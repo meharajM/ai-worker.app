@@ -242,6 +242,25 @@ ai-worker-app/
 
 ---
 
+### ✅ Phase 10: Robustness & DX [COMPLETED]
+
+**Goal:** Fix runtime environment issues and enhance server management
+
+**Implementation:**
+- [x] Fix ESM compatibility in main process (`__dirname` shim)
+- [x] Integrate `fix-path` for GUI environmental variables
+- [x] Implement actionable MCP error messages (installation instructions)
+- [x] Add "Edit Configuration" capability for existing servers
+- [x] Enhance Stdio transport with inherited stderr for easier debugging
+
+**Validation:** ✅
+- [x] App launches correctly in ESM mode
+- [x] `npx` and `python3` found in PATH even when launched from GUI
+- [x] Non-technical users see install commands for missing dependencies
+- [x] Servers can be updated without re-creating them
+
+---
+
 ## 🎙️ Voice UX Specification
 
 - **Primary Input:** Push-to-talk (click to start/stop)
@@ -261,8 +280,9 @@ ai-worker-app/
 ## 🔗 MCP Client
 
 - Connects to external MCP servers
-- Pre-configured templates for productivity & automation tools
-- Custom server connection via URL/path
+- Generic "Add Connection" supports any Stdio or SSE server
+- Integrated configuration editor for quick updates
+- Built-in runtime dependency helper for Node/Python/UV
 
 ---
 
@@ -283,4 +303,4 @@ ai-worker-app/
 
 ---
 
-**Current Status:** Phases 1-8 complete. Phase 9 (Real MCP Marketplace) in progress.
+**Current Status:** Phases 1-10 complete. Final polishing and testing in progress.

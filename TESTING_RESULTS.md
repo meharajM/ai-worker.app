@@ -50,6 +50,21 @@ All tests passed. Cross-platform builds completed for Mac, Windows, and Linux wi
 - **Issue:** Microphone permission not granted automatically
 - **Fix:** Added `setPermissionRequestHandler` in main process
 
+### ESM Compatibility
+- **Issue:** `ReferenceError: __dirname is not defined` in ESM mode
+- **Fix:** Added manual shim using `fileURLToPath(import.meta.url)` and `dirname` in `main/index.ts`
+
+### Environment Path Fixing
+- **Issue:** MCP commands (`npx`, `python`) missing when app is launched via GUI (Dock/Start Menu)
+- **Fix:** Integrated `fix-path` and explicitly passed `process.env` to MCP child processes.
+
+### MCP UX Enhancements
+- **Issue:** Users confused by complex Stdio connection failures
+- **Fix:** 
+  - Added actionable installation instructions for Node/Python/UV in error messages.
+  - Implemented "Edit Configuration" to allow updating existing connections.
+  - Enabled stderr inheritance for better debugging of crashing servers.
+
 ---
 
 ## Build Artifacts
@@ -108,6 +123,14 @@ chmod +x dist/AI-Worker-0.1.0-arm64.AppImage
 ollama run qwen2.5:3b
 # Then launch AI-Worker
 ```
+
+### Runtime Requirements for MCP Servers
+To use `stdio` MCP servers (Command Line type), the user must have the relevant runtimes installed on their system:
+- **Node.js & npm/npx**: For JavaScript/TypeScript servers
+- **Python/uv**: For Python-based servers
+- **Git**: For Git-related servers
+
+The application now includes `fix-path` to ensure it can locate these tools in the user's shell environment (e.g., from `.zshrc` or `.bashrc`) when launched from the OS GUI.
 
 ---
 

@@ -27,4 +27,5 @@ Analyze codebase, test all functionalities per plan.md, and build for Mac, Windo
 
 ### Verification
 - [x] Verify build artifacts are created in `dist/`
-- [x] Document fixes: removed unused `ipcMain` and `ipcRenderer` imports
+- [x] Document fixes: removed unused imports, fixed CSP, added ESM `__dirname` shim, and integrated `fix-path`.
+- [x] Verified MCP Stdio transport with real Python/Node servers.
