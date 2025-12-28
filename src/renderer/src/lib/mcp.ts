@@ -1,3 +1,5 @@
+/// <reference path="../env.d.ts" />
+
 // MCP Client Manager - Connects to external MCP servers
 // Uses @modelcontextprotocol/sdk to communicate with MCP servers
 
@@ -21,64 +23,7 @@ export interface MCPTool {
 }
 
 // Pre-configured MCP server templates
-export const MCP_TEMPLATES: Omit<MCPServer, 'id' | 'connected' | 'tools' | 'error'>[] = [
-    {
-        name: 'File System',
-        description: 'Read, write, and manage local files',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-filesystem', '/'],
-    },
-    {
-        name: 'GitHub',
-        description: 'Interact with GitHub repositories',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-github'],
-    },
-    {
-        name: 'Google Drive',
-        description: 'Access and manage Google Drive files',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-gdrive'],
-    },
-    {
-        name: 'Brave Search',
-        description: 'Search the web using Brave Search',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-brave-search'],
-    },
-    {
-        name: 'Memory',
-        description: 'Persistent memory across conversations',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-memory'],
-    },
-    {
-        name: 'Puppeteer',
-        description: 'Browser automation and web scraping',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-puppeteer'],
-    },
-    {
-        name: 'Slack',
-        description: 'Send messages and interact with Slack',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-slack'],
-    },
-    {
-        name: 'SQLite',
-        description: 'Query and manage SQLite databases',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-sqlite'],
-    },
-]
+// Use addCustomServer to add any server
 
 // Store for connected servers
 let connectedServers: Map<string, MCPServer> = new Map()
@@ -86,25 +31,6 @@ let connectedServers: Map<string, MCPServer> = new Map()
 // Generate unique ID
 function generateId(): string {
     return `mcp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-}
-
-// Add a server from template
-export function addServerFromTemplate(templateIndex: number): MCPServer {
-    const template = MCP_TEMPLATES[templateIndex]
-    if (!template) {
-        throw new Error('Invalid template index')
-    }
-
-    const server: MCPServer = {
-        ...template,
-        id: generateId(),
-        connected: false,
-        tools: [],
-    }
-
-    connectedServers.set(server.id, server)
-    saveServersToStorage()
-    return server
 }
 
 // Add a custom server

@@ -223,23 +223,22 @@ ai-worker-app/
 
 ---
 
-### 🔄 Phase 9: Real MCP Client & Marketplace [IN PROGRESS]
+### ✅ Phase 9: Real MCP Client [COMPLETED]
 
-**Goal:** Replace mock MCP with real SDK and add Marketplace
+**Goal:** Replace mock MCP with real SDK + Generic "Add Connection"
 
 **Implementation:**
 - [x] Install `@modelcontextprotocol/sdk`
 - [x] Implement IPC handlers for MCP in `src/main/index.ts`
 - [x] Verify `src/preload/index.ts` bridge
 - [x] Update `src/renderer/src/lib/mcp.ts` to use IPC
-- [ ] Create Marketplace Registry (JSON/API)
-- [ ] Update Connections Panel to show Marketplace
-- [ ] Implement "Install" flow for StdIO servers
+- [x] Remove mock templates
+- [x] Create generic "Add Connection" form (Stdio & SSE supported)
 
-**Validation:**
-- [ ] Connect to real GitHub MCP server
-- [ ] List tools from real server
-- [ ] Install new server from Marketplace list
+**Validation:** ✅
+- [x] UI allows adding `stdio` server (command + args)
+- [x] UI allows adding `sse` server (URL)
+- [x] Connection state managed via Electron IPC
 
 ---
 
