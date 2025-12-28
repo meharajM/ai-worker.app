@@ -4,8 +4,24 @@
 <head>
   <meta charset="UTF-8" />
   <title>AI-Worker</title>
-  <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:5173 http://localhost:5173;" />
+  <!--
+    Content Security Policy for Electron
+    - default-src 'self': Allow resources from same origin
+    - script-src: Allow inline and eval for React/Vite
+    - style-src: Allow inline styles for Tailwind
+    - connect-src: Allow all network connections for:
+      * localhost: Ollama, dev server
+      * wss/https google: Web Speech API
+      * https: OpenAI and other APIs
+    - media-src: Allow audio for TTS
+    - img-src: Allow images from any source
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self';
+             script-src 'self' 'unsafe-inline' 'unsafe-eval';
+             style-src 'self' 'unsafe-inline';
+             connect-src 'self' ws://localhost:* http://localhost:* https://* wss://*;
+             media-src 'self' blob: data:;
+             img-src 'self' data: blob: https:;" />
 </head>
 
 <body>

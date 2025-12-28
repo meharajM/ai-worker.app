@@ -132,8 +132,8 @@ export function getServers(): MCPServer[] {
     return Array.from(connectedServers.values())
 }
 
-// Connect to a server (mock implementation for now)
-// In the real implementation, this would use the MCP SDK in the main process
+// Connect to a server
+// Uses Electron IPC when available, otherwise mock implementation
 export async function connectServer(serverId: string): Promise<void> {
     const server = connectedServers.get(serverId)
     if (!server) {
@@ -141,25 +141,49 @@ export async function connectServer(serverId: string): Promise<void> {
     }
 
     try {
-        // TODO: Implement actual MCP connection via IPC to main process
-        // For now, simulate connection
-        await new Promise((resolve) => setTimeout(resolve, 1000))
+        // Try to use Electron IPC for actual MCP connection
+        if (window.electron?.mcp) {
+            const result = await window.electron.mcp.connect({
+                id: server.id,
+                type: server.type,
+                command: server.command,
+                args: server.args,
+                url: server.url,
+            })
 
-        // Mock tools for demonstration
-        server.connected = true
-        server.tools = [
-            {
-                name: `${server.name.toLowerCase().replace(/\s/g, '_')}_list`,
-                description: `List items from ${server.name}`,
-                inputSchema: { type: 'object', properties: {} },
-            },
-            {
-                name: `${server.name.toLowerCase().replace(/\s/g, '_')}_read`,
-                description: `Read data from ${server.name}`,
-                inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
-            },
-        ]
-        server.error = undefined
+            if (result.success) {
+                // Get tools from the connected server
+                const toolsResult = await window.electron.mcp.listTools(serverId)
+                server.tools = toolsResult.tools.map((t: { name: string; description: string }) => ({
+                    name: t.name,
+                    description: t.description,
+                    inputSchema: { type: 'object', properties: {} },
+                }))
+                server.connected = true
+                server.error = undefined
+            } else {
+                throw new Error(result.error || 'Connection failed')
+            }
+        } else {
+            // Browser fallback - simulate connection
+            await new Promise((resolve) => setTimeout(resolve, 1000))
+
+            // Mock tools for demonstration
+            server.connected = true
+            server.tools = [
+                {
+                    name: `${server.name.toLowerCase().replace(/\s/g, '_')}_list`,
+                    description: `List items from ${server.name}`,
+                    inputSchema: { type: 'object', properties: {} },
+                },
+                {
+                    name: `${server.name.toLowerCase().replace(/\s/g, '_')}_read`,
+                    description: `Read data from ${server.name}`,
+                    inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
+                },
+            ]
+            server.error = undefined
+        }
 
         connectedServers.set(serverId, server)
         saveServersToStorage()

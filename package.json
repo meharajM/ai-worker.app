@@ -74,7 +74,8 @@
                 "deb"
             ],
             "category": "Utility",
-            "icon": "build/icon.png"
+            "icon": "build/icon.png",
+            "maintainer": "AI-Worker Team <team@aiworker.app>"
         },
         "nsis": {
             "oneClick": false,
