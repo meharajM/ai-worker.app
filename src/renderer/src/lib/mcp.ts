@@ -47,6 +47,24 @@ export function addCustomServer(config: Omit<MCPServer, 'id' | 'connected' | 'to
     return server
 }
 
+// Update an existing server
+export function updateServer(serverId: string, config: Partial<Omit<MCPServer, 'id' | 'connected' | 'tools'>>): void {
+    const server = connectedServers.get(serverId)
+    if (!server) throw new Error('Server not found')
+
+    const updatedServer: MCPServer = {
+        ...server,
+        ...config,
+        // Reset connected state and tools if critical config changes
+        connected: false,
+        tools: [],
+        error: undefined
+    }
+
+    connectedServers.set(serverId, updatedServer)
+    saveServersToStorage()
+}
+
 // Remove a server
 export function removeServer(serverId: string): void {
     connectedServers.delete(serverId)

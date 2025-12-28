@@ -4,6 +4,7 @@ import {
     Power,
     PowerOff,
     Trash2,
+    Edit2,
     ChevronDown,
     ChevronRight,
     Database,
@@ -16,6 +17,7 @@ import {
 import {
     MCPServer,
     addCustomServer,
+    updateServer,
     removeServer,
     getServers,
     connectServer,
@@ -29,7 +31,8 @@ function getServerIcon(type: string): React.ReactNode {
 
 export function ConnectionsPanel() {
     const [servers, setServers] = useState<MCPServer[]>([])
-    const [showAddForm, setShowAddForm] = useState(false)
+    const [showForm, setShowForm] = useState(false)
+    const [editingServerId, setEditingServerId] = useState<string | null>(null)
     const [expandedServer, setExpandedServer] = useState<string | null>(null)
     const [connecting, setConnecting] = useState<string | null>(null)
 
@@ -50,26 +53,32 @@ export function ConnectionsPanel() {
         setServers(getServers())
     }, [])
 
-    // Add server
-    const handleAddServer = useCallback(() => {
+    // Add or Update server
+    const handleSubmit = useCallback(() => {
         if (!name.trim()) return
 
         if (serverType === 'stdio' && !command.trim()) return
         if (serverType === 'sse' && !url.trim()) return
 
-        addCustomServer({
+        const config = {
             name: name.trim(),
             description: serverType === 'stdio' ? 'Local CLI Tool' : 'Remote SSE Server',
             type: serverType,
             command: serverType === 'stdio' ? command.trim() : undefined,
             args: serverType === 'stdio' ? args.split(' ').filter(Boolean) : undefined,
             url: serverType === 'sse' ? url.trim() : undefined,
-        })
+        }
+
+        if (editingServerId) {
+            updateServer(editingServerId, config)
+        } else {
+            addCustomServer(config)
+        }
 
         refreshServers()
-        setShowAddForm(false)
+        setShowForm(false)
         resetForm()
-    }, [name, serverType, command, args, url, refreshServers])
+    }, [name, serverType, command, args, url, editingServerId, refreshServers])
 
     const resetForm = () => {
         setName('')
@@ -77,6 +86,19 @@ export function ConnectionsPanel() {
         setArgs('')
         setUrl('')
         setServerType('stdio')
+        setEditingServerId(null)
+    }
+
+    const handleEdit = (server: MCPServer) => {
+        setName(server.name)
+        setServerType(server.type as 'stdio' | 'sse')
+        setCommand(server.command || '')
+        setArgs(server.args?.join(' ') || '')
+        setUrl(server.url || '')
+        setEditingServerId(server.id)
+        setShowForm(true)
+        // Scroll to top to see form
+        window.scrollTo({ top: 0, behavior: 'smooth' })
     }
 
     // Connect/disconnect server
@@ -117,21 +139,32 @@ export function ConnectionsPanel() {
                 </div>
 
                 <button
-                    onClick={() => setShowAddForm(!showAddForm)}
+                    onClick={() => {
+                        if (showForm && editingServerId) {
+                            resetForm()
+                        } else {
+                            setShowForm(!showForm)
+                        }
+                    }}
                     className="flex items-center gap-2 px-4 py-2 bg-[#4fd1c5] text-white rounded-xl
                        hover:bg-[#5fe0d4] transition-all shadow-lg shadow-[#4fd1c5]/20"
                 >
-                    <Plus size={18} />
-                    Add Connection
+                    {showForm && editingServerId ? <Plus size={18} /> : (showForm ? <Plus size={18} /> : <Plus size={18} />)}
+                    {editingServerId ? 'Add New Instead' : 'Add Connection'}
                 </button>
             </div>
 
-            {/* Add Server Form */}
-            {showAddForm && (
-                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-6 mb-6 animate-in slide-in-from-top-2">
-                    <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
-                        <Server size={20} className="text-[#4fd1c5]" />
-                        New MCP Connection
+            {/* Add/Edit Server Form */}
+            {showForm && (
+                <div className="bg-[#1a1d23] border border-[#4fd1c5]/30 rounded-xl p-6 mb-6 animate-in slide-in-from-top-2 border-l-4">
+                    <h3 className="text-lg font-medium mb-4 flex items-center justify-between">
+                        <span className="flex items-center gap-2">
+                            <Server size={20} className="text-[#4fd1c5]" />
+                            {editingServerId ? `Edit ${name}` : 'New MCP Connection'}
+                        </span>
+                        {editingServerId && (
+                            <span className="text-[10px] bg-[#4fd1c5]/10 text-[#4fd1c5] px-2 py-0.5 rounded uppercase tracking-wider font-bold">Editing</span>
+                        )}
                     </h3>
 
                     <div className="space-y-4">
@@ -218,16 +251,16 @@ export function ConnectionsPanel() {
                         {/* Actions */}
                         <div className="flex gap-3 pt-2">
                             <button
-                                onClick={handleAddServer}
+                                onClick={handleSubmit}
                                 disabled={!name || (serverType === 'stdio' ? !command : !url)}
                                 className="px-6 py-2 bg-[#4fd1c5] text-white rounded-lg text-sm font-medium
                                    hover:bg-[#5fe0d4] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                Add Connection
+                                {editingServerId ? 'Update Connection' : 'Add Connection'}
                             </button>
                             <button
                                 onClick={() => {
-                                    setShowAddForm(false)
+                                    setShowForm(false)
                                     resetForm()
                                 }}
                                 className="px-6 py-2 bg-white/5 text-white/60 rounded-lg text-sm font-medium
@@ -237,6 +270,11 @@ export function ConnectionsPanel() {
                             </button>
                         </div>
                     </div>
+                    {editingServerId && (
+                        <p className="mt-4 text-[10px] text-white/30 italic">
+                            * Updating a connection will disconnect it if active.
+                        </p>
+                    )}
                 </div>
             )}
 
@@ -254,7 +292,7 @@ export function ConnectionsPanel() {
                     {servers.map((server) => (
                         <div
                             key={server.id}
-                            className="bg-[#1a1d23] border border-white/10 rounded-xl overflow-hidden shadow-sm hover:border-white/20 transition-colors"
+                            className={`bg-[#1a1d23] border rounded-xl overflow-hidden shadow-sm hover:border-white/20 transition-colors ${editingServerId === server.id ? 'border-[#4fd1c5]/50 ring-1 ring-[#4fd1c5]/20' : 'border-white/10'}`}
                         >
                             {/* Server Header */}
                             <div className="flex items-center gap-4 p-4">
@@ -297,6 +335,18 @@ export function ConnectionsPanel() {
                                 </div>
 
                                 <div className="flex items-center gap-2">
+                                    {/* Edit Button */}
+                                    <button
+                                        onClick={() => handleEdit(server)}
+                                        className={`p-2 rounded-lg transition-all ${editingServerId === server.id
+                                            ? 'bg-[#4fd1c5] text-white'
+                                            : 'bg-white/5 text-white/40 hover:bg-white/10 hover:text-white'
+                                            }`}
+                                        title="Edit configuration"
+                                    >
+                                        <Edit2 size={18} />
+                                    </button>
+
                                     <button
                                         onClick={() => handleToggleConnection(server)}
                                         disabled={connecting === server.id}
