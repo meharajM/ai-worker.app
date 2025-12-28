@@ -2,6 +2,8 @@ import React, { useState, useCallback, useEffect } from 'react'
 import { Settings, MessageSquare, Database, Wifi, WifiOff } from 'lucide-react'
 import { VoiceInput } from './components/VoiceInput'
 import { ChatView } from './components/ChatView'
+import { ConnectionsPanel } from './components/ConnectionsPanel'
+import { SettingsPanel } from './components/SettingsPanel'
 import { useChatStore } from './stores/chatStore'
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis'
 import { chat, getAvailableProviders, LLMMessage, LLMProvider } from './lib/llm'
@@ -105,8 +107,8 @@ function App() {
                     <button
                         onClick={() => setCurrentView('chat')}
                         className={`p-3 rounded-lg transition-colors ${currentView === 'chat'
-                                ? 'bg-white/10 text-[#4fd1c5]'
-                                : 'text-white/40 hover:text-white hover:bg-white/5'
+                            ? 'bg-white/10 text-[#4fd1c5]'
+                            : 'text-white/40 hover:text-white hover:bg-white/5'
                             }`}
                         title="Chat"
                     >
@@ -117,8 +119,8 @@ function App() {
                     <button
                         onClick={() => setCurrentView('connections')}
                         className={`p-3 rounded-lg transition-colors ${currentView === 'connections'
-                                ? 'bg-white/10 text-[#4fd1c5]'
-                                : 'text-white/40 hover:text-white hover:bg-white/5'
+                            ? 'bg-white/10 text-[#4fd1c5]'
+                            : 'text-white/40 hover:text-white hover:bg-white/5'
                             }`}
                         title="MCP Connections"
                     >
@@ -130,8 +132,8 @@ function App() {
                 <button
                     onClick={() => setCurrentView('settings')}
                     className={`p-3 rounded-lg transition-colors ${currentView === 'settings'
-                            ? 'bg-white/10 text-[#4fd1c5]'
-                            : 'text-white/40 hover:text-white hover:bg-white/5'
+                        ? 'bg-white/10 text-[#4fd1c5]'
+                        : 'text-white/40 hover:text-white hover:bg-white/5'
                         }`}
                     title="Settings"
                 >
@@ -171,76 +173,9 @@ function App() {
                     </div>
                 )}
 
-                {currentView === 'connections' && (
-                    <div className="flex-1 p-6">
-                        <h2 className="text-xl font-bold mb-4">MCP Connections</h2>
-                        <p className="text-white/60">Connect to MCP servers to enable tool usage.</p>
-                        <p className="text-white/40 mt-2 text-sm">Coming in Phase 5...</p>
-                    </div>
-                )}
+                {currentView === 'connections' && <ConnectionsPanel />}
 
-                {currentView === 'settings' && (
-                    <div className="flex-1 p-6 overflow-y-auto">
-                        <h2 className="text-xl font-bold mb-6">Settings</h2>
-
-                        {/* LLM Provider Section */}
-                        <div className="mb-8">
-                            <h3 className="text-sm font-semibold text-white/60 uppercase tracking-wider mb-4">LLM Provider</h3>
-
-                            <div className="space-y-4">
-                                {/* Provider Status */}
-                                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <span className="text-sm">Current Provider</span>
-                                        <span className={`text-sm ${llmStatus.available ? 'text-green-400' : 'text-yellow-400'}`}>
-                                            {llmStatus.provider || 'None Available'}
-                                        </span>
-                                    </div>
-                                    <p className="text-xs text-white/40">
-                                        {llmStatus.available
-                                            ? 'LLM is connected and ready'
-                                            : 'Start Ollama or configure OpenAI API key'}
-                                    </p>
-                                </div>
-
-                                {/* Ollama Instructions */}
-                                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
-                                    <h4 className="text-sm font-medium mb-2">Ollama (Recommended)</h4>
-                                    <p className="text-xs text-white/40 mb-2">
-                                        Install Ollama and run: <code className="bg-black/30 px-1 py-0.5 rounded">ollama run qwen2.5:3b</code>
-                                    </p>
-                                    <a
-                                        href="https://ollama.ai"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-xs text-[#4fd1c5] hover:underline"
-                                    >
-                                        Download Ollama →
-                                    </a>
-                                </div>
-
-                                {/* OpenAI API Key */}
-                                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
-                                    <h4 className="text-sm font-medium mb-2">OpenAI API (Fallback)</h4>
-                                    <input
-                                        type="password"
-                                        placeholder="Enter OpenAI API Key"
-                                        className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm
-                               placeholder-white/30 focus:border-white/20 focus:outline-none"
-                                        defaultValue={localStorage.getItem('openai_api_key') || ''}
-                                        onChange={(e) => {
-                                            if (e.target.value) {
-                                                localStorage.setItem('openai_api_key', e.target.value)
-                                            } else {
-                                                localStorage.removeItem('openai_api_key')
-                                            }
-                                        }}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
+                {currentView === 'settings' && <SettingsPanel />}
             </div>
         </div>
     )
