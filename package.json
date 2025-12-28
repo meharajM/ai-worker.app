@@ -1,0 +1,37 @@
+{
+    "name": "ai-worker",
+    "version": "0.1.0",
+    "type": "module",
+    "description": "Voice-first desktop workspace with MCP integration",
+    "main": "./out/main/index.js",
+    "author": "AI-Worker Team",
+    "scripts": {
+        "dev": "electron-vite dev",
+        "build": "electron-vite build",
+        "preview": "electron-vite preview",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@electron-toolkit/utils": "^3.0.0",
+        "@modelcontextprotocol/sdk": "^1.0.1",
+        "electron-store": "^11.0.2",
+        "lucide-react": "^0.468.0",
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0",
+        "zustand": "^5.0.9"
+    },
+    "devDependencies": {
+        "@electron-toolkit/tsconfig": "^1.0.1",
+        "@types/node": "^20.11.10",
+        "@types/react": "^18.2.48",
+        "@types/react-dom": "^18.2.18",
+        "@vitejs/plugin-react": "^4.2.1",
+        "autoprefixer": "^10.4.17",
+        "electron": "^28.2.0",
+        "electron-vite": "^2.0.0",
+        "postcss": "^8.4.35",
+        "tailwindcss": "^3.4.1",
+        "typescript": "^5.3.3",
+        "vite": "^5.0.12"
+    }
+}
