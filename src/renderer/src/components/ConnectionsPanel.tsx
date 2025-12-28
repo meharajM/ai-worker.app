@@ -328,9 +328,21 @@ export function ConnectionsPanel() {
                             {(expandedServer === server.id || server.error) && (
                                 <div className="border-t border-white/5 bg-black/20">
                                     {server.error && (
-                                        <div className="p-3 bg-red-500/5 border-b border-red-500/10 flex items-start gap-3">
-                                            <AlertCircle size={16} className="text-red-400 shrink-0 mt-0.5" />
-                                            <p className="text-xs text-red-300 font-mono break-all">{server.error}</p>
+                                        <div className="p-4 bg-red-500/5 border-b border-red-500/10">
+                                            <div className="flex items-start gap-3">
+                                                <AlertCircle size={16} className="text-red-400 shrink-0 mt-0.5" />
+                                                <div className="text-xs text-red-200 leading-relaxed font-sans whitespace-pre-wrap">
+                                                    {server.error.split('`').map((part, i) => (
+                                                        i % 2 === 1 ? (
+                                                            <code key={i} className="bg-red-500/20 px-1.5 py-0.5 rounded text-red-300 font-mono text-[11px] mx-0.5 border border-red-500/20 select-all cursor-pointer hover:bg-red-500/30 transition-colors" title="Click to select">
+                                                                {part}
+                                                            </code>
+                                                        ) : (
+                                                            <span key={i}>{part}</span>
+                                                        )
+                                                    ))}
+                                                </div>
+                                            </div>
                                         </div>
                                     )}
 

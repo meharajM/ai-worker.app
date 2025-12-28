@@ -1,9 +1,17 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
+import fixPath from 'fix-path'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+
+// Fix PATH for macOS/Linux GUI apps so they can find node/npx/python
+fixPath()
 
 // Store active MCP clients
 // Map<serverId, Client>
@@ -35,9 +43,12 @@ function setupIpcHandlers(): void {
 
             if (type === 'stdio') {
                 console.log(`Starting STDIO transport: ${command} ${args?.join(' ')}`)
+
                 transport = new StdioClientTransport({
                     command: command,
                     args: args || [],
+                    env: { ...process.env } as Record<string, string>,
+                    stderr: 'inherit'
                 })
             } else if (type === 'sse' && url) {
                 console.log(`Starting SSE transport: ${url}`)
@@ -61,7 +72,35 @@ function setupIpcHandlers(): void {
             activeConnections.set(id, client)
             return { success: true, serverId: id }
         } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error)
             console.error(`MCP connection error for ${id}:`, error)
+
+            let detailedError = errorMessage
+            if (errorMessage.includes('ENOENT')) {
+                const getInstallInstructions = (cmd: string) => {
+                    const isMac = process.platform === 'darwin'
+                    const isWin = process.platform === 'win32'
+
+                    if (cmd.includes('node') || cmd.includes('npx') || cmd.includes('npm')) {
+                        if (isMac) return "Install Node.js via Homebrew: `brew install node` or from nodejs.org"
+                        if (isWin) return "Install Node.js from https://nodejs.org/"
+                        return "Install Node.js via your package manager (apt install nodejs, etc.)"
+                    }
+                    if (cmd.includes('python') || cmd.includes('pip')) {
+                        if (isMac) return "Install Python 3 via Homebrew: `brew install python` or use `python3` instead of `python`."
+                        if (isWin) return "Install Python from https://www.python.org/downloads/ (ensure 'Add to PATH' is checked)"
+                        return "Install Python 3 via your package manager (apt install python3, etc.)"
+                    }
+                    if (cmd.includes('uv')) {
+                        return "Install uv: `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux) or `powershell -c \"irm https://astral.sh/uv/install.ps1 | iex\"` (Windows)"
+                    }
+                    return `Ensure '${cmd}' is installed and available in your system PATH.`
+                }
+
+                const instructions = getInstallInstructions(command)
+                detailedError = `Runtime environment missing: '${command}' not found.\n\n${instructions}`
+            }
+
             // Clean up if connection failed
             if (activeConnections.has(id)) {
                 try {
@@ -69,7 +108,7 @@ function setupIpcHandlers(): void {
                     activeConnections.delete(id)
                 } catch (e) { /* ignore */ }
             }
-            return { success: false, error: error instanceof Error ? error.message : String(error) }
+            return { success: false, error: detailedError }
         }
     })
 
