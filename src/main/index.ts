@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
@@ -18,7 +18,9 @@ function createWindow(): void {
 
     mainWindow.on('ready-to-show', () => {
         mainWindow.show()
-        mainWindow.webContents.openDevTools()
+        if (is.dev) {
+            mainWindow.webContents.openDevTools()
+        }
     })
 
     mainWindow.webContents.setWindowOpenHandler((details) => {
