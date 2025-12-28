@@ -9,6 +9,7 @@ import {
     ChevronRight,
     Database,
     Globe,
+    MessageSquare,
     AlertCircle,
     Loader2,
     Server,
@@ -23,6 +24,7 @@ import {
     connectServer,
     disconnectServer,
 } from '../lib/mcp'
+import { useChatStore } from '../stores/chatStore'
 
 // Icon mapping (simplified)
 function getServerIcon(type: string): React.ReactNode {
@@ -125,6 +127,33 @@ export function ConnectionsPanel() {
             refreshServers()
         }
     }, [refreshServers])
+
+    // Troubleshooting
+    const handleTroubleshoot = useCallback((server: MCPServer) => {
+        if (!server.error) return
+
+        const chatStore = useChatStore.getState()
+        const prompt = `I'm having trouble connecting to an MCP server named "${server.name}".
+        
+**Server Configuration:**
+- Type: ${server.type}
+- Command: ${server.command || 'N/A'}
+- Arguments: ${server.args?.join(' ') || 'N/A'}
+- URL: ${server.url || 'N/A'}
+
+**Error Message:**
+${server.error}
+
+Can you help me troubleshoot this? Please explain what might be missing and provide the exact commands I need to run to fix it. Use your browsing tool if needed to find current installation instructions.`
+
+        chatStore.addMessage({
+            role: 'user',
+            content: prompt
+        })
+
+        // Notify user
+        alert('Prompt sent to AI tutor! Head over to the Chat view to see the solution.')
+    }, [])
 
     const connectedCount = servers.filter((s) => s.connected).length
 
@@ -381,16 +410,26 @@ export function ConnectionsPanel() {
                                         <div className="p-4 bg-red-500/5 border-b border-red-500/10">
                                             <div className="flex items-start gap-3">
                                                 <AlertCircle size={16} className="text-red-400 shrink-0 mt-0.5" />
-                                                <div className="text-xs text-red-200 leading-relaxed font-sans whitespace-pre-wrap">
-                                                    {server.error.split('`').map((part, i) => (
-                                                        i % 2 === 1 ? (
-                                                            <code key={i} className="bg-red-500/20 px-1.5 py-0.5 rounded text-red-300 font-mono text-[11px] mx-0.5 border border-red-500/20 select-all cursor-pointer hover:bg-red-500/30 transition-colors" title="Click to select">
-                                                                {part}
-                                                            </code>
-                                                        ) : (
-                                                            <span key={i}>{part}</span>
-                                                        )
-                                                    ))}
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-xs text-red-200 leading-relaxed font-sans whitespace-pre-wrap">
+                                                        {server.error.split('`').map((part, i) => (
+                                                            i % 2 === 1 ? (
+                                                                <code key={i} className="bg-red-500/20 px-1.5 py-0.5 rounded text-red-300 font-mono text-[11px] mx-0.5 border border-red-500/20 select-all cursor-pointer hover:bg-red-500/30 transition-colors" title="Click to select">
+                                                                    {part}
+                                                                </code>
+                                                            ) : (
+                                                                <span key={i}>{part}</span>
+                                                            )
+                                                        ))}
+                                                    </div>
+
+                                                    <button
+                                                        onClick={() => handleTroubleshoot(server)}
+                                                        className="mt-4 flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-[11px] text-[#4fd1c5] hover:bg-[#4fd1c5]/10 hover:border-[#4fd1c5]/30 transition-all font-medium"
+                                                    >
+                                                        <MessageSquare size={14} />
+                                                        Troubleshoot with AI
+                                                    </button>
                                                 </div>
                                             </div>
                                         </div>

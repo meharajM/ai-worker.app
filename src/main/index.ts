@@ -42,12 +42,22 @@ function setupIpcHandlers(): void {
             let transport: StdioClientTransport | SSEClientTransport
 
             if (type === 'stdio') {
-                console.log(`Starting STDIO transport: ${command} ${args?.join(' ')}`)
+                let finalCommand = command
+                const finalEnv = { ...process.env } as Record<string, string>
+
+                // Fallback to internal Node.js if 'node' is requested
+                if (command === 'node' || command === 'node.exe') {
+                    console.log('Using Electron internal Node.js runtime')
+                    finalCommand = process.execPath
+                    finalEnv.ELECTRON_RUN_AS_NODE = '1'
+                }
+
+                console.log(`Starting STDIO transport: ${finalCommand} ${args?.join(' ')}`)
 
                 transport = new StdioClientTransport({
-                    command: command,
+                    command: finalCommand,
                     args: args || [],
-                    env: { ...process.env } as Record<string, string>,
+                    env: finalEnv,
                     stderr: 'inherit'
                 })
             } else if (type === 'sse' && url) {
@@ -81,24 +91,44 @@ function setupIpcHandlers(): void {
                     const isMac = process.platform === 'darwin'
                     const isWin = process.platform === 'win32'
 
+                    const header = `### 🛠️ Environment Setup Needed\n\nIt looks like the command \`${cmd}\` isn't available on your system yet. Don't worry, you can fix this in a few steps:`
+                    const internalNodeTip = "\n\n💡 **Pro Tip:** This app has a built-in Node.js runtime. If you have a local script, you can simply use `node` as the command and it will work immediately!"
+
                     if (cmd.includes('node') || cmd.includes('npx') || cmd.includes('npm')) {
-                        if (isMac) return "Install Node.js via Homebrew: `brew install node` or from nodejs.org"
-                        if (isWin) return "Install Node.js from https://nodejs.org/"
-                        return "Install Node.js via your package manager (apt install nodejs, etc.)"
+                        let steps = ""
+                        if (isMac) steps = "1. Open your **Terminal** app.\n2. Type \`brew install node\` and press Enter.\n3. *If you don't have Homebrew, download Node.js from [nodejs.org](https://nodejs.org).* "
+                        else if (isWin) steps = "1. Download and run the installer from [nodejs.org](https://nodejs.org).\n2. Follow the setup wizard and make sure 'Add to PATH' is checked.\n3. Restart the AI-Worker app once finished."
+                        else steps = "1. Install Node.js using your system's package manager (e.g., \`sudo apt install nodejs\`)."
+
+                        return `${header}\n\n${steps}${internalNodeTip}`
                     }
                     if (cmd.includes('python') || cmd.includes('pip')) {
-                        if (isMac) return "Install Python 3 via Homebrew: `brew install python` or use `python3` instead of `python`."
-                        if (isWin) return "Install Python from https://www.python.org/downloads/ (ensure 'Add to PATH' is checked)"
-                        return "Install Python 3 via your package manager (apt install python3, etc.)"
+                        let steps = ""
+                        if (isMac) steps = "1. Open your **Terminal** app.\n2. Type \`brew install python\` and press Enter.\n3. **Note:** Try using \`python3\` as the command in settings if \`python\` fails."
+                        else if (isWin) steps = "1. Download Python from [python.org](https://www.python.org/downloads/).\n2. **Important:** Check the box that says 'Add Python to PATH' during installation."
+                        else steps = "1. Install Python 3 using your system's package manager (e.g., \`sudo apt install python3\`)."
+
+                        if (args?.some(a => a.includes('mcp-server-git') || a.includes('mcp_server_git'))) {
+                            steps += `\n\n4. Finally, install the Git tool by running: \`pip install mcp-server-git\``
+                        }
+
+                        return `${header}\n\n${steps}`
                     }
                     if (cmd.includes('uv')) {
-                        return "Install uv: `curl -LsSf https://astral.sh/uv/install.sh | sh` (macOS/Linux) or `powershell -c \"irm https://astral.sh/uv/install.ps1 | iex\"` (Windows)"
+                        const installCmd = isWin ? 'powershell -c "irm https://astral.sh/uv/install.ps1 | iex"' : 'curl -LsSf https://astral.sh/uv/install.sh | sh'
+                        let steps = `1. Run this command in your terminal:\n\`${installCmd}\`\n2. Restart the app.`
+
+                        if (args?.some(a => a.includes('mcp-server-git') || a.includes('mcp_server_git'))) {
+                            steps += `\n3. **Quick Fix:** Use \`uvx mcp-server-git /path/to/your/repo\` to run without installing.`
+                        }
+
+                        return `${header}\n\n${steps}`
                     }
-                    return `Ensure '${cmd}' is installed and available in your system PATH.`
+
+                    return `${header}\n\nEnsure that \`${cmd}\` is installed and added to your system's environmental paths (PATH).`
                 }
 
-                const instructions = getInstallInstructions(command)
-                detailedError = `Runtime environment missing: '${command}' not found.\n\n${instructions}`
+                detailedError = getInstallInstructions(command)
             }
 
             // Clean up if connection failed
