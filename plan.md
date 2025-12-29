@@ -12,6 +12,7 @@ AI-Worker is a voice-first desktop workspace that uses the Model Context Protoco
 - **Voice:** Web Speech API (STT), SpeechSynthesis API (TTS)
 - **Storage:** electron-store (cross-platform)
 - **Auth:** Firebase Auth with Google Sign-in (feature-flagged)
+- **Environment:** fix-path (for GUI-launched PATH resolution)
 - **Zero Trust:** Privacy-focused, no central data collection
 
 ---
@@ -49,10 +50,14 @@ ai-worker-app/
 ├── src/
 │   ├── main/
 │   │   ├── index.ts
-│   │   ├── mcp-client.ts
-│   │   ├── llm-orchestrator.ts
-│   │   ├── storage.ts
-│   │   └── ipc-handlers.ts
+│   │   ├── ipc/
+│   │   │   ├── index.ts
+│   │   │   ├── app.ts
+│   │   │   ├── mcp.ts
+│   │   │   ├── llm.ts
+│   │   │   └── store.ts
+│   │   └── utils/
+│   │       └── env.ts
 │   ├── preload/
 │   │   └── index.ts
 │   └── renderer/
@@ -63,13 +68,20 @@ ai-worker-app/
 │           │   ├── VoiceInput.tsx
 │           │   ├── ConnectionsPanel.tsx
 │           │   ├── SettingsPanel.tsx
-│           │   └── AuthModal.tsx
+│           │   ├── Header.tsx
+│           │   ├── Sidebar.tsx
+│           │   └── mcp/
+│           │       ├── McpServerCard.tsx
+│           │       └── McpServerForm.tsx
 │           ├── hooks/
 │           │   ├── useSpeechRecognition.ts
 │           │   └── useSpeechSynthesis.ts
 │           ├── lib/
 │           │   ├── constants.ts
-│           │   └── firebase.ts
+│           │   ├── electron.ts
+│           │   ├── firebase.ts
+│           │   ├── llm.ts
+│           │   └── mcp.ts
 │           └── stores/
 │               ├── chatStore.ts
 │               ├── authStore.ts
@@ -261,6 +273,37 @@ ai-worker-app/
 
 ---
 
+### ✅ Phase 11: Code Refactoring & Architecture Improvement [COMPLETED]
+
+**Goal:** Improve code maintainability, modularity, and developer experience
+
+**Implementation:**
+- [x] Modularize IPC handlers into separate files (`src/main/ipc/`)
+  - [x] `app.ts` - App info and shell operations
+  - [x] `mcp.ts` - MCP connection and tool management
+  - [x] `llm.ts` - LLM operations (placeholder for future main-process LLM)
+  - [x] `store.ts` - Storage operations
+  - [x] `index.ts` - Central IPC handler registration
+- [x] Extract UI components for better reusability
+  - [x] `Header.tsx` - App header with LLM status indicator
+  - [x] `Sidebar.tsx` - Navigation sidebar with view switching
+  - [x] `McpServerCard.tsx` - Individual MCP server card with expand/collapse
+  - [x] `McpServerForm.tsx` - Reusable form for adding/editing MCP servers
+- [x] Centralize environment utilities
+  - [x] `src/main/utils/env.ts` - ESM shims and PATH fixing initialization
+- [x] Simplify `ConnectionsPanel.tsx` (reduced from 355+ lines to manageable size)
+- [x] Refactor `App.tsx` to use new modular components
+- [x] Add `fix-path` dependency for cross-platform PATH handling
+
+**Validation:** ✅
+- [x] All IPC handlers work correctly after modularization
+- [x] UI components render and function properly
+- [x] MCP server management UI is more intuitive and maintainable
+- [x] Code is easier to navigate and extend
+- [x] No functionality regressions
+
+---
+
 ## 🎙️ Voice UX Specification
 
 - **Primary Input:** Push-to-talk (click to start/stop)
@@ -303,4 +346,4 @@ ai-worker-app/
 
 ---
 
-**Current Status:** Phases 1-10 complete. Final polishing and testing in progress.
+**Current Status:** Phases 1-11 complete. Codebase refactored for maintainability. Production-ready with modular architecture.
