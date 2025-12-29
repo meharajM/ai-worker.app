@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
     User,
     Volume2,
@@ -16,29 +16,47 @@ import {
 import { useSettingsStore, Theme, LLMProviderType } from '../stores/settingsStore'
 import { useAuthStore } from '../stores/authStore'
 import { FEATURE_FLAGS, APP_INFO } from '../lib/constants'
-import { getAvailableProviders } from '../lib/llm'
+import { getAvailableProviders, testOllamaConnection, testOpenAIConnection } from '../lib/llm'
+import { ModelSelect } from './ModelSelect'
 
 type SettingsSection = 'account' | 'llm' | 'voice' | 'appearance' | 'about'
 
 interface ProviderStatus {
-    ollama: { available: boolean; model?: string; error?: string }
-    openai: { available: boolean; model?: string; error?: string }
+    ollama: { available: boolean; model?: string; models?: string[]; error?: string; modelsEndpointAvailable?: boolean }
+    openai: { available: boolean; model?: string; models?: string[]; error?: string; modelsEndpointAvailable?: boolean }
 }
 
 export function SettingsPanel() {
     const [activeSection, setActiveSection] = useState<SettingsSection>('llm')
     const [providerStatus, setProviderStatus] = useState<ProviderStatus | null>(null)
     const [checkingProviders, setCheckingProviders] = useState(false)
+    const [testingOllama, setTestingOllama] = useState(false)
+    const [testingOpenAI, setTestingOpenAI] = useState(false)
+    const [testResults, setTestResults] = useState<{ ollama?: string; openai?: string }>({})
 
     const settings = useSettingsStore()
     const auth = useAuthStore()
 
-    // Check provider availability
-    useEffect(() => {
-        async function check() {
+    // Check provider availability with request deduplication
+    const checkProvidersRef = React.useRef<Promise<void> | null>(null)
+    const checkProviders = React.useCallback(async () => {
+        // Prevent duplicate concurrent requests
+        if (checkProvidersRef.current) {
+            return checkProvidersRef.current
+        }
+
+        const promise = (async () => {
             setCheckingProviders(true)
             try {
-                const providers = await getAvailableProviders()
+                const settingsForLLM = {
+                    preferredProvider: settings.preferredProvider,
+                    ollamaModel: settings.ollamaModel,
+                    ollamaBaseUrl: settings.ollamaBaseUrl,
+                    openaiApiKey: settings.openaiApiKey,
+                    openaiBaseUrl: settings.openaiBaseUrl,
+                    openaiModel: settings.openaiModel,
+                }
+                const providers = await getAvailableProviders(settingsForLLM)
                 setProviderStatus({
                     ollama: providers.ollama,
                     openai: providers.openai,
@@ -47,10 +65,21 @@ export function SettingsPanel() {
                 console.error('Error checking providers:', error)
             } finally {
                 setCheckingProviders(false)
+                checkProvidersRef.current = null
             }
-        }
-        check()
-    }, [settings.openaiApiKey])
+        })()
+
+        checkProvidersRef.current = promise
+        return promise
+    }, [settings.preferredProvider, settings.ollamaModel, settings.ollamaBaseUrl, settings.openaiApiKey, settings.openaiBaseUrl, settings.openaiModel])
+
+    // Check providers on mount and when settings change (debounced)
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            checkProviders()
+        }, 500) // Debounce: wait 500ms after user stops typing
+        return () => clearTimeout(timer)
+    }, [checkProviders])
 
     const sections: { id: SettingsSection; label: string; icon: React.ReactNode }[] = [
         ...(FEATURE_FLAGS.AUTH_ENABLED ? [{ id: 'account' as const, label: 'Account', icon: <User size={20} /> }] : []),
@@ -146,6 +175,7 @@ export function SettingsPanel() {
                                 <select
                                     value={settings.preferredProvider}
                                     onChange={(e) => settings.setPreferredProvider(e.target.value as LLMProviderType)}
+                                    aria-label="Preferred LLM Provider"
                                     className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 
                              text-white focus:border-white/20 focus:outline-none"
                                 >
@@ -159,17 +189,26 @@ export function SettingsPanel() {
                             <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
                                 <div className="flex items-center justify-between mb-3">
                                     <h4 className="font-medium">Ollama</h4>
-                                    {checkingProviders ? (
-                                        <Loader2 size={16} className="animate-spin text-white/40" />
-                                    ) : providerStatus?.ollama.available ? (
-                                        <span className="flex items-center gap-1 text-xs text-green-400">
-                                            <Check size={14} /> Connected
-                                        </span>
-                                    ) : (
-                                        <span className="flex items-center gap-1 text-xs text-yellow-400">
-                                            <AlertCircle size={14} /> Not Available
-                                        </span>
-                                    )}
+                                    <div className="flex items-center gap-2">
+                                        {checkingProviders ? (
+                                            <Loader2 size={16} className="animate-spin text-white/40" />
+                                        ) : providerStatus?.ollama.available ? (
+                                            <span className="flex items-center gap-1 text-xs text-green-400">
+                                                <Check size={14} /> Connected
+                                            </span>
+                                        ) : (
+                                            <span className="flex items-center gap-1 text-xs text-yellow-400">
+                                                <AlertCircle size={14} /> Not Available
+                                            </span>
+                                        )}
+                                        <button
+                                            onClick={checkProviders}
+                                            className="px-2 py-1 text-xs bg-white/5 hover:bg-white/10 rounded text-white/60 hover:text-white transition-colors"
+                                            title="Refresh connection status"
+                                        >
+                                            ↻
+                                        </button>
+                                    </div>
                                 </div>
                                 <div className="space-y-3">
                                     <div>
@@ -178,21 +217,64 @@ export function SettingsPanel() {
                                             type="text"
                                             value={settings.ollamaBaseUrl}
                                             onChange={(e) => settings.setOllamaBaseUrl(e.target.value)}
+                                            placeholder="http://localhost:11434"
                                             className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm
                                  placeholder-white/30 focus:border-white/20 focus:outline-none"
                                         />
                                     </div>
                                     <div>
                                         <label className="block text-xs text-white/40 mb-1">Model</label>
-                                        <input
-                                            type="text"
+                                        <ModelSelect
                                             value={settings.ollamaModel}
-                                            onChange={(e) => settings.setOllamaModel(e.target.value)}
+                                            onChange={(value) => settings.setOllamaModel(value)}
+                                            models={providerStatus?.ollama.models || []}
                                             placeholder="qwen2.5:3b"
-                                            className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm
-                                 placeholder-white/30 focus:border-white/20 focus:outline-none"
+                                            ariaLabel="Ollama Model Selection"
                                         />
+                                        {providerStatus?.ollama.models && providerStatus.ollama.models.length > 0 && (
+                                            <p className="text-xs text-white/30 mt-1">
+                                                {providerStatus.ollama.models.length} model(s) available
+                                            </p>
+                                        )}
                                     </div>
+                                    <button
+                                        onClick={async () => {
+                                            setTestingOllama(true)
+                                            setTestResults({ ...testResults, ollama: undefined })
+                                            try {
+                                                const result = await testOllamaConnection(
+                                                    settings.ollamaBaseUrl || 'http://localhost:11434',
+                                                    settings.ollamaModel || 'qwen2.5:3b'
+                                                )
+                                                if (result.success) {
+                                                    setTestResults({ ...testResults, ollama: 'Connection successful!' })
+                                                    await checkProviders()
+                                                } else {
+                                                    setTestResults({ ...testResults, ollama: `Error: ${result.error}` })
+                                                }
+                                            } catch (error) {
+                                                setTestResults({ ...testResults, ollama: `Error: ${error instanceof Error ? error.message : 'Unknown error'}` })
+                                            } finally {
+                                                setTestingOllama(false)
+                                            }
+                                        }}
+                                        disabled={testingOllama}
+                                        className="w-full px-4 py-2 bg-[#4fd1c5]/10 hover:bg-[#4fd1c5]/20 text-[#4fd1c5] rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                    >
+                                        {testingOllama ? (
+                                            <>
+                                                <Loader2 size={16} className="animate-spin" />
+                                                Testing Connection...
+                                            </>
+                                        ) : (
+                                            'Test Connection'
+                                        )}
+                                    </button>
+                                    {testResults.ollama && (
+                                        <div className={`p-2 rounded text-xs ${testResults.ollama.includes('Error') ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'}`}>
+                                            {testResults.ollama}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -200,27 +282,50 @@ export function SettingsPanel() {
                             <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
                                 <div className="flex items-center justify-between mb-3">
                                     <h4 className="font-medium">OpenAI / Compatible API</h4>
-                                    {providerStatus?.openai.available ? (
-                                        <span className="flex items-center gap-1 text-xs text-green-400">
-                                            <Check size={14} /> Configured
-                                        </span>
-                                    ) : (
-                                        <span className="flex items-center gap-1 text-xs text-white/40">
-                                            No API Key
-                                        </span>
-                                    )}
+                                    <div className="flex items-center gap-2">
+                                        {providerStatus?.openai.available ? (
+                                            <span className="flex items-center gap-1 text-xs text-green-400">
+                                                <Check size={14} /> Configured
+                                            </span>
+                                        ) : (
+                                            <span className="flex items-center gap-1 text-xs text-white/40">
+                                                No API Key
+                                            </span>
+                                        )}
+                                        <button
+                                            onClick={checkProviders}
+                                            className="px-2 py-1 text-xs bg-white/5 hover:bg-white/10 rounded text-white/60 hover:text-white transition-colors"
+                                            title="Refresh connection status"
+                                        >
+                                            ↻
+                                        </button>
+                                    </div>
                                 </div>
                                 <div className="space-y-3">
                                     <div>
                                         <label className="block text-xs text-white/40 mb-1">API Key</label>
-                                        <input
-                                            type="password"
-                                            value={settings.openaiApiKey}
-                                            onChange={(e) => settings.setOpenaiApiKey(e.target.value)}
-                                            placeholder="sk-..."
-                                            className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm
-                                 placeholder-white/30 focus:border-white/20 focus:outline-none"
-                                        />
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="password"
+                                                value={settings.openaiApiKey}
+                                                onChange={(e) => settings.setOpenaiApiKey(e.target.value)}
+                                                placeholder="sk-..."
+                                                className="flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm
+                                         placeholder-white/30 focus:border-white/20 focus:outline-none"
+                                            />
+                                            {settings.openaiApiKey && (
+                                                <button
+                                                    onClick={checkProviders}
+                                                    disabled={providerStatus?.openai.modelsEndpointAvailable === false}
+                                                    className="px-3 py-2 text-xs bg-[#4fd1c5]/10 hover:bg-[#4fd1c5]/20 text-[#4fd1c5] rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    title={providerStatus?.openai.modelsEndpointAvailable === false 
+                                                        ? "Models endpoint not available for this API" 
+                                                        : "Fetch available models"}
+                                                >
+                                                    Fetch Models
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                     <div>
                                         <label className="block text-xs text-white/40 mb-1">Base URL</label>
@@ -235,15 +340,89 @@ export function SettingsPanel() {
                                     </div>
                                     <div>
                                         <label className="block text-xs text-white/40 mb-1">Model</label>
-                                        <input
-                                            type="text"
+                                        <ModelSelect
                                             value={settings.openaiModel}
-                                            onChange={(e) => settings.setOpenaiModel(e.target.value)}
+                                            onChange={(value) => settings.setOpenaiModel(value)}
+                                            models={providerStatus?.openai.models || []}
                                             placeholder="gpt-4o-mini"
-                                            className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm
-                                 placeholder-white/30 focus:border-white/20 focus:outline-none"
+                                            ariaLabel="OpenAI Model Selection"
                                         />
+                                        {providerStatus?.openai.models && providerStatus.openai.models.length > 0 ? (
+                                            <p className="text-xs text-white/30 mt-1">
+                                                {providerStatus.openai.models.length} model(s) available
+                                            </p>
+                                        ) : providerStatus?.openai.error && (
+                                            <p className="text-xs text-white/30 mt-1">
+                                                Could not fetch models: {providerStatus.openai.error}. Type model name manually.
+                                            </p>
+                                        )}
                                     </div>
+                                    <button
+                                        onClick={async () => {
+                                            if (!settings.openaiApiKey) {
+                                                setTestResults({ ...testResults, openai: 'Please enter an API key first' })
+                                                return
+                                            }
+                                            setTestingOpenAI(true)
+                                            setTestResults({ ...testResults, openai: undefined })
+                                            try {
+                                                const result = await testOpenAIConnection(
+                                                    settings.openaiBaseUrl || 'https://api.openai.com/v1',
+                                                    settings.openaiApiKey,
+                                                    settings.openaiModel || 'gpt-4o-mini'
+                                                )
+                                                if (result.success) {
+                                                    let message = 'Connection successful!'
+                                                    if (result.models && result.models.length > 0) {
+                                                        message += ` Found ${result.models.length} model(s).`
+                                                        // Update provider status with models
+                                                        setProviderStatus(prev => prev ? {
+                                                            ...prev,
+                                                            openai: {
+                                                                ...prev.openai,
+                                                                models: result.models,
+                                                                modelsEndpointAvailable: result.modelsEndpointAvailable ?? true,
+                                                            }
+                                                        } : null)
+                                                    } else if (result.modelsEndpointAvailable === false) {
+                                                        message += ' Models endpoint not available for this API.'
+                                                        setProviderStatus(prev => prev ? {
+                                                            ...prev,
+                                                            openai: {
+                                                                ...prev.openai,
+                                                                modelsEndpointAvailable: false,
+                                                            }
+                                                        } : null)
+                                                    }
+                                                    setTestResults({ ...testResults, openai: message })
+                                                    // Refresh providers to get updated status
+                                                    await checkProviders()
+                                                } else {
+                                                    setTestResults({ ...testResults, openai: `Error: ${result.error}` })
+                                                }
+                                            } catch (error) {
+                                                setTestResults({ ...testResults, openai: `Error: ${error instanceof Error ? error.message : 'Unknown error'}` })
+                                            } finally {
+                                                setTestingOpenAI(false)
+                                            }
+                                        }}
+                                        disabled={testingOpenAI || !settings.openaiApiKey}
+                                        className="w-full px-4 py-2 bg-[#4fd1c5]/10 hover:bg-[#4fd1c5]/20 text-[#4fd1c5] rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                    >
+                                        {testingOpenAI ? (
+                                            <>
+                                                <Loader2 size={16} className="animate-spin" />
+                                                Testing Connection...
+                                            </>
+                                        ) : (
+                                            'Test Connection & Fetch Models'
+                                        )}
+                                    </button>
+                                    {testResults.openai && (
+                                        <div className={`p-2 rounded text-xs ${testResults.openai.includes('Error') || testResults.openai.includes('Please') ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'}`}>
+                                            {testResults.openai}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -268,6 +447,7 @@ export function SettingsPanel() {
                                     </div>
                                     <button
                                         onClick={() => settings.setTtsEnabled(!settings.ttsEnabled)}
+                                        aria-label={settings.ttsEnabled ? 'Disable Text-to-Speech' : 'Enable Text-to-Speech'}
                                         className={`w-12 h-6 rounded-full transition-colors ${settings.ttsEnabled ? 'bg-[#4fd1c5]' : 'bg-white/20'
                                             }`}
                                     >
@@ -279,28 +459,32 @@ export function SettingsPanel() {
 
                             {/* Speech Rate */}
                             <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
-                                <label className="block text-sm mb-3">Speech Rate: {settings.ttsRate.toFixed(1)}x</label>
+                                <label className="block text-sm mb-3" htmlFor="tts-rate">Speech Rate: {settings.ttsRate.toFixed(1)}x</label>
                                 <input
+                                    id="tts-rate"
                                     type="range"
                                     min="0.5"
                                     max="2"
                                     step="0.1"
                                     value={settings.ttsRate}
                                     onChange={(e) => settings.setTtsRate(parseFloat(e.target.value))}
+                                    aria-label="Speech Rate"
                                     className="w-full"
                                 />
                             </div>
 
                             {/* Speech Pitch */}
                             <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
-                                <label className="block text-sm mb-3">Speech Pitch: {settings.ttsPitch.toFixed(1)}</label>
+                                <label className="block text-sm mb-3" htmlFor="tts-pitch">Speech Pitch: {settings.ttsPitch.toFixed(1)}</label>
                                 <input
+                                    id="tts-pitch"
                                     type="range"
                                     min="0.5"
                                     max="2"
                                     step="0.1"
                                     value={settings.ttsPitch}
                                     onChange={(e) => settings.setTtsPitch(parseFloat(e.target.value))}
+                                    aria-label="Speech Pitch"
                                     className="w-full"
                                 />
                             </div>

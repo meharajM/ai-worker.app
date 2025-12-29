@@ -19,6 +19,8 @@ const electronAPI = {
         chat: (messages: unknown[], tools?: unknown[]) =>
             ipcRenderer.invoke('llm:chat', messages, tools),
         getProviders: () => ipcRenderer.invoke('llm:get-providers'),
+        fetchOpenAIModels: (baseUrl: string, apiKey: string) =>
+            ipcRenderer.invoke('llm:fetch-openai-models', baseUrl, apiKey),
     },
 
     // Storage operations (using electron-store in main process)

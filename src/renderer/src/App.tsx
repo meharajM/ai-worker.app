@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { VoiceInput } from './components/VoiceInput'
 import { ChatView } from './components/ChatView'
 import { ConnectionsPanel } from './components/ConnectionsPanel'
@@ -6,40 +6,82 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { Sidebar, View } from './components/Sidebar'
 import { Header } from './components/Header'
 import { useChatStore } from './stores/chatStore'
+import { useSettingsStore } from './stores/settingsStore'
 import { useSpeechSynthesis } from './hooks/useSpeechSynthesis'
 import { chat, getAvailableProviders, LLMMessage } from './lib/llm'
 
 function App() {
     const [currentView, setCurrentView] = useState<View>('chat')
     const { messages, addMessage, setProcessing, isProcessing } = useChatStore()
+    const settings = useSettingsStore()
     const { speak } = useSpeechSynthesis()
     const [llmStatus, setLlmStatus] = useState<{ provider: string | null; available: boolean }>({
         provider: null,
         available: false,
     })
 
-    // Check LLM availability on mount
-    useEffect(() => {
-        async function checkLLM() {
+    // Check LLM availability on mount and when settings change (debounced)
+    // Only check when not in settings view to avoid duplicate calls
+    const checkLLMRef = React.useRef<Promise<void> | null>(null)
+    const checkLLM = React.useCallback(async () => {
+        // Skip if we're in settings view (SettingsPanel handles it)
+        if (currentView === 'settings') {
+            return
+        }
+
+        // Prevent duplicate concurrent requests
+        if (checkLLMRef.current) {
+            return checkLLMRef.current
+        }
+
+        const promise = (async () => {
             try {
-                const providers = await getAvailableProviders()
+                const settingsForLLM = {
+                    preferredProvider: settings.preferredProvider,
+                    ollamaModel: settings.ollamaModel,
+                    ollamaBaseUrl: settings.ollamaBaseUrl,
+                    openaiApiKey: settings.openaiApiKey,
+                    openaiBaseUrl: settings.openaiBaseUrl,
+                    openaiModel: settings.openaiModel,
+                }
+                const providers = await getAvailableProviders(settingsForLLM)
                 if (providers.ollama.available) {
                     setLlmStatus({ provider: `Ollama (${providers.ollama.model})`, available: true })
                 } else if (providers.openai.available) {
-                    setLlmStatus({ provider: 'OpenAI', available: true })
+                    setLlmStatus({ provider: `OpenAI (${providers.openai.model})`, available: true })
                 } else {
                     setLlmStatus({ provider: null, available: false })
                 }
             } catch (error) {
                 console.error('Error checking LLM:', error)
                 setLlmStatus({ provider: null, available: false })
+            } finally {
+                checkLLMRef.current = null
             }
+        })()
+
+        checkLLMRef.current = promise
+        return promise
+    }, [settings.preferredProvider, settings.ollamaModel, settings.ollamaBaseUrl, settings.openaiApiKey, settings.openaiBaseUrl, settings.openaiModel, currentView])
+
+    useEffect(() => {
+        // Debounce to avoid rapid calls when settings change
+        const timer = setTimeout(() => {
+            checkLLM()
+        }, 500)
+        return () => clearTimeout(timer)
+    }, [checkLLM])
+
+    // Re-check every 60 seconds (reduced from 30s) when not in settings
+    useEffect(() => {
+        if (currentView === 'settings') {
+            return // Don't poll when in settings view
         }
-        checkLLM()
-        // Re-check every 30 seconds
-        const interval = setInterval(checkLLM, 30000)
+        const interval = setInterval(() => {
+            checkLLM()
+        }, 60000) // Increased to 60 seconds
         return () => clearInterval(interval)
-    }, [])
+    }, [checkLLM, currentView])
 
     // Handle message submission
     const handleSubmit = useCallback(async (content: string) => {
@@ -66,8 +108,16 @@ function App() {
                 content: content.trim(),
             })
 
-            // Call LLM
-            const response = await chat(llmMessages)
+            // Call LLM with current settings
+            const settingsForLLM = {
+                preferredProvider: settings.preferredProvider,
+                ollamaModel: settings.ollamaModel,
+                ollamaBaseUrl: settings.ollamaBaseUrl,
+                openaiApiKey: settings.openaiApiKey,
+                openaiBaseUrl: settings.openaiBaseUrl,
+                openaiModel: settings.openaiModel,
+            }
+            const response = await chat(llmMessages, undefined, settingsForLLM)
 
             // Add assistant response
             addMessage({
@@ -95,7 +145,7 @@ function App() {
         } finally {
             setProcessing(false)
         }
-    }, [messages, addMessage, setProcessing, speak])
+    }, [messages, addMessage, setProcessing, speak, settings])
 
     return (
         <div className="flex h-screen bg-[#0f1115] text-white font-sans overflow-hidden">

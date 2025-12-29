@@ -27,58 +27,249 @@ export interface LLMResponse {
 
 export type LLMProvider = 'browser' | 'ollama' | 'openai'
 
+export interface LLMSettings {
+    preferredProvider?: 'auto' | 'ollama' | 'openai' | 'browser'
+    ollamaModel?: string
+    ollamaBaseUrl?: string
+    openaiApiKey?: string
+    openaiBaseUrl?: string
+    openaiModel?: string
+}
+
 interface ProviderStatus {
     available: boolean
     model?: string
     error?: string
+    models?: string[] // Available models list
+    modelsEndpointAvailable?: boolean // Whether /models endpoint exists
 }
 
-// Check if Ollama is running
-async function checkOllama(): Promise<ProviderStatus> {
+// Get Ollama settings from store or use defaults
+function getOllamaSettings(settings?: LLMSettings) {
+    const baseUrl = settings?.ollamaBaseUrl || LLM_CONFIG.OLLAMA.BASE_URL
+    const model = settings?.ollamaModel || LLM_CONFIG.OLLAMA.DEFAULT_MODEL
+    return { baseUrl, model }
+}
+
+// Get OpenAI settings from store or use defaults
+function getOpenAISettings(settings?: LLMSettings) {
+    const apiKey = settings?.openaiApiKey || localStorage.getItem('openai_api_key') || ''
+    const baseUrl = settings?.openaiBaseUrl || localStorage.getItem('openai_base_url') || 'https://api.openai.com/v1'
+    const model = settings?.openaiModel || LLM_CONFIG.OPENAI_COMPATIBLE.DEFAULT_MODEL
+    return { apiKey, baseUrl, model }
+}
+
+// Check if Ollama is running and list available models
+export async function checkOllama(settings?: LLMSettings): Promise<ProviderStatus> {
     if (!FEATURE_FLAGS.OLLAMA_ENABLED) {
         return { available: false, error: 'Ollama disabled' }
     }
 
+    const { baseUrl } = getOllamaSettings(settings)
+
     try {
-        const response = await fetch(`${LLM_CONFIG.OLLAMA.BASE_URL}/api/tags`)
+        const response = await fetch(`${baseUrl}/api/tags`)
         if (response.ok) {
             const data = await response.json()
-            const models = data.models || []
-            const defaultModel = models.find((m: { name: string }) =>
-                m.name.startsWith(LLM_CONFIG.OLLAMA.DEFAULT_MODEL)
-            )
+            const models = (data.models || []).map((m: { name: string }) => m.name)
+            const { model: preferredModel } = getOllamaSettings(settings)
+            const defaultModel = models.find((m: string) => m.startsWith(preferredModel)) || models[0] || preferredModel
             return {
                 available: true,
-                model: defaultModel?.name || models[0]?.name || LLM_CONFIG.OLLAMA.DEFAULT_MODEL,
+                model: defaultModel,
+                models: models,
             }
         }
         return { available: false, error: 'Ollama not responding' }
-    } catch {
-        return { available: false, error: 'Ollama not running' }
+    } catch (error) {
+        return { available: false, error: error instanceof Error ? error.message : 'Ollama not running' }
     }
 }
 
-// Check if OpenAI-compatible API is configured
-function checkOpenAI(): ProviderStatus {
+// Test Ollama connection with a specific model
+export async function testOllamaConnection(baseUrl: string, model: string): Promise<{ success: boolean; error?: string }> {
+    try {
+        const response = await fetch(`${baseUrl}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model,
+                prompt: 'test',
+                stream: false,
+            }),
+        })
+        if (response.ok) {
+            return { success: true }
+        }
+        const error = await response.json().catch(() => ({}))
+        return { success: false, error: error.error || 'Connection failed' }
+    } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Connection failed' }
+    }
+}
+
+// Check if OpenAI-compatible API is configured and fetch available models
+export async function checkOpenAI(settings?: LLMSettings): Promise<ProviderStatus> {
     if (!FEATURE_FLAGS.CLOUD_LLM_ENABLED) {
         return { available: false, error: 'Cloud LLM disabled' }
     }
 
-    const apiKey = localStorage.getItem('openai_api_key')
-    if (apiKey) {
+    const { apiKey, baseUrl, model } = getOpenAISettings(settings)
+    if (!apiKey) {
+        return { available: false, error: 'No API key configured' }
+    }
+
+    try {
+        // Use IPC to fetch models from main process (bypasses CORS)
+        const electron = (window as any).electron
+        if (electron?.llm?.fetchOpenAIModels) {
+            const result = await electron.llm.fetchOpenAIModels(baseUrl, apiKey)
+            
+            if (result.success && result.models && result.models.length > 0) {
+                const models = result.models
+                // Find the preferred model or use default
+                const preferredModel = model
+                const defaultModel = models.find((m: string) => m === preferredModel) 
+                    || models.find((m: string) => m.includes('gpt-4o')) 
+                    || models.find((m: string) => m.includes('gpt-4')) 
+                    || models[0] 
+                    || preferredModel
+
+                return {
+                    available: true,
+                    model: defaultModel,
+                    models: models,
+                    modelsEndpointAvailable: true,
+                }
+            } else {
+                // If models endpoint fails, still mark as available if API key exists
+                return {
+                    available: true,
+                    model: model,
+                    models: [model], // Fallback to just the configured model
+                    modelsEndpointAvailable: false,
+                    error: result.error || 'Could not fetch models list',
+                }
+            }
+        } else {
+            // Fallback to direct fetch if IPC not available (for development/testing)
+            const response = await fetch(`${baseUrl}/models`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                },
+            })
+
+            if (response.ok) {
+                const data = await response.json()
+                const models = (data.data || [])
+                    .filter((m: { id: string }) => {
+                        const id = m.id.toLowerCase()
+                        return id.includes('gpt') || id.includes('chat') || id.includes('claude') || id.includes('llama') || id.includes('perplexity')
+                    })
+                    .map((m: { id: string }) => m.id)
+                    .sort()
+
+                const preferredModel = model
+                const defaultModel = models.find((m: string) => m === preferredModel) 
+                    || models.find((m: string) => m.includes('gpt-4o')) 
+                    || models.find((m: string) => m.includes('gpt-4')) 
+                    || models[0] 
+                    || preferredModel
+
+                return {
+                    available: true,
+                    model: defaultModel,
+                    models: models,
+                    modelsEndpointAvailable: true,
+                }
+            } else {
+                return {
+                    available: true,
+                    model: model,
+                    models: [model],
+                    modelsEndpointAvailable: false,
+                }
+            }
+        }
+    } catch (error) {
+        // If fetch fails, still mark as available if API key exists
+        // User can still use the manually entered model
         return {
             available: true,
-            model: LLM_CONFIG.OPENAI_COMPATIBLE.DEFAULT_MODEL,
+            model: model,
+            models: [model], // Fallback to just the configured model
+            modelsEndpointAvailable: false,
+            error: error instanceof Error ? error.message : 'Could not fetch models list',
         }
     }
-    return { available: false, error: 'No API key configured' }
+}
+
+// Test OpenAI connection and fetch models
+export async function testOpenAIConnection(baseUrl: string, apiKey: string, model: string): Promise<{ 
+    success: boolean
+    error?: string
+    models?: string[]
+    modelsEndpointAvailable?: boolean
+}> {
+    try {
+        // Test connection with chat completions
+        const response = await fetch(`${baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model,
+                messages: [{ role: 'user', content: 'test' }],
+                max_tokens: 5,
+            }),
+        })
+        
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}))
+            return { success: false, error: error.error?.message || 'Connection failed' }
+        }
+
+        // Try to fetch models if connection succeeds
+        const electron = (window as any).electron
+        if (electron?.llm?.fetchOpenAIModels) {
+            try {
+                const modelsResult = await electron.llm.fetchOpenAIModels(baseUrl, apiKey)
+                if (modelsResult.success && modelsResult.models) {
+                    return { 
+                        success: true, 
+                        models: modelsResult.models,
+                        modelsEndpointAvailable: true
+                    }
+                } else {
+                    return { 
+                        success: true,
+                        modelsEndpointAvailable: false,
+                        error: modelsResult.error || 'Models endpoint not available'
+                    }
+                }
+            } catch (modelsError) {
+                // Connection works but models endpoint doesn't
+                return { 
+                    success: true,
+                    modelsEndpointAvailable: false
+                }
+            }
+        }
+
+        return { success: true, modelsEndpointAvailable: false }
+    } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Connection failed' }
+    }
 }
 
 // Get available providers
-export async function getAvailableProviders(): Promise<Record<LLMProvider, ProviderStatus>> {
+export async function getAvailableProviders(settings?: LLMSettings): Promise<Record<LLMProvider, ProviderStatus>> {
     const [ollama, openai] = await Promise.all([
-        checkOllama(),
-        Promise.resolve(checkOpenAI()),
+        checkOllama(settings),
+        checkOpenAI(settings),
     ])
 
     return {
@@ -91,13 +282,16 @@ export async function getAvailableProviders(): Promise<Record<LLMProvider, Provi
 // Call Ollama API
 async function callOllama(
     messages: LLMMessage[],
-    tools?: LLMTool[]
+    tools?: LLMTool[],
+    settings?: LLMSettings
 ): Promise<LLMResponse> {
-    const response = await fetch(`${LLM_CONFIG.OLLAMA.BASE_URL}/api/chat`, {
+    const { baseUrl, model } = getOllamaSettings(settings)
+    
+    const response = await fetch(`${baseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            model: LLM_CONFIG.OLLAMA.DEFAULT_MODEL,
+            model: model,
             messages: messages.map((m) => ({
                 role: m.role,
                 content: m.content,
@@ -115,7 +309,8 @@ async function callOllama(
     })
 
     if (!response.ok) {
-        throw new Error(`Ollama error: ${response.statusText}`)
+        const error = await response.json().catch(() => ({}))
+        throw new Error(error.error || `Ollama error: ${response.statusText}`)
     }
 
     const data = await response.json()
@@ -128,17 +323,17 @@ async function callOllama(
             arguments: tc.function.arguments,
         })),
         provider: 'ollama',
-        model: LLM_CONFIG.OLLAMA.DEFAULT_MODEL,
+        model: model,
     }
 }
 
 // Call OpenAI-compatible API
 async function callOpenAI(
     messages: LLMMessage[],
-    tools?: LLMTool[]
+    tools?: LLMTool[],
+    settings?: LLMSettings
 ): Promise<LLMResponse> {
-    const apiKey = localStorage.getItem('openai_api_key')
-    const baseUrl = localStorage.getItem('openai_base_url') || 'https://api.openai.com/v1'
+    const { apiKey, baseUrl, model } = getOpenAISettings(settings)
 
     if (!apiKey) {
         throw new Error('OpenAI API key not configured')
@@ -151,7 +346,7 @@ async function callOpenAI(
             'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-            model: LLM_CONFIG.OPENAI_COMPATIBLE.DEFAULT_MODEL,
+            model: model,
             messages,
             tools: tools?.map((t) => ({
                 type: 'function',
@@ -180,7 +375,7 @@ async function callOpenAI(
             arguments: JSON.parse(tc.function.arguments),
         })),
         provider: 'openai',
-        model: LLM_CONFIG.OPENAI_COMPATIBLE.DEFAULT_MODEL,
+        model: model,
     }
 }
 
@@ -188,19 +383,27 @@ async function callOpenAI(
 export async function chat(
     messages: LLMMessage[],
     tools?: LLMTool[],
-    preferredProvider?: LLMProvider
+    settings?: LLMSettings
 ): Promise<LLMResponse> {
-    const providers = await getAvailableProviders()
+    const providers = await getAvailableProviders(settings)
 
     // Determine which provider to use
     let provider: LLMProvider | null = null
+    const preferredProvider = settings?.preferredProvider
 
-    if (preferredProvider && providers[preferredProvider].available) {
-        provider = preferredProvider
-    } else if (providers.ollama.available) {
+    if (preferredProvider === 'auto' || !preferredProvider) {
+        // Auto-select: try ollama first, then openai
+        if (providers.ollama.available) {
+            provider = 'ollama'
+        } else if (providers.openai.available) {
+            provider = 'openai'
+        }
+    } else if (preferredProvider === 'ollama' && providers.ollama.available) {
         provider = 'ollama'
-    } else if (providers.openai.available) {
+    } else if (preferredProvider === 'openai' && providers.openai.available) {
         provider = 'openai'
+    } else if (preferredProvider === 'browser' && providers.browser.available) {
+        provider = 'browser'
     }
 
     if (!provider) {
@@ -222,9 +425,9 @@ Be concise and helpful. Format responses for voice output when possible.`,
 
     switch (provider) {
         case 'ollama':
-            return callOllama(messagesWithSystem, tools)
+            return callOllama(messagesWithSystem, tools, settings)
         case 'openai':
-            return callOpenAI(messagesWithSystem, tools)
+            return callOpenAI(messagesWithSystem, tools, settings)
         default:
             throw new Error(`Provider ${provider} not implemented`)
     }
