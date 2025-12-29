@@ -145,6 +145,31 @@ export function getAllTools(): MCPTool[] {
     return tools
 }
 
+// Find which server a tool belongs to
+export function findServerForTool(toolName: string): MCPServer | null {
+    for (const server of connectedServers.values()) {
+        if (server.connected && server.tools.some(t => t.name === toolName)) {
+            return server
+        }
+    }
+    return null
+}
+
+// Execute a tool call
+export async function executeToolCall(toolName: string, args: Record<string, unknown>): Promise<{ result: unknown; error?: string }> {
+    const server = findServerForTool(toolName)
+    if (!server) {
+        return { result: null, error: `Tool ${toolName} not found in any connected server` }
+    }
+    
+    try {
+        const result = await electron.mcp.callTool(server.id, toolName, args)
+        return result
+    } catch (error) {
+        return { result: null, error: error instanceof Error ? error.message : 'Tool execution failed' }
+    }
+}
+
 // Storage helpers
 function saveServersToStorage(): void {
     const serversArray = Array.from(connectedServers.values())
