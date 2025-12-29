@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { VoiceInput } from './components/VoiceInput'
 import { ChatView } from './components/ChatView'
+import { ChatSidebar } from './components/ChatSidebar'
 import { ConnectionsPanel } from './components/ConnectionsPanel'
 import { SettingsPanel } from './components/SettingsPanel'
 import { Sidebar, View } from './components/Sidebar'
@@ -12,7 +13,7 @@ import { chat, getAvailableProviders, LLMMessage } from './lib/llm'
 
 function App() {
     const [currentView, setCurrentView] = useState<View>('chat')
-    const { messages, addMessage, setProcessing, isProcessing } = useChatStore()
+    const { sessions, activeSessionId, addMessage, setProcessing, isProcessing } = useChatStore()
     const settings = useSettingsStore()
     const { speak } = useSpeechSynthesis()
     const [llmStatus, setLlmStatus] = useState<{ provider: string | null; available: boolean }>({
@@ -96,8 +97,12 @@ function App() {
         setProcessing(true)
 
         try {
+            // Get active session messages
+            const activeSession = sessions.find(s => s.id === activeSessionId)
+            const currentMessages = activeSession?.messages || []
+
             // Build message history for LLM
-            const llmMessages: LLMMessage[] = messages.map((m) => ({
+            const llmMessages: LLMMessage[] = currentMessages.map((m) => ({
                 role: m.role as 'user' | 'assistant',
                 content: m.content,
             }))
@@ -145,7 +150,7 @@ function App() {
         } finally {
             setProcessing(false)
         }
-    }, [messages, addMessage, setProcessing, speak, settings])
+    }, [sessions, activeSessionId, addMessage, setProcessing, speak, settings])
 
     return (
         <div className="flex h-screen bg-[#0f1115] text-white font-sans overflow-hidden">
@@ -156,10 +161,13 @@ function App() {
 
                 <main className="flex-1 flex flex-col overflow-hidden">
                     {currentView === 'chat' && (
-                        <div className="flex-1 flex flex-col overflow-hidden">
-                            <ChatView />
-                            <div className="p-4 flex-shrink-0 border-t border-white/5">
-                                <VoiceInput onSubmit={handleSubmit} disabled={isProcessing} />
+                        <div className="flex-1 flex overflow-hidden">
+                            <ChatSidebar />
+                            <div className="flex-1 flex flex-col overflow-hidden">
+                                <ChatView />
+                                <div className="p-4 flex-shrink-0 border-t border-white/5">
+                                    <VoiceInput onSubmit={handleSubmit} disabled={isProcessing} />
+                                </div>
                             </div>
                         </div>
                     )}
