@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { VOICE_CONFIG, FEATURE_FLAGS } from '../lib/constants'
+import { useSettingsStore } from '../stores/settingsStore'
 
 interface UseSpeechSynthesisReturn {
     isSpeaking: boolean
@@ -13,7 +14,8 @@ interface UseSpeechSynthesisReturn {
 
 export function useSpeechSynthesis(): UseSpeechSynthesisReturn {
     const [isSpeaking, setIsSpeaking] = useState(false)
-    const [isMuted, setIsMuted] = useState(!FEATURE_FLAGS.TTS_ENABLED)
+    const { ttsEnabled, ttsRate, ttsPitch } = useSettingsStore()
+const [isMuted, setIsMuted] = useState(!(FEATURE_FLAGS.TTS_ENABLED && ttsEnabled))
     const [isSupported, setIsSupported] = useState(false)
 
     const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
@@ -24,8 +26,13 @@ export function useSpeechSynthesis(): UseSpeechSynthesisReturn {
         }
     }, [])
 
+    // Sync mute state with TTS_ENABLED flag and settings
+    useEffect(() => {
+        setIsMuted(!(FEATURE_FLAGS.TTS_ENABLED && ttsEnabled))
+    }, [ttsEnabled])
+
     const speak = useCallback((text: string) => {
-        if (!isSupported || isMuted || !text.trim()) {
+        if (!isSupported || isMuted || !text.trim() || !FEATURE_FLAGS.TTS_ENABLED) {
             return
         }
 
@@ -34,8 +41,8 @@ export function useSpeechSynthesis(): UseSpeechSynthesisReturn {
 
         const utterance = new SpeechSynthesisUtterance(text)
         utterance.lang = VOICE_CONFIG.SPEECH_LANG
-        utterance.rate = VOICE_CONFIG.TTS_RATE
-        utterance.pitch = VOICE_CONFIG.TTS_PITCH
+        utterance.rate = ttsRate
+        utterance.pitch = ttsPitch
 
         utterance.onstart = () => {
             setIsSpeaking(true)

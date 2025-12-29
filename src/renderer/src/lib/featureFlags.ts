@@ -1,4 +1,4 @@
-import { FEATURE_FLAGS } from './constants'
+import { BASE_FEATURE_FLAGS } from './constants'
 
 export interface FeatureFlags {
   AUTH_ENABLED: boolean
@@ -55,7 +55,7 @@ export function saveFeatureFlags(flags: Partial<FeatureFlags>): void {
  * Get effective feature flags (merge default with localStorage overrides)
  */
 export function getEffectiveFeatureFlags(): FeatureFlags {
-  const defaultFlags = { ...FEATURE_FLAGS }
+  const defaultFlags = { ...BASE_FEATURE_FLAGS }
   
   // Only apply localStorage overrides in development mode
   if (isDevelopmentMode()) {

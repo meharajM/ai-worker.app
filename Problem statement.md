@@ -69,7 +69,7 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
   - API key management
   - Custom base URL support
   - Default model: `gpt-4o-mini`
-- ✅ **Browser LLM detection** - Future support for Gemini Nano/Phi (feature-flagged)
+- ✅ **Browser LLM detection** - Support for Gemini Nano/Phi (feature-flagged)
 - ✅ **Provider auto-selection** - Automatic fallback between providers
 - ✅ **Provider priority** - Browser → Ollama → OpenAI fallback chain
 
@@ -351,7 +351,7 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 
 ## Implementation Status
 
-### Completed Phases (1-11)
+### Completed Phases (1-12)
 - ✅ Phase 1: Project Setup
 - ✅ Phase 2: Voice & Text Input
 - ✅ Phase 3: Chat Messages & State
@@ -363,9 +363,10 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 - ✅ Phase 9: Real MCP Client
 - ✅ Phase 10: Robustness & DX
 - ✅ Phase 11: Code Refactoring & Architecture Improvement
+- ✅ Phase 12: Feature Flag Enhancements
 
 ### Current Status
-**Production-ready with modular architecture.** All core features implemented and tested. Codebase refactored for maintainability. Cross-platform builds verified for Mac, Windows, and Linux.
+**Production-ready with modular architecture and enhanced feature flags.** All core features implemented and tested, including validated feature flags and TTS controls. Codebase refactored for maintainability. Cross-platform builds verified for Mac, Windows, and Linux.
 
 ---
 
@@ -375,13 +376,13 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 AUTH_ENABLED: false              // Firebase Auth (ready but disabled)
 RATE_LIMITING_ENABLED: false     // Rate limiting (ready but disabled)
 TTS_ENABLED: true                // Text-to-speech (active)
-BROWSER_LLM_ENABLED: true        // Browser LLM detection (active)
+BROWSER_LLM_ENABLED: true        // Browser LLM detection and implementation (active)
 OLLAMA_ENABLED: true             // Ollama support (active)
 CLOUD_LLM_ENABLED: true          // OpenAI support (active)
 ```
 
 ---
 
-**Last Updated:** 2024-12-28  
+**Last Updated:** 2024-12-29  
 **Version:** 0.1.0  
 **Status:** MVP Complete - Production Ready
