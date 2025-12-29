@@ -215,9 +215,17 @@ function loadServersFromStorage(): void {
     const stored = localStorage.getItem(STORAGE_KEYS.MCP_SERVERS);
     if (stored) {
       const servers: MCPServer[] = JSON.parse(stored);
-      connectedServers = new Map(
-        servers.map((s) => [s.id, { ...s, connected: false, tools: [] }])
-      );
+      // Check if we have any servers, or if it's an empty array
+      if (servers && servers.length > 0) {
+        connectedServers = new Map(
+          servers.map((s) => [s.id, { ...s, connected: false, tools: [] }])
+        );
+        // Ensure default servers exist (add missing ones)
+        ensureDefaultServers();
+      } else {
+        // Empty array or null - initialize with default servers
+        initializeDefaultServers();
+      }
     } else {
       // First run: Initialize with default servers
       initializeDefaultServers();
@@ -241,6 +249,32 @@ function initializeDefaultServers(): void {
     connectedServers.set(server.id, server);
   });
   saveServersToStorage();
+}
+
+// Ensure default servers exist (add any missing ones)
+function ensureDefaultServers(): void {
+  let hasChanges = false;
+  const existingServerNames = new Set(
+    Array.from(connectedServers.values()).map((s) => s.name)
+  );
+
+  DEFAULT_MCP_SERVERS.forEach((serverConfig) => {
+    // Only add if this default server doesn't exist by name
+    if (!existingServerNames.has(serverConfig.name)) {
+      const server: MCPServer = {
+        ...serverConfig,
+        id: generateId(),
+        connected: false,
+        tools: [],
+      };
+      connectedServers.set(server.id, server);
+      hasChanges = true;
+    }
+  });
+
+  if (hasChanges) {
+    saveServersToStorage();
+  }
 }
 
 // Initialize on load
