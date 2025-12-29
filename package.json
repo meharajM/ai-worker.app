@@ -22,9 +22,11 @@
     "dependencies": {
         "@electron-toolkit/utils": "^3.0.0",
         "@modelcontextprotocol/sdk": "^1.0.1",
+        "@playwright/mcp": "^0.0.53",
         "electron-store": "^11.0.2",
         "fix-path": "^5.0.0",
         "lucide-react": "^0.468.0",
+        "playwright": "^1.58.0-alpha-1766189059000",
         "react": "^18.2.0",
         "react-dom": "^18.2.0",
         "zustand": "^5.0.9"
