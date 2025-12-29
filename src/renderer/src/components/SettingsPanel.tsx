@@ -11,15 +11,18 @@ import {
     Cpu,
     Loader2,
     Check,
-    AlertCircle
+    AlertCircle,
+    Flag
 } from 'lucide-react'
 import { useSettingsStore, Theme, LLMProviderType } from '../stores/settingsStore'
 import { useAuthStore } from '../stores/authStore'
 import { FEATURE_FLAGS, APP_INFO } from '../lib/constants'
+import { isDevelopmentMode } from '../lib/featureFlags'
+import { EnhancedFeatureFlagsPanel } from './EnhancedFeatureFlagsPanel'
 import { getAvailableProviders, testOllamaConnection, testOpenAIConnection, checkOllama, checkOpenAI } from '../lib/llm'
 import { ModelSelect } from './ModelSelect'
 
-type SettingsSection = 'account' | 'llm' | 'voice' | 'appearance' | 'about'
+type SettingsSection = 'account' | 'llm' | 'voice' | 'appearance' | 'flags' | 'about'
 
 interface ProviderStatus {
     ollama: { available: boolean; model?: string; models?: string[]; error?: string; modelsEndpointAvailable?: boolean }
@@ -96,12 +99,13 @@ export function SettingsPanel() {
     }, [checkProviders])
 
     const sections: { id: SettingsSection; label: string; icon: React.ReactNode }[] = [
-        ...(FEATURE_FLAGS.AUTH_ENABLED ? [{ id: 'account' as const, label: 'Account', icon: <User size={20} /> }] : []),
-        { id: 'llm', label: 'LLM Provider', icon: <Cpu size={20} /> },
-        { id: 'voice', label: 'Voice', icon: <Volume2 size={20} /> },
-        { id: 'appearance', label: 'Appearance', icon: <Palette size={20} /> },
-        { id: 'about', label: 'About', icon: <Info size={20} /> },
-    ]
+    ...(FEATURE_FLAGS.AUTH_ENABLED ? [{ id: 'account' as const, label: 'Account', icon: <User size={20} /> }] : []),
+    { id: 'llm', label: 'LLM Provider', icon: <Cpu size={20} /> },
+    { id: 'voice', label: 'Voice', icon: <Volume2 size={20} /> },
+    { id: 'appearance', label: 'Appearance', icon: <Palette size={20} /> },
+    ...(isDevelopmentMode() ? [{ id: 'flags' as const, label: 'Feature Flags', icon: <Flag size={20} /> }] : []),
+    { id: 'about', label: 'About', icon: <Info size={20} /> },
+]
 
     return (
         <div className="flex-1 flex overflow-hidden">
@@ -557,6 +561,11 @@ export function SettingsPanel() {
                             </p>
                         </div>
                     </div>
+                )}
+
+                {/* Feature Flags Section */}
+                {activeSection === 'flags' && isDevelopmentMode() && (
+                    <EnhancedFeatureFlagsPanel isDevMode={true} />
                 )}
 
                 {/* About Section */}

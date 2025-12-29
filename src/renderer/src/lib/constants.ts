@@ -1,11 +1,27 @@
-// Feature Flags - Flip these when ready
-export const FEATURE_FLAGS = {
+import { getEffectiveFeatureFlags } from './featureFlags'
+
+// Base Feature Flags - Default values, can be overridden in development mode
+const BASE_FEATURE_FLAGS = {
     AUTH_ENABLED: false,          // Flip to true when Firebase is configured
     RATE_LIMITING_ENABLED: false, // Flip to true when auth is ready
     TTS_ENABLED: true,            // Text-to-speech readout
     BROWSER_LLM_ENABLED: true,    // Try Gemini Nano / Phi first
     OLLAMA_ENABLED: true,         // Local Ollama models
     CLOUD_LLM_ENABLED: true,      // OpenAI-compatible APIs
+    
+    // New flags for demonstration of auto-detection
+    EXPERIMENTAL_FEATURES_ENABLED: false, // Enable experimental/beta features
+    DARK_MODE_ONLY: true,           // Force dark mode theme
+    ANALYTICS_ENABLED: false,     // Enable usage analytics and telemetry
+    EXPORT_FEATURES_ENABLED: true, // Enable data export functionality
+}
+
+// Get effective feature flags (merged with localStorage overrides in dev mode)
+export const FEATURE_FLAGS = getEffectiveFeatureFlags()
+
+// Export a function to get fresh feature flags (useful for development mode)
+export function getFeatureFlags() {
+  return getEffectiveFeatureFlags()
 }
 
 // Rate Limits for anonymous users (easily adjustable)
