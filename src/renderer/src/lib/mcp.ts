@@ -1,3 +1,6 @@
+import { STORAGE_KEYS, APP_INFO } from './constants'
+import electron from './electron'
+
 /// <reference path="../env.d.ts" />
 
 // MCP Client Manager - Connects to external MCP servers
@@ -85,48 +88,27 @@ export async function connectServer(serverId: string): Promise<void> {
     }
 
     try {
-        // Try to use Electron IPC for actual MCP connection
-        if (window.electron?.mcp) {
-            const result = await window.electron.mcp.connect({
-                id: server.id,
-                type: server.type,
-                command: server.command,
-                args: server.args,
-                url: server.url,
-            })
+        // Use the electron wrapper which handles browser fallback internally
+        const result = await electron.mcp.connect({
+            id: server.id,
+            type: server.type,
+            command: server.command,
+            args: server.args,
+            url: server.url,
+        })
 
-            if (result.success) {
-                // Get tools from the connected server
-                const toolsResult = await window.electron.mcp.listTools(serverId)
-                server.tools = toolsResult.tools.map((t: { name: string; description: string }) => ({
-                    name: t.name,
-                    description: t.description,
-                    inputSchema: { type: 'object', properties: {} },
-                }))
-                server.connected = true
-                server.error = undefined
-            } else {
-                throw new Error(result.error || 'Connection failed')
-            }
-        } else {
-            // Browser fallback - simulate connection
-            await new Promise((resolve) => setTimeout(resolve, 1000))
-
-            // Mock tools for demonstration
+        if (result.success) {
+            // Get tools from the connected server
+            const toolsResult = await electron.mcp.listTools(serverId)
+            server.tools = toolsResult.tools.map((t: { name: string; description: string }) => ({
+                name: t.name,
+                description: t.description,
+                inputSchema: { type: 'object', properties: {} },
+            }))
             server.connected = true
-            server.tools = [
-                {
-                    name: `${server.name.toLowerCase().replace(/\s/g, '_')}_list`,
-                    description: `List items from ${server.name}`,
-                    inputSchema: { type: 'object', properties: {} },
-                },
-                {
-                    name: `${server.name.toLowerCase().replace(/\s/g, '_')}_read`,
-                    description: `Read data from ${server.name}`,
-                    inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
-                },
-            ]
             server.error = undefined
+        } else {
+            throw new Error(result.error || 'Connection failed')
         }
 
         connectedServers.set(serverId, server)
@@ -166,12 +148,12 @@ export function getAllTools(): MCPTool[] {
 // Storage helpers
 function saveServersToStorage(): void {
     const serversArray = Array.from(connectedServers.values())
-    localStorage.setItem('mcp_servers', JSON.stringify(serversArray))
+    localStorage.setItem(STORAGE_KEYS.MCP_SERVERS, JSON.stringify(serversArray))
 }
 
 function loadServersFromStorage(): void {
     try {
-        const stored = localStorage.getItem('mcp_servers')
+        const stored = localStorage.getItem(STORAGE_KEYS.MCP_SERVERS)
         if (stored) {
             const servers: MCPServer[] = JSON.parse(stored)
             connectedServers = new Map(servers.map((s) => [s.id, { ...s, connected: false, tools: [] }]))

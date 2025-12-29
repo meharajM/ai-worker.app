@@ -43,4 +43,22 @@ export const VOICE_CONFIG = {
 export const APP_INFO = {
     NAME: 'AI-Worker',
     VERSION: '0.1.0',
+    CLIENT_ID: 'AI-Worker-Client',
+}
+
+// Storage Keys
+export const STORAGE_KEYS = {
+    MCP_SERVERS: 'mcp_servers',
+    CHAT_HISTORY: 'ai-worker-chat',
+    SETTINGS: 'ai-worker-settings',
+    AUTH_STATE: 'ai-worker-auth'
+}
+
+// UI Colors (Tailwind compatible)
+export const UI_COLORS = {
+    PRIMARY: '#4fd1c5',
+    PRIMARY_HOVER: '#5fe0d4',
+    BG_DARK: '#0f1115',
+    CARD_DARK: '#1a1d23',
+    ACCENT: '#4fd1c5'
 }
