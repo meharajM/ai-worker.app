@@ -1,3 +1,8 @@
+import { STORAGE_KEYS, APP_INFO } from './constants'
+import electron from './electron'
+
+/// <reference path="../env.d.ts" />
+
 // MCP Client Manager - Connects to external MCP servers
 // Uses @modelcontextprotocol/sdk to communicate with MCP servers
 
@@ -21,64 +26,7 @@ export interface MCPTool {
 }
 
 // Pre-configured MCP server templates
-export const MCP_TEMPLATES: Omit<MCPServer, 'id' | 'connected' | 'tools' | 'error'>[] = [
-    {
-        name: 'File System',
-        description: 'Read, write, and manage local files',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-filesystem', '/'],
-    },
-    {
-        name: 'GitHub',
-        description: 'Interact with GitHub repositories',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-github'],
-    },
-    {
-        name: 'Google Drive',
-        description: 'Access and manage Google Drive files',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-gdrive'],
-    },
-    {
-        name: 'Brave Search',
-        description: 'Search the web using Brave Search',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-brave-search'],
-    },
-    {
-        name: 'Memory',
-        description: 'Persistent memory across conversations',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-memory'],
-    },
-    {
-        name: 'Puppeteer',
-        description: 'Browser automation and web scraping',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-puppeteer'],
-    },
-    {
-        name: 'Slack',
-        description: 'Send messages and interact with Slack',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-slack'],
-    },
-    {
-        name: 'SQLite',
-        description: 'Query and manage SQLite databases',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-sqlite'],
-    },
-]
+// Use addCustomServer to add any server
 
 // Store for connected servers
 let connectedServers: Map<string, MCPServer> = new Map()
@@ -86,25 +34,6 @@ let connectedServers: Map<string, MCPServer> = new Map()
 // Generate unique ID
 function generateId(): string {
     return `mcp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-}
-
-// Add a server from template
-export function addServerFromTemplate(templateIndex: number): MCPServer {
-    const template = MCP_TEMPLATES[templateIndex]
-    if (!template) {
-        throw new Error('Invalid template index')
-    }
-
-    const server: MCPServer = {
-        ...template,
-        id: generateId(),
-        connected: false,
-        tools: [],
-    }
-
-    connectedServers.set(server.id, server)
-    saveServersToStorage()
-    return server
 }
 
 // Add a custom server
@@ -121,6 +50,24 @@ export function addCustomServer(config: Omit<MCPServer, 'id' | 'connected' | 'to
     return server
 }
 
+// Update an existing server
+export function updateServer(serverId: string, config: Partial<Omit<MCPServer, 'id' | 'connected' | 'tools'>>): void {
+    const server = connectedServers.get(serverId)
+    if (!server) throw new Error('Server not found')
+
+    const updatedServer: MCPServer = {
+        ...server,
+        ...config,
+        // Reset connected state and tools if critical config changes
+        connected: false,
+        tools: [],
+        error: undefined
+    }
+
+    connectedServers.set(serverId, updatedServer)
+    saveServersToStorage()
+}
+
 // Remove a server
 export function removeServer(serverId: string): void {
     connectedServers.delete(serverId)
@@ -132,8 +79,8 @@ export function getServers(): MCPServer[] {
     return Array.from(connectedServers.values())
 }
 
-// Connect to a server (mock implementation for now)
-// In the real implementation, this would use the MCP SDK in the main process
+// Connect to a server
+// Uses Electron IPC when available, otherwise mock implementation
 export async function connectServer(serverId: string): Promise<void> {
     const server = connectedServers.get(serverId)
     if (!server) {
@@ -141,25 +88,28 @@ export async function connectServer(serverId: string): Promise<void> {
     }
 
     try {
-        // TODO: Implement actual MCP connection via IPC to main process
-        // For now, simulate connection
-        await new Promise((resolve) => setTimeout(resolve, 1000))
+        // Use the electron wrapper which handles browser fallback internally
+        const result = await electron.mcp.connect({
+            id: server.id,
+            type: server.type,
+            command: server.command,
+            args: server.args,
+            url: server.url,
+        })
 
-        // Mock tools for demonstration
-        server.connected = true
-        server.tools = [
-            {
-                name: `${server.name.toLowerCase().replace(/\s/g, '_')}_list`,
-                description: `List items from ${server.name}`,
+        if (result.success) {
+            // Get tools from the connected server
+            const toolsResult = await electron.mcp.listTools(serverId)
+            server.tools = toolsResult.tools.map((t: { name: string; description: string }) => ({
+                name: t.name,
+                description: t.description,
                 inputSchema: { type: 'object', properties: {} },
-            },
-            {
-                name: `${server.name.toLowerCase().replace(/\s/g, '_')}_read`,
-                description: `Read data from ${server.name}`,
-                inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
-            },
-        ]
-        server.error = undefined
+            }))
+            server.connected = true
+            server.error = undefined
+        } else {
+            throw new Error(result.error || 'Connection failed')
+        }
 
         connectedServers.set(serverId, server)
         saveServersToStorage()
@@ -195,15 +145,40 @@ export function getAllTools(): MCPTool[] {
     return tools
 }
 
+// Find which server a tool belongs to
+export function findServerForTool(toolName: string): MCPServer | null {
+    for (const server of connectedServers.values()) {
+        if (server.connected && server.tools.some(t => t.name === toolName)) {
+            return server
+        }
+    }
+    return null
+}
+
+// Execute a tool call
+export async function executeToolCall(toolName: string, args: Record<string, unknown>): Promise<{ result: unknown; error?: string }> {
+    const server = findServerForTool(toolName)
+    if (!server) {
+        return { result: null, error: `Tool ${toolName} not found in any connected server` }
+    }
+    
+    try {
+        const result = await electron.mcp.callTool(server.id, toolName, args)
+        return result
+    } catch (error) {
+        return { result: null, error: error instanceof Error ? error.message : 'Tool execution failed' }
+    }
+}
+
 // Storage helpers
 function saveServersToStorage(): void {
     const serversArray = Array.from(connectedServers.values())
-    localStorage.setItem('mcp_servers', JSON.stringify(serversArray))
+    localStorage.setItem(STORAGE_KEYS.MCP_SERVERS, JSON.stringify(serversArray))
 }
 
 function loadServersFromStorage(): void {
     try {
-        const stored = localStorage.getItem('mcp_servers')
+        const stored = localStorage.getItem(STORAGE_KEYS.MCP_SERVERS)
         if (stored) {
             const servers: MCPServer[] = JSON.parse(stored)
             connectedServers = new Map(servers.map((s) => [s.id, { ...s, connected: false, tools: [] }]))

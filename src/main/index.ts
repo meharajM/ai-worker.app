@@ -1,18 +1,29 @@
 import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { initEnv, __dirname } from './utils/env'
+import { setupIpcHandlers } from './ipc'
+
+// Initialize environment (fix PATH, etc.)
+initEnv()
 
 function createWindow(): void {
     const mainWindow = new BrowserWindow({
-        width: 900,
-        height: 670,
+        width: 1000,
+        height: 700,
+        minWidth: 800,
+        minHeight: 600,
         show: false,
         autoHideMenuBar: true,
-        titleBarStyle: 'hidden',
+        titleBarStyle: 'hiddenInset',
         trafficLightPosition: { x: 15, y: 15 },
+        backgroundColor: '#0f1115',
         webPreferences: {
             preload: join(__dirname, '../preload/index.mjs'),
-            sandbox: false
+            sandbox: false,
+            contextIsolation: true,
+            nodeIntegration: false,
+            webSecurity: true,
         }
     })
 
@@ -28,6 +39,16 @@ function createWindow(): void {
         return { action: 'deny' }
     })
 
+    // Enable audio permissions for TTS/STT
+    mainWindow.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
+        const allowedPermissions = ['media', 'mediaKeySystem', 'geolocation', 'notifications', 'midi', 'midiSysex']
+        if (allowedPermissions.includes(permission)) {
+            callback(true)
+        } else {
+            callback(false)
+        }
+    })
+
     if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
         mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
     } else {
@@ -36,7 +57,10 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-    electronApp.setAppUserModelId('com.aiworker')
+    electronApp.setAppUserModelId('com.aiworker.app')
+
+    // Setup modular IPC handlers
+    setupIpcHandlers()
 
     app.on('browser-window-created', (_, window) => {
         optimizer.watchWindowShortcuts(window)
@@ -52,5 +76,15 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
         app.quit()
+    }
+})
+
+// Handle certificate errors for local development
+app.on('certificate-error', (event, _webContents, _url, _error, _certificate, callback) => {
+    if (is.dev) {
+        event.preventDefault()
+        callback(true)
+    } else {
+        callback(false)
     }
 })
