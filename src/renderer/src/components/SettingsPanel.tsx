@@ -16,7 +16,7 @@ import {
 import { useSettingsStore, Theme, LLMProviderType } from '../stores/settingsStore'
 import { useAuthStore } from '../stores/authStore'
 import { FEATURE_FLAGS, APP_INFO } from '../lib/constants'
-import { getAvailableProviders, testOllamaConnection, testOpenAIConnection } from '../lib/llm'
+import { getAvailableProviders, testOllamaConnection, testOpenAIConnection, checkOllama, checkOpenAI } from '../lib/llm'
 import { ModelSelect } from './ModelSelect'
 
 type SettingsSection = 'account' | 'llm' | 'voice' | 'appearance' | 'about'
@@ -56,11 +56,25 @@ export function SettingsPanel() {
                     openaiBaseUrl: settings.openaiBaseUrl,
                     openaiModel: settings.openaiModel,
                 }
-                const providers = await getAvailableProviders(settingsForLLM)
-                setProviderStatus({
-                    ollama: providers.ollama,
-                    openai: providers.openai,
-                })
+                if (settings.preferredProvider === 'ollama') {
+                    const ollama = await checkOllama(settingsForLLM)
+                    setProviderStatus({
+                        ollama,
+                        openai: { available: false },
+                    })
+                } else if (settings.preferredProvider === 'openai') {
+                    const openai = await checkOpenAI(settingsForLLM)
+                    setProviderStatus({
+                        ollama: { available: false },
+                        openai,
+                    })
+                } else {
+                    const providers = await getAvailableProviders(settingsForLLM)
+                    setProviderStatus({
+                        ollama: providers.ollama,
+                        openai: providers.openai,
+                    })
+                }
             } catch (error) {
                 console.error('Error checking providers:', error)
             } finally {
@@ -171,21 +185,43 @@ export function SettingsPanel() {
                         <div className="space-y-4">
                             {/* Provider Selection */}
                             <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
-                                <label className="block text-sm text-white/60 mb-2">Preferred Provider</label>
-                                <select
-                                    value={settings.preferredProvider}
-                                    onChange={(e) => settings.setPreferredProvider(e.target.value as LLMProviderType)}
-                                    aria-label="Preferred LLM Provider"
-                                    className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 
-                             text-white focus:border-white/20 focus:outline-none"
-                                >
-                                    <option value="auto">Auto (best available)</option>
-                                    <option value="ollama">Ollama</option>
-                                    <option value="openai">OpenAI / Compatible API</option>
-                                </select>
+                                <label className="block text-sm text-white/60 mb-3">Preferred Provider</label>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => settings.setPreferredProvider('ollama')}
+                                        className={`flex-1 py-2 px-4 rounded-lg text-sm transition-colors ${settings.preferredProvider === 'ollama'
+                                            ? 'bg-[#4fd1c5] text-white'
+                                            : 'bg-white/5 text-white/60 hover:bg-white/10'
+                                        }`}
+                                        aria-label="Select Ollama provider"
+                                    >
+                                        Ollama
+                                    </button>
+                                    <button
+                                        onClick={() => settings.setPreferredProvider('openai')}
+                                        className={`flex-1 py-2 px-4 rounded-lg text-sm transition-colors ${settings.preferredProvider === 'openai'
+                                            ? 'bg-[#4fd1c5] text-white'
+                                            : 'bg-white/5 text-white/60 hover:bg-white/10'
+                                        }`}
+                                        aria-label="Select OpenAI compatible provider"
+                                    >
+                                        OpenAI / Compatible
+                                    </button>
+                                    <button
+                                        onClick={() => settings.setPreferredProvider('auto')}
+                                        className={`flex-1 py-2 px-4 rounded-lg text-sm transition-colors ${settings.preferredProvider === 'auto'
+                                            ? 'bg-[#4fd1c5] text-white'
+                                            : 'bg-white/5 text-white/60 hover:bg-white/10'
+                                        }`}
+                                        aria-label="Select auto provider"
+                                    >
+                                        Auto
+                                    </button>
+                                </div>
                             </div>
 
                             {/* Ollama Config */}
+                            {(settings.preferredProvider === 'ollama' || settings.preferredProvider === 'auto') && (
                             <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
                                 <div className="flex items-center justify-between mb-3">
                                     <h4 className="font-medium">Ollama</h4>
@@ -277,8 +313,10 @@ export function SettingsPanel() {
                                     )}
                                 </div>
                             </div>
+                            )}
 
                             {/* OpenAI Config */}
+                            {(settings.preferredProvider === 'openai' || settings.preferredProvider === 'auto') && (
                             <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
                                 <div className="flex items-center justify-between mb-3">
                                     <h4 className="font-medium">OpenAI / Compatible API</h4>
@@ -425,6 +463,7 @@ export function SettingsPanel() {
                                     )}
                                 </div>
                             </div>
+                            )}
                         </div>
                     </div>
                 )}

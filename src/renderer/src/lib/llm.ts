@@ -267,13 +267,29 @@ export async function testOpenAIConnection(baseUrl: string, apiKey: string, mode
 
 // Get available providers
 export async function getAvailableProviders(settings?: LLMSettings): Promise<Record<LLMProvider, ProviderStatus>> {
+    const preferred = settings?.preferredProvider || 'auto'
+    if (preferred === 'ollama') {
+        const ollama = await checkOllama(settings)
+        return {
+            browser: { available: false, error: 'Not implemented yet' },
+            ollama,
+            openai: { available: false },
+        }
+    }
+    if (preferred === 'openai') {
+        const openai = await checkOpenAI(settings)
+        return {
+            browser: { available: false, error: 'Not implemented yet' },
+            ollama: { available: false },
+            openai,
+        }
+    }
     const [ollama, openai] = await Promise.all([
         checkOllama(settings),
         checkOpenAI(settings),
     ])
-
     return {
-        browser: { available: false, error: 'Not implemented yet' }, // TODO: Implement browser LLM detection
+        browser: { available: false, error: 'Not implemented yet' },
         ollama,
         openai,
     }
