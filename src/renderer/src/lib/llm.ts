@@ -528,11 +528,11 @@ async function callBrowserLLM(
       await loadWebLLMModel();
     }
 
-    // Don't pass tools to WebLLM - the system prompt already contains tool definitions
-    // Models will output JSON tool calls in their response content
+    // Pass tools to WebLLM - the manager will decide whether to use native tool calling
+    // or rely on the JSON fallback instructions in the system prompt based on model capability.
     const response = await chatWithWebLLM(
-      messages.map(m => ({ role: m.role, content: m.content }))
-      // No tools passed - avoids "model doesn't support tools" error
+      messages.map(m => ({ role: m.role, content: m.content })),
+      tools
     );
 
     // Parse tool calls from JSON in response content (same as existing JSON fallback)
@@ -743,23 +743,22 @@ function buildSystemPrompt(
 - Use the exact tool names from the "Available Tools" section above`
     : "";
 
-  // Build tools description - compact format with name and description
+  // Build tools description - detailed format with schema hints
   const toolsDescription =
     tools
       ?.map((tool, idx) => {
-        // Extract key parameters for context (if available)
-        const params = tool.parameters as
-          | { properties?: Record<string, unknown>; required?: string[] }
-          | undefined;
+        const params = tool.parameters as { properties?: Record<string, any>; required?: string[] } | undefined;
         const properties = params?.properties || {};
-        const paramNames = Object.keys(properties).slice(0, 3).join(", ");
-        const paramHint = paramNames
-          ? ` (params: ${paramNames}${Object.keys(properties).length > 3 ? "..." : ""
-          })`
-          : "";
+        const required = params?.required || [];
 
-        return `${idx + 1}. **${tool.name}**${paramHint}\n   ${tool.description
-          }`;
+        const paramList = Object.entries(properties).map(([name, schema]) => {
+          const type = schema.type || 'any';
+          const isRequired = required.includes(name) ? '(required)' : '(optional)';
+          const desc = schema.description ? ` - ${schema.description}` : '';
+          return `      - ${name} [${type}] ${isRequired}${desc}`;
+        }).join("\n");
+
+        return `${idx + 1}. **${tool.name}**\n   Description: ${tool.description}\n   Parameters:\n${paramList || '      None'}`;
       })
       .join("\n\n") || "";
 
@@ -771,7 +770,7 @@ function buildSystemPrompt(
         (s) => `${s.name} (${s.toolCount} tool${s.toolCount !== 1 ? "s" : ""})`
       )
       .join(", ");
-    serverContext = `\n\n## Connected MCP Servers\nThese are Model Context Protocol (MCP) servers that provide the tools listed above:\n${serverList}\n\nWhen users ask about "MCP servers" or "what tools do you have", refer to the tools and servers listed above.`;
+    serverContext = `\n\n## Connected MCP Servers\nThese are Model Context Protocol (MCP) servers providing the tools above: ${serverList}.`;
   }
 
   // Detect browser tools for special emphasis
@@ -781,14 +780,12 @@ function buildSystemPrompt(
     toolNamesLower.includes("browser") ||
     toolNamesLower.includes("navigate") ||
     toolNamesLower.includes("screenshot") ||
-    toolNamesLower.includes("playwright") ||
-    toolNamesLower.includes("goto") ||
-    toolNamesLower.includes("url");
+    toolNamesLower.includes("playwright");
 
   // Special emphasis for browser capabilities (addresses training bias)
   let browserCapabilityNote = "";
   if (hasBrowserOps) {
-    browserCapabilityNote = `\n\n**IMPORTANT: You have browser control tools available!** You CAN open websites, navigate to URLs, take screenshots, and interact with web pages. When users ask to "open [website]" or "go to [URL]", use the browser navigation tool immediately. Do NOT say you cannot open browsers - you have the tools to do it!`;
+    browserCapabilityNote = `\n\n**CRITICAL BROWSER RULES**:\n1. You have Playwright-powered browser tools. You CAN open any URL.\n2. **STATEFUL EXECUTION**: Only call ONE browser tool at a time (e.g., navigate first). Wait for the result/screenshot before clicking or filling forms. Do NOT assume the page state.\n3. **FILL FORM SCHEMA**: Most "fill" tools expect an array of fields. Check the parameters carefully.`;
   }
 
   return `You are a helpful AI assistant with access to ${toolCount} tool${toolCount !== 1 ? "s" : ""
@@ -865,9 +862,12 @@ export async function chat(
   }
 
   // Try to detect if we need JSON fallback (will be handled in callOpenAI if error occurs)
-  // For browser (WebLLM), we always use JSON fallback for now to ensure compatibility
-  // across all models (Qwen, Llama, etc.) without native tool calling errors
-  let useJsonFallback = provider === 'browser';
+  // For browser (WebLLM), we use JSON fallback if the model doesn't support native tools
+  let useJsonFallback = provider === 'browser' && (() => {
+    const currentModelId = providers.browser.model;
+    const modelInfo = WEBLLM_MODELS.find(m => m.id === currentModelId);
+    return !modelInfo?.supportsTools;
+  })();
 
   // Add system message if not present, or replace existing one to ensure it has tools
   let messagesWithSystem = [...messages];
