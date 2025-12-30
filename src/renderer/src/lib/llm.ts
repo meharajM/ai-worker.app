@@ -1,7 +1,33 @@
 // LLM Orchestrator - Manages different LLM providers
-// Priority: Browser LLM > Ollama > OpenAI-compatible
+// Priority: WebLLM (On-Device) > Ollama > OpenAI-compatible
 
 import { FEATURE_FLAGS, LLM_CONFIG } from "./constants";
+import {
+  getWebLLMStatus,
+  loadWebLLMModel,
+  chatWithWebLLM,
+  subscribeToWebLLMStatus,
+  WEBLLM_MODELS,
+  type WebLLMStatus,
+  type WebLLMModelId,
+  checkDownloadedWebLLMModels,
+  deleteWebLLMModel,
+  downloadWebLLMModelOnly,
+  getWebLLMDownloadStatus,
+  checkWebLLMModelCompatibility
+} from "./webllm";
+
+export {
+  getWebLLMStatus,
+  WEBLLM_MODELS,
+  subscribeToWebLLMStatus,
+  checkDownloadedWebLLMModels,
+  deleteWebLLMModel,
+  downloadWebLLMModelOnly,
+  getWebLLMDownloadStatus,
+  checkWebLLMModelCompatibility,
+  type WebLLMStatus
+};
 
 export interface LLMMessage {
   role: "system" | "user" | "assistant";
@@ -48,6 +74,13 @@ interface ProviderStatus {
   error?: string;
   models?: string[]; // Available models list
   modelsEndpointAvailable?: boolean; // Whether /models endpoint exists
+  // WebLLM specific
+  isWebGPUSupported?: boolean;
+  isLoaded?: boolean;
+  isLoading?: boolean;
+  loadingProgress?: number;
+  loadingStage?: string;
+  downloadedModels?: string[]; // WebLLM cached models
 }
 
 // Get Ollama settings from store or use defaults
@@ -133,36 +166,71 @@ export async function testOllamaConnection(
   }
 }
 
-// Check if browser-native LLM is available (Gemini Nano, Phi, etc.)
+// Check if WebLLM (On-Device AI via WebGPU) is available
 export async function checkBrowserLLM(): Promise<ProviderStatus> {
-    if (!FEATURE_FLAGS.BROWSER_LLM_ENABLED) {
-        return { available: false, error: 'Browser LLM disabled' }
+  if (!FEATURE_FLAGS.BROWSER_LLM_ENABLED) {
+    return { available: false, error: 'On-Device AI disabled' }
+  }
+
+  try {
+    const status = getWebLLMStatus();
+    console.log('[WebLLM] Status:', status);
+
+    if (!status.isSupported) {
+      return {
+        available: false,
+        error: status.error || 'WebGPU not supported',
+        isWebGPUSupported: false,
+      }
     }
 
-    try {
-        // Check for browser-native AI capabilities
-        const capabilities = await (window as any).ai?.capabilities?.()
-        if (capabilities && capabilities.available) {
-            return {
-                available: true,
-                model: capabilities.defaultModel || 'browser-llm',
-                models: capabilities.models || [capabilities.defaultModel || 'browser-llm'],
-            }
-        }
-        
-        // Fallback: check for experimental browser LLM APIs
-        if ('ai' in window && (window as any).ai) {
-            return {
-                available: true,
-                model: 'browser-llm',
-                models: ['browser-llm'],
-            }
-        }
-        
-        return { available: false, error: 'Browser LLM not available' }
-    } catch (error) {
-        return { available: false, error: 'Browser LLM not supported' }
+    // WebGPU is supported
+    const models = WEBLLM_MODELS.map(m => m.id);
+
+    return {
+      available: true,
+      model: status.currentModel || WEBLLM_MODELS[0].id,
+      models: models,
+      isWebGPUSupported: true,
+      isLoaded: status.isLoaded,
+      isLoading: status.isLoading,
+      loadingProgress: status.loadingProgress,
+      loadingStage: status.loadingStage,
+      downloadedModels: status.downloadedModels,
+      error: status.error || undefined,
     }
+  } catch (error) {
+    console.error('[WebLLM] Check error:', error);
+    return {
+      available: false,
+      error: error instanceof Error ? error.message : 'WebLLM check failed'
+    }
+  }
+}
+
+// Test WebLLM connection (simple chat)
+export async function testWebLLMConnection(): Promise<{ success: boolean; error?: string }> {
+  try {
+    const status = getWebLLMStatus();
+    if (!status.isLoaded) {
+      return { success: false, error: 'Model not loaded' };
+    }
+
+    // specific test message to avoid long responses
+    const response = await chatWithWebLLM([
+      { role: 'user', content: 'Say "test" and nothing else.' }
+    ]);
+
+    if (response.content) {
+      return { success: true };
+    }
+    return { success: false, error: 'No response content' };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Test failed'
+    };
+  }
 }
 
 // Check if OpenAI-compatible API is configured and fetch available models
@@ -349,7 +417,7 @@ export async function testOpenAIConnection(
 // Get available providers
 export async function getAvailableProviders(settings?: LLMSettings): Promise<Record<LLMProvider, ProviderStatus>> {
   const preferred = settings?.preferredProvider || 'auto'
-  
+
   if (preferred === 'ollama') {
     const ollama = await checkOllama(settings)
     return {
@@ -358,7 +426,7 @@ export async function getAvailableProviders(settings?: LLMSettings): Promise<Rec
       openai: { available: false },
     }
   }
-  
+
   if (preferred === 'openai') {
     const openai = await checkOpenAI(settings)
     return {
@@ -367,7 +435,7 @@ export async function getAvailableProviders(settings?: LLMSettings): Promise<Rec
       openai,
     }
   }
-  
+
   if (preferred === 'browser') {
     const browser = await checkBrowserLLM()
     return {
@@ -376,14 +444,14 @@ export async function getAvailableProviders(settings?: LLMSettings): Promise<Rec
       openai: { available: false },
     }
   }
-  
+
   // Auto mode - check all providers
   const [browser, ollama, openai] = await Promise.all([
     checkBrowserLLM(),
     checkOllama(settings),
     checkOpenAI(settings),
   ])
-  
+
   return {
     browser,
     ollama,
@@ -443,37 +511,46 @@ async function callOllama(
   };
 }
 
-// Call browser-native LLM
+// Call WebLLM (On-Device AI via WebGPU)
+// Note: Most WebLLM models don't support native tool calling, so we rely on
+// the system prompt to instruct the model to output JSON, then parse it
 async function callBrowserLLM(
-    messages: LLMMessage[],
-    tools?: LLMTool[],
-    settings?: LLMSettings
+  messages: LLMMessage[],
+  tools?: LLMTool[],
+  settings?: LLMSettings
 ): Promise<LLMResponse> {
-    try {
-        // Use the browser's native AI API if available
-        const ai = (window as any).ai
-        if (!ai) {
-            throw new Error('Browser LLM not available')
-        }
+  try {
+    const status = getWebLLMStatus();
 
-        // Convert messages to browser LLM format
-        const session = await ai.createTextSession()
-        
-        // Build conversation history
-        let conversation = messages.map(m => `${m.role}: ${m.content}`).join('\n')
-        
-        // Generate response
-        const response = await session.prompt(conversation)
-        await session.destroy()
-
-        return {
-            content: response || '',
-            provider: 'browser',
-            model: 'browser-llm',
-        }
-    } catch (error) {
-        throw new Error(`Browser LLM error: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    // Check if model is loaded
+    if (!status.isLoaded) {
+      console.log('[WebLLM] Model not loaded, attempting to load...');
+      await loadWebLLMModel();
     }
+
+    // Don't pass tools to WebLLM - the system prompt already contains tool definitions
+    // Models will output JSON tool calls in their response content
+    const response = await chatWithWebLLM(
+      messages.map(m => ({ role: m.role, content: m.content }))
+      // No tools passed - avoids "model doesn't support tools" error
+    );
+
+    // Parse tool calls from JSON in response content (same as existing JSON fallback)
+    let toolCalls = response.toolCalls;
+    if (!toolCalls && response.content && tools && tools.length > 0) {
+      toolCalls = parseToolCallsFromJson(response.content);
+    }
+
+    return {
+      content: response.content,
+      toolCalls,
+      provider: 'browser',
+      model: status.currentModel || 'webllm',
+    };
+  } catch (error) {
+    console.error('[WebLLM] Chat error:', error);
+    throw new Error(`WebLLM error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 // Call OpenAI-compatible API
@@ -524,15 +601,15 @@ async function callOpenAI(
       ...(useJsonFallback
         ? {}
         : {
-            tools: tools?.map((t) => ({
-              type: "function",
-              function: {
-                name: t.name,
-                description: t.description,
-                parameters: t.parameters,
-              },
-            })),
-          }),
+          tools: tools?.map((t) => ({
+            type: "function",
+            function: {
+              name: t.name,
+              description: t.description,
+              parameters: t.parameters,
+            },
+          })),
+        }),
     }),
   });
 
@@ -677,14 +754,12 @@ function buildSystemPrompt(
         const properties = params?.properties || {};
         const paramNames = Object.keys(properties).slice(0, 3).join(", ");
         const paramHint = paramNames
-          ? ` (params: ${paramNames}${
-              Object.keys(properties).length > 3 ? "..." : ""
-            })`
+          ? ` (params: ${paramNames}${Object.keys(properties).length > 3 ? "..." : ""
+          })`
           : "";
 
-        return `${idx + 1}. **${tool.name}**${paramHint}\n   ${
-          tool.description
-        }`;
+        return `${idx + 1}. **${tool.name}**${paramHint}\n   ${tool.description
+          }`;
       })
       .join("\n\n") || "";
 
@@ -716,11 +791,9 @@ function buildSystemPrompt(
     browserCapabilityNote = `\n\n**IMPORTANT: You have browser control tools available!** You CAN open websites, navigate to URLs, take screenshots, and interact with web pages. When users ask to "open [website]" or "go to [URL]", use the browser navigation tool immediately. Do NOT say you cannot open browsers - you have the tools to do it!`;
   }
 
-  return `You are a helpful AI assistant with access to ${toolCount} tool${
-    toolCount !== 1 ? "s" : ""
-  } from ${serverCount} connected server${
-    serverCount !== 1 ? "s" : ""
-  }. When users ask you to perform actions, you MUST use the appropriate tools instead of providing manual instructions.${jsonFormatNote}
+  return `You are a helpful AI assistant with access to ${toolCount} tool${toolCount !== 1 ? "s" : ""
+    } from ${serverCount} connected server${serverCount !== 1 ? "s" : ""
+    }. When users ask you to perform actions, you MUST use the appropriate tools instead of providing manual instructions.${jsonFormatNote}
 
 # Available Tools
 ${toolsDescription}${serverContext}${browserCapabilityNote}
@@ -792,13 +865,17 @@ export async function chat(
   }
 
   // Try to detect if we need JSON fallback (will be handled in callOpenAI if error occurs)
-  let useJsonFallback = false;
+  // For browser (WebLLM), we always use JSON fallback for now to ensure compatibility
+  // across all models (Qwen, Llama, etc.) without native tool calling errors
+  let useJsonFallback = provider === 'browser';
 
   // Add system message if not present, or replace existing one to ensure it has tools
   let messagesWithSystem = [...messages];
   const systemMsgIndex = messagesWithSystem.findIndex(
     (m) => m.role === "system"
   );
+
+  // Re-build system prompt with current tools and correct fallback setting
   const systemPrompt = buildSystemPrompt(tools, servers, useJsonFallback);
 
   if (systemMsgIndex >= 0) {
@@ -832,3 +909,45 @@ export async function chat(
       throw new Error(`Provider ${provider} not implemented`);
   }
 }
+
+// Load WebLLM model (download if needed)
+export async function downloadBrowserModel(
+  onProgress?: (progress: number) => void,
+  modelId?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const status = getWebLLMStatus();
+
+    if (!status.isSupported) {
+      return { success: false, error: status.error || 'WebGPU not supported' };
+    }
+
+    if (status.isLoaded && (!modelId || status.currentModel === modelId)) {
+      return { success: true };
+    }
+
+    // Subscribe to progress updates
+    let unsubscribe: (() => void) | null = null;
+    if (onProgress) {
+      unsubscribe = subscribeToWebLLMStatus((s) => {
+        if (s.isLoading) {
+          onProgress(s.loadingProgress);
+        }
+      });
+    }
+
+    try {
+      await loadWebLLMModel(modelId);
+      return { success: true };
+    } finally {
+      if (unsubscribe) unsubscribe();
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to load model'
+    };
+  }
+}
+
+
