@@ -28,6 +28,7 @@ interface ElectronAPI {
     llm: {
         chat: (messages: unknown[], tools?: unknown[]) => Promise<unknown>
         getProviders: () => Promise<Record<string, { available: boolean }>>
+        fetchOpenAIModels: (baseUrl: string, apiKey: string) => Promise<{ success: boolean; models?: string[]; error?: string }>
     }
 
     store: {

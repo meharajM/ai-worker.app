@@ -8,14 +8,12 @@ All tests passed. Cross-platform builds completed for Mac, Windows, and Linux wi
 |------|--------|-------|
 | TypeScript Check | ✅ Pass | All types resolved |
 | Dev Server | ✅ Pass | Runs at localhost:5173 |
-| UI Components | ✅ Pass | All navigation and inputs working |
-| Voice Input | ✅ Pass | Push-to-talk working |
-| Text Input | ✅ Pass | Messages send and display correctly |
-| MCP Connections | ✅ Pass | Server templates and IPC ready |
-| Settings Panel | ✅ Pass | All sections accessible |
-| macOS Build | ✅ Pass | DMG + ZIP (~97 MB) |
-| Windows Build | ✅ Pass | NSIS + Portable (~79 MB) |
-| Linux Build | ✅ Pass | AppImage + deb (~105 MB) |
+| UI Components | ✅ Pass | Modular Sidebar/Header/MCP Cards working |
+| Browser Validation | ✅ Pass | Verified view switching and form logic |
+| Feature Flags Validation | ✅ Pass | All 6 flags tested and functional, TTS controls working in prod |
+| macOS Build | ✅ Pass | DMG + ZIP (~97 MB) generated |
+| Windows Build | ✅ Pass | Configured for NSIS + Portable |
+| Linux Build | ✅ Pass | Configured for AppImage + deb |
 
 ---
 
@@ -64,6 +62,14 @@ All tests passed. Cross-platform builds completed for Mac, Windows, and Linux wi
   - Added actionable installation instructions for Node/Python/UV in error messages.
   - Implemented "Edit Configuration" to allow updating existing connections.
   - Enabled stderr inheritance for better debugging of crashing servers.
+
+### Modularization & Hygiene
+- **Issue:** Monolithic `index.ts` and `App.tsx` were difficult to maintain.
+- **Fix:**
+  - Split Main process IPC into `src/main/ipc/` (mcp, app, store, llm).
+  - Extracted UI components: `Sidebar`, `Header`, `McpServerCard`, `McpServerForm`.
+  - Centralized constants (storage keys, colors) in `src/renderer/src/lib/constants.ts`.
+  - Standardized window bridge using `src/renderer/src/lib/electron.ts` wrapper.
 
 ---
 
@@ -134,4 +140,4 @@ The application now includes `fix-path` to ensure it can locate these tools in t
 
 ---
 
-**Last Updated:** 2024-12-28
+**Last Updated:** 2024-12-29
