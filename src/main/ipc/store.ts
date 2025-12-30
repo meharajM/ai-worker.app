@@ -1,21 +1,29 @@
-import { ipcMain } from 'electron'
+import { ipcMain } from "electron";
+import Store from "electron-store";
 
-// Storage operations using simple file storage or electron-store
-// For now, keeping the in-memory Map as a placeholder, but in a real app 
-// this would be replaced with electron-store
-const storage: Map<string, unknown> = new Map()
+// Initialize electron-store with proper configuration
+// Using type assertion since electron-store extends Conf which has get/set/delete methods
+const store = new Store<Record<string, unknown>>({
+  name: "ai-worker-store",
+  defaults: {},
+}) as Store<Record<string, unknown>> & {
+  get: (key: string) => unknown;
+  set: (key: string, value: unknown) => void;
+  delete: (key: string) => void;
+};
 
 export function registerStoreHandlers(): void {
-    ipcMain.handle('store:get', (_event, key: string) => {
-        return storage.get(key)
-    })
+  ipcMain.handle("store:get", (_event, key: string) => {
+    return store.get(key);
+  });
 
-    ipcMain.handle('store:set', (_event, key: string, value: unknown) => {
-        storage.set(key, value)
-        return true
-    })
+  ipcMain.handle("store:set", (_event, key: string, value: unknown) => {
+    store.set(key, value);
+    return true;
+  });
 
-    ipcMain.handle('store:delete', (_event, key: string) => {
-        return storage.delete(key)
-    })
+  ipcMain.handle("store:delete", (_event, key: string) => {
+    store.delete(key);
+    return true;
+  });
 }

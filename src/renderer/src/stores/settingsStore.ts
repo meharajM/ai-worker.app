@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import { FEATURE_FLAGS, VOICE_CONFIG, LLM_CONFIG } from '../lib/constants'
+import { FEATURE_FLAGS, VOICE_CONFIG, LLM_CONFIG, STORAGE_KEYS } from '../lib/constants'
+import electron from '../lib/electron'
 
 export type Theme = 'dark' | 'light' | 'system'
 export type LLMProviderType = 'auto' | 'ollama' | 'openai' | 'browser'
@@ -33,8 +34,8 @@ interface SettingsState {
     setPreferredProvider: (provider: LLMProviderType) => void
     setOllamaModel: (model: string) => void
     setOllamaBaseUrl: (url: string) => void
-    setOpenaiApiKey: (key: string) => void
-    setOpenaiBaseUrl: (url: string) => void
+    setOpenaiApiKey: (key: string) => Promise<void>
+    setOpenaiBaseUrl: (url: string) => Promise<void>
     setOpenaiModel: (model: string) => void
     setTheme: (theme: Theme) => void
     resetToDefaults: () => void
@@ -55,6 +56,42 @@ const defaultSettings = {
     theme: 'dark' as Theme,
 }
 
+// Migrate OpenAI credentials from localStorage to electron-store
+async function migrateOpenAICredentials(): Promise<void> {
+    try {
+        // Check if we need to migrate OpenAI credentials
+        const existingApiKey = await electron.store.get<string>('openai_api_key')
+        const existingBaseUrl = await electron.store.get<string>('openai_base_url')
+        
+        if (!existingApiKey && !existingBaseUrl) {
+            // Try to migrate from localStorage
+            const localApiKey = localStorage.getItem('openai_api_key')
+            const localBaseUrl = localStorage.getItem('openai_base_url')
+            
+            if (localApiKey) {
+                await electron.store.set('openai_api_key', localApiKey)
+                console.log('[Settings] Migrated OpenAI API key from localStorage to electron-store')
+            }
+            
+            if (localBaseUrl) {
+                await electron.store.set('openai_base_url', localBaseUrl)
+                console.log('[Settings] Migrated OpenAI base URL from localStorage to electron-store')
+            }
+            
+            // Clear localStorage after successful migration
+            if (localApiKey || localBaseUrl) {
+                localStorage.removeItem('openai_api_key')
+                localStorage.removeItem('openai_base_url')
+            }
+        }
+    } catch (error) {
+        console.error('[Settings] Error migrating OpenAI credentials:', error)
+    }
+}
+
+// Run migration on module load
+migrateOpenAICredentials().catch(console.error)
+
 export const useSettingsStore = create<SettingsState>()(
     persist(
         (set) => ({
@@ -68,26 +105,34 @@ export const useSettingsStore = create<SettingsState>()(
             setPreferredProvider: (provider) => set({ preferredProvider: provider }),
             setOllamaModel: (model) => set({ ollamaModel: model }),
             setOllamaBaseUrl: (url) => set({ ollamaBaseUrl: url }),
-            setOpenaiApiKey: (key) => {
+            setOpenaiApiKey: async (key) => {
                 set({ openaiApiKey: key })
-                // Also sync to localStorage for LLM lib
-                if (key) {
-                    localStorage.setItem('openai_api_key', key)
-                } else {
-                    localStorage.removeItem('openai_api_key')
-                }
+                // Persist to electron-store
+                await electron.store.set('openai_api_key', key || '')
             },
-            setOpenaiBaseUrl: (url) => {
+            setOpenaiBaseUrl: async (url) => {
                 set({ openaiBaseUrl: url })
-                localStorage.setItem('openai_base_url', url)
+                // Persist to electron-store
+                await electron.store.set('openai_base_url', url)
             },
             setOpenaiModel: (model) => set({ openaiModel: model }),
             setTheme: (theme) => set({ theme }),
             resetToDefaults: () => set(defaultSettings),
         }),
         {
-            name: 'ai-worker-settings',
-            storage: createJSONStorage(() => localStorage),
+            name: STORAGE_KEYS.SETTINGS,
+            storage: createJSONStorage(() => ({
+                getItem: async (name: string): Promise<string | null> => {
+                    const value = await electron.store.get(name)
+                    return value ? JSON.stringify(value) : null
+                },
+                setItem: async (name: string, value: string): Promise<void> => {
+                    await electron.store.set(name, JSON.parse(value))
+                },
+                removeItem: async (name: string): Promise<void> => {
+                    await electron.store.delete(name)
+                },
+            })),
         }
     )
 )
