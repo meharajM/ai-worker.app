@@ -21,6 +21,7 @@
     },
     "dependencies": {
         "@electron-toolkit/utils": "^3.0.0",
+        "@mlc-ai/web-llm": "^0.2.80",
         "@modelcontextprotocol/sdk": "^1.0.1",
         "@playwright/mcp": "^0.0.53",
         "electron-store": "^11.0.2",
@@ -38,7 +39,7 @@
         "@types/react-dom": "^18.2.18",
         "@vitejs/plugin-react": "^4.2.1",
         "autoprefixer": "^10.4.17",
-        "electron": "^28.2.0",
+        "electron": "^33.0.0",
         "electron-builder": "^25.1.8",
         "electron-vite": "^2.0.0",
         "postcss": "^8.4.35",

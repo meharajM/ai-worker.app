@@ -4,6 +4,17 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initEnv, __dirname } from './utils/env'
 import { setupIpcHandlers } from './ipc'
 
+
+// Enable experimental on-device AI features (Gemini Nano / Chrome Prompt API)
+// These flags attempt to enable the window.ai API in Electron's Chromium
+app.commandLine.appendSwitch('enable-features',
+    'PromptAPIForGeminiNano,' +
+    'OptimizationGuideOnDeviceModel:bypass_perf_requirement/true,' +
+    'LanguageDetectionAPI'
+)
+app.commandLine.appendSwitch('optimization-guide-on-device-model-execution', 'performance_class:0')
+
+
 // Initialize environment (fix PATH, etc.)
 initEnv()
 

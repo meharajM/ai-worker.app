@@ -12,6 +12,8 @@ import { useSpeechSynthesis } from './hooks/useSpeechSynthesis';
 import {
   chat,
   getAvailableProviders,
+  subscribeToWebLLMStatus,
+  type WebLLMStatus,
   LLMMessage,
   LLMTool,
   ServerInfo,
@@ -58,7 +60,31 @@ function App() {
           openaiModel: settings.openaiModel,
         };
         const providers = await getAvailableProviders(settingsForLLM);
-        if (providers.ollama.available) {
+        if (providers.browser.available) {
+          if (providers.browser.isLoaded) {
+            setLlmStatus({
+              provider: `On-Device (${providers.browser.model})`,
+              available: true,
+            });
+          } else if (providers.browser.isLoading) {
+            setLlmStatus({
+              provider: `On-Device (Loading...)`,
+              available: false,
+            });
+          } else if (providers.ollama.available) {
+            setLlmStatus({
+              provider: `Ollama (${providers.ollama.model})`,
+              available: true,
+            });
+          } else if (providers.openai.available) {
+            setLlmStatus({
+              provider: `OpenAI (${providers.openai.model})`,
+              available: true,
+            });
+          } else {
+            setLlmStatus({ provider: null, available: false });
+          }
+        } else if (providers.ollama.available) {
           setLlmStatus({
             provider: `Ollama (${providers.ollama.model})`,
             available: true,
@@ -109,6 +135,27 @@ function App() {
     }, 60000); // Increased to 60 seconds
     return () => clearInterval(interval);
   }, [checkLLM, currentView]);
+
+  // Subscribe to WebLLM status for real-time updates
+  useEffect(() => {
+    const unsubscribe = subscribeToWebLLMStatus((status: WebLLMStatus) => {
+      if (status.isLoaded && status.currentModel) {
+        setLlmStatus({
+          provider: `On-Device (${status.currentModel})`,
+          available: true,
+        });
+      } else if (status.isLoading || status.backgroundDownload) {
+        setLlmStatus({
+          provider: `On-Device (Loading ${status.loadingProgress.toFixed(0)}%)`,
+          available: false, // Show as yellow/inactive while loading
+        });
+      } else {
+        // Fallback to regular check if WebLLM is not loaded or loading
+        checkLLM();
+      }
+    });
+    return () => unsubscribe();
+  }, [checkLLM]);
 
   // Handle message submission
   const handleSubmit = useCallback(
