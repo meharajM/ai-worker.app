@@ -81,6 +81,12 @@ interface ProviderStatus {
   loadingProgress?: number;
   loadingStage?: string;
   downloadedModels?: string[]; // WebLLM cached models
+  adapterInfo?: {
+    vendor: string;
+    architecture: string;
+    device: string;
+    description: string;
+  };
 }
 
 // Get Ollama settings from store or use defaults
@@ -198,6 +204,7 @@ export async function checkBrowserLLM(): Promise<ProviderStatus> {
       loadingStage: status.loadingStage,
       downloadedModels: status.downloadedModels,
       error: status.error || undefined,
+      adapterInfo: status.adapterInfo,
     }
   } catch (error) {
     console.error('[WebLLM] Check error:', error);

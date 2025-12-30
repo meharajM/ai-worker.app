@@ -10,6 +10,15 @@ declare global {
     interface Navigator {
         gpu?: any; // WebGPU API
     }
+    interface GPUAdapter {
+        requestAdapterInfo(): Promise<GPUAdapterInfo>;
+    }
+    interface GPUAdapterInfo {
+        vendor: string;
+        architecture: string;
+        device: string;
+        description: string;
+    }
 }
 
 // Available models - some support native tool calling, others use JSON fallback
@@ -82,6 +91,12 @@ export interface WebLLMStatus {
         progress: number;
         stage: string;
     } | null;
+    adapterInfo?: {
+        vendor: string;
+        architecture: string;
+        device: string;
+        description: string;
+    };
 }
 
 export interface WebLLMMessage {
@@ -116,6 +131,7 @@ class WebLLMManager {
         error: null,
         downloadedModels: [],
         backgroundDownload: null,
+        adapterInfo: undefined,
     };
 
     // Separate status for background downloads
@@ -203,6 +219,21 @@ class WebLLMManager {
                 this.status.error = 'No WebGPU adapter found. Please ensure your GPU drivers are up to date.';
                 return;
             }
+
+            let info;
+            if (adapter.requestAdapterInfo) {
+                info = await adapter.requestAdapterInfo();
+            } else {
+                // Fallback or just empty
+                info = { vendor: '', architecture: '', device: '', description: 'Unknown Adapter' };
+            }
+
+            this.status.adapterInfo = {
+                vendor: info.vendor || '',
+                architecture: info.architecture || '',
+                device: info.device || '',
+                description: info.description || '',
+            };
 
             this.status.isSupported = true;
             this.status.error = null;

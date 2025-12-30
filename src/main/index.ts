@@ -5,13 +5,22 @@ import { initEnv, __dirname } from './utils/env'
 import { setupIpcHandlers } from './ipc'
 
 
-// Enable experimental on-device AI features (Gemini Nano / Chrome Prompt API)
-// These flags attempt to enable the window.ai API in Electron's Chromium
-app.commandLine.appendSwitch('enable-features',
-    'PromptAPIForGeminiNano,' +
-    'OptimizationGuideOnDeviceModel:bypass_perf_requirement/true,' +
-    'LanguageDetectionAPI'
-)
+// Enable experimental on-device AI features and WebGPU
+// These flags attempt to enable the window.ai API and WebGPU in Electron's Chromium
+const features = [
+    'PromptAPIForGeminiNano',
+    'OptimizationGuideOnDeviceModel:bypass_perf_requirement/true',
+    'LanguageDetectionAPI',
+    'Vulkan',
+    'VulkanFromANGLE',
+    'DefaultANGLEVulkan',
+    'WebGPU'
+].join(',')
+
+app.commandLine.appendSwitch('enable-features', features)
+app.commandLine.appendSwitch('enable-unsafe-webgpu')
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+app.commandLine.appendSwitch('use-vulkan')
 app.commandLine.appendSwitch('optimization-guide-on-device-model-execution', 'performance_class:0')
 
 

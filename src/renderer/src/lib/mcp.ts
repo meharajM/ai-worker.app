@@ -17,6 +17,7 @@ export interface MCPServer {
   connected: boolean;
   tools: MCPTool[];
   error?: string;
+  installStatus?: string;
 }
 
 export interface MCPTool {
@@ -48,6 +49,16 @@ const DEFAULT_MCP_SERVERS: Omit<MCPServer, "id" | "connected" | "tools">[] = [
 
 // Store for connected servers
 let connectedServers: Map<string, MCPServer> = new Map();
+const serverListeners: Set<() => void> = new Set();
+
+export function subscribeToServers(callback: () => void): () => void {
+  serverListeners.add(callback);
+  return () => serverListeners.delete(callback);
+}
+
+function notifyServersChange(): void {
+  serverListeners.forEach((l) => l());
+}
 
 // Generate unique ID
 function generateId(): string {
@@ -132,6 +143,7 @@ export async function connectServer(serverId: string): Promise<void> {
       );
       server.connected = true;
       server.error = undefined;
+      server.installStatus = undefined;
     } else {
       throw new Error(result.error || "Connection failed");
     }
@@ -140,6 +152,7 @@ export async function connectServer(serverId: string): Promise<void> {
     saveServersToStorage();
   } catch (error) {
     server.connected = false;
+    server.installStatus = undefined;
     server.error = error instanceof Error ? error.message : "Connection failed";
     connectedServers.set(serverId, server);
     throw error;
@@ -208,6 +221,7 @@ export async function executeToolCall(
 function saveServersToStorage(): void {
   const serversArray = Array.from(connectedServers.values());
   localStorage.setItem(STORAGE_KEYS.MCP_SERVERS, JSON.stringify(serversArray));
+  notifyServersChange();
 }
 
 function loadServersFromStorage(): void {
@@ -279,3 +293,14 @@ function ensureDefaultServers(): void {
 
 // Initialize on load
 loadServersFromStorage();
+
+// Listen for status updates from main process
+if (electron.mcp.onStatusUpdate) {
+  electron.mcp.onStatusUpdate((_event: any, data: { serverId: string, status: string }) => {
+    const server = connectedServers.get(data.serverId);
+    if (server) {
+      server.installStatus = data.status;
+      notifyServersChange();
+    }
+  });
+}

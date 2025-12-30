@@ -72,6 +72,12 @@ export const electron = {
             console.log('[Browser] MCP call tool mock:', { serverId, toolName, args })
             return { result: null }
         },
+        onStatusUpdate: (callback: (event: any, data: { serverId: string, status: string }) => void) => {
+            if (isElectron() && window.electron?.mcp?.onStatusUpdate) {
+                return window.electron.mcp.onStatusUpdate(callback)
+            }
+            return () => { }
+        }
     },
 
     // Storage with localStorage fallback

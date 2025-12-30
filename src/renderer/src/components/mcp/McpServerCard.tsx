@@ -60,7 +60,17 @@ export function McpServerCard({
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3">
                         <h3 className="font-medium text-white/90 truncate">{server.name}</h3>
-                        {server.connected ? (
+                        {server.installStatus ? (
+                            <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 text-[10px] font-medium uppercase tracking-wide border border-blue-500/20">
+                                <Loader2 size={10} className="animate-spin" />
+                                {server.installStatus}
+                            </span>
+                        ) : isConnecting ? (
+                            <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-400 text-[10px] font-medium uppercase tracking-wide border border-yellow-500/20">
+                                <Loader2 size={10} className="animate-spin" />
+                                Connecting...
+                            </span>
+                        ) : server.connected ? (
                             <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 text-[10px] font-medium uppercase tracking-wide border border-green-500/20">
                                 <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
                                 Active
@@ -94,14 +104,14 @@ export function McpServerCard({
 
                     <button
                         onClick={onToggleConnection}
-                        disabled={isConnecting}
+                        disabled={isConnecting || !!server.installStatus}
                         className={`p-2 rounded-lg transition-all ${server.connected
                             ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
                             : 'bg-green-500/10 text-green-400 hover:bg-green-500/20'
-                            } disabled:opacity-50`}
+                            } disabled:opacity-50 disabled:cursor-not-allowed`}
                         title={server.connected ? 'Disconnect' : 'Connect'}
                     >
-                        {isConnecting ? (
+                        {isConnecting || server.installStatus ? (
                             <Loader2 size={18} className="animate-spin" />
                         ) : (
                             <Power size={18} />

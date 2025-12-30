@@ -42,6 +42,12 @@ interface ProviderStatus {
         loadingProgress?: number;
         loadingStage?: string;
         downloadedModels?: string[];
+        adapterInfo?: {
+            vendor: string;
+            architecture: string;
+            device: string;
+            description: string;
+        };
     }
 }
 
@@ -654,6 +660,42 @@ export function SettingsPanel() {
                                             </ul>
                                         </div>
 
+                                        {/* GPU Warning */}
+                                        {providerStatus?.browser?.adapterInfo && (
+                                            (() => {
+                                                const info = providerStatus.browser!.adapterInfo!;
+                                                const name = (info.description || info.device || '').toLowerCase();
+                                                // Simple heuristic for likely integrated/weak GPUs
+                                                const isLikelyIntegrated =
+                                                    (name.includes('intel') && !name.includes('arc')) ||
+                                                    name.includes('microsoft basic') ||
+                                                    name.includes('llvmpipe') ||
+                                                    name.includes('softpipe');
+
+                                                if (isLikelyIntegrated) {
+                                                    return (
+                                                        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
+                                                            <div className="flex items-start gap-2">
+                                                                <AlertCircle size={16} className="text-yellow-400 mt-0.5" />
+                                                                <div>
+                                                                    <p className="text-xs font-bold text-yellow-400 mb-1">
+                                                                        Integrated/Weak GPU Detected
+                                                                    </p>
+                                                                    <p className="text-xs text-yellow-400/80 mb-1">
+                                                                        Current Renderer: <span className="text-white/80">{info.description || info.device || 'Unknown'}</span>
+                                                                    </p>
+                                                                    <p className="text-[10px] text-yellow-400/60 leading-relaxed">
+                                                                        Performance may be slow. If you have a dedicated GPU (NVIDIA/AMD), consider forcing the app to use it in your OS settings.
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                }
+                                                return null;
+                                            })()
+                                        )}
+
                                         {providerStatus?.browser?.isWebGPUSupported ? (
                                             <div className="space-y-3">
                                                 {/* Model Selection */}
@@ -867,14 +909,62 @@ export function SettingsPanel() {
                                                 )}
                                             </div>
                                         ) : (
-                                            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-                                                <p className="text-sm text-red-300 mb-2">
-                                                    {providerStatus?.browser?.error || 'WebGPU is not supported on this device.'}
-                                                </p>
-                                                <p className="text-xs text-white/50">
-                                                    WebGPU requires: macOS with Metal, Windows with DirectX 12, or Linux with Vulkan.
-                                                    Ensure your GPU drivers are up to date.
-                                                </p>
+                                            <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
+                                                <div className="flex items-start gap-3 mb-3">
+                                                    <AlertCircle className="text-red-400 mt-0.5" size={18} />
+                                                    <div>
+                                                        <p className="font-medium text-red-300">
+                                                            {providerStatus?.browser?.error || 'WebGPU is not supported on this device.'}
+                                                        </p>
+                                                        <p className="text-xs text-white/50 mt-1">
+                                                            WebGPU requires: macOS (Metal), Windows (DX12), or Linux (Vulkan).
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                <div className="space-y-4 pt-3 border-t border-white/10">
+                                                    {/* Linux Section */}
+                                                    <div className="space-y-2">
+                                                        <p className="text-xs font-bold text-white/70 uppercase tracking-wider">Troubleshooting (Linux)</p>
+                                                        <p className="text-[11px] text-white/40">1. Install Vulkan drivers:</p>
+                                                        <div className="flex gap-2">
+                                                            <code className="flex-1 bg-black/40 p-2 rounded text-[10px] text-[#4fd1c5] font-mono break-all">
+                                                                sudo apt update && sudo apt install mesa-vulkan-drivers libvulkan1
+                                                            </code>
+                                                            <button
+                                                                onClick={() => navigator.clipboard.writeText('sudo apt update && sudo apt install mesa-vulkan-drivers libvulkan1')}
+                                                                className="px-2 py-1 text-[10px] bg-white/5 hover:bg-white/10 rounded border border-white/10 transition-colors"
+                                                            >
+                                                                Copy
+                                                            </button>
+                                                        </div>
+                                                        <p className="text-[11px] text-white/40 mt-2">2. If still failing, try launching with:</p>
+                                                        <div className="flex gap-2">
+                                                            <code className="flex-1 bg-black/40 p-2 rounded text-[10px] text-[#4fd1c5] font-mono break-all">
+                                                                VULKAN_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.x86_64.json
+                                                            </code>
+                                                            <button
+                                                                onClick={() => navigator.clipboard.writeText('VULKAN_ICD_FILENAMES=/usr/share/vulkan/icd.d/intel_icd.x86_64.json')}
+                                                                className="px-2 py-1 text-[10px] bg-white/5 hover:bg-white/10 rounded border border-white/10 transition-colors"
+                                                            >
+                                                                Copy
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Windows Section */}
+                                                    <div className="space-y-2 pt-2 border-t border-white/5">
+                                                        <p className="text-xs font-bold text-white/70 uppercase tracking-wider">Troubleshooting (Windows)</p>
+                                                        <ul className="text-[11px] text-white/50 space-y-1.5 list-disc pl-3">
+                                                            <li>Update drivers directly from <strong>Intel.com</strong>, <strong>Nvidia.com</strong>, or <strong>AMD.com</strong>.</li>
+                                                            <li><strong>Multi-GPU:</strong> Go to Settings &gt; System &gt; Display &gt; Graphics, add the app, and select "High Performance".</li>
+                                                        </ul>
+                                                    </div>
+
+                                                    <p className="text-[10px] text-white/30 italic mt-2">
+                                                        * Restart the app after applying these steps.
+                                                    </p>
+                                                </div>
                                             </div>
                                         )}
 
