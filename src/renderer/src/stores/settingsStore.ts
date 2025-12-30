@@ -21,6 +21,7 @@ interface SettingsState {
     openaiApiKey: string
     openaiBaseUrl: string
     openaiModel: string
+    browserModel: string
 
     // Appearance
     theme: Theme
@@ -37,6 +38,7 @@ interface SettingsState {
     setOpenaiApiKey: (key: string) => Promise<void>
     setOpenaiBaseUrl: (url: string) => Promise<void>
     setOpenaiModel: (model: string) => void
+    setBrowserModel: (model: string) => void
     setTheme: (theme: Theme) => void
     resetToDefaults: () => void
 }
@@ -53,6 +55,7 @@ const defaultSettings = {
     openaiApiKey: '',
     openaiBaseUrl: 'https://api.openai.com/v1',
     openaiModel: LLM_CONFIG.OPENAI_COMPATIBLE.DEFAULT_MODEL,
+    browserModel: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', // Default small model
     theme: 'dark' as Theme,
 }
 
@@ -116,6 +119,7 @@ export const useSettingsStore = create<SettingsState>()(
                 await electron.store.set('openai_base_url', url)
             },
             setOpenaiModel: (model) => set({ openaiModel: model }),
+            setBrowserModel: (model) => set({ browserModel: model }),
             setTheme: (theme) => set({ theme }),
             resetToDefaults: () => set(defaultSettings),
         }),
