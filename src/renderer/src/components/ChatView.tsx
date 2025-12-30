@@ -8,8 +8,11 @@ interface ChatViewProps {
 }
 
 export function ChatView({ onClearChat }: ChatViewProps) {
-    const { messages, isProcessing, removeMessage, clearMessages } = useChatStore()
+    const { sessions, activeSessionId, isProcessing, removeMessage, clearMessages } = useChatStore()
     const messagesEndRef = useRef<HTMLDivElement>(null)
+
+    const activeSession = sessions.find(s => s.id === activeSessionId)
+    const messages = activeSession?.messages || []
 
     // Auto-scroll to bottom when new messages arrive
     useEffect(() => {

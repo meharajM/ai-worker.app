@@ -19,6 +19,9 @@ Analyze codebase, test all functionalities per plan.md, and build for Mac, Windo
 - [x] Test LLM integration (Ollama/OpenAI)
 - [x] Test MCP connections panel
 - [x] Test settings panel
+- [x] Test feature flags panel in dev mode
+- [x] Validate all 6 feature flags functionality
+- [x] Test TTS toggle, rate, and pitch in prod mode
 
 ### Build Testing
 - [x] Build for macOS (`npm run build:mac`) - DMG + ZIP

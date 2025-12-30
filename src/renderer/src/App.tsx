@@ -1,25 +1,28 @@
-import React, { useState, useCallback, useEffect, useRef } from "react";
-import { VoiceInput } from "./components/VoiceInput";
-import { ChatView } from "./components/ChatView";
-import { ConnectionsPanel } from "./components/ConnectionsPanel";
-import { SettingsPanel } from "./components/SettingsPanel";
-import { Sidebar, View } from "./components/Sidebar";
-import { Header } from "./components/Header";
-import { useChatStore } from "./stores/chatStore";
-import { useSettingsStore } from "./stores/settingsStore";
-import { useSpeechSynthesis } from "./hooks/useSpeechSynthesis";
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { VoiceInput } from './components/VoiceInput';
+import { ChatView } from './components/ChatView';
+import { ChatSidebar } from './components/ChatSidebar';
+import { ConnectionsPanel } from './components/ConnectionsPanel';
+import { SettingsPanel } from './components/SettingsPanel';
+import { Sidebar, View } from './components/Sidebar';
+import { Header } from './components/Header';
+import { useChatStore } from './stores/chatStore';
+import { useSettingsStore } from './stores/settingsStore';
+import { useSpeechSynthesis } from './hooks/useSpeechSynthesis';
 import {
   chat,
   getAvailableProviders,
   LLMMessage,
   LLMTool,
   ServerInfo,
-} from "./lib/llm";
-import { getAllTools, getServers, executeToolCall } from "./lib/mcp";
+} from './lib/llm';
+import { getAllTools, getServers, executeToolCall } from './lib/mcp';
 
 function App() {
-  const [currentView, setCurrentView] = useState<View>("chat");
-  const { messages, addMessage, setProcessing, isProcessing } = useChatStore();
+  const [currentView, setCurrentView] = useState<View>('chat');
+  const { sessions, activeSessionId, addMessage, setProcessing, isProcessing } = useChatStore();
+  const activeSession = sessions.find(s => s.id === activeSessionId);
+  const messages = activeSession?.messages || [];
   const settings = useSettingsStore();
   const { speak } = useSpeechSynthesis();
   const [llmStatus, setLlmStatus] = useState<{
@@ -190,15 +193,13 @@ function App() {
                     ? result.result
                     : JSON.stringify(result.result);
                 toolResults.push(
-                  `Tool ${
-                    toolCall.name
+                  `Tool ${toolCall.name
                   } executed. Result: ${resultStr.substring(0, 200)}`
                 );
               }
             } catch (error) {
               toolResults.push(
-                `Tool ${toolCall.name} error: ${
-                  error instanceof Error ? error.message : "Unknown error"
+                `Tool ${toolCall.name} error: ${error instanceof Error ? error.message : "Unknown error"
                 }`
               );
             }
@@ -219,9 +220,6 @@ function App() {
           content: finalContent,
           toolCalls: response.toolCalls,
         });
-
-        // Speak the response
-        speak(finalContent);
 
         // Update provider status
         setLlmStatus({
@@ -254,19 +252,23 @@ function App() {
         <Header status={llmStatus} />
 
         <main className="flex-1 flex flex-col overflow-hidden">
-          {currentView === "chat" && (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              <ChatView />
-              <div className="p-4 flex-shrink-0 border-t border-white/5">
-                <VoiceInput onSubmit={handleSubmit} disabled={isProcessing} />
+          {currentView === 'chat' && (
+            <div className="flex-1 flex overflow-hidden">
+              <ChatSidebar />
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <ChatView />
+                <div className="p-4 flex-shrink-0 border-t border-white/5">
+                  <VoiceInput onSubmit={handleSubmit} disabled={isProcessing} />
+                </div>
               </div>
             </div>
           )}
 
-          {currentView === "connections" && <ConnectionsPanel />}
-          {currentView === "settings" && <SettingsPanel />}
+          {currentView === 'connections' && <ConnectionsPanel />}
+          {currentView === 'settings' && <SettingsPanel />}
         </main>
       </div>
+
     </div>
   );
 }

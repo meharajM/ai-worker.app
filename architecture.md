@@ -189,6 +189,7 @@ graph TD
     Main --> ChatView[ChatView<br/>Chat Interface]
     Main --> ConnectionsPanel[ConnectionsPanel<br/>MCP Management]
     Main --> SettingsPanel[SettingsPanel<br/>Configuration]
+    Main --> FeatureFlagsPanel[FeatureFlagsPanel<br/>Dev Mode Flags]
     
     ChatView --> MessageBubble[MessageBubble<br/>Message Display]
     ChatView --> VoiceInput[VoiceInput<br/>Input Component]
@@ -197,7 +198,7 @@ graph TD
     ConnectionsPanel --> McpServerCard[McpServerCard<br/>Server Display]
     
     VoiceInput --> SpeechRecognition[useSpeechRecognition<br/>STT Hook]
-    VoiceInput --> SpeechSynthesis[useSpeechSynthesis<br/>TTS Hook]
+    VoiceInput --> SpeechSynthesis[useSpeechSynthesis<br/>TTS Hook with Dynamic Controls]
 ```
 
 ### State Management Architecture
@@ -475,7 +476,7 @@ sequenceDiagram
     App->>LLMLib: chat(messages, tools)
     LLMLib->>LLMLib: Check Provider Priority
     
-    alt Browser LLM Available
+    alt Browser LLM Available and Enabled
         LLMLib->>BrowserLLM: Request
         BrowserLLM-->>LLMLib: Response
     else Ollama Available
@@ -882,7 +883,7 @@ ai-worker-app/
 
 ---
 
-**Last Updated:** 2024-12-28  
+**Last Updated:** 2024-12-29  
 **Version:** 0.1.0  
 **Architecture Version:** 1.0
 

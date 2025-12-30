@@ -133,6 +133,38 @@ export async function testOllamaConnection(
   }
 }
 
+// Check if browser-native LLM is available (Gemini Nano, Phi, etc.)
+export async function checkBrowserLLM(): Promise<ProviderStatus> {
+    if (!FEATURE_FLAGS.BROWSER_LLM_ENABLED) {
+        return { available: false, error: 'Browser LLM disabled' }
+    }
+
+    try {
+        // Check for browser-native AI capabilities
+        const capabilities = await (window as any).ai?.capabilities?.()
+        if (capabilities && capabilities.available) {
+            return {
+                available: true,
+                model: capabilities.defaultModel || 'browser-llm',
+                models: capabilities.models || [capabilities.defaultModel || 'browser-llm'],
+            }
+        }
+        
+        // Fallback: check for experimental browser LLM APIs
+        if ('ai' in window && (window as any).ai) {
+            return {
+                available: true,
+                model: 'browser-llm',
+                models: ['browser-llm'],
+            }
+        }
+        
+        return { available: false, error: 'Browser LLM not available' }
+    } catch (error) {
+        return { available: false, error: 'Browser LLM not supported' }
+    }
+}
+
 // Check if OpenAI-compatible API is configured and fetch available models
 export async function checkOpenAI(
   settings?: LLMSettings
@@ -315,19 +347,48 @@ export async function testOpenAIConnection(
 }
 
 // Get available providers
-export async function getAvailableProviders(
-  settings?: LLMSettings
-): Promise<Record<LLMProvider, ProviderStatus>> {
-  const [ollama, openai] = await Promise.all([
+export async function getAvailableProviders(settings?: LLMSettings): Promise<Record<LLMProvider, ProviderStatus>> {
+  const preferred = settings?.preferredProvider || 'auto'
+  
+  if (preferred === 'ollama') {
+    const ollama = await checkOllama(settings)
+    return {
+      browser: { available: false, error: 'Not implemented yet' },
+      ollama,
+      openai: { available: false },
+    }
+  }
+  
+  if (preferred === 'openai') {
+    const openai = await checkOpenAI(settings)
+    return {
+      browser: { available: false, error: 'Not implemented yet' },
+      ollama: { available: false },
+      openai,
+    }
+  }
+  
+  if (preferred === 'browser') {
+    const browser = await checkBrowserLLM()
+    return {
+      browser,
+      ollama: { available: false },
+      openai: { available: false },
+    }
+  }
+  
+  // Auto mode - check all providers
+  const [browser, ollama, openai] = await Promise.all([
+    checkBrowserLLM(),
     checkOllama(settings),
     checkOpenAI(settings),
-  ]);
-
+  ])
+  
   return {
-    browser: { available: false, error: "Not implemented yet" }, // TODO: Implement browser LLM detection
+    browser,
     ollama,
     openai,
-  };
+  }
 }
 
 // Call Ollama API
@@ -380,6 +441,39 @@ async function callOllama(
     provider: "ollama",
     model: model,
   };
+}
+
+// Call browser-native LLM
+async function callBrowserLLM(
+    messages: LLMMessage[],
+    tools?: LLMTool[],
+    settings?: LLMSettings
+): Promise<LLMResponse> {
+    try {
+        // Use the browser's native AI API if available
+        const ai = (window as any).ai
+        if (!ai) {
+            throw new Error('Browser LLM not available')
+        }
+
+        // Convert messages to browser LLM format
+        const session = await ai.createTextSession()
+        
+        // Build conversation history
+        let conversation = messages.map(m => `${m.role}: ${m.content}`).join('\n')
+        
+        // Generate response
+        const response = await session.prompt(conversation)
+        await session.destroy()
+
+        return {
+            content: response || '',
+            provider: 'browser',
+            model: 'browser-llm',
+        }
+    } catch (error) {
+        throw new Error(`Browser LLM error: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
 }
 
 // Call OpenAI-compatible API
@@ -676,25 +770,25 @@ export async function chat(
   let provider: LLMProvider | null = null;
   const preferredProvider = settings?.preferredProvider;
 
-  if (preferredProvider === "auto" || !preferredProvider) {
-    // Auto-select: try ollama first, then openai
-    if (providers.ollama.available) {
-      provider = "ollama";
+  if (preferredProvider === 'auto' || !preferredProvider) {
+    // Auto-select: try browser first (if enabled), then ollama, then openai
+    if (providers.browser.available) {
+      provider = 'browser';
+    } else if (providers.ollama.available) {
+      provider = 'ollama';
     } else if (providers.openai.available) {
-      provider = "openai";
+      provider = 'openai';
     }
-  } else if (preferredProvider === "ollama" && providers.ollama.available) {
-    provider = "ollama";
-  } else if (preferredProvider === "openai" && providers.openai.available) {
-    provider = "openai";
-  } else if (preferredProvider === "browser" && providers.browser.available) {
-    provider = "browser";
+  } else if (preferredProvider === 'browser' && providers.browser.available) {
+    provider = 'browser';
+  } else if (preferredProvider === 'ollama' && providers.ollama.available) {
+    provider = 'ollama';
+  } else if (preferredProvider === 'openai' && providers.openai.available) {
+    provider = 'openai';
   }
 
   if (!provider) {
-    throw new Error(
-      "No LLM provider available. Please configure Ollama or add an OpenAI API key."
-    );
+    throw new Error('No LLM provider available. Please enable a provider (Browser LLM, Ollama, or OpenAI) and configure it appropriately.');
   }
 
   // Try to detect if we need JSON fallback (will be handled in callOpenAI if error occurs)
@@ -722,9 +816,11 @@ export async function chat(
   }
 
   switch (provider) {
-    case "ollama":
+    case 'browser':
+      return callBrowserLLM(messagesWithSystem, tools, settings);
+    case 'ollama':
       return callOllama(messagesWithSystem, tools, settings);
-    case "openai":
+    case 'openai':
       return callOpenAI(
         messagesWithSystem,
         tools,
