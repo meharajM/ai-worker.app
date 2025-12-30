@@ -23,6 +23,7 @@ interface ElectronAPI {
         disconnect: (serverId: string) => Promise<{ success: boolean }>
         listTools: (serverId: string) => Promise<{ tools: Array<{ name: string; description: string }> }>
         callTool: (serverId: string, toolName: string, args: unknown) => Promise<{ result: unknown }>
+        onStatusUpdate: (callback: (event: any, data: { serverId: string, status: string }) => void) => () => void
     }
 
     llm: {

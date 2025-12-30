@@ -10,6 +10,15 @@ declare global {
     interface Navigator {
         gpu?: any; // WebGPU API
     }
+    interface GPUAdapter {
+        requestAdapterInfo(): Promise<GPUAdapterInfo>;
+    }
+    interface GPUAdapterInfo {
+        vendor: string;
+        architecture: string;
+        device: string;
+        description: string;
+    }
 }
 
 // Available models - some support native tool calling, others use JSON fallback
@@ -82,6 +91,12 @@ export interface WebLLMStatus {
         progress: number;
         stage: string;
     } | null;
+    adapterInfo?: {
+        vendor: string;
+        architecture: string;
+        device: string;
+        description: string;
+    };
 }
 
 export interface WebLLMMessage {
@@ -116,6 +131,7 @@ class WebLLMManager {
         error: null,
         downloadedModels: [],
         backgroundDownload: null,
+        adapterInfo: undefined,
     };
 
     // Separate status for background downloads
@@ -203,6 +219,21 @@ class WebLLMManager {
                 this.status.error = 'No WebGPU adapter found. Please ensure your GPU drivers are up to date.';
                 return;
             }
+
+            let info;
+            if (adapter.requestAdapterInfo) {
+                info = await adapter.requestAdapterInfo();
+            } else {
+                // Fallback or just empty
+                info = { vendor: '', architecture: '', device: '', description: 'Unknown Adapter' };
+            }
+
+            this.status.adapterInfo = {
+                vendor: info.vendor || '',
+                architecture: info.architecture || '',
+                device: info.device || '',
+                description: info.description || '',
+            };
 
             this.status.isSupported = true;
             this.status.error = null;
@@ -400,11 +431,33 @@ class WebLLMManager {
                 }));
             }
 
+            const finalMessages = messages.map(m => ({
+                role: m.role,
+                content: m.content || '',
+            }));
+
+            // Handle models like Hermes-2-Pro that forbid custom system prompts when tools are used
+            if (openAITools && supportsNativeTools) {
+                const systemIdx = finalMessages.findIndex(m => m.role === 'system');
+                if (systemIdx !== -1) {
+                    const systemContent = finalMessages[systemIdx].content;
+                    // Remove the system message
+                    finalMessages.splice(systemIdx, 1);
+
+                    // Prefix the first user message with the system instructions
+                    const userIdx = finalMessages.findIndex(m => m.role === 'user');
+                    if (userIdx !== -1) {
+                        finalMessages[userIdx].content = `[SYSTEM INSTRUCTIONS]\n${systemContent}\n[END SYSTEM INSTRUCTIONS]\n\n${finalMessages[userIdx].content}`;
+                    } else {
+                        // If no user message (unlikely), add one
+                        finalMessages.unshift({ role: 'user', content: systemContent });
+                    }
+                    console.log('[WebLLM] Merged system prompt into user message to support Hermes tool calling');
+                }
+            }
+
             const response = await this.engine.chat.completions.create({
-                messages: messages.map(m => ({
-                    role: m.role,
-                    content: m.content,
-                })),
+                messages: finalMessages as any,
                 ...(openAITools ? { tools: openAITools } : {}),
                 temperature: 0.7,
                 max_tokens: 2048,
@@ -425,8 +478,8 @@ class WebLLMManager {
                 }));
             }
 
-            // For models without native tool calling, try to parse JSON from content
-            if (!toolCalls && !supportsNativeTools && tools && tools.length > 0 && message.content) {
+            // For models without native tool calling (or as fallback), try to parse JSON from content
+            if (!toolCalls && tools && tools.length > 0 && message.content) {
                 toolCalls = this.parseToolCallsFromContent(message.content);
             }
 

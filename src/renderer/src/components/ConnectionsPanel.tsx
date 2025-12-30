@@ -8,6 +8,7 @@ import {
     getServers,
     connectServer,
     disconnectServer,
+    subscribeToServers,
 } from '../lib/mcp'
 import { useChatStore } from '../stores/chatStore'
 import { McpServerCard } from './mcp/McpServerCard'
@@ -20,9 +21,12 @@ export function ConnectionsPanel() {
     const [expandedServer, setExpandedServer] = useState<string | null>(null)
     const [connecting, setConnecting] = useState<string | null>(null)
 
-    // Load servers on mount
+    // Load servers on mount and subscribe to changes
     useEffect(() => {
         setServers(getServers())
+        return subscribeToServers(() => {
+            setServers(getServers())
+        })
     }, [])
 
     // Refresh servers

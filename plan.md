@@ -21,13 +21,13 @@ AI-Worker is a voice-first desktop workspace that uses the Model Context Protoco
 
 ```typescript
 export const FEATURE_FLAGS = {
-  AUTH_ENABLED: false,          // Flip to true when Firebase is configured
+  AUTH_ENABLED: false, // Flip to true when Firebase is configured
   RATE_LIMITING_ENABLED: false, // Flip to true when auth is ready
-  TTS_ENABLED: true,            // Text-to-speech readout
-  BROWSER_LLM_ENABLED: true,    // Try Gemini Nano / Phi first
-  OLLAMA_ENABLED: true,         // Local Ollama models
-  CLOUD_LLM_ENABLED: true,      // OpenAI-compatible APIs
-}
+  TTS_ENABLED: true, // Text-to-speech readout
+  BROWSER_LLM_ENABLED: true, // Try Gemini Nano / Phi first
+  OLLAMA_ENABLED: true, // Local Ollama models
+  CLOUD_LLM_ENABLED: true, // OpenAI-compatible APIs
+};
 
 export const RATE_LIMITS = {
   ANONYMOUS: {
@@ -37,8 +37,8 @@ export const RATE_LIMITS = {
   AUTHENTICATED: {
     CHATS_PER_DAY: Infinity,
     MCP_OPERATIONS_PER_HOUR: Infinity,
-  }
-}
+  },
+};
 ```
 
 ---
@@ -93,6 +93,7 @@ ai-worker-app/
 ## 🗺️ Implementation Phases (with Validation)
 
 ### ✅ Phase 1: Project Setup [COMPLETED]
+
 - [x] Electron + React + TypeScript + Tailwind scaffold
 - [x] Base UI with sidebar navigation
 - [x] electron-vite build system
@@ -105,6 +106,7 @@ ai-worker-app/
 **Goal:** User can speak or type messages, app displays them
 
 **Implementation:**
+
 - [x] Create `src/renderer/src/lib/constants.ts` (feature flags, rate limits)
 - [x] Create `src/renderer/src/hooks/useSpeechRecognition.ts`
 - [x] Create `src/renderer/src/hooks/useSpeechSynthesis.ts`
@@ -113,6 +115,7 @@ ai-worker-app/
 - [x] Add mute toggle for TTS
 
 **Validation:** ✅
+
 - [x] Click mic → speak → see transcript appear
 - [x] Type in text field → press Enter → see message
 - [x] Mute toggle disables voice readout
@@ -124,6 +127,7 @@ ai-worker-app/
 **Goal:** Display chat history, persist messages
 
 **Implementation:**
+
 - [x] Create `src/renderer/src/stores/chatStore.ts` (zustand)
 - [x] Create `src/renderer/src/components/ChatView.tsx`
 - [x] Create `src/renderer/src/components/MessageBubble.tsx`
@@ -131,6 +135,7 @@ ai-worker-app/
 - [x] Persist chat history to localStorage (zustand persist)
 
 **Validation:** ✅
+
 - [x] Send message → appears in chat
 - [x] Restart app → chat history preserved
 - [x] Clear chat button works
@@ -142,6 +147,7 @@ ai-worker-app/
 **Goal:** Get AI responses from available LLM providers
 
 **Implementation:**
+
 - [x] Create `src/renderer/src/lib/llm.ts` (LLM orchestrator)
 - [x] Implement Ollama client (qwen2.5:3b default)
 - [x] Implement OpenAI-compatible client
@@ -150,6 +156,7 @@ ai-worker-app/
 - [x] Settings panel with API key input
 
 **Validation:** ✅
+
 - [x] Provider status shows in UI header
 - [x] Settings shows LLM configuration options
 - [x] API key can be saved for OpenAI
@@ -161,6 +168,7 @@ ai-worker-app/
 **Goal:** Connect to MCP servers, execute tools
 
 **Implementation:**
+
 - [x] Create `src/renderer/src/lib/mcp.ts` (MCP client manager)
 - [x] Create `src/renderer/src/components/ConnectionsPanel.tsx`
 - [x] Pre-configured templates (File System, GitHub, Drive, etc.)
@@ -169,6 +177,7 @@ ai-worker-app/
 - [x] Server list with status indicators
 
 **Validation:** ✅
+
 - [x] Add Server dropdown shows templates
 - [x] Add File System → appears in list
 - [x] Connection status indicators work
@@ -180,6 +189,7 @@ ai-worker-app/
 **Goal:** User can configure app settings
 
 **Implementation:**
+
 - [x] Create `src/renderer/src/stores/settingsStore.ts`
 - [x] Create `src/renderer/src/components/SettingsPanel.tsx`
 - [x] LLM provider selection UI
@@ -188,6 +198,7 @@ ai-worker-app/
 - [x] Persist settings to electron-store
 
 **Validation:** ✅
+
 - [x] Change LLM provider → new provider used
 - [x] Toggle TTS → voice enabled/disabled
 - [x] Switch theme → UI updates
@@ -200,6 +211,7 @@ ai-worker-app/
 **Goal:** Optional sign-in, rate limiting for anonymous users
 
 **Implementation:**
+
 - [x] Create `src/renderer/src/lib/firebase.ts` (placeholder config)
 - [x] Create `src/renderer/src/stores/authStore.ts`
 - [x] Create `src/renderer/src/components/AuthModal.tsx`
@@ -208,6 +220,7 @@ ai-worker-app/
 - [x] Auth status in Settings panel
 
 **Validation:** ✅
+
 - [x] AUTH_ENABLED=false → no sign-in UI shown
 - [x] AUTH_ENABLED=true → sign-in button appears
 - [x] RATE_LIMITING_ENABLED=true → limits enforced
@@ -220,6 +233,7 @@ ai-worker-app/
 **Goal:** Production-ready app
 
 **Implementation:**
+
 - [x] Error handling & loading states
 - [x] Keyboard shortcuts
 - [x] Cross-platform testing (Mac, Windows, Linux)
@@ -229,6 +243,7 @@ ai-worker-app/
 - [x] Implement IPC handlers for system operations
 
 **Validation:** ✅
+
 - [x] All features work on Mac (DMG built)
 - [x] All features work on Windows (EXE built)
 - [x] All features work on Linux (AppImage/Deb built)
@@ -240,6 +255,7 @@ ai-worker-app/
 **Goal:** Replace mock MCP with real SDK + Generic "Add Connection"
 
 **Implementation:**
+
 - [x] Install `@modelcontextprotocol/sdk`
 - [x] Implement IPC handlers for MCP in `src/main/index.ts`
 - [x] Verify `src/preload/index.ts` bridge
@@ -248,6 +264,7 @@ ai-worker-app/
 - [x] Create generic "Add Connection" form (Stdio & SSE supported)
 
 **Validation:** ✅
+
 - [x] UI allows adding `stdio` server (command + args)
 - [x] UI allows adding `sse` server (URL)
 - [x] Connection state managed via Electron IPC
@@ -259,6 +276,7 @@ ai-worker-app/
 **Goal:** Fix runtime environment issues and enhance server management
 
 **Implementation:**
+
 - [x] Fix ESM compatibility in main process (`__dirname` shim)
 - [x] Integrate `fix-path` for GUI environmental variables
 - [x] Implement actionable MCP error messages (installation instructions)
@@ -266,6 +284,7 @@ ai-worker-app/
 - [x] Enhance Stdio transport with inherited stderr for easier debugging
 
 **Validation:** ✅
+
 - [x] App launches correctly in ESM mode
 - [x] `npx` and `python3` found in PATH even when launched from GUI
 - [x] Non-technical users see install commands for missing dependencies
@@ -278,6 +297,7 @@ ai-worker-app/
 **Goal:** Improve code maintainability, modularity, and developer experience
 
 **Implementation:**
+
 - [x] Modularize IPC handlers into separate files (`src/main/ipc/`)
   - [x] `app.ts` - App info and shell operations
   - [x] `mcp.ts` - MCP connection and tool management
@@ -296,6 +316,7 @@ ai-worker-app/
 - [x] Add `fix-path` dependency for cross-platform PATH handling
 
 **Validation:** ✅
+
 - [x] All IPC handlers work correctly after modularization
 - [x] UI components render and function properly
 - [x] MCP server management UI is more intuitive and maintainable
@@ -343,9 +364,12 @@ ai-worker-app/
 ## 🔗 MCP Client
 
 - Connects to external MCP servers
+- **Default Servers**: Playwright and Sequential Thinking configured automatically on first run
 - Generic "Add Connection" supports any Stdio or SSE server
+- Form pre-fills with Sequential Thinking configuration for quick setup
 - Integrated configuration editor for quick updates
 - Built-in runtime dependency helper for Node/Python/UV
+- Automatic default server restoration (adds missing defaults on load)
 
 ---
 
@@ -366,4 +390,8 @@ ai-worker-app/
 
 ---
 
+<<<<<<< HEAD
 **Current Status:** Phases 1-12 complete. Codebase refactored for maintainability. Production-ready with modular architecture and enhanced feature flags.
+=======
+**Current Status:** Phases 1-12 complete. Default MCP servers configured. Codebase refactored for maintainability. Production-ready with modular architecture.
+>>>>>>> c9cd8f5 (updating plan and artitechure)

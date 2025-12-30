@@ -12,6 +12,10 @@ const electronAPI = {
         listTools: (serverId: string) => ipcRenderer.invoke('mcp:list-tools', serverId),
         callTool: (serverId: string, toolName: string, args: unknown) =>
             ipcRenderer.invoke('mcp:call-tool', serverId, toolName, args),
+        onStatusUpdate: (callback: (event: any, data: { serverId: string, status: string }) => void) => {
+            ipcRenderer.on('mcp:status-update', callback)
+            return () => ipcRenderer.removeListener('mcp:status-update', callback)
+        }
     },
 
     // LLM operations (for future main process LLM handling)

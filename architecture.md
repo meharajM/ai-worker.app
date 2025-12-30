@@ -30,18 +30,18 @@ graph TB
         Preload[Preload Script<br/>Bridge Layer]
         Renderer[Renderer Process<br/>React UI]
     end
-    
+
     subgraph "External Services"
         Ollama[Ollama API<br/>Local LLM]
         OpenAI[OpenAI API<br/>Cloud LLM]
         MCPServers[MCP Servers<br/>Stdio/SSE]
     end
-    
+
     subgraph "System Resources"
         FileSystem[File System<br/>electron-store]
         BrowserAPIs[Browser APIs<br/>Speech/Storage]
     end
-    
+
     Main -->|IPC| Preload
     Preload -->|Context Bridge| Renderer
     Main -->|HTTP| Ollama
@@ -67,14 +67,14 @@ graph LR
         MCP[MCP Client Manager<br/>@modelcontextprotocol/sdk]
         Env[Environment Utils<br/>fix-path, ESM shims]
     end
-    
+
     subgraph "IPC Modules"
         AppHandlers[app.ts<br/>App Info & Shell]
         MCPHandlers[mcp.ts<br/>MCP Operations]
         LLMHandlers[llm.ts<br/>LLM Placeholder]
         StoreHandlers[store.ts<br/>Storage Operations]
     end
-    
+
     App --> IPC
     IPC --> AppHandlers
     IPC --> MCPHandlers
@@ -85,6 +85,7 @@ graph LR
 ```
 
 **Key Responsibilities:**
+
 - Window management and lifecycle
 - IPC handler registration
 - MCP server connections (Stdio/SSE)
@@ -101,7 +102,7 @@ graph TB
         ContextBridge[Context Bridge<br/>Secure API Exposure]
         IPCInvoke[IPC Invoke<br/>Async Communication]
     end
-    
+
     subgraph "Exposed APIs"
         MCPAPI[MCP Operations]
         LLMAPI[LLM Operations]
@@ -109,7 +110,7 @@ graph TB
         ShellAPI[Shell Operations]
         AppAPI[App Info]
     end
-    
+
     ContextBridge --> MCPAPI
     ContextBridge --> LLMAPI
     ContextBridge --> StoreAPI
@@ -119,6 +120,7 @@ graph TB
 ```
 
 **Key Responsibilities:**
+
 - Expose secure APIs to renderer via `contextBridge`
 - Translate renderer calls to IPC invocations
 - Maintain security boundaries (no direct Node.js access)
@@ -135,7 +137,7 @@ graph TB
         Stores[Zustand Stores]
         Lib[Library Modules]
     end
-    
+
     subgraph "Components"
         ChatView[ChatView]
         VoiceInput[VoiceInput]
@@ -144,20 +146,20 @@ graph TB
         Header[Header]
         Sidebar[Sidebar]
     end
-    
+
     subgraph "Stores"
         ChatStore[chatStore]
         SettingsStore[settingsStore]
         AuthStore[authStore]
     end
-    
+
     subgraph "Libraries"
         LLMLib[llm.ts]
         MCPLib[mcp.ts]
         ElectronLib[electron.ts]
         Constants[constants.ts]
     end
-    
+
     ReactApp --> Components
     ReactApp --> Stores
     Components --> Lib
@@ -166,6 +168,7 @@ graph TB
 ```
 
 **Key Responsibilities:**
+
 - UI rendering and user interactions
 - State management (Zustand)
 - LLM API calls (via fetch)
@@ -181,11 +184,11 @@ graph TB
 ```mermaid
 graph TD
     App[App.tsx<br/>Root Component]
-    
+
     App --> Sidebar[Sidebar<br/>Navigation]
     App --> Header[Header<br/>Status Display]
     App --> Main[Main Content Area]
-    
+
     Main --> ChatView[ChatView<br/>Chat Interface]
     Main --> ConnectionsPanel[ConnectionsPanel<br/>MCP Management]
     Main --> SettingsPanel[SettingsPanel<br/>Configuration]
@@ -193,10 +196,10 @@ graph TD
     
     ChatView --> MessageBubble[MessageBubble<br/>Message Display]
     ChatView --> VoiceInput[VoiceInput<br/>Input Component]
-    
+
     ConnectionsPanel --> McpServerForm[McpServerForm<br/>Server Configuration]
     ConnectionsPanel --> McpServerCard[McpServerCard<br/>Server Display]
-    
+
     VoiceInput --> SpeechRecognition[useSpeechRecognition<br/>STT Hook]
     VoiceInput --> SpeechSynthesis[useSpeechSynthesis<br/>TTS Hook with Dynamic Controls]
 ```
@@ -210,16 +213,16 @@ graph LR
         SettingsStore[settingsStore<br/>User Preferences]
         AuthStore[authStore<br/>Authentication]
     end
-    
+
     subgraph "Persistence"
         LocalStorage[localStorage<br/>Browser Storage]
         ElectronStore[electron-store<br/>Main Process]
     end
-    
+
     ChatStore -->|Persist| LocalStorage
     SettingsStore -->|Persist| LocalStorage
     AuthStore -->|Persist| LocalStorage
-    
+
     SettingsStore -.->|Sync API Keys| ElectronStore
 ```
 
@@ -238,7 +241,7 @@ sequenceDiagram
     participant LLMLib
     participant Ollama/OpenAI
     participant TTS
-    
+
     User->>VoiceInput: Speak or Type
     VoiceInput->>ChatStore: addMessage(user)
     ChatStore->>App: Message Added
@@ -261,7 +264,7 @@ sequenceDiagram
     participant Preload
     participant Main Process
     participant MCPServer
-    
+
     User->>ConnectionsPanel: Add Server Config
     ConnectionsPanel->>MCPLib: addCustomServer()
     MCPLib->>MCPLib: Save to Storage
@@ -293,7 +296,7 @@ sequenceDiagram
     participant SettingsStore
     participant LocalStorage
     participant ElectronStore
-    
+
     User->>SettingsPanel: Change Setting
     SettingsPanel->>SettingsStore: setTtsEnabled(true)
     SettingsStore->>LocalStorage: Persist State
@@ -316,24 +319,24 @@ graph TB
         Renderer[React Components]
         ElectronAPI[window.electron API]
     end
-    
+
     subgraph "Preload Script"
         ContextBridge[Context Bridge]
         IPCInvoke[ipcRenderer.invoke]
     end
-    
+
     subgraph "Main Process"
         IPCReceive[ipcMain.handle]
         Handlers[IPC Handlers]
     end
-    
+
     subgraph "Handler Modules"
         AppH[app.ts<br/>App Info & Shell]
         MCPH[mcp.ts<br/>MCP Operations]
         LLMH[llm.ts<br/>LLM Operations]
         StoreH[store.ts<br/>Storage]
     end
-    
+
     Renderer --> ElectronAPI
     ElectronAPI --> ContextBridge
     ContextBridge --> IPCInvoke
@@ -347,20 +350,48 @@ graph TB
 
 ### IPC Channel Mapping
 
-| Renderer API | IPC Channel | Handler Module | Description |
-|-------------|-------------|----------------|-------------|
-| `electron.mcp.connect()` | `mcp:connect` | `mcp.ts` | Connect to MCP server |
-| `electron.mcp.disconnect()` | `mcp:disconnect` | `mcp.ts` | Disconnect from server |
-| `electron.mcp.listTools()` | `mcp:list-tools` | `mcp.ts` | List available tools |
-| `electron.mcp.callTool()` | `mcp:call-tool` | `mcp.ts` | Execute MCP tool |
-| `electron.store.get()` | `store:get` | `store.ts` | Get stored value |
-| `electron.store.set()` | `store:set` | `store.ts` | Set stored value |
-| `electron.shell.openExternal()` | `shell:open-external` | `app.ts` | Open external URL |
-| `electron.app.getVersion()` | `app:get-version` | `app.ts` | Get app version |
+| Renderer API                    | IPC Channel           | Handler Module | Description            |
+| ------------------------------- | --------------------- | -------------- | ---------------------- |
+| `electron.mcp.connect()`        | `mcp:connect`         | `mcp.ts`       | Connect to MCP server  |
+| `electron.mcp.disconnect()`     | `mcp:disconnect`      | `mcp.ts`       | Disconnect from server |
+| `electron.mcp.listTools()`      | `mcp:list-tools`      | `mcp.ts`       | List available tools   |
+| `electron.mcp.callTool()`       | `mcp:call-tool`       | `mcp.ts`       | Execute MCP tool       |
+| `electron.store.get()`          | `store:get`           | `store.ts`     | Get stored value       |
+| `electron.store.set()`          | `store:set`           | `store.ts`     | Set stored value       |
+| `electron.shell.openExternal()` | `shell:open-external` | `app.ts`       | Open external URL      |
+| `electron.app.getVersion()`     | `app:get-version`     | `app.ts`       | Get app version        |
 
 ---
 
 ## MCP Integration
+
+### Default MCP Servers
+
+AI-Worker comes with two pre-configured MCP servers that are automatically initialized on first run:
+
+1. **Playwright Server** (`playwright`)
+
+   - Purpose: Browser automation and web interaction
+   - Configuration:
+     - Type: `stdio`
+     - Command: `npx`
+     - Args: `-y @modelcontextprotocol/server-playwright`
+   - Tools: Browser navigation, screenshot, DOM interaction
+
+2. **Sequential Thinking Server** (`sequential-thinking`)
+   - Purpose: Step-by-step reasoning for complex tasks
+   - Configuration:
+     - Type: `stdio`
+     - Command: `npx`
+     - Args: `-y @modelcontextprotocol/server-sequential-thinking`
+   - Tools: Sequential reasoning, task decomposition
+
+**Initialization Behavior:**
+
+- Default servers are created automatically when localStorage is empty (first run)
+- Missing default servers are automatically added on app load
+- Users can edit, remove, or customize default servers
+- Form pre-fills with Sequential Thinking configuration for quick setup
 
 ### MCP Client Architecture
 
@@ -371,17 +402,17 @@ graph TB
         MCPClient[MCP Client<br/>@modelcontextprotocol/sdk]
         TransportManager[Transport Manager]
     end
-    
+
     subgraph "Transport Types"
         StdioTransport[Stdio Transport<br/>Local Commands]
         SSETransport[SSE Transport<br/>Remote Servers]
     end
-    
+
     subgraph "MCP Servers"
         LocalServer[Local Server<br/>node/python/npx]
         RemoteServer[Remote Server<br/>HTTP/SSE]
     end
-    
+
     MCPHandler --> MCPClient
     MCPClient --> TransportManager
     TransportManager --> StdioTransport
@@ -394,7 +425,11 @@ graph TB
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Disconnected: Initial State
+    [*] --> Initializing: App Start
+    Initializing --> DefaultServersCreated: First Run
+    Initializing --> ServersLoaded: Existing Config
+    DefaultServersCreated --> Disconnected: Defaults Added
+    ServersLoaded --> Disconnected: Servers Loaded
     Disconnected --> Connecting: User Clicks Connect
     Connecting --> Connected: Connection Success
     Connecting --> Error: Connection Failed
@@ -406,6 +441,13 @@ stateDiagram-v2
     CallingTool --> Connected: Tool Complete
 ```
 
+**Initialization Flow:**
+
+1. App loads → Check localStorage for existing servers
+2. If empty → Create default servers (Playwright, Sequential Thinking)
+3. If servers exist → Load them and ensure defaults are present
+4. Missing defaults → Automatically add them
+
 ### MCP Server Configuration
 
 ```mermaid
@@ -414,7 +456,7 @@ graph LR
         Stdio[Stdio Server<br/>Command + Args]
         SSE[SSE Server<br/>URL]
     end
-    
+
     subgraph "Configuration"
         Name[Name]
         Type[Type: stdio/sse]
@@ -422,12 +464,41 @@ graph LR
         Args[Arguments<br/>Array of strings]
         URL[URL<br/>http://...]
     end
-    
+
+    subgraph "Default Servers"
+        Playwright[Playwright<br/>Browser Automation]
+        SequentialThinking[Sequential Thinking<br/>Step-by-step Reasoning]
+    end
+
     Stdio --> Command
     Stdio --> Args
     SSE --> URL
     Name --> Type
+    Playwright --> Stdio
+    SequentialThinking --> Stdio
 ```
+
+**Default MCP Servers:**
+
+- **Playwright** (`playwright`)
+
+  - Type: `stdio`
+  - Command: `npx`
+  - Args: `-y @modelcontextprotocol/server-playwright`
+  - Description: Browser automation and web interaction tools
+
+- **Sequential Thinking** (`sequential-thinking`)
+  - Type: `stdio`
+  - Command: `npx`
+  - Args: `-y @modelcontextprotocol/server-sequential-thinking`
+  - Description: Enables step-by-step reasoning for complex tasks
+
+**Initialization Logic:**
+
+- Default servers are automatically created on first run (when localStorage is empty)
+- Missing default servers are automatically added on app load
+- Users can edit, remove, or customize default servers
+- Form pre-fills with Sequential Thinking configuration for quick setup
 
 ---
 
@@ -441,19 +512,19 @@ graph TB
         LLMLib[llm.ts<br/>LLM Orchestrator]
         ProviderSelector[Provider Selector]
     end
-    
+
     subgraph "LLM Providers"
         BrowserLLM[Browser LLM<br/>Gemini Nano/Phi<br/>Feature-Flagged]
         Ollama[Ollama<br/>Local LLM<br/>qwen2.5:3b]
         OpenAI[OpenAI<br/>Cloud LLM<br/>gpt-4o-mini]
     end
-    
+
     subgraph "Provider Priority"
         Priority1[1. Browser LLM]
         Priority2[2. Ollama]
         Priority3[3. OpenAI]
     end
-    
+
     LLMLib --> ProviderSelector
     ProviderSelector --> Priority1
     Priority1 --> BrowserLLM
@@ -472,7 +543,7 @@ sequenceDiagram
     participant Ollama
     participant OpenAI
     participant BrowserLLM
-    
+
     App->>LLMLib: chat(messages, tools)
     LLMLib->>LLMLib: Check Provider Priority
     
@@ -488,7 +559,7 @@ sequenceDiagram
     else No Provider Available
         LLMLib-->>App: Error
     end
-    
+
     LLMLib-->>App: LLM Response
 ```
 
@@ -501,12 +572,12 @@ graph LR
         OllamaConfig[Ollama Config<br/>Model, Base URL]
         OpenAIConfig[OpenAI Config<br/>API Key, Base URL, Model]
     end
-    
+
     subgraph "Storage"
         SettingsStore[settingsStore]
         LocalStorage[localStorage]
     end
-    
+
     Provider --> SettingsStore
     OllamaConfig --> SettingsStore
     OpenAIConfig --> SettingsStore
@@ -525,18 +596,18 @@ graph TB
         LocalStorage[localStorage<br/>Browser Storage]
         ZustandPersist[Zustand Persist<br/>Automatic Sync]
     end
-    
+
     subgraph "Main Process Storage"
         ElectronStore[electron-store<br/>Cross-Platform]
         FileSystem[File System<br/>OS-Specific Paths]
     end
-    
+
     subgraph "Storage Locations"
         MacPath[macOS<br/>~/Library/Application Support/ai-worker/]
         WinPath[Windows<br/>%APPDATA%/ai-worker/]
         LinuxPath[Linux<br/>~/.config/ai-worker/]
     end
-    
+
     ZustandPersist --> LocalStorage
     ElectronStore --> FileSystem
     FileSystem --> MacPath
@@ -552,22 +623,25 @@ graph LR
         ChatStore[chatStore]
         ChatLocalStorage[localStorage<br/>ai-worker-chat]
     end
-    
+
     subgraph "Settings Data"
         SettingsStore[settingsStore]
         SettingsLocalStorage[localStorage<br/>ai-worker-settings]
     end
-    
+
     subgraph "MCP Servers"
         MCPLib[mcp.ts]
         MCPStorage[localStorage<br/>mcp_servers]
+        DefaultServers[Default Servers<br/>Auto-initialized]
     end
-    
+
+    DefaultServers --> MCPLib
+
     subgraph "API Keys"
         SettingsStore2[settingsStore]
         ElectronStore2[electron-store<br/>Secure Storage]
     end
-    
+
     ChatStore --> ChatLocalStorage
     SettingsStore --> SettingsLocalStorage
     MCPLib --> MCPStorage
@@ -586,21 +660,21 @@ graph TB
         ReactUI[React UI]
         BrowserAPIs[Browser APIs Only]
     end
-    
+
     subgraph "Preload Script<br/>Isolated Context"
         ContextBridge[Context Bridge<br/>Secure API Exposure]
     end
-    
+
     subgraph "Main Process<br/>Full Node.js Access"
         IPC[IPC Handlers]
         SystemAccess[System Access]
     end
-    
+
     ReactUI -->|No Direct Access| BrowserAPIs
     ReactUI -->|Via Context Bridge| ContextBridge
     ContextBridge -->|IPC Only| IPC
     IPC --> SystemAccess
-    
+
     style ReactUI fill:#90EE90
     style ContextBridge fill:#FFD700
     style IPC fill:#FF6B6B
@@ -616,13 +690,13 @@ graph LR
         WSS[Allow wss://*<br/>WebSocket, Speech API]
         Media[Allow media-src<br/>Audio for TTS]
     end
-    
+
     subgraph "Blocked"
         InlineScripts[Block Inline Scripts]
         Eval[Block eval()]
         UnsafeInline[Block unsafe-inline]
     end
-    
+
     Localhost --> Security
     HTTPS --> Security
     WSS --> Security
@@ -645,26 +719,26 @@ graph TB
         React[React Components]
         Assets[Static Assets]
     end
-    
+
     subgraph "Build Process"
         ElectronVite[electron-vite<br/>Build Tool]
         Vite[Vite<br/>Frontend Bundler]
         TSC[TypeScript Compiler]
     end
-    
+
     subgraph "Output"
         MainOut[out/main/<br/>Main Process]
         PreloadOut[out/preload/<br/>Preload Script]
         RendererOut[out/renderer/<br/>Renderer Bundle]
     end
-    
+
     subgraph "Packaging"
         ElectronBuilder[electron-builder]
         MacBuild[macOS<br/>DMG + ZIP]
         WinBuild[Windows<br/>NSIS + Portable]
         LinuxBuild[Linux<br/>AppImage + deb]
     end
-    
+
     TypeScript --> ElectronVite
     React --> ElectronVite
     Assets --> ElectronVite
@@ -689,17 +763,17 @@ graph LR
         DMG[AI-Worker.dmg<br/>~97 MB]
         ZIP[AI-Worker.zip<br/>~92 MB]
     end
-    
+
     subgraph "Windows"
         NSIS[AI-Worker Setup.exe<br/>~79 MB]
         Portable[AI-Worker.exe<br/>~79 MB]
     end
-    
+
     subgraph "Linux"
         AppImage[AI-Worker.AppImage<br/>~105 MB]
         DEB[ai-worker.deb<br/>~68 MB]
     end
-    
+
     DMG --> Distribution
     ZIP --> Distribution
     NSIS --> Distribution
@@ -714,27 +788,27 @@ graph LR
 
 ### Core Technologies
 
-| Layer | Technology | Version | Purpose |
-|-------|-----------|---------|---------|
-| **Framework** | Electron | 28.2.0 | Desktop application framework |
-| **Frontend** | React | 18.2.0 | UI library |
-| **Language** | TypeScript | 5.3.3 | Type-safe development |
-| **Styling** | Tailwind CSS | 3.4.1 | Utility-first CSS |
-| **State** | Zustand | 5.0.9 | State management |
-| **Build** | electron-vite | 2.0.0 | Build tooling |
-| **MCP** | @modelcontextprotocol/sdk | 1.0.1 | MCP client library |
-| **Storage** | electron-store | 11.0.2 | Cross-platform storage |
-| **Environment** | fix-path | 5.0.0 | PATH resolution |
+| Layer           | Technology                | Version | Purpose                       |
+| --------------- | ------------------------- | ------- | ----------------------------- |
+| **Framework**   | Electron                  | 28.2.0  | Desktop application framework |
+| **Frontend**    | React                     | 18.2.0  | UI library                    |
+| **Language**    | TypeScript                | 5.3.3   | Type-safe development         |
+| **Styling**     | Tailwind CSS              | 3.4.1   | Utility-first CSS             |
+| **State**       | Zustand                   | 5.0.9   | State management              |
+| **Build**       | electron-vite             | 2.0.0   | Build tooling                 |
+| **MCP**         | @modelcontextprotocol/sdk | 1.0.1   | MCP client library            |
+| **Storage**     | electron-store            | 11.0.2  | Cross-platform storage        |
+| **Environment** | fix-path                  | 5.0.0   | PATH resolution               |
 
 ### Development Tools
 
-| Tool | Purpose |
-|------|---------|
-| Vite | Fast frontend bundler |
-| TypeScript | Type checking |
+| Tool             | Purpose               |
+| ---------------- | --------------------- |
+| Vite             | Fast frontend bundler |
+| TypeScript       | Type checking         |
 | electron-builder | Application packaging |
-| PostCSS | CSS processing |
-| Autoprefixer | CSS vendor prefixes |
+| PostCSS          | CSS processing        |
+| Autoprefixer     | CSS vendor prefixes   |
 
 ---
 
@@ -772,30 +846,37 @@ ai-worker-app/
 ## Key Design Decisions
 
 ### 1. Multi-Process Architecture
+
 - **Decision:** Use Electron's multi-process model
 - **Rationale:** Security isolation, better performance, system access control
 
 ### 2. Context Isolation
+
 - **Decision:** Enable context isolation with preload script
 - **Rationale:** Security best practice, prevents renderer from accessing Node.js directly
 
 ### 3. Modular IPC Handlers
+
 - **Decision:** Split IPC handlers into separate modules
 - **Rationale:** Better maintainability, easier testing, clear separation of concerns
 
 ### 4. Zustand for State Management
+
 - **Decision:** Use Zustand instead of Redux
 - **Rationale:** Simpler API, less boilerplate, built-in persistence
 
 ### 5. Renderer-Side LLM Calls
+
 - **Decision:** Make LLM API calls from renderer process
 - **Rationale:** Simpler implementation, direct fetch API access, future main-process option available
 
 ### 6. Local-First Storage
+
 - **Decision:** Use localStorage and electron-store
 - **Rationale:** Privacy-focused, no cloud dependency, fast access
 
 ### 7. MCP in Main Process
+
 - **Decision:** Handle MCP connections in main process
 - **Rationale:** System-level access needed, better security, proper process management
 
@@ -806,21 +887,25 @@ ai-worker-app/
 ### Planned Enhancements
 
 1. **Main Process LLM Handling**
+
    - Move LLM calls to main process for better security
    - Implement streaming responses
    - Add request queuing
 
 2. **Browser LLM Integration**
+
    - Full Gemini Nano/Phi support
    - Browser API integration
    - Local-first LLM priority
 
 3. **Enhanced MCP Features**
+
    - Resource discovery
    - Prompt templates
    - Sampling support
 
 4. **Authentication System**
+
    - Firebase Auth integration
    - Rate limiting enforcement
    - User preferences sync
@@ -837,16 +922,19 @@ ai-worker-app/
 ### Optimization Strategies
 
 1. **Code Splitting**
+
    - Component-based lazy loading
    - Route-based code splitting
    - Dynamic imports for heavy modules
 
 2. **State Management**
+
    - Selective re-renders with Zustand
    - Memoization of expensive computations
    - Efficient persistence strategies
 
 3. **IPC Communication**
+
    - Batch operations where possible
    - Async/await for non-blocking calls
    - Error handling and retries
@@ -863,15 +951,18 @@ ai-worker-app/
 ### Security Measures
 
 1. **Context Isolation**
+
    - Renderer cannot access Node.js directly
    - All system access via IPC
 
 2. **Content Security Policy**
+
    - Strict CSP headers
    - No inline scripts
    - Whitelisted domains only
 
 3. **API Key Storage**
+
    - Secure storage via electron-store
    - No exposure to renderer
    - Encrypted at rest (OS-level)
@@ -885,5 +976,11 @@ ai-worker-app/
 
 **Last Updated:** 2024-12-29  
 **Version:** 0.1.0  
-**Architecture Version:** 1.0
+**Architecture Version:** 1.1
 
+**Recent Updates:**
+
+- Added default MCP server configuration (Playwright, Sequential Thinking)
+- Implemented automatic server initialization on first run
+- Added form pre-filling with Sequential Thinking defaults
+- Enhanced server management with automatic default restoration

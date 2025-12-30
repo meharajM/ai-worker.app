@@ -203,7 +203,7 @@ function App() {
             toolCount: server.tools.length,
           }));
 
-        // Call LLM with current settings and tools
+        // Initial call LLM with current settings and tools
         const settingsForLLM = {
           preferredProvider: settings.preferredProvider,
           ollamaModel: settings.ollamaModel,
@@ -212,59 +212,61 @@ function App() {
           openaiBaseUrl: settings.openaiBaseUrl,
           openaiModel: settings.openaiModel,
         };
-        const response = await chat(
+
+        let currentIteration = 0;
+        const maxIterations = 10;
+        let response = await chat(
           llmMessages,
           llmTools.length > 0 ? llmTools : undefined,
           settingsForLLM,
           serverInfo.length > 0 ? serverInfo : undefined
         );
 
-        // Execute tool calls if any
-        let finalContent = response.content;
-        if (response.toolCalls && response.toolCalls.length > 0) {
-          const toolResults: string[] = [];
+        while (response.toolCalls && response.toolCalls.length > 0 && currentIteration < maxIterations) {
+          currentIteration++;
 
-          for (const toolCall of response.toolCalls) {
+          // Add assistant response with tool calls to history
+          llmMessages.push({
+            role: "assistant",
+            content: response.content || "",
+          });
+
+          // Execute all tool calls in the current turn
+          const results = await Promise.all(response.toolCalls.map(async (toolCall) => {
             try {
-              const result = await executeToolCall(
-                toolCall.name,
-                toolCall.arguments
-              );
-              if (result.error) {
-                toolResults.push(
-                  `Tool ${toolCall.name} failed: ${result.error}`
-                );
-              } else {
-                const resultStr =
-                  typeof result.result === "string"
-                    ? result.result
-                    : JSON.stringify(result.result);
-                toolResults.push(
-                  `Tool ${toolCall.name
-                  } executed. Result: ${resultStr.substring(0, 200)}`
-                );
-              }
-            } catch (error) {
-              toolResults.push(
-                `Tool ${toolCall.name} error: ${error instanceof Error ? error.message : "Unknown error"
-                }`
-              );
-            }
-          }
+              const result = await executeToolCall(toolCall.name, toolCall.arguments);
+              const resultStr = typeof result.result === "string"
+                ? result.result
+                : JSON.stringify(result.result);
 
-          // If we have tool results, we might want to send them back to the LLM for a follow-up response
-          // For now, append to the content
-          if (toolResults.length > 0) {
-            finalContent += `\n\nTool execution results:\n${toolResults.join(
-              "\n"
-            )}`;
-          }
+              if (result.error) {
+                return `Tool ${toolCall.name} failed: ${result.error}`;
+              }
+              return `Tool ${toolCall.name} executed. Result: ${resultStr}`;
+            } catch (error) {
+              return `Tool ${toolCall.name} error: ${error instanceof Error ? error.message : "Unknown error"}`;
+            }
+          }));
+
+          // Add tool results to history for the LLM to consume
+          llmMessages.push({
+            role: "user",
+            content: `TOOL RESULTS:\n${results.join("\n\n")}\n\nBased on these results, proceed with the next step or provide your final response.`
+          });
+
+          // Call LLM again with results
+          response = await chat(
+            llmMessages,
+            llmTools.length > 0 ? llmTools : undefined,
+            settingsForLLM,
+            serverInfo.length > 0 ? serverInfo : undefined
+          );
         }
 
-        // Add assistant response
+        // Add the final assistant message (the one that hopefully has no tool calls or hit max iterations)
         addMessage({
           role: "assistant",
-          content: finalContent,
+          content: response.content,
           toolCalls: response.toolCalls,
         });
 
