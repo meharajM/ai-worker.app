@@ -753,6 +753,24 @@ graph TB
     ElectronBuilder --> MacBuild
     ElectronBuilder --> WinBuild
     ElectronBuilder --> LinuxBuild
+    
+### Cross-Platform Build Support
+
+AI-Worker supports building for Windows from a Linux environment using Wine. This is integrated into the build process to ensure seamless CI/CD and local development compatibility.
+
+**Windows Build Flow on Linux:**
+
+1. **Dependency Check:** `npm run check:wine` verifies if Wine is installed.
+2. **Environment Setup:** 
+   - `install_build_deps.sh`: Helper to install Wine if missing.
+   - `fix_wine_env.sh`: Troubleshooting tool to reset corrupted Wine prefixes.
+3. **Build Execution:** `electron-builder` uses Wine to sign and package the Windows executable (`.exe`).
+
+```bash
+# Workflow
+./install_build_deps.sh  # One-time setup
+npm run build:win        # Builds .exe using Wine
+```
 ```
 
 ### Distribution Structure
