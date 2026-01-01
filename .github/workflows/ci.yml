@@ -55,6 +55,8 @@ jobs:
         contains(github.event.pull_request.labels.*.name, 'build-windows')
       ))
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node.js
@@ -95,6 +97,8 @@ jobs:
         contains(github.event.pull_request.labels.*.name, 'build-macos')
       ))
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node.js
