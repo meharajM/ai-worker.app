@@ -8,7 +8,14 @@ const fs = require('fs');
     if (fs.existsSync('test-failure.png')) fs.unlinkSync('test-failure.png');
     if (fs.existsSync('test-start.png')) fs.unlinkSync('test-start.png');
 
+    // Find the installed electron binary
+    const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/electron');
+    const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
+    console.log('Using electron execPath:', execPath);
+    console.log('exists execPath?', fs.existsSync(execPath));
+
     const electronApp = await electron.launch({
+        executablePath: execPath,
         args: [path.join(__dirname, '../out/main/index.js')],
         timeout: 45000,
         env: {
