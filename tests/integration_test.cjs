@@ -11,18 +11,39 @@ const fs = require('fs');
     // Find the installed electron binary
     const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/electron');
     const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
+
     console.log('Using electron execPath:', execPath);
     console.log('exists execPath?', fs.existsSync(execPath));
 
-    const electronApp = await electron.launch({
-        executablePath: execPath,
-        args: [path.join(__dirname, '../out/main/index.js')],
-        timeout: 45000,
-        env: {
-            ...process.env,
-            NODE_ENV: 'production'
+    let electronApp;
+    try {
+        console.log('🚀 Launching Electron...');
+        electronApp = await electron.launch({
+            executablePath: execPath,
+            args: [
+                path.join(__dirname, '../out/main/index.js'),
+                '--no-sandbox',
+                '--disable-gpu',
+                '--disable-dev-shm-usage'
+            ],
+            timeout: 45000,
+            env: {
+                ...process.env,
+                NODE_ENV: 'production'
+            }
+        });
+        console.log('✅ Electron launched successfully');
+    } catch (launchError) {
+        console.error('❌ Failed to launch Electron:', launchError);
+        if (process.env.GITHUB_ACTIONS) {
+            try {
+                const { execSync } = require('child_process');
+                console.log('Debug: ldd electron output:');
+                console.log(execSync(`ldd ${execPath}`).toString());
+            } catch (lddError) { }
         }
-    });
+        process.exit(1);
+    }
 
     try {
         const window = await electronApp.firstWindow();
