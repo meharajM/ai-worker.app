@@ -109,8 +109,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-artifacts/*
-          draft: true
+          files: release-artifacts/**/*
+          draft: false
           prerelease: false
           generate_release_notes: true
         env:

@@ -1,5 +1,7 @@
 # AI-Worker App
 
+[![CI/CD](https://github.com/meharajM/ai-worker.app/actions/workflows/ci.yml/badge.svg)](https://github.com/meharajM/ai-worker.app/actions/workflows/ci.yml)
+
 Voice-first desktop workspace with MCP integration.
 
 ## Testing & CI/CD
