@@ -73,6 +73,8 @@ jobs:
           sudo apt-get install -y wine64 wine32 nsis
           npm run build:linux
           npm run build:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
@@ -106,6 +108,8 @@ jobs:
 
       - name: Build MacOS
         run: npm run build:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
