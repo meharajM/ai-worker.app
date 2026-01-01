@@ -2,6 +2,16 @@
 
 Voice-first desktop workspace with MCP integration.
 
+## Testing & CI/CD
+
+This project uses GitHub Actions for continuous integration.
+
+- **Tests**: Every push runs typechecking and automated E2E mock tests.
+- **Builds**: Multi-platform binaries (Linux, Windows, macOS) are built automatically.
+- **Releases**: Creating a tag (e.g., `v1.0.0`) automatically creates a draft GitHub release with the compiled binaries.
+
+For local testing details, see [TESTING.md](./TESTING.md).
+
 ## Building
 
 ### Prerequisites

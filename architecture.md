@@ -155,6 +155,7 @@ graph TB
 
     subgraph "Libraries"
         LLMLib[llm.ts]
+        WebLLMLib[webllm.ts]
         MCPLib[mcp.ts]
         ElectronLib[electron.ts]
         Constants[constants.ts]
@@ -165,6 +166,12 @@ graph TB
     Components --> Lib
     Stores --> Lib
     Lib --> ElectronLib
+    
+    subgraph "Web Worker"
+        LLMWorker[llm-worker.ts<br/>Model Inference]
+    end
+    
+    WebLLMLib -->|Worker Message| LLMWorker
 ```
 
 **Key Responsibilities:**
@@ -510,11 +517,12 @@ graph LR
 graph TB
     subgraph "Renderer Process"
         LLMLib[llm.ts<br/>LLM Orchestrator]
+        WebLLM[webllm.ts<br/>Browser Model Manager]
         ProviderSelector[Provider Selector]
     end
 
     subgraph "LLM Providers"
-        BrowserLLM[Browser LLM<br/>Gemini Nano/Phi<br/>Feature-Flagged]
+        BrowserLLM[Browser LLM<br/>WebLLM + Worker<br/>Feature-Flagged]
         Ollama[Ollama<br/>Local LLM<br/>qwen2.5:3b]
         OpenAI[OpenAI<br/>Cloud LLM<br/>gpt-4o-mini]
     end
@@ -540,6 +548,7 @@ graph TB
 sequenceDiagram
     participant App
     participant LLMLib
+    participant WebLLM
     participant Ollama
     participant OpenAI
     participant BrowserLLM
@@ -547,9 +556,12 @@ sequenceDiagram
     App->>LLMLib: chat(messages, tools)
     LLMLib->>LLMLib: Check Provider Priority
     
+    
     alt Browser LLM Available and Enabled
-        LLMLib->>BrowserLLM: Request
-        BrowserLLM-->>LLMLib: Response
+        LLMLib->>WebLLM: chat(msg)
+        WebLLM->>BrowserLLM: PostMessage (Worker)
+        BrowserLLM-->>WebLLM: Response
+        WebLLM-->>LLMLib: Response
     else Ollama Available
         LLMLib->>Ollama: HTTP POST /api/chat
         Ollama-->>LLMLib: Response
