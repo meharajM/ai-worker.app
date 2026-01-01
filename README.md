@@ -9,7 +9,10 @@ Voice-first desktop workspace with MCP integration.
 This project uses GitHub Actions for continuous integration.
 
 - **Tests**: Every push runs typechecking and automated E2E mock tests.
-- **Builds**: Multi-platform binaries (Linux, Windows, macOS) are built automatically.
+- **Builds**: Multi-platform binaries (Linux, Windows, macOS) are built automatically for **Tags**.
+- **On-Demand Builds**: You can trigger specific builds on a Pull Request by adding one of these labels:
+    - `build-all`: Builds for all platforms.
+    - `build-linux`, `build-windows`, `build-macos`: Builds for specific platforms.
 - **Releases**: Creating a tag (e.g., `v1.0.0`) automatically creates a draft GitHub release with the compiled binaries.
 
 For local testing details, see [TESTING.md](./TESTING.md).
