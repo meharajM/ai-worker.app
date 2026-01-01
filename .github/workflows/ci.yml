@@ -34,7 +34,7 @@ jobs:
         run: npm run build
       
       - name: Run E2E Mock Tests
-        run: xvfb-run --auto-servernum --force-display --server-args="-screen 0 1280x720x24" npm run test:mock
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" npm run test:mock
       
       - name: Upload Test Artifacts
         if: failure()
@@ -65,8 +65,9 @@ jobs:
       - name: Build Linux & Windows
         if: matrix.os == 'ubuntu-latest'
         run: |
+          sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y wine64 nsis
+          sudo apt-get install -y wine64 wine32 nsis
           npm run build:linux
           npm run build:win
       
@@ -79,7 +80,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.os }}
-          path: dist/*.{dmg,exe,zip,AppImage,deb}
+          path: |
+            dist/*.dmg
+            dist/*.exe
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.blockmap
 
   release:
     needs: build
@@ -88,21 +95,22 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
+          path: release-artifacts
           pattern: release-*
           merge-multiple: true
+      
+      - name: List Artifacts (Debug)
+        run: ls -R release-artifacts
       
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            *.dmg
-            *.exe
-            *.AppImage
-            *.deb
-            *.zip
+          files: release-artifacts/*
           draft: true
           prerelease: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
