@@ -127,12 +127,135 @@ class WebLLMManager {
         modelId: null as string | null,
     };
 
+    // Memory pressure detection and idle tracking
+    private lastUsedTime: number = 0;
+    private memoryCheckInterval: ReturnType<typeof setInterval> | null = null;
+    private readonly IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes idle timeout
+    private readonly MEMORY_PRESSURE_THRESHOLD = 0.80; // 80% memory usage threshold
+    private readonly MEMORY_CHECK_INTERVAL_MS = 60 * 1000; // Check every 60 seconds
+
     private statusCallbacks: Set<StatusCallback> = new Set();
 
     constructor() {
         this.checkWebGPUSupport();
         this.checkDownloadedModels();
+        this.startMemoryMonitoring();
     }
+
+    /**
+     * Start monitoring memory pressure and idle status
+     * Automatically unloads model if:
+     * 1. Memory usage exceeds threshold AND model is idle
+     * 2. Model has been unused for IDLE_TIMEOUT_MS
+     */
+    private startMemoryMonitoring(): void {
+        // Clean up any existing interval
+        if (this.memoryCheckInterval) {
+            clearInterval(this.memoryCheckInterval);
+        }
+
+        this.memoryCheckInterval = setInterval(() => {
+            this.checkMemoryPressure();
+        }, this.MEMORY_CHECK_INTERVAL_MS);
+    }
+
+    /**
+     * Check memory pressure and idle status
+     * Automatically unloads model if conditions are met
+     */
+    private async checkMemoryPressure(): Promise<void> {
+        // Only check if a model is loaded
+        if (!this.status.isLoaded || this.status.isLoading) {
+            return;
+        }
+
+        const idleTime = Date.now() - this.lastUsedTime;
+        const isIdle = idleTime > this.IDLE_TIMEOUT_MS;
+
+        // Check device memory (if available)
+        const deviceMemory = (navigator as any).deviceMemory;
+        const isLowMemoryDevice = deviceMemory && deviceMemory < 4;
+
+        // Check JS heap memory usage (Chromium only)
+        const memoryInfo = (performance as any).memory;
+        let isHighMemoryUsage = false;
+
+        if (memoryInfo) {
+            const heapUsageRatio = memoryInfo.usedJSHeapSize / memoryInfo.jsHeapSizeLimit;
+            isHighMemoryUsage = heapUsageRatio > this.MEMORY_PRESSURE_THRESHOLD;
+        }
+
+        // Unload conditions:
+        // 1. Model is idle for IDLE_TIMEOUT_MS AND memory pressure is high
+        // 2. Model is idle for extended time (2x IDLE_TIMEOUT_MS) regardless of memory
+        // 3. Low memory device AND model idle for half the timeout
+        const shouldUnload = (
+            (isIdle && isHighMemoryUsage) ||
+            (idleTime > this.IDLE_TIMEOUT_MS * 2) ||
+            (isLowMemoryDevice && idleTime > this.IDLE_TIMEOUT_MS / 2)
+        );
+
+        if (shouldUnload) {
+            console.log('[WebLLM] Memory pressure or idle timeout detected, unloading model...');
+            console.log(`[WebLLM] Idle time: ${(idleTime / 1000 / 60).toFixed(1)} min, Memory pressure: ${isHighMemoryUsage}, Low memory device: ${isLowMemoryDevice}`);
+            await this.unloadModel();
+        }
+    }
+
+    /**
+     * Update last used time - call this on every chat interaction
+     */
+    private updateLastUsedTime(): void {
+        this.lastUsedTime = Date.now();
+    }
+
+    /**
+     * Get memory status for debugging/display
+     */
+    public getMemoryStatus(): {
+        deviceMemoryGB: number | null;
+        heapUsageRatio: number | null;
+        idleTimeMs: number;
+        isIdleWarning: boolean;
+        isMemoryPressure: boolean;
+    } {
+        const deviceMemory = (navigator as any).deviceMemory || null;
+        const memoryInfo = (performance as any).memory;
+        let heapUsageRatio: number | null = null;
+
+        if (memoryInfo) {
+            heapUsageRatio = memoryInfo.usedJSHeapSize / memoryInfo.jsHeapSizeLimit;
+        }
+
+        const idleTime = this.lastUsedTime > 0 ? Date.now() - this.lastUsedTime : 0;
+
+        return {
+            deviceMemoryGB: deviceMemory,
+            heapUsageRatio,
+            idleTimeMs: idleTime,
+            isIdleWarning: idleTime > this.IDLE_TIMEOUT_MS * 0.75,
+            isMemoryPressure: heapUsageRatio !== null && heapUsageRatio > this.MEMORY_PRESSURE_THRESHOLD,
+        };
+    }
+
+    /**
+     * Force release model from memory (called manually or by memory pressure)
+     */
+    public async forceUnload(): Promise<void> {
+        await this.unloadModel();
+    }
+
+    /**
+     * Cleanup when manager is destroyed
+     */
+    public destroy(): void {
+        if (this.memoryCheckInterval) {
+            clearInterval(this.memoryCheckInterval);
+            this.memoryCheckInterval = null;
+        }
+        this.unloadModel();
+    }
+
 
     public async checkDownloadedModels(): Promise<void> {
         try {
@@ -409,6 +532,9 @@ class WebLLMManager {
             throw new Error('Model not loaded. Please load a model first.');
         }
 
+        // Track last usage for memory pressure detection
+        this.updateLastUsedTime();
+
         try {
             // Check if current model supports native tool calling
             const currentModelInfo = WEBLLM_MODELS.find(m => m.id === this.currentModelId);
@@ -603,4 +729,13 @@ export const getWebLLMDownloadStatus = () => {
 
 export const checkWebLLMModelCompatibility = (modelId: string) => {
     return webLLMManager.checkModelCompatibility(modelId);
+};
+
+// Memory management exports
+export const getWebLLMMemoryStatus = () => {
+    return webLLMManager.getMemoryStatus();
+};
+
+export const forceUnloadWebLLMModel = async (): Promise<void> => {
+    return webLLMManager.forceUnload();
 };

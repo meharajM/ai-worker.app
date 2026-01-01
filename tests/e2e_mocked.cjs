@@ -23,7 +23,8 @@ const fs = require('fs');
                 path.join(__dirname, '../out/main/index.js'),
                 '--no-sandbox',
                 '--disable-gpu',
-                '--disable-dev-shm-usage'
+                '--disable-dev-shm-usage',
+                `--user-data-dir=${path.join(require('os').tmpdir(), `ai-worker-test-${Date.now()}`)}`
             ],
             timeout: 60000,
             env: {
