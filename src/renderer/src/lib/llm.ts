@@ -26,7 +26,7 @@ export {
   downloadWebLLMModelOnly,
   getWebLLMDownloadStatus,
   checkWebLLMModelCompatibility,
-  type WebLLMStatus
+  type WebLLMStatus,
 };
 
 export interface LLMMessage {
@@ -44,6 +44,7 @@ export interface ServerInfo {
   name: string;
   description: string;
   toolCount: number;
+  isReasoningServer?: boolean; // True for servers that provide reasoning capabilities without traditional tools
 }
 
 export interface LLMResponse {
@@ -91,12 +92,19 @@ function getOllamaSettings(settings?: LLMSettings) {
 }
 
 // Get OpenAI settings from store or use defaults
-function getOpenAISettings(settings?: LLMSettings) {
+async function getOpenAISettings(
+  settings?: LLMSettings
+): Promise<{ apiKey: string; baseUrl: string; model: string }> {
+  // Import electron here to avoid circular dependencies
+  const electron = (await import("./electron")).default;
+
   const apiKey =
-    settings?.openaiApiKey || localStorage.getItem("openai_api_key") || "";
+    settings?.openaiApiKey ||
+    (await electron.store.get<string>("openai_api_key")) ||
+    "";
   const baseUrl =
     settings?.openaiBaseUrl ||
-    localStorage.getItem("openai_base_url") ||
+    (await electron.store.get<string>("openai_base_url")) ||
     "https://api.openai.com/v1";
   const model =
     settings?.openaiModel || LLM_CONFIG.OPENAI_COMPATIBLE.DEFAULT_MODEL;
@@ -241,7 +249,7 @@ export async function checkOpenAI(
     return { available: false, error: "Cloud LLM disabled" };
   }
 
-  const { apiKey, baseUrl, model } = getOpenAISettings(settings);
+  const { apiKey, baseUrl, model } = await getOpenAISettings(settings);
   if (!apiKey) {
     return { available: false, error: "No API key configured" };
   }
@@ -421,19 +429,19 @@ export async function getAvailableProviders(settings?: LLMSettings): Promise<Rec
   if (preferred === 'ollama') {
     const ollama = await checkOllama(settings)
     return {
-      browser: { available: false, error: 'Not implemented yet' },
+      browser: { available: false, error: "Not implemented yet" },
       ollama,
       openai: { available: false },
-    }
+    };
   }
 
   if (preferred === 'openai') {
     const openai = await checkOpenAI(settings)
     return {
-      browser: { available: false, error: 'Not implemented yet' },
+      browser: { available: false, error: "Not implemented yet" },
       ollama: { available: false },
       openai,
-    }
+    };
   }
 
   if (preferred === 'browser') {
@@ -442,7 +450,7 @@ export async function getAvailableProviders(settings?: LLMSettings): Promise<Rec
       browser,
       ollama: { available: false },
       openai: { available: false },
-    }
+    };
   }
 
   // Auto mode - check all providers
@@ -456,7 +464,7 @@ export async function getAvailableProviders(settings?: LLMSettings): Promise<Rec
     browser,
     ollama,
     openai,
-  }
+  };
 }
 
 // Call Ollama API
@@ -561,7 +569,7 @@ async function callOpenAI(
   useJsonFallback = false,
   servers?: ServerInfo[]
 ): Promise<LLMResponse> {
-  const { apiKey, baseUrl, model } = getOpenAISettings(settings);
+  const { apiKey, baseUrl, model } = await getOpenAISettings(settings);
 
   if (!apiKey) {
     throw new Error("OpenAI API key not configured");
@@ -767,11 +775,26 @@ function buildSystemPrompt(
   let serverContext = "";
   if (serverCount > 0 && servers) {
     const serverList = servers
-      .map(
-        (s) => `${s.name} (${s.toolCount} tool${s.toolCount !== 1 ? "s" : ""})`
-      )
+      .map((s) => {
+        console.log("server", s);
+        if (s.isReasoningServer) {
+          return `${s.name} (reasoning server - provides step-by-step reasoning capabilities)`;
+        }
+        return `${s.name} (${s.toolCount} tool${s.toolCount !== 1 ? "s" : ""})`;
+      })
       .join(", ");
-    serverContext = `\n\n## Connected MCP Servers\nThese are Model Context Protocol (MCP) servers that provide the tools listed above:\n${serverList}\n\nWhen users ask about "MCP servers" or "what tools do you have", refer to the tools and servers listed above.`;
+
+    const reasoningServers = servers.filter((s) => s.isReasoningServer);
+    const reasoningNote =
+      reasoningServers.length > 0
+        ? `\n\n**Reasoning Servers Available**: ${reasoningServers
+            .map((s) => s.name)
+            .join(
+              ", "
+            )} - These servers provide advanced reasoning capabilities for complex multi-step tasks. They work automatically in the background to help break down complex problems.`
+        : "";
+
+    serverContext = `\n\n## Connected MCP Servers\nThese are Model Context Protocol (MCP) servers that provide the tools listed above:\n${serverList}${reasoningNote}\n\nWhen users ask about "MCP servers" or "what tools do you have", refer to the tools and servers listed above.`;
   }
 
   // Detect browser tools for special emphasis
@@ -788,7 +811,22 @@ function buildSystemPrompt(
   // Special emphasis for browser capabilities (addresses training bias)
   let browserCapabilityNote = "";
   if (hasBrowserOps) {
-    browserCapabilityNote = `\n\n**IMPORTANT: You have browser control tools available!** You CAN open websites, navigate to URLs, take screenshots, and interact with web pages. When users ask to "open [website]" or "go to [URL]", use the browser navigation tool immediately. Do NOT say you cannot open browsers - you have the tools to do it!`;
+    browserCapabilityNote = `\n\n**IMPORTANT: You have browser control tools available!** You CAN open websites, navigate to URLs, take screenshots, and interact with web pages. When users ask to "open [website]" or "go to [URL]", use the browser navigation tool immediately. Do NOT say you cannot open browsers - you have the tools to do it!
+
+**MULTI-STEP BROWSER TASKS**: For complex browser tasks like "search for X on Google" or "fill out a form", you MUST complete ALL steps:
+1. Navigate to the website (e.g., browser_navigate to google.com)
+2. Wait for the page to load (check the result)
+3. Fill in search boxes or forms (e.g., browser_type or browser_fill)
+4. Submit or click buttons (e.g., browser_click or browser_press_key)
+5. Continue until the task is COMPLETE
+
+Example: "search for nike shoes on Google" requires:
+- Step 1: browser_navigate to google.com
+- Step 2: browser_type or browser_fill to enter "nike shoes" in the search box
+- Step 3: browser_click the search button OR browser_press_key Enter
+- Step 4: Verify the search completed (check results)
+
+DO NOT stop after just navigating - complete the entire workflow!`;
   }
 
   return `You are a helpful AI assistant with access to ${toolCount} tool${toolCount !== 1 ? "s" : ""
@@ -843,25 +881,27 @@ export async function chat(
   let provider: LLMProvider | null = null;
   const preferredProvider = settings?.preferredProvider;
 
-  if (preferredProvider === 'auto' || !preferredProvider) {
+  if (preferredProvider === "auto" || !preferredProvider) {
     // Auto-select: try browser first (if enabled), then ollama, then openai
     if (providers.browser.available) {
-      provider = 'browser';
+      provider = "browser";
     } else if (providers.ollama.available) {
-      provider = 'ollama';
+      provider = "ollama";
     } else if (providers.openai.available) {
-      provider = 'openai';
+      provider = "openai";
     }
-  } else if (preferredProvider === 'browser' && providers.browser.available) {
-    provider = 'browser';
-  } else if (preferredProvider === 'ollama' && providers.ollama.available) {
-    provider = 'ollama';
-  } else if (preferredProvider === 'openai' && providers.openai.available) {
-    provider = 'openai';
+  } else if (preferredProvider === "browser" && providers.browser.available) {
+    provider = "browser";
+  } else if (preferredProvider === "ollama" && providers.ollama.available) {
+    provider = "ollama";
+  } else if (preferredProvider === "openai" && providers.openai.available) {
+    provider = "openai";
   }
 
   if (!provider) {
-    throw new Error('No LLM provider available. Please enable a provider (Browser LLM, Ollama, or OpenAI) and configure it appropriately.');
+    throw new Error(
+      "No LLM provider available. Please enable a provider (Browser LLM, Ollama, or OpenAI) and configure it appropriately."
+    );
   }
 
   // Try to detect if we need JSON fallback (will be handled in callOpenAI if error occurs)
@@ -893,11 +933,11 @@ export async function chat(
   }
 
   switch (provider) {
-    case 'browser':
+    case "browser":
       return callBrowserLLM(messagesWithSystem, tools, settings);
-    case 'ollama':
+    case "ollama":
       return callOllama(messagesWithSystem, tools, settings);
-    case 'openai':
+    case "openai":
       return callOpenAI(
         messagesWithSystem,
         tools,
