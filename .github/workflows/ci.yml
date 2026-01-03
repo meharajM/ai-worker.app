@@ -1,0 +1,153 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+    types: [opened, synchronize, labeled]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Install System Dependencies (Xvfb & Playwright deps)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgbm1
+          npx playwright install
+          npx playwright install-deps
+      
+      - name: Typecheck
+        run: npm run typecheck
+      
+      - name: Build for Testing
+        run: npm run build
+      
+      - name: Run E2E Mock Tests
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" npm run test:mock
+      
+      - name: Upload Test Artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-failure-screenshots
+          path: test-mock-failure.png
+
+  build-linux-win:
+    needs: test
+    if: |
+      startsWith(github.ref, 'refs/tags/') || 
+      (github.event_name == 'pull_request' && (
+        contains(github.event.pull_request.labels.*.name, 'build-all') ||
+        contains(github.event.pull_request.labels.*.name, 'build-linux') ||
+        contains(github.event.pull_request.labels.*.name, 'build-windows')
+      ))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Linux & Windows
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y wine64 wine32 nsis
+          npm run build:linux
+          npm run build:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-ubuntu-latest
+          path: |
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.blockmap
+
+  build-macos:
+    needs: test
+    if: |
+      startsWith(github.ref, 'refs/tags/') || 
+      (github.event_name == 'pull_request' && (
+        contains(github.event.pull_request.labels.*.name, 'build-all') ||
+        contains(github.event.pull_request.labels.*.name, 'build-macos')
+      ))
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build MacOS
+        run: npm run build:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-latest
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
+
+  release:
+    needs: [build-linux-win, build-macos]
+    # Allow release if either build succeeded and it's a tag
+    if: always() && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          pattern: release-*
+          merge-multiple: true
+      
+      - name: List Artifacts (Debug)
+        run: ls -R release-artifacts
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/**/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -247,6 +247,10 @@ ai-worker-app/
 - [x] All features work on Mac (DMG built)
 - [x] All features work on Windows (EXE built)
 - [x] All features work on Linux (AppImage/Deb built)
+- [x] Cross-compilation: Windows builds on Linux supported via Wine
+  - `install_build_deps.sh`: Installs Wine dependencies
+  - `fix_wine_env.sh`: Troubleshoots/Resets Wine environment
+  - `check:wine`: Pre-build check in package.json
 
 ---
 

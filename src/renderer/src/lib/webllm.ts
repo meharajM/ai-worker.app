@@ -103,8 +103,10 @@ export interface WebLLMResponse {
 type StatusCallback = (status: WebLLMStatus) => void;
 
 class WebLLMManager {
-    private engine: webllm.MLCEngine | null = null;
-    private backgroundEngine: webllm.MLCEngine | null = null; // For downloading without unloading current
+    private engine: webllm.MLCEngineInterface | null = null; // Use Interface for worker compatibility
+    private backgroundEngine: webllm.MLCEngineInterface | null = null;
+    private worker: Worker | null = null;
+    private backgroundWorker: Worker | null = null;
     private currentModelId: string | null = null;
     private status: WebLLMStatus = {
         isSupported: false,
@@ -249,15 +251,29 @@ class WebLLMManager {
             this.downloadingStatus.progress = 0;
 
             try {
-                this.backgroundEngine = new webllm.MLCEngine();
-                this.backgroundEngine.setInitProgressCallback((progress: webllm.InitProgressReport) => {
-                    this.downloadingStatus.progress = progress.progress * 100;
-                    this.notifyStatusChange();
-                });
+                // For background download, we can still use the main engine strictly for caching (faster init),
+                // but ideally we should use a worker too to avoid freezing during the "init" phase of download.
+                // However, creating a second worker engine might be complex. 
+                // Let's stick to standard engine for background download or use the worker factory.
+                // NOTE: Creating multiple engines might be resource intensive.
+                // For safety, let's use the worker factory pattern again.
 
-                await this.backgroundEngine.reload(modelId);
+                this.backgroundWorker = new Worker(new URL('./llm-worker.ts', import.meta.url), { type: 'module' });
+                this.backgroundEngine = await webllm.CreateWebWorkerMLCEngine(
+                    this.backgroundWorker,
+                    modelId,
+                    {
+                        initProgressCallback: (progress: webllm.InitProgressReport) => {
+                            this.downloadingStatus.progress = progress.progress * 100;
+                            this.notifyStatusChange();
+                        }
+                    }
+                );
 
-                // Once loaded, immediately unload to free VRAM, but it remains in cache
+                // CreateWebWorkerMLCEngine loads the model automatically
+                // await this.backgroundEngine.reload(modelId);
+
+                // Once loaded, immediately unload
                 await this.backgroundEngine.unload();
                 this.backgroundEngine = null;
 
@@ -270,18 +286,18 @@ class WebLLMManager {
                 this.downloadingStatus.isDownloading = false;
                 this.downloadingStatus.modelId = null;
                 this.downloadingStatus.progress = 0;
+
+                if (this.backgroundWorker) {
+                    this.backgroundWorker.terminate();
+                    this.backgroundWorker = null;
+                }
                 this.backgroundEngine = null;
                 this.notifyStatusChange();
             }
         } else {
-            // No model loaded, just use regular load which effectively downloads
-            // But we want to "download only" (i.e. not keep it loaded)?
-            // If the user clicked "Download", they probably want it cached.
-            // But standard behavior for "Load" is to make it active.
-            // We'll trust the caller. If they want to "Use", they call loadModel.
-            // If they call downloadModel, and nothing is loaded, we can use the main engine temporarily.
+            // No model loaded, just use regular load
             await this.loadModel(modelId);
-            await this.unloadModel(); // Since it's just "download"
+            await this.unloadModel();
         }
     }
 
@@ -302,23 +318,28 @@ class WebLLMManager {
 
         this.status.isLoading = true;
         this.status.loadingProgress = 0;
-        this.status.loadingStage = 'Initializing...';
+        this.status.loadingStage = 'Initializing Worker...';
         this.status.error = null;
         this.notifyStatusChange();
 
         try {
-            console.log('[WebLLM] Loading model:', modelId);
+            console.log('[WebLLM] Loading model via Worker:', modelId);
 
-            this.engine = new webllm.MLCEngine();
+            // Initialize via Web Worker to prevent UI blocking
+            this.worker = new Worker(new URL('./llm-worker.ts', import.meta.url), { type: 'module' });
+            this.engine = await webllm.CreateWebWorkerMLCEngine(
+                this.worker,
+                modelId,
+                {
+                    initProgressCallback: (progress: webllm.InitProgressReport) => {
+                        this.status.loadingProgress = progress.progress * 100;
+                        this.status.loadingStage = progress.text;
+                        this.notifyStatusChange();
+                    }
+                }
+            );
 
-            // Set progress callback
-            this.engine.setInitProgressCallback((progress: webllm.InitProgressReport) => {
-                this.status.loadingProgress = progress.progress * 100;
-                this.status.loadingStage = progress.text;
-                this.notifyStatusChange();
-            });
-
-            await this.engine.reload(modelId);
+            // Model is already loaded by CreateWebWorkerMLCEngine with the modelId argument
 
             this.currentModelId = modelId;
             this.status.isLoaded = true;
@@ -348,6 +369,12 @@ class WebLLMManager {
             }
             this.engine = null;
         }
+
+        if (this.worker) {
+            this.worker.terminate();
+            this.worker = null;
+        }
+
         this.currentModelId = null;
         this.status.isLoaded = false;
         this.status.currentModel = null;
