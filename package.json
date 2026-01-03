@@ -11,6 +11,10 @@
         "build": "electron-vite build",
         "preview": "electron-vite preview",
         "typecheck": "tsc --noEmit",
+        "test": "vitest run && npm run test:e2e",
+        "test:unit": "vitest run",
+        "test:unit:watch": "vitest",
+        "test:coverage": "vitest run --coverage",
         "test:e2e": "node tests/integration_test.cjs && node tests/e2e_mocked.cjs",
         "test:mock": "node tests/e2e_mocked.cjs",
         "clean": "rm -rf out dist",
@@ -51,6 +55,9 @@
     },
     "devDependencies": {
         "@electron-toolkit/tsconfig": "^1.0.1",
+        "@testing-library/jest-dom": "^6.9.1",
+        "@testing-library/react": "^16.3.1",
+        "@types/jsdom": "^27.0.0",
         "@types/node": "^20.11.10",
         "@types/react": "^18.2.48",
         "@types/react-dom": "^18.2.18",
@@ -59,10 +66,12 @@
         "electron": "^33.0.0",
         "electron-builder": "^25.1.8",
         "electron-vite": "^2.0.0",
+        "jsdom": "^27.4.0",
         "postcss": "^8.4.35",
         "tailwindcss": "^3.4.1",
         "typescript": "^5.3.3",
-        "vite": "^5.0.12"
+        "vite": "^5.0.12",
+        "vitest": "^4.0.16"
     },
     "build": {
         "appId": "com.aiworker.app",

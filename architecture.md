@@ -155,7 +155,7 @@ graph TB
 
     subgraph "Libraries"
         LLMLib[llm.ts]
-        WebLLMLib[webllm.ts]
+        WebLLMLib[webllm.ts<br/>Memory Managed]
         MCPLib[mcp.ts]
         ElectronLib[electron.ts]
         Constants[constants.ts]
@@ -199,6 +199,11 @@ graph TD
     Main --> ChatView[ChatView<br/>Chat Interface]
     Main --> ConnectionsPanel[ConnectionsPanel<br/>MCP Management]
     Main --> SettingsPanel[SettingsPanel<br/>Configuration]
+    
+    SettingsPanel --> AccountSettings[AccountSettings]
+    SettingsPanel --> VoiceSettings[VoiceSettings]
+    SettingsPanel --> AppearanceSettings[AppearanceSettings]
+    SettingsPanel --> AboutSettings[AboutSettings]
     Main --> FeatureFlagsPanel[FeatureFlagsPanel<br/>Dev Mode Flags]
     
     ChatView --> MessageBubble[MessageBubble<br/>Message Display]
@@ -717,6 +722,46 @@ graph LR
     Eval --> Security
     UnsafeInline --> Security
 ```
+
+---
+
+## Quality Assurance
+
+### Testing Infrastructure
+
+AI-Worker utilizes **Vitest** for robust unit testing, integrated into the development workflow and CI pipeline.
+
+```mermaid
+graph LR
+    subgraph "Test Suite"
+        Unit[Unit Tests<br/>Vitest]
+        E2E[E2E Mock<br/>Playwright]
+        Type[Type Check<br/>TSC]
+    end
+
+    subgraph "Coverage"
+        Stores[Zustand Stores]
+        Utils[Utilities]
+        Constants[Constants]
+    end
+
+    Unit --> Stores
+    Unit --> Utils
+    Unit --> Constants
+    
+    subgraph "Mocks"
+        ElectronMock[Electron IPC]
+        BrowserMock[Browser APIs]
+    end
+
+    Unit -.-> ElectronMock
+    Unit -.-> BrowserMock
+```
+
+**Testing Levels:**
+1. **Unit Tests (`npm run test:unit`)**: Validates individual stores, hooks, and utility logic in isolation.
+2. **Integration Tests (`npm run test:mock`)**: Verifies the full application flow with mocked LLM and MCP services.
+3. **Type Checking (`npm run typecheck`)**: Ensures strict TypeScript compliance.
 
 ---
 
