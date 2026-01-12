@@ -192,6 +192,14 @@ function App() {
 
       setProcessing(true);
 
+      // Create a placeholder assistant message that we'll update incrementally
+      const assistantMessage = addMessage({
+        role: "assistant",
+        content: "",
+      });
+      const assistantMessageId = assistantMessage.id;
+      const { updateMessage } = useChatStore.getState();
+
       try {
         // Build message history for LLM
         const llmMessages: LLMMessage[] = messages.map((m) => ({
@@ -227,8 +235,6 @@ function App() {
         }));
 
         // Build compact server info
-        // Include all connected servers, even if they have no tools (reasoning servers)
-        // Note: Reasoning servers are included for context but don't affect tool execution
         const serverInfo: ServerInfo[] = servers
           .filter((server) => server.connected)
           .map((server) => {
@@ -264,6 +270,7 @@ function App() {
           name: string;
           arguments: Record<string, unknown>;
         }> = [];
+        let accumulatedContent = "";
 
         while (iterationCount < maxIterations) {
           console.log(
@@ -284,13 +291,22 @@ function App() {
               currentMessages,
               llmTools.length > 0 ? llmTools : undefined,
               settingsForLLM,
-              serverInfo.length > 0 ? serverInfo : undefined
+              serverInfo.length > 0 ? serverInfo : undefined,
+              (chunk, fullContent) => {
+                // Determine what content to show
+                // If this is a subsequent iteration, we append to accumulated content
+                // Note: fullContent is just for THIS turn
+                const displayContent = accumulatedContent + (accumulatedContent ? "\n\n" : "") + fullContent;
+                updateMessage(assistantMessageId, {
+                  content: displayContent
+                });
+              }
             );
 
             const timeoutPromise = new Promise<never>((_, reject) => {
               setTimeout(
-                () => reject(new Error("LLM call timeout after 60 seconds")),
-                60000
+                () => reject(new Error("LLM call timeout after 120 seconds")),
+                120000
               );
             });
 
@@ -308,13 +324,91 @@ function App() {
               }
             );
 
-            // If it's a timeout or error, break the loop and show error
-            finalResponse = {
-              content: `Error during tool execution: ${errorMessage}. The task may be incomplete.`,
-              provider: "error",
-              model: "unknown",
-            };
-            break;
+            // Check if this is a timeout and we can fallback to cloud
+            const isTimeout = errorMessage.includes("timeout");
+            const isWebLLMError = errorMessage.includes("WebLLM") || 
+                                  errorMessage.includes("MessageOrder") ||
+                                  errorMessage.includes("Context");
+            
+            if (isTimeout || isWebLLMError) {
+              console.log("[MCP App] Attempting cloud fallback...");
+              
+              // Update UI to show fallback status
+              updateMessage(assistantMessageId, {
+                content: accumulatedContent + (accumulatedContent ? "\n\n" : "") + "⚠️ Connection timed out. Switching to cloud provider..."
+              });
+
+              // Check for available cloud providers
+              const providers = await getAvailableProviders(settingsForLLM);
+              const hasCloudFallback = providers.ollama.available || providers.openai.available;
+              
+              if (hasCloudFallback) {
+                try {
+                  // Force cloud provider
+                  const cloudSettings = {
+                    ...settingsForLLM,
+                    preferredProvider: providers.openai.available ? "openai" as const : "ollama" as const,
+                  };
+                  
+                  console.log(`[MCP App] Retrying with ${cloudSettings.preferredProvider}...`);
+                  
+                  response = await chat(
+                    currentMessages,
+                    llmTools.length > 0 ? llmTools : undefined,
+                    cloudSettings,
+                    serverInfo.length > 0 ? serverInfo : undefined
+                  );
+                  
+                  console.log(`[MCP App] Cloud fallback succeeded with ${cloudSettings.preferredProvider}`);
+                  // Continue with the response from cloud
+                } catch (cloudError) {
+                  console.error("[MCP App] Cloud fallback also failed:", cloudError);
+                  const failMsg = `WebLLM timed out and cloud fallback failed. Please try a simpler query or check your cloud provider settings.`;
+                  updateMessage(assistantMessageId, {
+                     content: accumulatedContent + (accumulatedContent ? "\n\n" : "") + failMsg
+                  });
+                  finalResponse = {
+                    content: failMsg,
+                    provider: "error",
+                    model: "unknown",
+                  };
+                  break;
+                }
+              } else {
+                // No cloud fallback available
+                const failMsg = `WebLLM timed out. Configure OpenAI or Ollama in Settings for automatic fallback.`;
+                updateMessage(assistantMessageId, {
+                   content: accumulatedContent + (accumulatedContent ? "\n\n" : "") + failMsg
+                });
+                finalResponse = {
+                  content: failMsg,
+                  provider: "error",
+                  model: "unknown",
+                };
+                break;
+              }
+            } else {
+              // Non-timeout error, just show it
+              const failMsg = `Error during tool execution: ${errorMessage}. The task may be incomplete.`;
+              updateMessage(assistantMessageId, {
+                 content: accumulatedContent + (accumulatedContent ? "\n\n" : "") + failMsg
+              });
+              finalResponse = {
+                content: failMsg,
+                provider: "error",
+                model: "unknown",
+              };
+              break;
+            }
+          }
+
+          // Accumulate content if successful
+          if (response.content) {
+             accumulatedContent += (accumulatedContent ? "\n\n" : "") + response.content;
+             // Update final state of this turn
+             updateMessage(assistantMessageId, {
+               content: accumulatedContent
+             });
           }
 
           console.log(
@@ -346,6 +440,14 @@ function App() {
             break;
           }
 
+          // Track all tool calls for display
+          allToolCalls.push(...response.toolCalls);
+          
+          // Update message with accumulated tool calls
+          updateMessage(assistantMessageId, {
+            toolCalls: allToolCalls
+          });
+
           // Log what tool calls we're about to execute
           console.log(
             `[MCP App] LLM requested ${response.toolCalls.length} tool call(s)`,
@@ -356,9 +458,6 @@ function App() {
               toolNames: response.toolCalls.map((tc) => tc.name),
             }
           );
-
-          // Track all tool calls for display
-          allToolCalls.push(...response.toolCalls);
 
           // Execute tool calls
           const toolExecutionStartTime = Date.now();
@@ -385,7 +484,7 @@ function App() {
               id: tc.id,
               type: "function",
               function: {
-                name: tc.name,
+                name: tc.name, // Ensure this matches actual tool name
                 arguments: JSON.stringify(tc.arguments),
               },
             })),
@@ -548,28 +647,26 @@ function App() {
         if (!finalResponse) {
           throw new Error("No response from LLM");
         }
-
-        // Add assistant response
-        addMessage({
-          role: "assistant",
-          content: finalResponse.content,
-          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-        });
-
-        // Update provider status
+        
+        // Final status update
         setLlmStatus({
           provider: `${finalResponse.provider} (${finalResponse.model})`,
           available: true,
         });
+
       } catch (error) {
         console.error("LLM error:", error);
         const errorMessage =
           error instanceof Error ? error.message : "Unknown error";
 
-        addMessage({
-          role: "assistant",
-          content: `Sorry, I couldn't process that. ${errorMessage}`,
-        });
+        // Update the assistant message with the error if it wasn't already handled
+        const { updateMessage } = useChatStore.getState();
+        // Check if we need to append or replace based on if we have an ID
+        if (assistantMessageId) {
+           updateMessage(assistantMessageId, {
+             content: (useChatStore.getState().getActiveSession()?.messages.find(m => m.id === assistantMessageId)?.content || "") + `\n\nSorry, I couldn't process that. ${errorMessage}`
+           });
+        }
 
         speak("Sorry, I couldn't process that request.");
       } finally {

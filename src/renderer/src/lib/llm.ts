@@ -6,6 +6,7 @@ import {
   getWebLLMStatus,
   loadWebLLMModel,
   chatWithWebLLM,
+  chatStreamWithWebLLM,
   subscribeToWebLLMStatus,
   WEBLLM_MODELS,
   type WebLLMStatus,
@@ -14,7 +15,7 @@ import {
   deleteWebLLMModel,
   downloadWebLLMModelOnly,
   getWebLLMDownloadStatus,
-  checkWebLLMModelCompatibility
+  checkWebLLMModelCompatibility,
 } from "./webllm";
 
 export {
@@ -177,23 +178,23 @@ export async function testOllamaConnection(
 // Check if WebLLM (On-Device AI via WebGPU) is available
 export async function checkBrowserLLM(): Promise<ProviderStatus> {
   if (!FEATURE_FLAGS.BROWSER_LLM_ENABLED) {
-    return { available: false, error: 'On-Device AI disabled' }
+    return { available: false, error: "On-Device AI disabled" };
   }
 
   try {
     const status = getWebLLMStatus();
-    console.log('[WebLLM] Status:', status);
+    console.log("[WebLLM] Status:", status);
 
     if (!status.isSupported) {
       return {
         available: false,
-        error: status.error || 'WebGPU not supported',
+        error: status.error || "WebGPU not supported",
         isWebGPUSupported: false,
-      }
+      };
     }
 
     // WebGPU is supported
-    const models = WEBLLM_MODELS.map(m => m.id);
+    const models = WEBLLM_MODELS.map((m) => m.id);
 
     return {
       available: true,
@@ -206,37 +207,40 @@ export async function checkBrowserLLM(): Promise<ProviderStatus> {
       loadingStage: status.loadingStage,
       downloadedModels: status.downloadedModels,
       error: status.error || undefined,
-    }
+    };
   } catch (error) {
-    console.error('[WebLLM] Check error:', error);
+    console.error("[WebLLM] Check error:", error);
     return {
       available: false,
-      error: error instanceof Error ? error.message : 'WebLLM check failed'
-    }
+      error: error instanceof Error ? error.message : "WebLLM check failed",
+    };
   }
 }
 
 // Test WebLLM connection (simple chat)
-export async function testWebLLMConnection(): Promise<{ success: boolean; error?: string }> {
+export async function testWebLLMConnection(): Promise<{
+  success: boolean;
+  error?: string;
+}> {
   try {
     const status = getWebLLMStatus();
     if (!status.isLoaded) {
-      return { success: false, error: 'Model not loaded' };
+      return { success: false, error: "Model not loaded" };
     }
 
     // specific test message to avoid long responses
     const response = await chatWithWebLLM([
-      { role: 'user', content: 'Say "test" and nothing else.' }
+      { role: "user", content: 'Say "test" and nothing else.' },
     ]);
 
     if (response.content) {
       return { success: true };
     }
-    return { success: false, error: 'No response content' };
+    return { success: false, error: "No response content" };
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Test failed'
+      error: error instanceof Error ? error.message : "Test failed",
     };
   }
 }
@@ -423,11 +427,13 @@ export async function testOpenAIConnection(
 }
 
 // Get available providers
-export async function getAvailableProviders(settings?: LLMSettings): Promise<Record<LLMProvider, ProviderStatus>> {
-  const preferred = settings?.preferredProvider || 'auto'
+export async function getAvailableProviders(
+  settings?: LLMSettings
+): Promise<Record<LLMProvider, ProviderStatus>> {
+  const preferred = settings?.preferredProvider || "auto";
 
-  if (preferred === 'ollama') {
-    const ollama = await checkOllama(settings)
+  if (preferred === "ollama") {
+    const ollama = await checkOllama(settings);
     return {
       browser: { available: false, error: "Not implemented yet" },
       ollama,
@@ -435,8 +441,8 @@ export async function getAvailableProviders(settings?: LLMSettings): Promise<Rec
     };
   }
 
-  if (preferred === 'openai') {
-    const openai = await checkOpenAI(settings)
+  if (preferred === "openai") {
+    const openai = await checkOpenAI(settings);
     return {
       browser: { available: false, error: "Not implemented yet" },
       ollama: { available: false },
@@ -444,8 +450,8 @@ export async function getAvailableProviders(settings?: LLMSettings): Promise<Rec
     };
   }
 
-  if (preferred === 'browser') {
-    const browser = await checkBrowserLLM()
+  if (preferred === "browser") {
+    const browser = await checkBrowserLLM();
     return {
       browser,
       ollama: { available: false },
@@ -458,7 +464,7 @@ export async function getAvailableProviders(settings?: LLMSettings): Promise<Rec
     checkBrowserLLM(),
     checkOllama(settings),
     checkOpenAI(settings),
-  ])
+  ]);
 
   return {
     browser,
@@ -502,18 +508,27 @@ async function callOllama(
   }
 
   const data = await response.json();
+  const content = data.message?.content || "";
+
+  // Try native tool calls first
+  let toolCalls = data.message?.tool_calls?.map(
+    (tc: {
+      function: { name: string; arguments: Record<string, unknown> };
+    }) => ({
+      id: `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name: tc.function.name,
+      arguments: tc.function.arguments,
+    })
+  );
+
+  // If no native tool calls but we have tools and content, try JSON parsing
+  if (!toolCalls && content && tools && tools.length > 0) {
+    toolCalls = parseToolCallsFromJson(content);
+  }
 
   return {
-    content: data.message?.content || "",
-    toolCalls: data.message?.tool_calls?.map(
-      (tc: {
-        function: { name: string; arguments: Record<string, unknown> };
-      }) => ({
-        id: `call_${Date.now()}`,
-        name: tc.function.name,
-        arguments: tc.function.arguments,
-      })
-    ),
+    content: content,
+    toolCalls: toolCalls,
     provider: "ollama",
     model: model,
   };
@@ -525,39 +540,126 @@ async function callOllama(
 async function callBrowserLLM(
   messages: LLMMessage[],
   tools?: LLMTool[],
-  settings?: LLMSettings
+  settings?: LLMSettings,
+  servers?: ServerInfo[],
+  onStream?: (chunk: string, fullContent: string) => void
 ): Promise<LLMResponse> {
   try {
     const status = getWebLLMStatus();
 
     // Check if model is loaded
     if (!status.isLoaded) {
-      console.log('[WebLLM] Model not loaded, attempting to load...');
+      console.log("[WebLLM] Model not loaded, attempting to load...");
       await loadWebLLMModel();
     }
 
-    // Don't pass tools to WebLLM - the system prompt already contains tool definitions
-    // Models will output JSON tool calls in their response content
-    const response = await chatWithWebLLM(
-      messages.map(m => ({ role: m.role, content: m.content }))
-      // No tools passed - avoids "model doesn't support tools" error
-    );
+    // =========================================================================
+    // Context Window Optimization for WebLLM (small models have 4096 context)
+    // =========================================================================
+    
+    // Budget allocation for 4096 context:
+    // - System prompt: ~400 tokens (compact)
+    // - Response: ~256 tokens (max_tokens in webllm.ts)
+    // - Conversation: ~3000 tokens (remaining budget)
+    const MAX_CONVERSATION_TOKENS = 2800; // Conservative to leave room for response
+    
+    // Replace system message with compact version
+    let processedMessages = [...messages];
+    const systemMsgIndex = processedMessages.findIndex(m => m.role === "system");
+    const compactSystemPrompt = buildCompactSystemPrompt(tools, servers);
+    
+    // We already check for system message in the caller (chat function), but 
+    // we need to REPLACE it with compact version here for WebLLM specifically
+    if (systemMsgIndex >= 0) {
+      processedMessages[systemMsgIndex] = {
+        role: "system" as const,
+        content: compactSystemPrompt,
+      };
+    } else {
+      processedMessages.unshift({
+        role: "system" as const,
+        content: compactSystemPrompt,
+      });
+    }
+    
+    // Truncate conversation history to fit within context window
+    processedMessages = truncateConversationHistory(processedMessages, MAX_CONVERSATION_TOKENS);
+    
+    console.log(`[WebLLM] Messages truncated: ${messages.length} -> ${processedMessages.length}`);
+
+    // Pass tools to WebLLM so it can perform JSON fallback parsing if native tools aren't supported
+    // The WebLLM manager handles the check for native support vs JSON fallback
+    let response;
+    
+    if (onStream) {
+      response = await chatStreamWithWebLLM(
+        processedMessages.map((m) => ({ role: m.role, content: m.content })),
+        onStream,
+        tools
+      );
+    } else {
+      response = await chatWithWebLLM(
+        processedMessages.map((m) => ({ role: m.role, content: m.content })),
+        tools
+      );
+    }
 
     // Parse tool calls from JSON in response content (same as existing JSON fallback)
     let toolCalls = response.toolCalls;
     if (!toolCalls && response.content && tools && tools.length > 0) {
+      console.log(`[WebLLM] Attempting JSON parse, content length: ${response.content.length}, preview: ${response.content.substring(0, 200)}`);
       toolCalls = parseToolCallsFromJson(response.content);
     }
 
+    // Normalize tool names (fix common model hallucinations)
+    if (toolCalls) {
+      toolCalls = toolCalls.map((tc: any) => {
+        let name = tc.name;
+        
+        // Fix sequential thinking
+        if (name === 'sequential-thinking') {
+          name = 'sequentialthinking';
+        }
+        
+        // Strip common hallucinatory prefixes - REMOVED
+        // Real tools from @playwright/mcp ACTUALLY have 'browser_' prefix
+        // so stripping it breaks them.
+        /* 
+        if (name.startsWith('browser_')) {
+          name = name.replace('browser_', '');
+        } else if (name.startsWith('playwright_')) {
+          name = name.replace('playwright_', '');
+        }
+        */
+        
+        // Ensure snake_case (some models output camelCase)
+        if (/[A-Z]/.test(name)) {
+          name = name.replace(/([A-Z])/g, "_$1").toLowerCase();
+        }
+        
+        return { ...tc, name };
+      });
+    }
+
+    // Strip the JSON from the content to clean up UI
+    let finalContent = response.content;
+    if (toolCalls && toolCalls.length > 0 && finalContent) {
+      finalContent = stripToolCallsJson(finalContent);
+    }
+
     return {
-      content: response.content,
+      content: finalContent,
       toolCalls,
-      provider: 'browser',
-      model: status.currentModel || 'webllm',
+      provider: "browser",
+      model: status.currentModel || "webllm",
     };
   } catch (error) {
-    console.error('[WebLLM] Chat error:', error);
-    throw new Error(`WebLLM error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    console.error("[WebLLM] Chat error:", error);
+    throw new Error(
+      `WebLLM error: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`
+    );
   }
 }
 
@@ -609,15 +711,15 @@ async function callOpenAI(
       ...(useJsonFallback
         ? {}
         : {
-          tools: tools?.map((t) => ({
-            type: "function",
-            function: {
-              name: t.name,
-              description: t.description,
-              parameters: t.parameters,
-            },
-          })),
-        }),
+            tools: tools?.map((t) => ({
+              type: "function",
+              function: {
+                name: t.name,
+                description: t.description,
+                parameters: t.parameters,
+              },
+            })),
+          }),
     }),
   });
 
@@ -677,53 +779,149 @@ async function callOpenAI(
     toolCalls = parseToolCallsFromJson(content);
   }
 
+  // Strip the JSON from the content if we parsed generic tool calls
+  let finalContent = content;
+  if (!choice.message?.tool_calls && toolCalls && toolCalls.length > 0 && finalContent) {
+    finalContent = stripToolCallsJson(finalContent);
+  }
+
   return {
-    content: content,
-    toolCalls: toolCalls,
+    content: finalContent,
+    toolCalls,
     provider: "openai",
     model: model,
   };
 }
 
+// Cached regex patterns for better performance
+// Note: CODE_BLOCK_REGEX uses greedy match to capture full JSON with nested braces
+const CODE_BLOCK_REGEX = /```(?:json)?\s*(\{[\s\S]*\})\s*```/;
+const TOOL_CALLS_REGEX = /"tool_calls"\s*:\s*\[([\s\S]*?)\]/i;
+const MARKDOWN_CLEANUP_REGEX = /^```(?:json)?\s*|\s*```$/gi;
+
 // Parse tool calls from JSON in response content
-function parseToolCallsFromJson(
-  content: string
-): LLMResponse["toolCalls"] | undefined {
-  try {
-    // Try to find JSON in the content (might be in code blocks or raw)
-    let jsonStr = content.trim();
+// Optimized with early exits and efficient strategy ordering
 
-    // Remove markdown code blocks if present
-    jsonStr = jsonStr
-      .replace(/```json\n?/g, "")
-      .replace(/```\n?/g, "")
-      .trim();
 
-    // Try to extract JSON object
-    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
-        return parsed.tool_calls.map(
-          (
-            tc: { name: string; arguments: Record<string, unknown> },
-            idx: number
-          ) => ({
-            id: `json_call_${Date.now()}_${idx}`,
-            name: tc.name,
-            arguments: tc.arguments || {},
-          })
-        );
-      }
-    }
-  } catch (error) {
-    // Failed to parse, return undefined
-    console.warn("Failed to parse tool calls from JSON:", error);
-  }
-  return undefined;
+// ============================================================================
+// Context Window Management for WebLLM
+// ============================================================================
+
+/**
+ * Estimate token count for a string (rough approximation: ~4 chars per token)
+ */
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
 }
 
-// Build robust but token-efficient system prompt
+/**
+ * Estimate total tokens for a list of messages
+ */
+function estimateMessagesTokens(messages: LLMMessage[]): number {
+  return messages.reduce((sum, msg) => sum + estimateTokens(msg.content) + 4, 0); // +4 for role/formatting overhead
+}
+
+/**
+ * Truncate conversation history to fit within token budget using sliding window.
+ * Always preserves the system message and most recent messages.
+ * 
+ * @param messages - Full conversation history
+ * @param maxTokens - Maximum tokens allowed for messages (excluding response)
+ * @returns Truncated messages that fit within token budget
+ */
+export function truncateConversationHistory(
+  messages: LLMMessage[],
+  maxTokens: number
+): LLMMessage[] {
+  // Separate system message and conversation messages
+  const systemMsg = messages.find(m => m.role === "system");
+  const conversationMsgs = messages.filter(m => m.role !== "system");
+  
+  // Calculate tokens used by system message
+  const systemTokens = systemMsg ? estimateTokens(systemMsg.content) + 4 : 0;
+  const availableTokens = maxTokens - systemTokens;
+  
+  if (availableTokens <= 0) {
+    // System message alone exceeds budget - return just system message
+    return systemMsg ? [systemMsg] : [];
+  }
+  
+  // Build result from newest messages backwards (sliding window)
+  const result: LLMMessage[] = [];
+  let usedTokens = 0;
+  
+  for (let i = conversationMsgs.length - 1; i >= 0; i--) {
+    const msg = conversationMsgs[i];
+    const msgTokens = estimateTokens(msg.content) + 4;
+    
+    if (usedTokens + msgTokens <= availableTokens) {
+      result.unshift(msg);
+      usedTokens += msgTokens;
+    } else {
+      // No more room, stop
+      break;
+    }
+  }
+  
+  // WebLLM REQUIREMENT: Last message must be from "user" or "tool"
+  // If last message is from "assistant", remove it
+  while (result.length > 0 && result[result.length - 1].role === "assistant") {
+    result.pop();
+  }
+  
+  // Add system message at the beginning
+  if (systemMsg) {
+    result.unshift(systemMsg);
+  }
+  
+  return result;
+}
+
+/**
+ * Build a compact system prompt for WebLLM (small context window models).
+ * Uses minimal tokens while preserving essential tool calling capability.
+ */
+function buildCompactSystemPrompt(
+  tools?: LLMTool[],
+  servers?: ServerInfo[]
+): string {
+  if (!tools || tools.length === 0) {
+    return `You are AI-Worker, a helpful assistant. Be concise.`;
+  }
+
+  // Compact tool list: just name and very brief description
+  const toolList = tools
+    .slice(0, 15) // Limit to 15 most important tools
+    .map(t => `- ${t.name}: ${t.description.split('.')[0]}`) // First sentence only
+    .join('\n');
+
+  const hasSequentialThinking = tools.some(t => t.name.includes('sequential') && t.name.includes('thinking'));
+  
+  const seqThinkingNote = hasSequentialThinking 
+    ? `\n- **SEQUENTIAL THINKING**: Use 'sequentialthinking' tool to break down complex tasks and create a Todo list. EXECUTE ONE STEP AT A TIME.` 
+    : '';
+
+  return `You are AI-Worker. You have a REAL BROWSER and tools.
+
+**AVAILABLE TOOLS:**
+${toolList}
+
+**BROWSER RULES:**
+- You CAN navigate to websites, click, type, and read pages.
+- When asked to "open X" or "search Y", use 'browser_navigate' or 'google_search' tools IMMEDIATELY.
+- DO NOT explain how to do it. DO IT.
+- DO NOT say "I cannot browse". You HAVE a browser.${seqThinkingNote}
+
+**FORMAT:**
+To use a tool, output ONLY this JSON (no text before/after):
+{"tool_calls": [{"name": "tool_name", "arguments": {"param": "value"}}]}
+
+**CRITICAL:**
+- Use ONLY the tools listed above.
+- Do NOT invent tools like 'browser_evaluate' or 'run_code'.
+- Do NOT output python/javascript code explanations.
+- If you need to browse, use the 'browser_navigate' tool.`;
+}
 function buildSystemPrompt(
   tools?: LLMTool[],
   servers?: ServerInfo[],
@@ -742,13 +940,25 @@ function buildSystemPrompt(
     return `You are AI-Worker, a helpful voice-first assistant. When tools become available, use them to perform actions instead of providing manual instructions. Be concise for voice output.`;
   }
 
-  // Add JSON format instruction if using fallback
+  // Add JSON format instruction if using fallback (optimized for token efficiency)
   const jsonFormatNote = useJsonFallback
-    ? `\n\n**CRITICAL: JSON TOOL CALLING FORMAT**\nThis model doesn't support native tool calling. When you need to use a tool, return ONLY a JSON object (no markdown, no code blocks, no text before/after, just raw JSON):\n{\n  "tool_calls": [\n    {\n      "name": "tool_name",\n      "arguments": {"param": "value"}\n    }\n  ]\n}\n\nIMPORTANT: 
-- If you need to use tools, return ONLY the JSON object, nothing else
-- If no tools are needed, respond with normal text
-- The JSON must be valid and parseable
-- Use the exact tool names from the "Available Tools" section above`
+    ? `\n\n**JSON TOOL CALLING (REQUIRED)**
+
+This model doesn't support native tool calling. Use JSON format to call tools.
+
+**FORMAT:**
+Return ONLY valid JSON (no markdown, no text before/after):
+{"tool_calls": [{"name": "tool_name", "arguments": {"param": "value"}}]}
+
+**RULES:**
+- Use tools when user asks to DO something (create, read, write, search, navigate, etc.)
+- Return ONLY the JSON object, nothing else
+- If no tools needed, respond with normal text
+- Tools execute sequentially - you'll receive results and can call more tools
+
+**EXAMPLES:**
+User: "Read /tmp/test.txt" → {"tool_calls": [{"name": "read_file", "arguments": {"path": "/tmp/test.txt"}}]}
+User: "What's 2+2?" → Normal text response (no tools)`
     : "";
 
   // Build tools description - compact format with name and description
@@ -762,12 +972,14 @@ function buildSystemPrompt(
         const properties = params?.properties || {};
         const paramNames = Object.keys(properties).slice(0, 3).join(", ");
         const paramHint = paramNames
-          ? ` (params: ${paramNames}${Object.keys(properties).length > 3 ? "..." : ""
-          })`
+          ? ` (params: ${paramNames}${
+              Object.keys(properties).length > 3 ? "..." : ""
+            })`
           : "";
 
-        return `${idx + 1}. **${tool.name}**${paramHint}\n   ${tool.description
-          }`;
+        return `${idx + 1}. **${tool.name}**${paramHint}\n   ${
+          tool.description
+        }`;
       })
       .join("\n\n") || "";
 
@@ -784,14 +996,18 @@ function buildSystemPrompt(
       })
       .join(", ");
 
-    const reasoningServers = servers.filter((s) => s.isReasoningServer);
+
+    const reasoningServers = servers.filter((s) => s.isReasoningServer && s.toolCount > 0);
     const reasoningNote =
       reasoningServers.length > 0
-        ? `\n\n**Reasoning Servers Available**: ${reasoningServers
-            .map((s) => s.name)
-            .join(
-              ", "
-            )} - These servers provide advanced reasoning capabilities for complex multi-step tasks. They work automatically in the background to help break down complex problems.`
+        ? `\n\n**SEQUENTIAL THINKING (REQUIRED)**:
+The 'sequentialthinking' tool is available. You MUST use it to strictly follow this process:
+1. Divide the task into multiple sub-tasks.
+2. Create and show a Todo list.
+3. Execute one task/tool at a time.
+4. Listen for response/feedback from the tool and perform the next task based on that feedback.
+5. Loop until all tasks are done and results are achieved.
+6. **NO ASSUMPTIONS ALLOWED**: Ask questions if you have doubts before proceeding.`
         : "";
 
     serverContext = `\n\n## Connected MCP Servers\nThese are Model Context Protocol (MCP) servers that provide the tools listed above:\n${serverList}${reasoningNote}\n\nWhen users ask about "MCP servers" or "what tools do you have", refer to the tools and servers listed above.`;
@@ -811,27 +1027,29 @@ function buildSystemPrompt(
   // Special emphasis for browser capabilities (addresses training bias)
   let browserCapabilityNote = "";
   if (hasBrowserOps) {
-    browserCapabilityNote = `\n\n**IMPORTANT: You have browser control tools available!** You CAN open websites, navigate to URLs, take screenshots, and interact with web pages. When users ask to "open [website]" or "go to [URL]", use the browser navigation tool immediately. Do NOT say you cannot open browsers - you have the tools to do it!
-
+    browserCapabilityNote = `\n\n**IMPORTANT: You have browser control tools available!** You CAN open websites, navigate to URLs, take screenshots, and interact with web pages. When users ask to "open [website]" or "go to [URL]", use the 'browser_navigate' tool immediately. Do NOT say you cannot open browsers - you have the tools to do it!
+    
 **MULTI-STEP BROWSER TASKS**: For complex browser tasks like "search for X on Google" or "fill out a form", you MUST complete ALL steps:
-1. Navigate to the website (e.g., browser_navigate to google.com)
+1. Navigate to the website (e.g., use the 'browser_navigate' tool to go to google.com)
 2. Wait for the page to load (check the result)
-3. Fill in search boxes or forms (e.g., browser_type or browser_fill)
-4. Submit or click buttons (e.g., browser_click or browser_press_key)
+3. Fill in search boxes or forms (e.g., use 'browser_fill_form' or 'browser_type' tools)
+4. Submit or click buttons (e.g., use 'browser_click' or 'browser_press_key' tools)
 5. Continue until the task is COMPLETE
 
 Example: "search for nike shoes on Google" requires:
-- Step 1: browser_navigate to google.com
-- Step 2: browser_type or browser_fill to enter "nike shoes" in the search box
-- Step 3: browser_click the search button OR browser_press_key Enter
+- Step 1: Use 'browser_navigate' to go to google.com
+- Step 2: Use fill or type to enter "nike shoes" in the search box
+- Step 3: Use click or press_key to submit
 - Step 4: Verify the search completed (check results)
 
 DO NOT stop after just navigating - complete the entire workflow!`;
   }
 
-  return `You are a helpful AI assistant with access to ${toolCount} tool${toolCount !== 1 ? "s" : ""
-    } from ${serverCount} connected server${serverCount !== 1 ? "s" : ""
-    }. When users ask you to perform actions, you MUST use the appropriate tools instead of providing manual instructions.${jsonFormatNote}
+  return `You are a helpful AI assistant with access to ${toolCount} tool${
+    toolCount !== 1 ? "s" : ""
+  } from ${serverCount} connected server${
+    serverCount !== 1 ? "s" : ""
+  }. When users ask you to perform actions, you MUST use the appropriate tools instead of providing manual instructions.${jsonFormatNote}
 
 # Available Tools
 ${toolsDescription}${serverContext}${browserCapabilityNote}
@@ -873,7 +1091,8 @@ export async function chat(
   messages: LLMMessage[],
   tools?: LLMTool[],
   settings?: LLMSettings,
-  servers?: ServerInfo[]
+  servers?: ServerInfo[],
+  onStream?: (chunk: string, fullContent: string) => void
 ): Promise<LLMResponse> {
   const providers = await getAvailableProviders(settings);
 
@@ -907,35 +1126,29 @@ export async function chat(
   // Try to detect if we need JSON fallback (will be handled in callOpenAI if error occurs)
   // For browser (WebLLM), we always use JSON fallback for now to ensure compatibility
   // across all models (Qwen, Llama, etc.) without native tool calling errors
-  let useJsonFallback = provider === 'browser';
+  let useJsonFallback = provider === "browser";
+
+  console.log(`[LLM] Using provider: ${provider}`);
 
   // Add system message if not present, or replace existing one to ensure it has tools
-  let messagesWithSystem = [...messages];
-  const systemMsgIndex = messagesWithSystem.findIndex(
-    (m) => m.role === "system"
-  );
+  const messagesWithSystem = [...messages];
+  if (!messagesWithSystem.find((m) => m.role === "system")) {
+    const compactSystemPrompt = buildCompactSystemPrompt(tools, servers);
+    // Use compact prompt for browser, full prompt for others (unless restricted)
+    const prompt = provider === 'browser'
+      ? compactSystemPrompt
+      : buildSystemPrompt(tools, servers, provider === "ollama");
 
-  // Re-build system prompt with current tools and correct fallback setting
-  const systemPrompt = buildSystemPrompt(tools, servers, useJsonFallback);
-
-  if (systemMsgIndex >= 0) {
-    // Replace existing system message to ensure it has current tools
-    messagesWithSystem[systemMsgIndex] = {
-      role: "system" as const,
-      content: systemPrompt,
-    };
-  } else {
-    // Add new system message
     messagesWithSystem.unshift({
-      role: "system" as const,
-      content: systemPrompt,
+      role: "system",
+      content: prompt,
     });
   }
 
+  // Route to provider
   switch (provider) {
-    case "browser":
-      return callBrowserLLM(messagesWithSystem, tools, settings);
     case "ollama":
+      // Currently using non-streaming backend for Ollama (could be updated later)
       return callOllama(messagesWithSystem, tools, settings);
     case "openai":
       return callOpenAI(
@@ -945,8 +1158,10 @@ export async function chat(
         useJsonFallback,
         servers
       );
+    case "browser":
+      return callBrowserLLM(messagesWithSystem, tools, settings, servers, onStream);
     default:
-      throw new Error(`Provider ${provider} not implemented`);
+      throw new Error(`Unsupported provider: ${provider}`);
   }
 }
 
@@ -959,7 +1174,7 @@ export async function downloadBrowserModel(
     const status = getWebLLMStatus();
 
     if (!status.isSupported) {
-      return { success: false, error: status.error || 'WebGPU not supported' };
+      return { success: false, error: status.error || "WebGPU not supported" };
     }
 
     if (status.isLoaded && (!modelId || status.currentModel === modelId)) {
@@ -985,9 +1200,165 @@ export async function downloadBrowserModel(
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Failed to load model'
+      error: error instanceof Error ? error.message : "Failed to load model",
     };
   }
 }
 
+/**
+ * Remove JSON tool call blocks from content to cleaner UI
+ */
+function stripToolCallsJson(content: string): string {
+  if (!content) return "";
+  
+  let cleaned = content;
+  
+  // Remove markdown code blocks containing JSON
+  cleaned = cleaned.replace(CODE_BLOCK_REGEX, "");
+  
+  // Remove standalone JSON-like structures that match tool_calls
+  // This is a bit aggressive but necessary if the model doesn't use markdown blocks
+  const toolCallsMatch = cleaned.match(TOOL_CALLS_REGEX);
+  if (toolCallsMatch) {
+    // Find the encompassing braces if possible
+    const matchIndex = toolCallsMatch.index || 0;
+    const braceStart = cleaned.lastIndexOf("{", matchIndex);
+    if (braceStart !== -1) {
+       // Simple heuristic: if we found tool_calls, try to remove the whole JSON object
+       // We can iterate forward to find the closing brace
+       let braceCount = 0;
+       let end = -1;
+       for (let i = braceStart; i < cleaned.length; i++) {
+         if (cleaned[i] === "{") braceCount++;
+         else if (cleaned[i] === "}") {
+           braceCount--;
+           if (braceCount === 0) {
+             end = i + 1;
+             break;
+           }
+         }
+       }
+       if (end !== -1) {
+         cleaned = cleaned.substring(0, braceStart) + cleaned.substring(end);
+       }
+    }
+  }
+  
+  return cleaned.trim();
+}
+function parseToolCallsFromJson(
+  content: string
+): LLMResponse["toolCalls"] | undefined {
+  // Early exit checks
+  if (!content || typeof content !== "string" || !content.trim()) {
+    return undefined;
+  }
 
+  const jsonStr = content.trim();
+
+  // Strategy 1: Attempt to parse the entire string as JSON
+  try {
+    const parsed = JSON.parse(jsonStr);
+    return extractToolCallsFromObject(parsed);
+  } catch (e) {
+    // Continue to next strategy
+  }
+
+  // Strategy 2: Extract JSON from markdown code blocks
+  const codeBlockMatch = jsonStr.match(CODE_BLOCK_REGEX);
+  if (codeBlockMatch && codeBlockMatch[1]) {
+    try {
+      const parsed = JSON.parse(codeBlockMatch[1]);
+      return extractToolCallsFromObject(parsed);
+    } catch (e) {
+      // Continue
+    }
+  }
+
+  // Strategy 3: Heuristic scan for {"tool_calls": ...} pattern
+  // This is needed when the model outputs raw JSON but with some extra text or without markdown
+  const toolCallsMatch = jsonStr.match(TOOL_CALLS_REGEX);
+  if (toolCallsMatch) {
+    // Find startup brace
+    const matchIndex = toolCallsMatch.index || 0;
+    const braceStart = jsonStr.lastIndexOf("{", matchIndex);
+    
+    if (braceStart !== -1) {
+      // Try to find the matching closing brace by counting
+      let braceCount = 0;
+      for (let i = braceStart; i < jsonStr.length; i++) {
+        if (jsonStr[i] === "{") braceCount++;
+        else if (jsonStr[i] === "}") {
+          braceCount--;
+          if (braceCount === 0) {
+            // Found potential end
+            const potentialJson = jsonStr.substring(braceStart, i + 1);
+            try {
+              const parsed = JSON.parse(potentialJson);
+              const result = extractToolCallsFromObject(parsed);
+              if (result) return result;
+            } catch (e) {
+              // regex match might have continued
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return undefined;
+}
+
+// Helper to validate and extract tool calls from a parsed object
+function extractToolCallsFromObject(parsed: any): LLMResponse["toolCalls"] | undefined {
+  if (!parsed || typeof parsed !== "object") return undefined;
+
+  const validateToolCall = (tc: any, idx: number) => {
+    if (!tc || typeof tc !== "object") return null;
+    
+    // Normalize name
+    let name = tc.name || tc.function?.name || tc.tool_name;
+    if (!name || typeof name !== "string") return null;
+    
+    // Normalize arguments
+    let args = tc.arguments || tc.function?.arguments || tc.parameters || {};
+    if (typeof args === "string") {
+      try {
+        args = JSON.parse(args);
+      } catch (e) {
+        // Keep as string or empty object if parse fails
+        if (!args.trim().startsWith("{")) {
+            // Maybe it's just a string value? wrap it
+            args = { value: args };
+        } else {
+            args = {};
+        } 
+      }
+    } else if (typeof args !== "object" || Array.isArray(args)) {
+      args = {};
+    }
+
+    return {
+      id: tc.id || `json_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 5)}`,
+      name: name.trim(),
+      arguments: args,
+    };
+  };
+
+  // Check for standard formats
+  let candidates: any[] = [];
+  
+  if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
+    candidates = parsed.tool_calls;
+  } else if (Array.isArray(parsed)) {
+    candidates = parsed;
+  } else if (parsed.name || parsed.function?.name || parsed.tool_name) {
+    candidates = [parsed];
+  }
+
+  const toolCalls = candidates
+    .map((tc, idx) => validateToolCall(tc, idx))
+    .filter((tc): tc is NonNullable<LLMResponse["toolCalls"]>[0] => tc !== null);
+
+  return toolCalls.length > 0 ? toolCalls : undefined;
+}

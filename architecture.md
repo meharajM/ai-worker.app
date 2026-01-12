@@ -556,12 +556,22 @@ sequenceDiagram
     App->>LLMLib: chat(messages, tools)
     LLMLib->>LLMLib: Check Provider Priority
     
-    
     alt Browser LLM Available and Enabled
-        LLMLib->>WebLLM: chat(msg)
+        LLMLib->>WebLLM: chatStream(msg)
         WebLLM->>BrowserLLM: PostMessage (Worker)
-        BrowserLLM-->>WebLLM: Response
-        WebLLM-->>LLMLib: Response
+        loop Streaming
+            BrowserLLM-->>WebLLM: Token Chunk
+            WebLLM-->>App: Token Chunk
+        end
+        opt Timeout / Error
+            WebLLM-->>App: Error
+            App->>App: Cloud Fallback Logic
+            alt Fallback to Cloud
+                App->>LLMLib: chat(messages, tools) [Force Cloud]
+                LLMLib->>OpenAI: Request
+                OpenAI-->>App: Response
+            end
+        end
     else Ollama Available
         LLMLib->>Ollama: HTTP POST /api/chat
         Ollama-->>LLMLib: Response

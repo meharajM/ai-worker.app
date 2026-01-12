@@ -45,21 +45,59 @@ export function MessageBubble({ message, onDelete }: MessageBubbleProps) {
                             : 'bg-[#1a1d23] border border-white/10 text-white/90'
                         }`}
                 >
-                    <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                    {/* Content or Loading Indicator */}
+                    {message.content ? (
+                        <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                    ) : (
+                        (!message.toolCalls || message.toolCalls.length === 0) && (
+                            <div className="flex gap-1.5 py-1">
+                                <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                                <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                                <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                            </div>
+                        )
+                    )}
 
-                    {/* Tool calls display */}
+                    {/* Tool calls display - Enhanced UI */}
                     {message.toolCalls && message.toolCalls.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-white/10">
-                            {message.toolCalls.map((tool) => (
-                                <div key={tool.id} className="text-xs text-white/50">
-                                    <span className="font-mono">🔧 {tool.name}</span>
-                                    {tool.result && (
-                                        <div className="mt-1 p-2 bg-black/20 rounded text-white/40">
-                                            {tool.result}
+                        <div className="mt-3 pt-2 border-t border-white/10 space-y-2">
+                            {message.toolCalls.map((tool) => {
+                                // Map tool names to friendly descriptions
+                                const getFriendlyTitle = (name: string) => {
+                                    const n = name.toLowerCase();
+                                    if (n.includes('navigate') || n.includes('goto')) return 'Navigating to website...';
+                                    if (n.includes('click')) return 'Clicking element...';
+                                    if (n.includes('type') || n.includes('fill')) return 'Typing input...';
+                                    if (n.includes('search')) return 'Searching...';
+                                    if (n.includes('screenshot')) return 'Taking screenshot...';
+                                    if (n.includes('read')) return 'Reading file...';
+                                    if (n.includes('write')) return 'Writing file...';
+                                    if (n.includes('list')) return 'Listing files...';
+                                    if (n.includes('sequential')) return 'Thinking...';
+                                    return `Executing ${name}...`;
+                                };
+                                
+                                return (
+                                    <div key={tool.id} className="text-xs bg-black/20 rounded-lg overflow-hidden border border-white/5">
+                                        <div className="px-3 py-2 flex items-center gap-2 text-white/70">
+                                            <span className="text-emerald-400">⚡</span>
+                                            <span className="font-medium">{getFriendlyTitle(tool.name)}</span>
                                         </div>
-                                    )}
-                                </div>
-                            ))}
+                                        
+                                        {/* Details (collapsed by default logic could be added here, currently just compact) */}
+                                        <div className="px-3 py-2 bg-black/10 text-white/40 font-mono border-t border-white/5 text-[10px] break-all">
+                                            {JSON.stringify(tool.arguments).substring(0, 100)}
+                                            {JSON.stringify(tool.arguments).length > 100 && '...'}
+                                        </div>
+
+                                        {tool.result && (
+                                            <div className="px-3 py-2 bg-emerald-900/10 text-emerald-200/60 font-mono border-t border-white/5 text-[10px] max-h-20 overflow-y-auto">
+                                                {tool.result.startsWith('{') ? '✓ Task completed' : tool.result}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
 

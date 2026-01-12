@@ -38,7 +38,7 @@ const DEFAULT_MCP_SERVERS: Omit<
       "Playwright MCP Server - Browser automation and web interaction tools",
     type: "stdio",
     command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-playwright"],
+    args: ["-y", "@playwright/mcp"],
   },
   {
     name: "sequential-thinking",
@@ -154,18 +154,18 @@ export async function connectServer(serverId: string): Promise<void> {
         error?: string;
       };
 
-      // Check if connection was closed during tool listing
       if (toolsResult.error) {
-        const isConnectionClosed =
+        const isConnectionClosedError =
           toolsResult.error.includes("-32000") ||
           toolsResult.error.includes("Connection closed") ||
           toolsResult.error.includes("connection closed") ||
           toolsResult.error.includes("ECONNRESET") ||
           toolsResult.error.includes("EPIPE");
 
-        if (isConnectionClosed) {
+        if (isConnectionClosedError) {
           server.connected = false;
-          server.tools = [];
+          // Don't clear tools on connection error - this allows auto-reconnect to find them
+           // server.tools = []; 
           server.error = "Connection closed unexpectedly";
           connectedServers.set(serverId, server);
           await saveServersToStorage();
@@ -286,9 +286,9 @@ export function getAllTools(): MCPTool[] {
 }
 
 // Find which server a tool belongs to
-export function findServerForTool(toolName: string): MCPServer | null {
+export function findServerForTool(toolName: string, includeDisconnected = false): MCPServer | null {
   for (const server of connectedServers.values()) {
-    if (server.connected && server.tools.some((t) => t.name === toolName)) {
+    if ((server.connected || includeDisconnected) && server.tools.some((t) => t.name === toolName)) {
       return server;
     }
   }
@@ -368,10 +368,16 @@ export async function executeToolCall(
     argsSize: JSON.stringify(args).length,
   });
 
-  const server = findServerForTool(toolName);
+  let server = findServerForTool(toolName);
+  
+  // If not found in connected servers, check disconnected ones (for auto-reconnect)
+  if (!server) {
+    server = findServerForTool(toolName, true);
+  }
+
   if (!server) {
     const duration = Date.now() - startTime;
-    logMcpRenderer("error", "Tool not found in any connected server", {
+    logMcpRenderer("error", "Tool not found in any server", {
       operation: "executeToolCall",
       toolName,
       duration,
@@ -381,6 +387,35 @@ export async function executeToolCall(
       result: null,
       error: `Tool ${toolName} not found in any connected server`,
     };
+  }
+
+  // Auto-reconnect if needed
+  if (!server.connected) {
+    logMcpRenderer("info", "Server disconnected, attempting auto-reconnect", {
+        operation: "executeToolCall",
+        toolName,
+        serverId: server.id,
+        serverName: server.name
+    });
+
+    try {
+        await connectServer(server.id);
+        // Refresh server reference
+        const refreshedServer = connectedServers.get(server.id);
+        if (refreshedServer) {
+            server = refreshedServer;
+            // Verify tool still exists
+            if (!server.tools.some(t => t.name === toolName)) {
+                throw new Error(`Tool ${toolName} not found after reconnection`);
+            }
+        }
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Reconnection failed";
+        return {
+            result: null,
+            error: `Failed to reconnect to server ${server.name}: ${errorMessage}`
+        };
+    }
   }
 
   logMcpRenderer("info", "Tool found, executing via server", {
@@ -410,7 +445,8 @@ export async function executeToolCall(
       if (isConnectionClosed) {
         // Update server state to reflect disconnected status
         server.connected = false;
-        server.tools = [];
+        // Don't clear tools - allow for auto-reconnect next time
+        // server.tools = [];
         server.error = "Connection closed unexpectedly";
         connectedServers.set(server.id, server);
         await saveServersToStorage();
@@ -575,9 +611,33 @@ async function loadServersFromStorage(): Promise<void> {
     );
 
     if (stored && Array.isArray(stored) && stored.length > 0) {
+      // Auto-migration: Fix invalid Playwright package name in existing configs
+      let migrationNeeded = false;
+      const invalidPackages = ["@modelcontextprotocol/server-playwright", "@executeautomation/playwright-mcp-server"];
+      const validPackage = "@playwright/mcp";
+      
+      const migratedStored = stored.map(s => {
+        if (s.name === "playwright" && s.args) {
+          const hasInvalidPackage = invalidPackages.some(pkg => s.args!.includes(pkg));
+          if (hasInvalidPackage) {
+            console.log("Migrating Playwright server to use valid package");
+            migrationNeeded = true;
+            return {
+              ...s,
+              args: s.args!.map(arg => invalidPackages.includes(arg) ? validPackage : arg)
+            };
+          }
+        }
+        return s;
+      });
+
+      if (migrationNeeded) {
+         await electron.store.set(STORAGE_KEYS.MCP_SERVERS, migratedStored);
+      }
+
       // Restore servers, resetting runtime state
       connectedServers = new Map(
-        stored.map((s) => [
+        migratedStored.map((s) => [
           s.id,
           {
             ...s,

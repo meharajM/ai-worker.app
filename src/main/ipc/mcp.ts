@@ -19,12 +19,12 @@ interface McpLogContext {
 
 function logMcpOperation(level: 'info' | 'warn' | 'error', message: string, context: McpLogContext): void {
     const timestamp = new Date().toISOString()
-    const logEntry = {
-        timestamp,
-        level,
-        message,
-        ...context,
-    }
+    // const logEntry = {
+    //     timestamp,
+    //     level,
+    //     message,
+    //     ...context,
+    // }
     
     const logMessage = `[MCP ${level.toUpperCase()}] ${timestamp} - ${message}`
     const contextStr = JSON.stringify(context, null, 2)
@@ -118,6 +118,8 @@ export function registerMcpHandlers(): void {
             url: type === 'sse' ? url : undefined,
         })
 
+        let stderrBuffer = ''
+
         try {
             if (activeConnections.has(id)) {
                 logMcpOperation('warn', 'MCP server already connected', {
@@ -173,6 +175,7 @@ export function registerMcpHandlers(): void {
                             serverId: id,
                             exitCode: code,
                             signal: signal || undefined,
+                            stderr: stderrBuffer
                         })
                         
                         // Clean up connection if process exits unexpectedly
@@ -187,13 +190,13 @@ export function registerMcpHandlers(): void {
                             operation: 'process-monitor',
                             serverId: id,
                             error: error.message,
+                            stderr: stderrBuffer
                         })
                         cleanupClosedConnection(id)
                     })
                     
                     // Monitor stderr for server errors
                     if (process.stderr) {
-                        let stderrBuffer = ''
                         process.stderr.on('data', (data: Buffer) => {
                             stderrBuffer += data.toString()
                             // Log stderr for debugging
@@ -242,8 +245,13 @@ export function registerMcpHandlers(): void {
             return { success: true, serverId: id }
         } catch (error) {
             const duration = Date.now() - startTime
-            const errorMessage = error instanceof Error ? error.message : String(error)
+            let errorMessage = error instanceof Error ? error.message : String(error)
             
+            // Append stderr if available and relevant
+            if (stderrBuffer && stderrBuffer.trim().length > 0) {
+                 errorMessage += `\n\nProcess Error Output:\n${stderrBuffer}`
+            }
+
             logMcpOperation('error', 'MCP connection failed', {
                 operation: 'connect',
                 serverId: id,
@@ -417,9 +425,7 @@ export function registerMcpHandlers(): void {
             
             const duration = Date.now() - startTime
             const resultSize = JSON.stringify(result).length
-            const resultPreview = typeof result === 'string' 
-                ? result.substring(0, 200) 
-                : JSON.stringify(result).substring(0, 200)
+            const resultPreview = JSON.stringify(result).substring(0, 200)
             
             logMcpOperation('info', 'MCP tool call completed successfully', {
                 operation: 'call-tool',

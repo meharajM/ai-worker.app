@@ -416,8 +416,10 @@ class WebLLMManager {
 
             // Only pass tools if model supports them
             let openAITools: any[] | undefined;
-            if (supportsNativeTools && tools && tools.length > 0) {
-                openAITools = tools.map(t => ({
+            // DISABLE native tools for now to prevent "Unknown error" crashes in WebLLM
+            // We'll rely on our robust JSON fallback parsing instead
+            if (false && supportsNativeTools && tools && tools?.length > 0) {
+                openAITools = tools?.map(t => ({
                     type: 'function' as const,
                     function: {
                         name: t.name,
@@ -428,13 +430,23 @@ class WebLLMManager {
             }
 
             const response = await this.engine.chat.completions.create({
-                messages: messages.map(m => ({
-                    role: m.role,
-                    content: m.content,
-                })),
-                ...(openAITools ? { tools: openAITools } : {}),
+                messages: messages.map(m => {
+                    // Start of Selection
+                    const role = m.role as string;
+                    if (role === 'tool') {
+                        return {
+                            role: 'user',
+                            content: `[Tool Result] ${m.content}`
+                        };
+                    }
+                    return {
+                        role: m.role,
+                        content: m.content,
+                    };
+                }),
+                // ...(openAITools ? { tools: openAITools } : {}), // Disabled to prevent crash
                 temperature: 0.7,
-                max_tokens: 2048,
+                max_tokens: 256, // Reduced for faster responses on small context models
             });
 
             const choice = response.choices[0];
@@ -452,8 +464,8 @@ class WebLLMManager {
                 }));
             }
 
-            // For models without native tool calling, try to parse JSON from content
-            if (!toolCalls && !supportsNativeTools && tools && tools.length > 0 && message.content) {
+            // For models without native tool calling (OR if model failed to use native format), try to parse JSON from content
+            if (!toolCalls && tools && tools.length > 0 && message.content) {
                 toolCalls = this.parseToolCallsFromContent(message.content);
             }
 
@@ -463,6 +475,66 @@ class WebLLMManager {
             };
         } catch (error) {
             console.error('[WebLLM] Chat error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Stream chat responses for better perceived performance.
+     * Yields content chunks as they are generated.
+     */
+    public async chatStream(
+        messages: WebLLMMessage[],
+        onChunk: (chunk: string, fullContent: string) => void,
+        tools?: { name: string; description: string; parameters: Record<string, unknown> }[]
+    ): Promise<WebLLMResponse> {
+        if (!this.engine || !this.status.isLoaded) {
+            throw new Error('Model not loaded. Please load a model first.');
+        }
+
+        try {
+            const response = await this.engine.chat.completions.create({
+                messages: messages.map(m => {
+                    const role = m.role as string;
+                    if (role === 'tool') {
+                        return {
+                            role: 'user',
+                            content: `[Tool Result] ${m.content}`
+                        };
+                    }
+                    return {
+                        role: m.role,
+                        content: m.content,
+                    };
+                }),
+                temperature: 0.7,
+                max_tokens: 256,
+                stream: true,
+            });
+
+            let fullContent = '';
+            
+            // Iterate over the stream
+            for await (const chunk of response as AsyncIterable<any>) {
+                const delta = chunk.choices[0]?.delta?.content || '';
+                if (delta) {
+                    fullContent += delta;
+                    onChunk(delta, fullContent);
+                }
+            }
+
+            // Try to parse tool calls from the final content
+            let toolCalls: WebLLMToolCall[] | undefined;
+            if (tools && tools.length > 0 && fullContent) {
+                toolCalls = this.parseToolCallsFromContent(fullContent);
+            }
+
+            return {
+                content: fullContent,
+                toolCalls,
+            };
+        } catch (error) {
+            console.error('[WebLLM] Chat stream error:', error);
             throw error;
         }
     }
@@ -575,6 +647,14 @@ export const chatWithWebLLM = async (
     tools?: { name: string; description: string; parameters: Record<string, unknown> }[]
 ): Promise<WebLLMResponse> => {
     return webLLMManager.chat(messages, tools);
+};
+
+export const chatStreamWithWebLLM = async (
+    messages: WebLLMMessage[],
+    onChunk: (chunk: string, fullContent: string) => void,
+    tools?: { name: string; description: string; parameters: Record<string, unknown> }[]
+): Promise<WebLLMResponse> => {
+    return webLLMManager.chatStream(messages, onChunk, tools);
 };
 
 export const subscribeToWebLLMStatus = (callback: StatusCallback): (() => void) => {

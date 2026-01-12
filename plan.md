@@ -329,6 +329,29 @@ ai-worker-app/
 
 ---
 
+### ✅ Phase 13: WebLLM Optimization [COMPLETED]
+
+**Goal:** Improve performance and reliability of on-device models
+
+**Implementation:**
+
+- [x] Context window management (token estimation & truncation)
+- [x] Compact system prompt generation
+- [x] Fix JSON parsing for nested tool calls
+- [x] Implement streaming responses for WebLLM
+- [x] Add cloud fallback on timeout/error
+- [x] Increase timeout allowance (120s)
+- [x] Reduce response token limit (256)
+
+**Validation:** ✅
+
+- [x] Long conversations don't crash context
+- [x] Responses stream incrementally
+- [x] Fallback to OpenAI/Ollama works on timeout
+- [x] Tool calls execute reliably
+
+---
+
 ### ✅ Phase 12: Feature Flag Enhancements [COMPLETED]
 
 **Goal:** Enhance feature flag system with dynamic controls and validation

@@ -71,21 +71,8 @@ export function ChatView({ onClearChat }: ChatViewProps) {
                     ))
                 )}
 
-                {/* Processing indicator */}
-                {isProcessing && (
-                    <div className="flex gap-3 justify-start">
-                        <div className="w-8 h-8 rounded-lg bg-[#00a896] flex items-center justify-center flex-shrink-0">
-                            <Bot size={18} className="text-white" />
-                        </div>
-                        <div className="bg-[#1a1d23] border border-white/10 rounded-2xl px-4 py-3">
-                            <div className="flex gap-1.5">
-                                <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                                <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                                <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
-                            </div>
-                        </div>
-                    </div>
-                )}
+                {/* Processing indicator - Removed (handled in MessageBubble now) */}
+                {/* {isProcessing && ( ... )} */}
 
                 {/* Scroll anchor */}
                 <div ref={messagesEndRef} />
