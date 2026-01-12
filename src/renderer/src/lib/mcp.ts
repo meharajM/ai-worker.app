@@ -32,23 +32,23 @@ const DEFAULT_MCP_SERVERS: Omit<
   MCPServer,
   "id" | "connected" | "tools" | "autoConnect"
 >[] = [
-  {
-    name: "playwright",
-    description:
-      "Playwright MCP Server - Browser automation and web interaction tools",
-    type: "stdio",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-playwright"],
-  },
-  {
-    name: "sequential-thinking",
-    description:
-      "Sequential Thinking MCP Server - Enables step-by-step reasoning for complex tasks",
-    type: "stdio",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
-  },
-];
+    {
+      name: "playwright",
+      description:
+        "Playwright MCP Server - Browser automation and web interaction tools",
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-playwright"],
+    },
+    {
+      name: "sequential-thinking",
+      description:
+        "Sequential Thinking MCP Server - Enables step-by-step reasoning for complex tasks",
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+    },
+  ];
 
 // Store for connected servers
 let connectedServers: Map<string, MCPServer> = new Map();
@@ -472,6 +472,28 @@ export async function executeToolCall(
       error: errorMessage,
     };
   }
+}
+
+// Compress large tool results for small context LLMs
+export async function executeToolWithCompression(name: string, args: any) {
+  const result = await executeToolCall(name, args);
+
+  // Compress large results
+  if (result.result && typeof result.result === 'object') {
+    const data = result.result as Record<string, any>;
+    const keys = Object.keys(data);
+    if (keys.length > 3) {
+      return {
+        result: {
+          ...Object.fromEntries(keys.slice(0, 3).map(k => [k, data[k]])),
+          _compressed: true
+        },
+        error: result.error
+      };
+    }
+  }
+
+  return result;
 }
 
 // Set auto-connect preference for a server

@@ -67,7 +67,9 @@ export const useAuthStore = create<AuthState>()(
 
                 try {
                     // TODO: Implement actual Firebase Google sign-in
-                    // For now, simulate auth
+                    // This requires valid Firebase configuration (API keys, etc.)
+                    // and enabling Google Auth provider in Firebase Console.
+                    // For now, simulate auth to allow UI testing.
                     await new Promise((resolve) => setTimeout(resolve, 1000))
 
                     // Mock user for development
@@ -93,6 +95,7 @@ export const useAuthStore = create<AuthState>()(
 
                 try {
                     // TODO: Implement actual Firebase sign out
+                    // This requires firebase/auth library and initialized app
                     await new Promise((resolve) => setTimeout(resolve, 500))
                     set({ user: null, loading: false })
                 } catch (error) {

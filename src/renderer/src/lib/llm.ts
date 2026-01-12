@@ -726,146 +726,63 @@ function parseToolCallsFromJson(
 // Build robust but token-efficient system prompt
 function buildSystemPrompt(
   tools?: LLMTool[],
-  servers?: ServerInfo[],
+  _servers?: ServerInfo[],
   useJsonFallback = false
 ): string {
   const toolCount = tools?.length || 0;
-  const serverCount = servers?.length || 0;
 
   if (toolCount === 0) {
-    return `You are AI-Worker, a helpful voice-first assistant. When tools become available, use them to perform actions instead of providing manual instructions. Be concise for voice output.`;
+    return `You are AI-Worker, a helpful assistant. Be concise and natural.`;
   }
 
-  // Ensure we have tools - this should never happen if tools are passed correctly
-  if (!tools || tools.length === 0) {
-    console.warn("buildSystemPrompt called with empty tools array");
-    return `You are AI-Worker, a helpful voice-first assistant. When tools become available, use them to perform actions instead of providing manual instructions. Be concise for voice output.`;
+  // Build compact tools list
+  const compactToolList = tools
+    ?.map(t => `${t.name}:${t.description.substring(0, 40)}(${Object.keys(t.parameters || {}).join(',')})`)
+    .join(' | ') || "";
+
+  if (useJsonFallback) {
+    return `You are AI-Worker, an autonomous assistant with tool access.
+
+## CRITICAL FORMATTING RULES:
+1. ALWAYS start with <THINK>brief reasoning</THINK>
+2. If tool needed: add <TOOL>{"name":"tool_name","args":{}}</TOOL>
+3. If final answer: provide after </THINK> with no <TOOL> tag
+4. ONE tool per response maximum
+5. Keep reasoning under 2 sentences
+
+## AVAILABLE TOOLS (use exact names):
+${compactToolList}
+
+## REMEMBER:
+- Wait for tool result before next step
+- No multiple tools in one response
+- Final answer: natural language after </THINK>
+- Keep responses EXTREMELY concise`;
   }
 
-  // Add JSON format instruction if using fallback
-  const jsonFormatNote = useJsonFallback
-    ? `\n\n**CRITICAL: JSON TOOL CALLING FORMAT**\nThis model doesn't support native tool calling. When you need to use a tool, return ONLY a JSON object (no markdown, no code blocks, no text before/after, just raw JSON):\n{\n  "tool_calls": [\n    {\n      "name": "tool_name",\n      "arguments": {"param": "value"}\n    }\n  ]\n}\n\nIMPORTANT: 
-- If you need to use tools, return ONLY the JSON object, nothing else
-- If no tools are needed, respond with normal text
-- The JSON must be valid and parseable
-- Use the exact tool names from the "Available Tools" section above`
-    : "";
-
-  // Build tools description - compact format with name and description
+  // Build tools description for native tool calling providers (Ollama/OpenAI)
   const toolsDescription =
     tools
       ?.map((tool, idx) => {
-        // Extract key parameters for context (if available)
-        const params = tool.parameters as
-          | { properties?: Record<string, unknown>; required?: string[] }
-          | undefined;
-        const properties = params?.properties || {};
+        const properties = (tool.parameters as any)?.properties || {};
         const paramNames = Object.keys(properties).slice(0, 3).join(", ");
         const paramHint = paramNames
-          ? ` (params: ${paramNames}${Object.keys(properties).length > 3 ? "..." : ""
-          })`
+          ? ` (params: ${paramNames}${Object.keys(properties).length > 3 ? "..." : ""})`
           : "";
 
-        return `${idx + 1}. **${tool.name}**${paramHint}\n   ${tool.description
-          }`;
+        return `${idx + 1}. **${tool.name}**${paramHint}\n   ${tool.description}`;
       })
       .join("\n\n") || "";
 
-  // Group tools by server if we have server info (for context)
-  let serverContext = "";
-  if (serverCount > 0 && servers) {
-    const serverList = servers
-      .map((s) => {
-        console.log("server", s);
-        if (s.isReasoningServer) {
-          return `${s.name} (reasoning server - provides step-by-step reasoning capabilities)`;
-        }
-        return `${s.name} (${s.toolCount} tool${s.toolCount !== 1 ? "s" : ""})`;
-      })
-      .join(", ");
-
-    const reasoningServers = servers.filter((s) => s.isReasoningServer);
-    const reasoningNote =
-      reasoningServers.length > 0
-        ? `\n\n**Reasoning Servers Available**: ${reasoningServers
-            .map((s) => s.name)
-            .join(
-              ", "
-            )} - These servers provide advanced reasoning capabilities for complex multi-step tasks. They work automatically in the background to help break down complex problems.`
-        : "";
-
-    serverContext = `\n\n## Connected MCP Servers\nThese are Model Context Protocol (MCP) servers that provide the tools listed above:\n${serverList}${reasoningNote}\n\nWhen users ask about "MCP servers" or "what tools do you have", refer to the tools and servers listed above.`;
-  }
-
-  // Detect browser tools for special emphasis
-  const toolNames = tools?.map((t) => t.name).join(", ") || "";
-  const toolNamesLower = toolNames.toLowerCase();
-  const hasBrowserOps =
-    toolNamesLower.includes("browser") ||
-    toolNamesLower.includes("navigate") ||
-    toolNamesLower.includes("screenshot") ||
-    toolNamesLower.includes("playwright") ||
-    toolNamesLower.includes("goto") ||
-    toolNamesLower.includes("url");
-
-  // Special emphasis for browser capabilities (addresses training bias)
-  let browserCapabilityNote = "";
-  if (hasBrowserOps) {
-    browserCapabilityNote = `\n\n**IMPORTANT: You have browser control tools available!** You CAN open websites, navigate to URLs, take screenshots, and interact with web pages. When users ask to "open [website]" or "go to [URL]", use the browser navigation tool immediately. Do NOT say you cannot open browsers - you have the tools to do it!
-
-**MULTI-STEP BROWSER TASKS**: For complex browser tasks like "search for X on Google" or "fill out a form", you MUST complete ALL steps:
-1. Navigate to the website (e.g., browser_navigate to google.com)
-2. Wait for the page to load (check the result)
-3. Fill in search boxes or forms (e.g., browser_type or browser_fill)
-4. Submit or click buttons (e.g., browser_click or browser_press_key)
-5. Continue until the task is COMPLETE
-
-Example: "search for nike shoes on Google" requires:
-- Step 1: browser_navigate to google.com
-- Step 2: browser_type or browser_fill to enter "nike shoes" in the search box
-- Step 3: browser_click the search button OR browser_press_key Enter
-- Step 4: Verify the search completed (check results)
-
-DO NOT stop after just navigating - complete the entire workflow!`;
-  }
-
-  return `You are a helpful AI assistant with access to ${toolCount} tool${toolCount !== 1 ? "s" : ""
-    } from ${serverCount} connected server${serverCount !== 1 ? "s" : ""
-    }. When users ask you to perform actions, you MUST use the appropriate tools instead of providing manual instructions.${jsonFormatNote}
+  return `You are AI-Worker, a helpful AI assistant with access to ${toolCount} tool${toolCount !== 1 ? "s" : ""}. 
 
 # Available Tools
-${toolsDescription}${serverContext}${browserCapabilityNote}
+${toolsDescription}
 
 # CRITICAL RULES
-1. **USE TOOLS, DON'T EXPLAIN**: When a user asks you to DO something (create, update, search, navigate, read, write, execute, etc.), immediately use the appropriate tool. Never provide step-by-step instructions or templates when a tool can do it.
-
-2. **AUTONOMOUS EXECUTION**: Execute tool calls immediately without asking for permission, unless the action is destructive or irreversible (like deleting files, formatting drives, etc.).
-
-3. **ITERATIVE EXECUTION**: You can call multiple tools in sequence. After one tool completes, you'll receive its result and can use that information to call the next tool.
-
-4. **CHAINED WORKFLOWS**: For complex tasks requiring multiple steps:
-   - Call the first tool immediately
-   - Wait for its result
-   - Use information from that result in the next tool call
-   - Repeat until the workflow is complete
-   - Example: Read file → Parse content → Create new file with processed data
-
-5. **CONFIRM WITH RESULTS**: After using tool(s), confirm the action with specific details from the tool's response:
-   - File paths, IDs, or keys created/updated
-   - Direct links/URLs if available (look for fields like 'url', 'link', 'web_url', 'self', 'path', etc.)
-   - Status or confirmation of the action taken
-   - Any relevant data retrieved
-
-6. **HANDLE ERRORS**: If a tool fails, explain the specific error clearly and offer to retry with corrections if applicable.
-
-7. **VOICE-OPTIMIZED**: All responses will be read aloud. Keep them concise, natural, and conversational. Use shorter sentences and pause-friendly phrasing.
-
-# Response Pattern
-- User asks to create/update/search/read/write/navigate → You call the tool immediately → You confirm: "Done! [specific details from response]"
-- User asks for complex workflow → You call tools iteratively in sequence → You provide comprehensive summary
-- User asks for help/instructions → You explain what's available but ALWAYS prefer using tools when applicable
-
-Remember: Your goal is to TAKE ACTION using tools, not to teach users how to do it themselves. You can call tools multiple times in sequence to accomplish complex tasks!`;
+1. **USE TOOLS, DON'T EXPLAIN**: When a user asks you to DO something, immediately use the appropriate tool.
+2. **ITERATIVE EXECUTION**: You can call tools in sequence. After one tool completes, you'll receive its result and can call the next tool.
+3. **CONCISE**: Keep responses concise and natural.`;
 }
 
 // Main chat function - automatically selects best provider
@@ -873,7 +790,8 @@ export async function chat(
   messages: LLMMessage[],
   tools?: LLMTool[],
   settings?: LLMSettings,
-  servers?: ServerInfo[]
+  servers?: ServerInfo[],
+  options: { useSequentialPrompt?: boolean } = {}
 ): Promise<LLMResponse> {
   const providers = await getAvailableProviders(settings);
 
@@ -904,10 +822,8 @@ export async function chat(
     );
   }
 
-  // Try to detect if we need JSON fallback (will be handled in callOpenAI if error occurs)
-  // For browser (WebLLM), we always use JSON fallback for now to ensure compatibility
-  // across all models (Qwen, Llama, etc.) without native tool calling errors
-  let useJsonFallback = provider === 'browser';
+  // Try to detect if we need JSON fallback
+  let useJsonFallback = provider === 'browser' || options.useSequentialPrompt;
 
   // Add system message if not present, or replace existing one to ensure it has tools
   let messagesWithSystem = [...messages];
@@ -915,21 +831,23 @@ export async function chat(
     (m) => m.role === "system"
   );
 
-  // Re-build system prompt with current tools and correct fallback setting
-  const systemPrompt = buildSystemPrompt(tools, servers, useJsonFallback);
+  // Re-build system prompt if not already a sequential prompt
+  const existingSystemMsg = systemMsgIndex >= 0 ? messagesWithSystem[systemMsgIndex].content : "";
+  const isAlreadySequential = existingSystemMsg.includes("<THINK>") && existingSystemMsg.includes("<TOOL>");
 
-  if (systemMsgIndex >= 0) {
-    // Replace existing system message to ensure it has current tools
-    messagesWithSystem[systemMsgIndex] = {
-      role: "system" as const,
-      content: systemPrompt,
-    };
-  } else {
-    // Add new system message
-    messagesWithSystem.unshift({
-      role: "system" as const,
-      content: systemPrompt,
-    });
+  if (!isAlreadySequential) {
+    const systemPrompt = buildSystemPrompt(tools, servers, useJsonFallback);
+    if (systemMsgIndex >= 0) {
+      messagesWithSystem[systemMsgIndex] = {
+        role: "system" as const,
+        content: systemPrompt,
+      };
+    } else {
+      messagesWithSystem.unshift({
+        role: "system" as const,
+        content: systemPrompt,
+      });
+    }
   }
 
   switch (provider) {

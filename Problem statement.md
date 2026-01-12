@@ -69,14 +69,19 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
   - API key management
   - Custom base URL support
   - Default model: `gpt-4o-mini`
-- ✅ **Browser LLM detection** - Support for Gemini Nano/Phi (feature-flagged)
+- ✅ **WebLLM Integration** - In-browser local inference via WebGPU
+  - **Models**: Hermes 2 Pro (8B), Qwen 2.5 (1.5B), Llama 3.2 (1B), Phi 3.5 Mini
+  - **Tool Calling**: Native support or JSON fallback depending on model
+  - **Memory Management**: Automatic unloading on memory pressure or idle
+  - **Task Analysis**: Complexity analysis for local vs cloud offloading
 - ✅ **Provider auto-selection** - Automatic fallback between providers
-- ✅ **Provider priority** - Browser → Ollama → OpenAI fallback chain
+- ✅ **Provider priority** - Browser (WebLLM) → Ollama → OpenAI fallback chain
 
 #### 3.2 LLM Configuration
 - ✅ **Provider selection** - User can choose preferred provider (auto/ollama/openai/browser)
 - ✅ **API key management** - Secure storage of OpenAI API keys
 - ✅ **Model configuration** - Per-provider model selection
+- ✅ **WebLLM Management** - Download, delete, and manage local browser models
 - ✅ **Status indicators** - Real-time LLM availability status in header
 - ✅ **Provider health checks** - Automatic provider availability detection
 
@@ -117,6 +122,7 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 - ✅ **Provider selection** - Choose preferred LLM provider
 - ✅ **Ollama configuration** - Model and base URL settings
 - ✅ **OpenAI configuration** - API key, base URL, and model settings
+- ✅ **WebLLM configuration** - Model selection, download status, and memory stats
 - ✅ **Provider status display** - Real-time availability checking
 
 #### 5.2 Voice Settings
@@ -163,9 +169,11 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 ### 8. Cross-Platform Support
 
 #### 8.1 Build & Distribution
-- ✅ **macOS support** - DMG and ZIP distribution
+- ✅ **macOS support** - DMG and ZIP distribution (Universal/Intel/ARM)
 - ✅ **Windows support** - NSIS installer and portable EXE
 - ✅ **Linux support** - AppImage and deb package formats
+- ✅ **Cross-Compilation** - Wine integration for building Windows apps on Linux
+- ✅ **CI/CD Pipeline** - GitHub Actions for automated testing and multi-platform releases
 - ✅ **Auto-update infrastructure** - Electron updater configuration
 
 #### 8.2 Platform-Specific Features
@@ -187,6 +195,7 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 
 #### 1.2 Resource Management
 - ✅ **Memory efficiency** - Zustand state management with persistence
+- ✅ **WebLLM Optimization** - Intelligent unloading on memory pressure
 - ✅ **Connection pooling** - Efficient MCP client connection management
 - ✅ **Lazy loading** - Component-based code splitting
 
@@ -203,7 +212,7 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 
 #### 2.2 Privacy
 - ✅ **Anonymous mode** - Works without authentication
-- ✅ **Local processing** - Support for local LLMs (Ollama)
+- ✅ **Local processing** - Support for local LLMs (Ollama) and In-Browser (WebLLM)
 - ✅ **No telemetry** - Privacy-focused, no tracking
 - ✅ **User data control** - All data stored locally
 
@@ -218,14 +227,14 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 
 #### 3.2 Interface Design
 - ✅ **Modern UI** - Tailwind CSS with dark theme
+- ✅ **Design System** - Standardized components (Cards, Inputs, Buttons)
 - ✅ **Responsive layout** - Flexible component layout
 - ✅ **Icon system** - Lucide React icons for visual clarity
-- ✅ **Color coding** - Status indicators with color (green/yellow/red)
 
 ### 4. Reliability
 
 #### 4.1 Error Handling
-- ✅ **Graceful degradation** - Fallback between LLM providers
+- ✅ **Graceful degradation** - Fallback between LLM providers (WebLLM -> Ollama -> OpenAI)
 - ✅ **Connection retry logic** - MCP connection error handling
 - ✅ **Error recovery** - User-friendly error messages with solutions
 - ✅ **Validation** - Input validation for server configurations
@@ -236,10 +245,15 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 - ✅ **IPC communication** - Secure Electron IPC handlers
 - ✅ **ESM compatibility** - Proper ESM shims for Node.js
 
+#### 4.3 Testing & QA
+- ✅ **Unit Testing** - Vitest for component and logic testing
+- ✅ **Integration Testing** - E2E flows with mocked LLM/MCP responses
+- ✅ **CI Integration** - Automated test runs on pull requests
+
 ### 5. Maintainability
 
 #### 5.1 Code Organization
-- ✅ **Modular architecture** - Separated IPC handlers, components, stores
+- ✅ **Modular architecture** - Separated IPC handlers, components, stores, lib
 - ✅ **Component reusability** - Reusable UI components (Header, Sidebar, Cards)
 - ✅ **Separation of concerns** - Clear boundaries between main/renderer processes
 - ✅ **Type definitions** - Comprehensive TypeScript types
@@ -260,7 +274,7 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 
 #### 6.2 Future-Proofing
 - ✅ **Local-first design** - Ready for local LLM integration
-- ✅ **Browser LLM support** - Prepared for Gemini Nano/Phi
+- ✅ **Browser LLM support** - Full WebLLM integration with multiple models
 - ✅ **Authentication ready** - Firebase Auth infrastructure in place
 - ✅ **Rate limiting framework** - Ready for production rate limits
 
@@ -268,6 +282,7 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 
 #### 7.1 Browser Compatibility
 - ✅ **Web Speech API** - Standard browser APIs
+- ✅ **WebGPU Support** - Hardware accelerated in-browser inference
 - ✅ **Modern JavaScript** - ES6+ features
 - ✅ **Electron compatibility** - Electron 30+ support
 
@@ -299,6 +314,7 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 - ✅ Zero Trust architecture for data processing
 - ✅ Local-first data storage
 - ✅ Support for local LLMs (Ollama)
+- ✅ **On-Device AI** (WebLLM) running entirely in the browser
 - ✅ Anonymous mode operation
 - ✅ No telemetry or tracking
 
@@ -344,14 +360,23 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 
 ### LLM Providers
 - **Ollama:** Local LLM support
+- **WebLLM:** In-browser WebGPU inference (MLC AI)
 - **OpenAI:** Cloud LLM support
-- **Browser:** Future Gemini Nano/Phi support
+
+### Testing Stack
+- **Unit/Integration:** Vitest
+- **E2E:** Playwright (Mocked)
+- **Environment:** JSDOM, Electron-Vite
+
+### CI/CD
+- **Platform:** GitHub Actions
+- **Builds:** Matrix build (Linux, Windows via Wine, macOS)
 
 ---
 
 ## Implementation Status
 
-### Completed Phases (1-12)
+### Completed Phases (1-13)
 - ✅ Phase 1: Project Setup
 - ✅ Phase 2: Voice & Text Input
 - ✅ Phase 3: Chat Messages & State
@@ -364,9 +389,10 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 - ✅ Phase 10: Robustness & DX
 - ✅ Phase 11: Code Refactoring & Architecture Improvement
 - ✅ Phase 12: Feature Flag Enhancements
+- ✅ Phase 13: Advanced WebLLM & Testing Infrastructure
 
 ### Current Status
-**Production-ready with modular architecture and enhanced feature flags.** All core features implemented and tested, including validated feature flags and TTS controls. Codebase refactored for maintainability. Cross-platform builds verified for Mac, Windows, and Linux.
+**Production-ready with modular architecture and local intelligence.** All core features implemented. WebLLM integration allows for true local-first AI without external dependencies. Testing infrastructure (Unit/E2E) ensures reliability. Cross-platform builds verified (Mac, Windows, Linux).
 
 ---
 
@@ -376,13 +402,7 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 AUTH_ENABLED: false              // Firebase Auth (ready but disabled)
 RATE_LIMITING_ENABLED: false     // Rate limiting (ready but disabled)
 TTS_ENABLED: true                // Text-to-speech (active)
-BROWSER_LLM_ENABLED: true        // Browser LLM detection and implementation (active)
+BROWSER_LLM_ENABLED: true        // WebLLM WebGPU models (active)
 OLLAMA_ENABLED: true             // Ollama support (active)
 CLOUD_LLM_ENABLED: true          // OpenAI support (active)
 ```
-
----
-
-**Last Updated:** 2024-12-29  
-**Version:** 0.1.0  
-**Status:** MVP Complete - Production Ready

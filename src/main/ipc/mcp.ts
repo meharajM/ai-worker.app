@@ -19,16 +19,19 @@ interface McpLogContext {
 
 function logMcpOperation(level: 'info' | 'warn' | 'error', message: string, context: McpLogContext): void {
     const timestamp = new Date().toISOString()
+    // Log entry structure for future file logging
+    /*
     const logEntry = {
         timestamp,
         level,
         message,
         ...context,
     }
-    
+    */
+
     const logMessage = `[MCP ${level.toUpperCase()}] ${timestamp} - ${message}`
     const contextStr = JSON.stringify(context, null, 2)
-    
+
     switch (level) {
         case 'error':
             console.error(logMessage)
@@ -47,11 +50,11 @@ function logMcpOperation(level: 'info' | 'warn' | 'error', message: string, cont
 // Check if error indicates connection was closed
 function isConnectionClosedError(error: string | Error): boolean {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    return errorMessage.includes('-32000') || 
-           errorMessage.includes('Connection closed') ||
-           errorMessage.includes('connection closed') ||
-           errorMessage.includes('ECONNRESET') ||
-           errorMessage.includes('EPIPE')
+    return errorMessage.includes('-32000') ||
+        errorMessage.includes('Connection closed') ||
+        errorMessage.includes('connection closed') ||
+        errorMessage.includes('ECONNRESET') ||
+        errorMessage.includes('EPIPE')
 }
 
 // Clean up a closed connection
@@ -65,13 +68,13 @@ function cleanupClosedConnection(serverId: string): void {
             })
             activeConnections.delete(serverId)
         }
-        
+
         // Clean up process reference
         const process = activeProcesses.get(serverId)
         if (process) {
             activeProcesses.delete(serverId)
         }
-        
+
         logMcpOperation('info', 'Cleaned up closed connection', {
             operation: 'cleanup',
             serverId,
@@ -89,10 +92,10 @@ function cleanupClosedConnection(serverId: string): void {
 // Sanitize arguments for logging (remove sensitive data)
 function sanitizeArgs(args: unknown): unknown {
     if (!args || typeof args !== 'object') return args
-    
+
     const sanitized = { ...args as Record<string, unknown> }
     const sensitiveKeys = ['password', 'apiKey', 'token', 'secret', 'key', 'auth']
-    
+
     for (const key in sanitized) {
         if (sensitiveKeys.some(sk => key.toLowerCase().includes(sk.toLowerCase()))) {
             sanitized[key] = '***REDACTED***'
@@ -100,7 +103,7 @@ function sanitizeArgs(args: unknown): unknown {
             sanitized[key] = sanitizeArgs(sanitized[key])
         }
     }
-    
+
     return sanitized
 }
 
@@ -159,13 +162,13 @@ export function registerMcpHandlers(): void {
                     env: finalEnv,
                     stderr: 'pipe' // Capture stderr to monitor for errors
                 })
-                
+
                 // Monitor the underlying process for crashes
                 const transportAny = transport as any
                 if (transportAny.process) {
                     const process = transportAny.process as ChildProcess
                     activeProcesses.set(id, process)
-                    
+
                     // Monitor process exit
                     process.on('exit', (code, signal) => {
                         logMcpOperation('warn', 'MCP server process exited', {
@@ -174,13 +177,13 @@ export function registerMcpHandlers(): void {
                             exitCode: code,
                             signal: signal || undefined,
                         })
-                        
+
                         // Clean up connection if process exits unexpectedly
                         if (code !== 0 && code !== null) {
                             cleanupClosedConnection(id)
                         }
                     })
-                    
+
                     // Monitor process errors
                     process.on('error', (error) => {
                         logMcpOperation('error', 'MCP server process error', {
@@ -190,7 +193,7 @@ export function registerMcpHandlers(): void {
                         })
                         cleanupClosedConnection(id)
                     })
-                    
+
                     // Monitor stderr for server errors
                     if (process.stderr) {
                         let stderrBuffer = ''
@@ -243,7 +246,7 @@ export function registerMcpHandlers(): void {
         } catch (error) {
             const duration = Date.now() - startTime
             const errorMessage = error instanceof Error ? error.message : String(error)
-            
+
             logMcpOperation('error', 'MCP connection failed', {
                 operation: 'connect',
                 serverId: id,
@@ -267,7 +270,7 @@ export function registerMcpHandlers(): void {
 
     ipcMain.handle('mcp:disconnect', async (_event, serverId: string) => {
         const startTime = Date.now()
-        
+
         logMcpOperation('info', 'MCP disconnection requested', {
             operation: 'disconnect',
             serverId,
@@ -279,44 +282,44 @@ export function registerMcpHandlers(): void {
                 await client.close()
                 cleanupClosedConnection(serverId)
                 const duration = Date.now() - startTime
-                
+
                 logMcpOperation('info', 'MCP server disconnected successfully', {
                     operation: 'disconnect',
                     serverId,
                     duration,
                 })
-                
+
                 return { success: true }
             } catch (error) {
                 const duration = Date.now() - startTime
                 const errorMessage = error instanceof Error ? error.message : String(error)
-                
+
                 logMcpOperation('error', 'MCP disconnection failed', {
                     operation: 'disconnect',
                     serverId,
                     error: errorMessage,
                     duration,
                 })
-                
+
                 // Still clean up even if close failed
                 cleanupClosedConnection(serverId)
-                
+
                 return { success: false, error: errorMessage }
             }
         }
-        
+
         logMcpOperation('warn', 'MCP server not found for disconnection', {
             operation: 'disconnect',
             serverId,
             duration: Date.now() - startTime,
         })
-        
+
         return { success: true }
     })
 
     ipcMain.handle('mcp:list-tools', async (_event, serverId: string) => {
         const startTime = Date.now()
-        
+
         logMcpOperation('info', 'MCP list tools requested', {
             operation: 'list-tools',
             serverId,
@@ -337,7 +340,7 @@ export function registerMcpHandlers(): void {
             const duration = Date.now() - startTime
             const toolCount = result.tools?.length || 0
             const toolNames = result.tools?.map((t: { name: string }) => t.name) || []
-            
+
             // Some servers (like sequential-thinking) may not expose traditional tools
             // but still function as reasoning/prompting servers
             if (toolCount === 0) {
@@ -357,12 +360,12 @@ export function registerMcpHandlers(): void {
                     duration,
                 })
             }
-            
+
             return { tools: result.tools || [] }
         } catch (error) {
             const duration = Date.now() - startTime
             const errorMessage = error instanceof Error ? error.message : String(error)
-            
+
             // Check for connection closed error
             if (isConnectionClosedError(errorMessage)) {
                 logMcpOperation('warn', 'MCP connection closed unexpectedly, cleaning up', {
@@ -371,7 +374,7 @@ export function registerMcpHandlers(): void {
                     error: errorMessage,
                     duration,
                 })
-                
+
                 cleanupClosedConnection(serverId)
             } else {
                 logMcpOperation('error', 'MCP list tools failed', {
@@ -381,7 +384,7 @@ export function registerMcpHandlers(): void {
                     duration,
                 })
             }
-            
+
             return { tools: [], error: errorMessage }
         }
     })
@@ -389,7 +392,7 @@ export function registerMcpHandlers(): void {
     ipcMain.handle('mcp:call-tool', async (_event, serverId: string, toolName: string, args: unknown) => {
         const startTime = Date.now()
         const sanitizedArgs = sanitizeArgs(args)
-        
+
         logMcpOperation('info', 'MCP tool call initiated', {
             operation: 'call-tool',
             serverId,
@@ -414,13 +417,11 @@ export function registerMcpHandlers(): void {
                 name: toolName,
                 arguments: args as Record<string, unknown>
             })
-            
+
             const duration = Date.now() - startTime
             const resultSize = JSON.stringify(result).length
-            const resultPreview = typeof result === 'string' 
-                ? result.substring(0, 200) 
-                : JSON.stringify(result).substring(0, 200)
-            
+            const resultPreview = JSON.stringify(result).substring(0, 200)
+
             logMcpOperation('info', 'MCP tool call completed successfully', {
                 operation: 'call-tool',
                 serverId,
@@ -428,14 +429,14 @@ export function registerMcpHandlers(): void {
                 duration,
                 resultSize,
                 resultPreview: resultPreview + (resultSize > 200 ? '...' : ''),
-                hasError: false,
+                hasError: result.isError || false,
             })
-            
+
             return { result }
         } catch (error) {
             const duration = Date.now() - startTime
             const errorMessage = error instanceof Error ? error.message : String(error)
-            
+
             // Check for connection closed error
             if (isConnectionClosedError(errorMessage)) {
                 logMcpOperation('warn', 'MCP connection closed unexpectedly during tool call, cleaning up', {
@@ -446,7 +447,7 @@ export function registerMcpHandlers(): void {
                     duration,
                     hasError: true,
                 })
-                
+
                 cleanupClosedConnection(serverId)
             } else {
                 logMcpOperation('error', 'MCP tool call failed', {
@@ -459,7 +460,7 @@ export function registerMcpHandlers(): void {
                     hasError: true,
                 })
             }
-            
+
             return { result: null, error: errorMessage }
         }
     })

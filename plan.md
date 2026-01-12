@@ -394,8 +394,70 @@ ai-worker-app/
 
 ---
 
-<<<<<<< HEAD
-**Current Status:** Phases 1-12 complete. Codebase refactored for maintainability. Production-ready with modular architecture and enhanced feature flags.
-=======
-**Current Status:** Phases 1-12 complete. Default MCP servers configured. Codebase refactored for maintainability. Production-ready with modular architecture.
->>>>>>> c9cd8f5 (updating plan and artitechure)
+### ✅ Phase 13: Advanced WebLLM & Testing Infrastructure [COMPLETED]
+
+**Goal:** Implement high-performance in-browser AI and robust testing
+
+**Implementation:**
+- [x] Integrate `@mlc-ai/web-llm` for WebGPU-accelerated inference
+- [x] Create `src/renderer/src/lib/webllm.ts` (WebLLM manager)
+- [x] Implement Web Worker for model inference to prevent UI blocking
+- [x] Add model download, deletion, and management UI
+- [x] Implement task complexity analysis for local/cloud offloading
+- [x] Set up Vitest for unit and integration testing
+- [x] Create E2E test suite with mocked LLM/MCP responses
+
+**Validation:** ✅
+- [x] WebLLM models load and run via WebGPU
+- [x] UI reflects download progress and model availability
+- [x] Complexity analysis correctly suggests offloading for heavy tasks
+- [x] All unit and E2E tests passing in CI pipeline
+
+---
+
+## 🎙️ Voice UX Specification
+
+- **Primary Input:** Push-to-talk (click to start/stop)
+- **Secondary Input:** Text field (always visible)
+- **Output:** Text display + TTS readout (with mute toggle)
+
+---
+
+## 🧠 LLM Provider Priority
+
+1. Browser LLMs (Gemini Nano, Phi, Hermes) - detect & use if available
+2. Ollama (qwen2.5:3b) - local, fast, tool-capable
+3. OpenAI-compatible API - user provides key
+
+---
+
+## 🔗 MCP Client
+
+- Connects to external MCP servers
+- **Default Servers**: Playwright and Sequential Thinking configured automatically on first run
+- Generic "Add Connection" supports any Stdio or SSE server
+- Form pre-fills with Sequential Thinking configuration for quick setup
+- Integrated configuration editor for quick updates
+- Built-in runtime dependency helper for Node/Python/UV
+- Automatic default server restoration (adds missing defaults on load)
+
+---
+
+## 👤 Authentication (Feature-Flagged)
+
+- Firebase Auth + Google Sign-in
+- Works without login (anonymous mode)
+- Rate limiting for anonymous users (configurable)
+- Sign-in unlocks unlimited usage
+
+---
+
+## 📍 Storage Locations
+
+- **macOS:** `~/Library/Application Support/ai-worker/`
+- **Windows:** `%APPDATA%/ai-worker/`
+- **Linux:** `~/.config/ai-worker/`
+
+---
+
+**Current Status:** Phases 1-13 complete. Codebase refactored for maintainability. Production-ready with modular architecture, local intelligence (WebLLM), and robust testing infrastructure.
