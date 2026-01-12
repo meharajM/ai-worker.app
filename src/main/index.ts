@@ -10,9 +10,18 @@ import { setupIpcHandlers } from './ipc'
 app.commandLine.appendSwitch('enable-features',
     'PromptAPIForGeminiNano,' +
     'OptimizationGuideOnDeviceModel:bypass_perf_requirement/true,' +
+    'WebGPU,Vulkan,' +
     'LanguageDetectionAPI'
 )
 app.commandLine.appendSwitch('optimization-guide-on-device-model-execution', 'performance_class:0')
+
+// Linux-specific flags to enable WebGPU/Vulkan which are often disabled by default
+if (process.platform === 'linux') {
+    app.commandLine.appendSwitch('enable-unsafe-webgpu')
+    app.commandLine.appendSwitch('enable-vulkan')
+    app.commandLine.appendSwitch('ignore-gpu-blocklist')
+    app.commandLine.appendSwitch('use-angle', 'vulkan')
+}
 
 
 // Initialize environment (fix PATH, etc.)
