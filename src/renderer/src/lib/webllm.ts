@@ -473,7 +473,24 @@ class WebLLMManager {
      */
     private parseToolCallsFromContent(content: string): WebLLMToolCall[] | undefined {
         try {
-            // Look for JSON in the content
+            // 1. Check for <TOOL> tag format (prioritized)
+            const toolTagMatch = content.match(/<TOOL>([\s\S]*?)<\/TOOL>/);
+            if (toolTagMatch) {
+                try {
+                    const toolJson = toolTagMatch[1].trim();
+                    const parsed = JSON.parse(toolJson);
+                    const args = parsed.args || parsed.arguments || {};
+                    return [{
+                        id: `tool_${Date.now()}`,
+                        name: parsed.name,
+                        arguments: args
+                    }];
+                } catch (e) {
+                    console.debug('[WebLLM] Failed to parse JSON inside <TOOL> tag');
+                }
+            }
+
+            // 2. Look for JSON in the content
             let jsonStr = content.trim();
 
             // Remove markdown code blocks if present
@@ -483,12 +500,23 @@ class WebLLMManager {
             const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
                 const parsed = JSON.parse(jsonMatch[0]);
+                
+                // Support tool_calls array format
                 if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
                     return parsed.tool_calls.map((tc: any, idx: number) => ({
                         id: `json_call_${Date.now()}_${idx}`,
                         name: tc.name,
                         arguments: tc.arguments || {},
                     }));
+                }
+
+                // Support single tool object
+                if (parsed.name && (parsed.args || parsed.arguments)) {
+                    return [{
+                        id: `json_call_${Date.now()}`,
+                        name: parsed.name,
+                        arguments: parsed.args || parsed.arguments || {}
+                    }];
                 }
             }
         } catch (e) {

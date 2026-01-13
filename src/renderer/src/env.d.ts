@@ -45,6 +45,12 @@ interface ElectronAPI {
         getVersion: () => Promise<string>
         getName: () => Promise<string>
     }
+    
+    files: {
+        writeTemp: (content: string, extension?: string) => Promise<{ success: boolean; path?: string; error?: string }>
+        cleanupTemp: () => Promise<{ success: boolean; count?: number; error?: string }>
+    }
+
 }
 
 // Web Speech API types

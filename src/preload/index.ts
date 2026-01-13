@@ -40,6 +40,13 @@ const electronAPI = {
         getVersion: () => ipcRenderer.invoke('app:get-version'),
         getName: () => ipcRenderer.invoke('app:get-name'),
     },
+
+    // File operations
+    files: {
+        writeTemp: (content: string, extension?: string) =>
+            ipcRenderer.invoke('files:write-temp', content, extension),
+        cleanupTemp: () => ipcRenderer.invoke('files:cleanup-temp'),
+    },
 }
 
 // Expose APIs to renderer

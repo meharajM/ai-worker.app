@@ -24,6 +24,7 @@ import {
   executeToolCall,
   autoConnectServers,
   initializeMcpServers,
+  cleanupToolOutputs,
 } from "./lib/mcp";
 import { parseSequentialResponse, ParsedStep } from "./utils/llmParser";
 import { getCompactToolList } from "./utils/toolRegistry";
@@ -55,6 +56,8 @@ function App() {
         await initializeMcpServers();
         // Auto-connect servers with autoConnect enabled
         await autoConnectServers();
+        // Clean up any stale temp files from previous sessions
+        await cleanupToolOutputs();
       } catch (error) {
         console.error("Error initializing MCP servers:", error);
       }

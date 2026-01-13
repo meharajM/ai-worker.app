@@ -110,6 +110,25 @@ export const electron = {
             return true
         },
     },
+
+    // File operations (no browser fallback really possible, just mock)
+    // File operations
+    files: {
+        writeTemp: async (content: string, extension?: string): Promise<{ success: boolean; path?: string; error?: string }> => {
+            if (isElectron() && window.electron?.files) {
+                return await window.electron.files.writeTemp(content, extension)
+            }
+            console.warn('[Browser] File write not supported in browser')
+            return { success: false, error: 'Not supported in browser' }
+        },
+
+        cleanupTemp: async (): Promise<{ success: boolean; count?: number; error?: string }> => {
+            if (isElectron() && window.electron?.files) {
+                return await window.electron.files.cleanupTemp()
+            }
+            return { success: true, count: 0 }
+        }
+    }
 }
 
 export default electron

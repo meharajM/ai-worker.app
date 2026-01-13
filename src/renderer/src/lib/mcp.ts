@@ -477,23 +477,92 @@ export async function executeToolCall(
 // Compress large tool results for small context LLMs
 export async function executeToolWithCompression(name: string, args: any) {
   const result = await executeToolCall(name, args);
+  const MAX_STRING_LENGTH = 1000;
 
-  // Compress large results
-  if (result.result && typeof result.result === 'object') {
-    const data = result.result as Record<string, any>;
-    const keys = Object.keys(data);
-    if (keys.length > 3) {
-      return {
-        result: {
-          ...Object.fromEntries(keys.slice(0, 3).map(k => [k, data[k]])),
-          _compressed: true
-        },
-        error: result.error
-      };
+  // Helper to offload large string to file
+  const offloadToFile = async (content: string): Promise<string> => {
+    try {
+      // Robust check: ensure electron.files exists before calling
+      if (electron?.files?.writeTemp) {
+        console.debug('[MCP] Attempting to offload output to file...');
+        const response = await electron.files.writeTemp(content, '.txt');
+        if (response.success && response.path) {
+          console.debug('[MCP] Offloaded output to', response.path);
+          return `<OFFLOADED_FILE>${response.path}</OFFLOADED_FILE>\n(Output too large, saved to file. Use read_file to access content.)`;
+        } else {
+             console.warn('[MCP] File write returned failure:', response.error);
+        }
+      } else {
+          console.debug('[MCP] File offloading not supported (API missing)');
+      }
+    } catch (e) {
+      console.error('[MCP] Failed to offload to file:', e);
     }
+    // Fallback to truncation if file write fails or API is missing
+    return truncateValue(content);
+  };
+
+  // Fallback helper
+  const truncateValue = (val: string) => val.substring(0, MAX_STRING_LENGTH) + `\n... (truncated ${val.length - MAX_STRING_LENGTH} chars)`;
+
+  try {
+    // 1. Handle string results directly
+    if (typeof result.result === 'string') {
+      if (result.result.length > MAX_STRING_LENGTH) {
+        const newResult = await offloadToFile(result.result);
+        return { ...result, result: newResult };
+      }
+      return result;
+    }
+
+    // 2. Handle object results
+    if (result.result && typeof result.result === 'object') {
+      const data = result.result as Record<string, any>;
+      // Check if total JSON size is too big
+      const jsonString = JSON.stringify(data);
+      if (jsonString.length > MAX_STRING_LENGTH) {
+         // If generic object is too big, try to offload individual large strings
+         // or just offload the whole JSON if it's not structural
+         
+         const compressedData: Record<string, any> = {};
+         const keys = Object.keys(data);
+         
+         // Process keys
+         for (const key of keys) {
+           const val = data[key];
+           if (typeof val === 'string' && val.length > MAX_STRING_LENGTH) {
+             compressedData[key] = await offloadToFile(val);
+           } else {
+             compressedData[key] = val;
+           }
+         }
+         
+         // If still too big after processing strings (e.g. huge array), offload the whole json
+         if (JSON.stringify(compressedData).length > MAX_STRING_LENGTH) {
+             const offloaded = await offloadToFile(JSON.stringify(data, null, 2));
+             return { ...result, result: offloaded };
+         }
+         
+         return { ...result, result: compressedData };
+      }
+    }
+  } catch (e) {
+    console.warn('Error compressing tool result:', e);
   }
 
   return result;
+}
+
+// Clean up temporary files
+export async function cleanupToolOutputs(): Promise<void> {
+  try {
+     if (electron?.files?.cleanupTemp) {
+       await electron.files.cleanupTemp();
+       console.log('[MCP] Cleaned up temporary tool outputs');
+     }
+  } catch (e) {
+    console.error('[MCP] Failed to cleanup tool outputs:', e);
+  }
 }
 
 // Set auto-connect preference for a server

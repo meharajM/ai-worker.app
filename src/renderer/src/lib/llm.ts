@@ -690,7 +690,26 @@ function parseToolCallsFromJson(
   content: string
 ): LLMResponse["toolCalls"] | undefined {
   try {
-    // Try to find JSON in the content (might be in code blocks or raw)
+    // 1. Check for <TOOL> tag format (prioritized for sequential thinking)
+    const toolTagMatch = content.match(/<TOOL>([\s\S]*?)<\/TOOL>/);
+    if (toolTagMatch) {
+      try {
+        const toolJson = toolTagMatch[1].trim();
+        const parsed = JSON.parse(toolJson);
+        // Handle both "args" (from prompt) and "arguments" (standard)
+        const args = parsed.args || parsed.arguments || {};
+        
+        return [{
+          id: `tool_${Date.now()}`,
+          name: parsed.name,
+          arguments: args
+        }];
+      } catch (e) {
+        console.warn("Failed to parse JSON inside <TOOL> tag:", e);
+      }
+    }
+
+    // 2. Fallback: Look for standard JSON blocks
     let jsonStr = content.trim();
 
     // Remove markdown code blocks if present
@@ -703,6 +722,8 @@ function parseToolCallsFromJson(
     const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
+      
+      // Support tool_calls array format (standard OpenAI/Ollama schema)
       if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
         return parsed.tool_calls.map(
           (
@@ -714,6 +735,15 @@ function parseToolCallsFromJson(
             arguments: tc.arguments || {},
           })
         );
+      }
+      
+      // Support single tool object (if model output only the JSON object)
+      if (parsed.name && (parsed.args || parsed.arguments)) {
+        return [{
+          id: `json_call_${Date.now()}`,
+          name: parsed.name,
+          arguments: parsed.args || parsed.arguments || {}
+        }];
       }
     }
   } catch (error) {
