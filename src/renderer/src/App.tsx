@@ -4,10 +4,12 @@ import { ChatView } from "./components/ChatView";
 import { ChatSidebar } from "./components/ChatSidebar";
 import { ConnectionsPanel } from "./components/ConnectionsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { ActivityTimeline } from "./components/ActivityTimeline";
 import { Sidebar, View } from "./components/Sidebar";
 import { Header } from "./components/Header";
 import { useChatStore } from "./stores/chatStore";
 import { useSettingsStore } from "./stores/settingsStore";
+import { useLogStore } from "./stores/logStore";
 import { useSpeechSynthesis } from "./hooks/useSpeechSynthesis";
 import {
   chat,
@@ -30,6 +32,7 @@ function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
   const { sessions, activeSessionId, addMessage, setProcessing, isProcessing } =
     useChatStore();
+  const { addLog } = useLogStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const messages = activeSession?.messages || [];
   const settings = useSettingsStore();
@@ -80,6 +83,10 @@ function App() {
           openaiApiKey: settings.openaiApiKey,
           openaiBaseUrl: settings.openaiBaseUrl,
           openaiModel: settings.openaiModel,
+          geminiApiKey: settings.geminiApiKey,
+          geminiModel: settings.geminiModel,
+          openrouterApiKey: settings.openrouterApiKey,
+          openrouterModel: settings.openrouterModel,
         };
         const providers = await getAvailableProviders(settingsForLLM);
         if (providers.browser.available) {
@@ -98,6 +105,16 @@ function App() {
               provider: `Ollama (${providers.ollama.model})`,
               available: true,
             });
+          } else if (providers.gemini.available) {
+            setLlmStatus({
+              provider: `Gemini (${providers.gemini.model})`,
+              available: true,
+            });
+          } else if (providers.openrouter.available) {
+            setLlmStatus({
+              provider: `OpenRouter (${providers.openrouter.model})`,
+              available: true,
+            });
           } else if (providers.openai.available) {
             setLlmStatus({
               provider: `OpenAI (${providers.openai.model})`,
@@ -109,6 +126,16 @@ function App() {
         } else if (providers.ollama.available) {
           setLlmStatus({
             provider: `Ollama (${providers.ollama.model})`,
+            available: true,
+          });
+        } else if (providers.gemini.available) {
+          setLlmStatus({
+            provider: `Gemini (${providers.gemini.model})`,
+            available: true,
+          });
+        } else if (providers.openrouter.available) {
+          setLlmStatus({
+            provider: `OpenRouter (${providers.openrouter.model})`,
             available: true,
           });
         } else if (providers.openai.available) {
@@ -209,14 +236,17 @@ function App() {
         const mcpTools = getAllTools();
         const servers = getServers();
 
-        console.log(`[MCP App] Preparing LLM request with MCP tools`, {
-          timestamp: new Date().toISOString(),
+        addLog({
+          level: "info",
+          sessionId: activeSessionId || "default",
           operation: "prepareLLMRequest",
-          mcpToolCount: mcpTools.length,
-          connectedServerCount: servers.filter((s) => s.connected).length,
-          totalServerCount: servers.length,
-          toolNames: mcpTools.map((t) => t.name),
-          serverNames: servers.filter((s) => s.connected).map((s) => s.name),
+          component: "App",
+          message: `Preparing LLM request with ${mcpTools.length} MCP tools`,
+          data: {
+            mcpToolCount: mcpTools.length,
+            connectedServerCount: servers.filter((s) => s.connected).length,
+            toolNames: mcpTools.map((t) => t.name),
+          },
         });
 
         // Convert to LLM format (minimal for token efficiency)
@@ -253,6 +283,10 @@ function App() {
           openaiApiKey: settings.openaiApiKey,
           openaiBaseUrl: settings.openaiBaseUrl,
           openaiModel: settings.openaiModel,
+          geminiApiKey: settings.geminiApiKey,
+          geminiModel: settings.geminiModel,
+          openrouterApiKey: settings.openrouterApiKey,
+          openrouterModel: settings.openrouterModel,
         };
 
         let currentMessages = [...llmMessages];
@@ -266,16 +300,19 @@ function App() {
         }> = [];
 
         while (iterationCount < maxIterations) {
-          console.log(
-            `[MCP App] Starting LLM call (iteration ${iterationCount + 1})`,
-            {
-              timestamp: new Date().toISOString(),
-              operation: "llmCall",
+          addLog({
+            level: "info",
+            sessionId: activeSessionId || "default",
+            operation: "llmCallStart",
+            component: "App",
+            message: `Starting LLM call (iteration ${iterationCount + 1})`,
+            data: {
               iteration: iterationCount + 1,
+              provider: settingsForLLM.preferredProvider,
               messageCount: currentMessages.length,
               hasTools: llmTools.length > 0,
-            }
-          );
+            },
+          });
 
           let response: Awaited<ReturnType<typeof chat>>;
           try {
@@ -298,15 +335,14 @@ function App() {
           } catch (error) {
             const errorMessage =
               error instanceof Error ? error.message : "Unknown error";
-            console.error(
-              `[MCP App] LLM call failed (iteration ${iterationCount + 1})`,
-              {
-                timestamp: new Date().toISOString(),
-                operation: "llmCall",
-                iteration: iterationCount + 1,
-                error: errorMessage,
-              }
-            );
+            addLog({
+              level: "error",
+              sessionId: activeSessionId || "default",
+              operation: "llmCallError",
+              component: "App",
+              message: `LLM call failed (iteration ${iterationCount + 1}): ${errorMessage}`,
+              data: { iteration: iterationCount + 1, error: errorMessage },
+            });
 
             // If it's a timeout or error, break the loop and show error
             finalResponse = {
@@ -317,20 +353,22 @@ function App() {
             break;
           }
 
-          console.log(
-            `[MCP App] LLM call completed (iteration ${iterationCount + 1})`,
-            {
-              timestamp: new Date().toISOString(),
-              operation: "llmCall",
+          addLog({
+            level: "info",
+            sessionId: activeSessionId || "default",
+            operation: "llmCallComplete",
+            component: "App",
+            message: `LLM call completed (iteration ${iterationCount + 1})`,
+            data: {
               iteration: iterationCount + 1,
+              provider: response.provider,
+              model: response.model,
               hasContent: !!response.content,
-              hasToolCalls: !!(
-                response.toolCalls && response.toolCalls.length > 0
-              ),
               toolCallCount: response.toolCalls?.length || 0,
-              contentPreview: response.content?.substring(0, 100),
-            }
-          );
+              content: response.content,
+              toolCalls: response.toolCalls,
+            },
+          });
 
           finalResponse = response;
 
@@ -362,20 +400,20 @@ function App() {
 
           // Execute tool calls
           const toolExecutionStartTime = Date.now();
-          console.log(
-            `[MCP App] Tool execution batch started (iteration ${
-              iterationCount + 1
-            })`,
-            {
-              timestamp: new Date().toISOString(),
-              operation: "executeToolCalls",
+          addLog({
+            level: "info",
+            sessionId: activeSessionId || "default",
+            operation: "toolExecutionBatchStart",
+            component: "App",
+            message: `Tool execution batch started (iteration ${iterationCount + 1})`,
+            data: {
               iteration: iterationCount + 1,
               toolCallCount: response.toolCalls.length,
               toolNames: response.toolCalls.map((tc) => tc.name),
-              llmProvider: response.provider,
-              llmModel: response.model,
-            }
-          );
+              provider: response.provider,
+              model: response.model,
+            },
+          });
 
           // Add assistant message with tool calls to conversation (for OpenAI API format)
           currentMessages.push({
@@ -403,8 +441,7 @@ function App() {
             const toolCallStartTime = Date.now();
 
             console.log(
-              `[MCP App] Executing tool call ${i + 1}/${
-                response.toolCalls.length
+              `[MCP App] Executing tool call ${i + 1}/${response.toolCalls.length
               }`,
               {
                 timestamp: new Date().toISOString(),
@@ -426,13 +463,17 @@ function App() {
               const toolCallDuration = Date.now() - toolCallStartTime;
 
               if (result.error) {
-                console.error(`[MCP App] Tool call ${i + 1} failed`, {
-                  timestamp: new Date().toISOString(),
-                  operation: "executeToolCall",
-                  toolName: toolCall.name,
-                  toolIndex: i + 1,
-                  error: result.error,
-                  duration: toolCallDuration,
+                addLog({
+                  level: "error",
+                  sessionId: activeSessionId || "default",
+                  operation: "toolCallError",
+                  component: "App",
+                  message: `Tool call ${i + 1} (${toolCall.name}) failed`,
+                  data: {
+                    toolName: toolCall.name,
+                    error: result.error,
+                    duration: toolCallDuration,
+                  },
                 });
 
                 toolResults.push({
@@ -447,15 +488,17 @@ function App() {
                     ? result.result.substring(0, 100)
                     : JSON.stringify(result.result).substring(0, 100);
 
-                console.log(`[MCP App] Tool call ${i + 1} completed`, {
-                  timestamp: new Date().toISOString(),
-                  operation: "executeToolCall",
-                  toolName: toolCall.name,
-                  toolIndex: i + 1,
-                  duration: toolCallDuration,
-                  resultSize,
-                  resultPreview:
-                    resultPreview + (resultSize > 100 ? "..." : ""),
+                addLog({
+                  level: "info",
+                  sessionId: activeSessionId || "default",
+                  operation: "toolCallComplete",
+                  component: "App",
+                  message: `Tool call ${i + 1} (${toolCall.name}) completed`,
+                  data: {
+                    toolName: toolCall.name,
+                    duration: toolCallDuration,
+                    result: result.result,
+                  },
                 });
 
                 const resultStr =
@@ -601,6 +644,7 @@ function App() {
 
           {currentView === "connections" && <ConnectionsPanel />}
           {currentView === "settings" && <SettingsPanel />}
+          {currentView === "timeline" && <ActivityTimeline />}
         </main>
       </div>
     </div>

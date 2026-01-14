@@ -40,6 +40,13 @@ const electronAPI = {
         getVersion: () => ipcRenderer.invoke('app:get-version'),
         getName: () => ipcRenderer.invoke('app:get-name'),
     },
+
+    // Logging operations
+    logs: {
+        add: (entry: any) => ipcRenderer.invoke('logs:add', entry),
+        getSession: (sessionId: string) => ipcRenderer.invoke('logs:get-session', sessionId),
+        clear: (sessionId?: string) => ipcRenderer.invoke('logs:clear', sessionId),
+    },
 }
 
 // Expose APIs to renderer

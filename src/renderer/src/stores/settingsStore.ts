@@ -4,7 +4,7 @@ import { FEATURE_FLAGS, VOICE_CONFIG, LLM_CONFIG, STORAGE_KEYS } from '../lib/co
 import electron from '../lib/electron'
 
 export type Theme = 'dark' | 'light' | 'system'
-export type LLMProviderType = 'auto' | 'ollama' | 'openai' | 'browser'
+export type LLMProviderType = 'auto' | 'ollama' | 'openai' | 'gemini' | 'openrouter' | 'browser'
 
 interface SettingsState {
     // Voice settings
@@ -21,6 +21,10 @@ interface SettingsState {
     openaiApiKey: string
     openaiBaseUrl: string
     openaiModel: string
+    geminiApiKey: string
+    geminiModel: string
+    openrouterApiKey: string
+    openrouterModel: string
     browserModel: string
 
     // Appearance
@@ -38,6 +42,10 @@ interface SettingsState {
     setOpenaiApiKey: (key: string) => Promise<void>
     setOpenaiBaseUrl: (url: string) => Promise<void>
     setOpenaiModel: (model: string) => void
+    setGeminiApiKey: (key: string) => Promise<void>
+    setGeminiModel: (model: string) => void
+    setOpenrouterApiKey: (key: string) => Promise<void>
+    setOpenrouterModel: (model: string) => void
     setBrowserModel: (model: string) => void
     setTheme: (theme: Theme) => void
     resetToDefaults: () => void
@@ -55,6 +63,10 @@ const defaultSettings = {
     openaiApiKey: '',
     openaiBaseUrl: 'https://api.openai.com/v1',
     openaiModel: LLM_CONFIG.OPENAI_COMPATIBLE.DEFAULT_MODEL,
+    geminiApiKey: '',
+    geminiModel: LLM_CONFIG.GEMINI.DEFAULT_MODEL,
+    openrouterApiKey: '',
+    openrouterModel: LLM_CONFIG.OPENROUTER.DEFAULT_MODEL,
     browserModel: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', // Default small model
     theme: 'dark' as Theme,
 }
@@ -65,22 +77,22 @@ async function migrateOpenAICredentials(): Promise<void> {
         // Check if we need to migrate OpenAI credentials
         const existingApiKey = await electron.store.get<string>('openai_api_key')
         const existingBaseUrl = await electron.store.get<string>('openai_base_url')
-        
+
         if (!existingApiKey && !existingBaseUrl) {
             // Try to migrate from localStorage
             const localApiKey = localStorage.getItem('openai_api_key')
             const localBaseUrl = localStorage.getItem('openai_base_url')
-            
+
             if (localApiKey) {
                 await electron.store.set('openai_api_key', localApiKey)
                 console.log('[Settings] Migrated OpenAI API key from localStorage to electron-store')
             }
-            
+
             if (localBaseUrl) {
                 await electron.store.set('openai_base_url', localBaseUrl)
                 console.log('[Settings] Migrated OpenAI base URL from localStorage to electron-store')
             }
-            
+
             // Clear localStorage after successful migration
             if (localApiKey || localBaseUrl) {
                 localStorage.removeItem('openai_api_key')
@@ -119,6 +131,16 @@ export const useSettingsStore = create<SettingsState>()(
                 await electron.store.set('openai_base_url', url)
             },
             setOpenaiModel: (model) => set({ openaiModel: model }),
+            setGeminiApiKey: async (key) => {
+                set({ geminiApiKey: key })
+                await electron.store.set('gemini_api_key', key || '')
+            },
+            setGeminiModel: (model) => set({ geminiModel: model }),
+            setOpenrouterApiKey: async (key) => {
+                set({ openrouterApiKey: key })
+                await electron.store.set('openrouter_api_key', key || '')
+            },
+            setOpenrouterModel: (model) => set({ openrouterModel: model }),
             setBrowserModel: (model) => set({ browserModel: model }),
             setTheme: (theme) => set({ theme }),
             resetToDefaults: () => set(defaultSettings),

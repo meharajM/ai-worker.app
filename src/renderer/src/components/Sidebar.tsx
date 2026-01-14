@@ -1,7 +1,7 @@
 import React from 'react'
-import { Settings, MessageSquare, Database } from 'lucide-react'
+import { Settings, MessageSquare, Database, Activity } from 'lucide-react'
 
-export type View = 'chat' | 'connections' | 'settings'
+export type View = 'chat' | 'connections' | 'settings' | 'timeline'
 
 interface SidebarProps {
     currentView: View
@@ -26,6 +26,14 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
                     onClick={() => onViewChange('connections')}
                     icon={<Database size={24} />}
                     title="MCP Connections"
+                />
+
+                {/* Timeline Tab */}
+                <SidebarItem
+                    active={currentView === 'timeline'}
+                    onClick={() => onViewChange('timeline')}
+                    icon={<Activity size={24} />}
+                    title="Technical Timeline"
                 />
             </div>
 

@@ -383,6 +383,13 @@ CLOUD_LLM_ENABLED: true          // OpenAI support (active)
 
 ---
 
+## Immediate Implementations
+
+1. **End-to-end working automated workflows**
+2. **Deciding list of white labeling of the apps for specific workflows**
+3. **Implementing preinstalled MCP server and workflow execution prompts for decided workflow application**
+4. **Making workable installers for beta testing and listing**
+
 **Last Updated:** 2024-12-29  
 **Version:** 0.1.0  
 **Status:** MVP Complete - Production Ready

@@ -23,7 +23,23 @@ import { useAuthStore } from '../stores/authStore'
 import { FEATURE_FLAGS, APP_INFO } from '../lib/constants'
 import { isDevelopmentMode } from '../lib/featureFlags'
 import { EnhancedFeatureFlagsPanel } from './EnhancedFeatureFlagsPanel'
-import { getAvailableProviders, testOllamaConnection, testOpenAIConnection, testWebLLMConnection, checkOllama, checkOpenAI, downloadBrowserModel, WEBLLM_MODELS, subscribeToWebLLMStatus, deleteWebLLMModel, checkWebLLMModelCompatibility } from '../lib/llm'
+import {
+    chat,
+    getAvailableProviders,
+    checkOllama,
+    checkOpenAI,
+    checkGemini,
+    checkOpenRouter,
+    testOllamaConnection,
+    testOpenAIConnection,
+    testGeminiConnection,
+    subscribeToWebLLMStatus,
+    downloadBrowserModel,
+    checkWebLLMModelCompatibility,
+    testWebLLMConnection, // Kept from original
+    WEBLLM_MODELS, // Kept from original
+    deleteWebLLMModel // Kept from original
+} from '../lib/llm'
 import { ModelSelect } from './ModelSelect'
 
 type SettingsSection = 'account' | 'llm' | 'voice' | 'appearance' | 'flags' | 'about'
@@ -31,6 +47,8 @@ type SettingsSection = 'account' | 'llm' | 'voice' | 'appearance' | 'flags' | 'a
 interface ProviderStatus {
     ollama: { available: boolean; model?: string; models?: string[]; error?: string; modelsEndpointAvailable?: boolean }
     openai: { available: boolean; model?: string; models?: string[]; error?: string; modelsEndpointAvailable?: boolean }
+    gemini: { available: boolean; model?: string; models?: string[]; error?: string; modelsEndpointAvailable?: boolean }
+    openrouter: { available: boolean; model?: string; models?: string[]; error?: string; modelsEndpointAvailable?: boolean }
     browser?: {
         available: boolean;
         model?: string;
@@ -51,11 +69,13 @@ export function SettingsPanel() {
     const [checkingProviders, setCheckingProviders] = useState(false)
     const [testingOllama, setTestingOllama] = useState(false)
     const [testingOpenAI, setTestingOpenAI] = useState(false)
+    const [testingGemini, setTestingGemini] = useState(false)
+    const [testingOpenRouter, setTestingOpenRouter] = useState(false)
     const [testingBrowser, setTestingBrowser] = useState(false)
     const [downloadingBrowser, setDownloadingBrowser] = useState(false)
     const [downloadingModelId, setDownloadingModelId] = useState<string | null>(null)
     const [downloadProgress, setDownloadProgress] = useState(0)
-    const [testResults, setTestResults] = useState<{ ollama?: string; openai?: string; browser?: string }>({})
+    const [testResults, setTestResults] = useState<{ ollama?: string; openai?: string; gemini?: string; openrouter?: string; browser?: string }>({})
     const [modelCompatibility, setModelCompatibility] = useState<Record<string, { compatible: boolean; reasons: string[] }>>({})
 
     const settings = useSettingsStore()
@@ -91,28 +111,51 @@ export function SettingsPanel() {
                     openaiApiKey: settings.openaiApiKey,
                     openaiBaseUrl: settings.openaiBaseUrl,
                     openaiModel: settings.openaiModel,
+                    geminiApiKey: settings.geminiApiKey,
+                    geminiModel: settings.geminiModel,
+                    openrouterApiKey: settings.openrouterApiKey,
+                    openrouterModel: settings.openrouterModel,
                 }
                 if (settings.preferredProvider === 'ollama') {
                     const ollama = await checkOllama(settingsForLLM)
                     setProviderStatus({
                         ollama,
                         openai: { available: false },
+                        gemini: { available: false },
+                        openrouter: { available: false },
                     })
                 } else if (settings.preferredProvider === 'openai') {
                     const openai = await checkOpenAI(settingsForLLM)
                     setProviderStatus({
                         ollama: { available: false },
                         openai,
+                        gemini: { available: false },
+                        openrouter: { available: false },
+                    })
+                } else if (settings.preferredProvider === 'gemini') {
+                    const gemini = await checkGemini(settingsForLLM)
+                    setProviderStatus({
+                        ollama: { available: false },
+                        openai: { available: false },
+                        gemini,
+                        openrouter: { available: false },
+                    })
+                } else if (settings.preferredProvider === 'openrouter') {
+                    const openrouter = await checkOpenRouter(settingsForLLM)
+                    setProviderStatus({
+                        ollama: { available: false },
+                        openai: { available: false },
+                        gemini: { available: false },
+                        openrouter,
                     })
                 } else {
                     const providers = await getAvailableProviders(settingsForLLM)
 
-                    // Auto-load Logic for Browser Model
-                    // This logic is now handled by a separate useEffect.
-
                     setProviderStatus({
                         ollama: providers.ollama,
                         openai: providers.openai,
+                        gemini: providers.gemini,
+                        openrouter: providers.openrouter,
                         browser: providers.browser,
                     })
                 }
@@ -126,7 +169,7 @@ export function SettingsPanel() {
 
         checkProvidersRef.current = promise
         return promise
-    }, [settings.preferredProvider, settings.ollamaModel, settings.ollamaBaseUrl, settings.openaiApiKey, settings.openaiBaseUrl, settings.openaiModel])
+    }, [settings.preferredProvider, settings.ollamaModel, settings.ollamaBaseUrl, settings.openaiApiKey, settings.openaiBaseUrl, settings.openaiModel, settings.geminiApiKey, settings.geminiModel, settings.openrouterApiKey, settings.openrouterModel])
 
     // Auto-load effect
     const autoLoadAttempted = useRef(false);
@@ -307,8 +350,28 @@ export function SettingsPanel() {
                                         OpenAI / Compatible
                                     </button>
                                     <button
+                                        onClick={() => settings.setPreferredProvider('gemini')}
+                                        className={`flex-1 py-1 px-3 rounded-lg text-xs transition-colors ${settings.preferredProvider === 'gemini'
+                                            ? 'bg-[#4fd1c5] text-white'
+                                            : 'bg-white/5 text-white/60 hover:bg-white/10'
+                                            }`}
+                                        aria-label="Select Gemini provider"
+                                    >
+                                        Gemini
+                                    </button>
+                                    <button
+                                        onClick={() => settings.setPreferredProvider('openrouter')}
+                                        className={`flex-1 py-1 px-3 rounded-lg text-xs transition-colors ${settings.preferredProvider === 'openrouter'
+                                            ? 'bg-[#4fd1c5] text-white'
+                                            : 'bg-white/5 text-white/60 hover:bg-white/10'
+                                            }`}
+                                        aria-label="Select OpenRouter provider"
+                                    >
+                                        OpenRouter
+                                    </button>
+                                    <button
                                         onClick={() => settings.setPreferredProvider('auto')}
-                                        className={`flex-1 py-2 px-4 rounded-lg text-sm transition-colors ${settings.preferredProvider === 'auto'
+                                        className={`flex-1 py-1 px-3 rounded-lg text-xs transition-colors ${settings.preferredProvider === 'auto'
                                             ? 'bg-[#4fd1c5] text-white'
                                             : 'bg-white/5 text-white/60 hover:bg-white/10'
                                             }`}
@@ -318,13 +381,13 @@ export function SettingsPanel() {
                                     </button>
                                     <button
                                         onClick={() => settings.setPreferredProvider('browser')}
-                                        className={`flex-1 py-2 px-4 rounded-lg text-sm transition-colors ${settings.preferredProvider === 'browser'
+                                        className={`flex-1 py-1 px-3 rounded-lg text-xs transition-colors ${settings.preferredProvider === 'browser'
                                             ? 'bg-[#4fd1c5] text-white'
                                             : 'bg-white/5 text-white/60 hover:bg-white/10'
                                             }`}
                                         aria-label="Select Browser / On-Device provider"
                                     >
-                                        On-Device II
+                                        On-Device
                                     </button>
                                 </div>
                             </div>
@@ -346,6 +409,14 @@ export function SettingsPanel() {
                                                     <AlertCircle size={14} /> Not Available
                                                 </span>
                                             )}
+                                            <a
+                                                href="https://ollama.com/"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="px-2 py-0.5 text-[10px] bg-[#4fd1c5]/10 text-[#4fd1c5] rounded border border-[#4fd1c5]/20 hover:bg-[#4fd1c5]/20 transition-colors"
+                                            >
+                                                Install Ollama
+                                            </a>
                                             <button
                                                 onClick={checkProviders}
                                                 className="px-2 py-1 text-xs bg-white/5 hover:bg-white/10 rounded text-white/60 hover:text-white transition-colors"
@@ -439,6 +510,14 @@ export function SettingsPanel() {
                                                     No API Key
                                                 </span>
                                             )}
+                                            <a
+                                                href="https://platform.openai.com/api-keys"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="px-2 py-0.5 text-[10px] bg-[#4fd1c5]/10 text-[#4fd1c5] rounded border border-[#4fd1c5]/20 hover:bg-[#4fd1c5]/20 transition-colors"
+                                            >
+                                                Get API Key
+                                            </a>
                                             <button
                                                 onClick={checkProviders}
                                                 className="px-2 py-1 text-xs bg-white/5 hover:bg-white/10 rounded text-white/60 hover:text-white transition-colors"
@@ -568,6 +647,195 @@ export function SettingsPanel() {
                                         {testResults.openai && (
                                             <div className={`p-2 rounded text-xs ${testResults.openai.includes('Error') || testResults.openai.includes('Please') ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'}`}>
                                                 {testResults.openai}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Gemini Config */}
+                            {(settings.preferredProvider === 'gemini' || settings.preferredProvider === 'auto') && (
+                                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h4 className="font-medium">Google Gemini</h4>
+                                        <div className="flex items-center gap-2">
+                                            {providerStatus?.gemini.available ? (
+                                                <span className="flex items-center gap-1 text-xs text-green-400">
+                                                    <Check size={14} /> Configured
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center gap-1 text-xs text-white/40">
+                                                    No API Key
+                                                </span>
+                                            )}
+                                            <a
+                                                href="https://aistudio.google.com/app/apikey"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="px-2 py-0.5 text-[10px] bg-[#4fd1c5]/10 text-[#4fd1c5] rounded border border-[#4fd1c5]/20 hover:bg-[#4fd1c5]/20 transition-colors"
+                                            >
+                                                Get API Key
+                                            </a>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-xs text-white/40 mb-1">API Key</label>
+                                            <input
+                                                type="password"
+                                                value={settings.geminiApiKey}
+                                                onChange={(e) => settings.setGeminiApiKey(e.target.value)}
+                                                placeholder="Enter Gemini API Key..."
+                                                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm
+                                     placeholder-white/30 focus:border-white/20 focus:outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-white/40 mb-1">Model</label>
+                                            <ModelSelect
+                                                value={settings.geminiModel}
+                                                onChange={(value) => settings.setGeminiModel(value)}
+                                                models={providerStatus?.gemini.models || []}
+                                                placeholder="gemini-1.5-flash"
+                                                ariaLabel="Gemini Model Selection"
+                                            />
+                                        </div>
+                                        <button
+                                            onClick={async () => {
+                                                if (!settings.geminiApiKey) {
+                                                    setTestResults({ ...testResults, gemini: 'Please enter an API key first' })
+                                                    return
+                                                }
+                                                setTestingGemini(true)
+                                                setTestResults({ ...testResults, gemini: undefined })
+                                                try {
+                                                    const result = await testGeminiConnection(
+                                                        settings.geminiApiKey,
+                                                        settings.geminiModel || 'gemini-1.5-flash'
+                                                    )
+                                                    if (result.success) {
+                                                        const message = `Connection successful! Found ${result.models?.length || 0} models.`
+                                                        setTestResults({ ...testResults, gemini: message })
+                                                        await checkProviders()
+                                                    } else {
+                                                        setTestResults({ ...testResults, gemini: `Error: ${result.error}` })
+                                                    }
+                                                } catch (error) {
+                                                    setTestResults({ ...testResults, gemini: `Error: ${error instanceof Error ? error.message : 'Unknown error'}` })
+                                                } finally {
+                                                    setTestingGemini(false)
+                                                }
+                                            }}
+                                            disabled={testingGemini || !settings.geminiApiKey}
+                                            className="w-full px-4 py-2 bg-[#4fd1c5]/10 hover:bg-[#4fd1c5]/20 text-[#4fd1c5] rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                        >
+                                            {testingGemini ? (
+                                                <>
+                                                    <Loader2 size={16} className="animate-spin" />
+                                                    Testing...
+                                                </>
+                                            ) : (
+                                                'Test Connection'
+                                            )}
+                                        </button>
+                                        {testResults.gemini && (
+                                            <div className={`p-2 rounded text-xs ${testResults.gemini.includes('Error') ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'}`}>
+                                                {testResults.gemini}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* OpenRouter Config */}
+                            {(settings.preferredProvider === 'openrouter' || settings.preferredProvider === 'auto') && (
+                                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <h4 className="font-medium">OpenRouter</h4>
+                                        <div className="flex items-center gap-2">
+                                            {providerStatus?.openrouter.available ? (
+                                                <span className="flex items-center gap-1 text-xs text-green-400">
+                                                    <Check size={14} /> Configured
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center gap-1 text-xs text-white/40">
+                                                    No API Key
+                                                </span>
+                                            )}
+                                            <a
+                                                href="https://openrouter.ai/keys"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="px-2 py-0.5 text-[10px] bg-[#4fd1c5]/10 text-[#4fd1c5] rounded border border-[#4fd1c5]/20 hover:bg-[#4fd1c5]/20 transition-colors"
+                                            >
+                                                Get API Key
+                                            </a>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-xs text-white/40 mb-1">API Key</label>
+                                            <input
+                                                type="password"
+                                                value={settings.openrouterApiKey}
+                                                onChange={(e) => settings.setOpenrouterApiKey(e.target.value)}
+                                                placeholder="Enter OpenRouter API Key..."
+                                                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm
+                                     placeholder-white/30 focus:border-white/20 focus:outline-none"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-white/40 mb-1">Model</label>
+                                            <ModelSelect
+                                                value={settings.openrouterModel}
+                                                onChange={(value) => settings.setOpenrouterModel(value)}
+                                                models={providerStatus?.openrouter.models || []}
+                                                placeholder="anthropic/claude-3.5-sonnet"
+                                                ariaLabel="OpenRouter Model Selection"
+                                            />
+                                        </div>
+                                        <button
+                                            onClick={async () => {
+                                                if (!settings.openrouterApiKey) {
+                                                    setTestResults({ ...testResults, openrouter: 'Please enter an API key first' })
+                                                    return
+                                                }
+                                                setTestingOpenRouter(true)
+                                                setTestResults({ ...testResults, openrouter: undefined })
+                                                try {
+                                                    const result = await testOpenAIConnection(
+                                                        'https://openrouter.ai/api/v1',
+                                                        settings.openrouterApiKey,
+                                                        settings.openrouterModel || 'anthropic/claude-3.5-sonnet'
+                                                    )
+                                                    if (result.success) {
+                                                        const message = `Connection successful! Found ${result.models?.length || 0} models.`
+                                                        setTestResults({ ...testResults, openrouter: message })
+                                                        await checkProviders()
+                                                    } else {
+                                                        setTestResults({ ...testResults, openrouter: `Error: ${result.error}` })
+                                                    }
+                                                } catch (error) {
+                                                    setTestResults({ ...testResults, openrouter: `Error: ${error instanceof Error ? error.message : 'Unknown error'}` })
+                                                } finally {
+                                                    setTestingOpenRouter(false)
+                                                }
+                                            }}
+                                            disabled={testingOpenRouter || !settings.openrouterApiKey}
+                                            className="w-full px-4 py-2 bg-[#4fd1c5]/10 hover:bg-[#4fd1c5]/20 text-[#4fd1c5] rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                        >
+                                            {testingOpenRouter ? (
+                                                <>
+                                                    <Loader2 size={16} className="animate-spin" />
+                                                    Testing...
+                                                </>
+                                            ) : (
+                                                'Test Connection'
+                                            )}
+                                        </button>
+                                        {testResults.openrouter && (
+                                            <div className={`p-2 rounded text-xs ${testResults.openrouter.includes('Error') ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'}`}>
+                                                {testResults.openrouter}
                                             </div>
                                         )}
                                     </div>

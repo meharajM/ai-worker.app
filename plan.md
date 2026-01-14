@@ -349,6 +349,53 @@ ai-worker-app/
 
 ---
 
+### ✅ Phase 13: Advanced LLMs & Technical Inspector [COMPLETED]
+
+**Goal:** Support for high-tier models (Gemini, Claude via OpenRouter) and technical auditing.
+
+**Implementation:**
+- [x] Integrate **Google Gemini** (Native API support with multi-turn tool calling)
+- [x] Integrate **OpenRouter** (Unified access to Claude, Llama 3, etc.)
+- [x] Implement "Easy Config" UI with helper links for API keys
+- [x] Refactor logging to **Filesystem-based JSONL** storage
+- [x] Create **Activity Timeline** for technical payload inspection (Inspector with Copy/JSON)
+
+**Validation:** ✅
+- [x] Gemini/OpenRouter models fetch and call successfully
+- [x] Logs persist across restarts in `userData/logs/`
+- [x] Raw JSON payloads visible in technical inspector
+
+---
+
+### 🚀 Phase 14: App Launch Preparation [IN PROGRESS]
+
+**Goal:** Finalize distribution, assets, and production stability.
+
+**Implementation:**
+- [ ] **Visual Identity**: Design app icon (ICNS/ICO) and splash screen
+- [ ] **Build Optimization**: Minimizing bundle size and verifying production CSP
+- [ ] **Universal Linux Support**: Testing .deb, .rpm, and AppImage builds
+- [ ] **Documentation**: Create "Quick Start" guide for new users
+- [ ] **Landing Page**: Basic static site with download links
+
+**Validation:**
+- [ ] Clean build on all 3 major platforms
+- [ ] Installer correctly sets up shortcuts and icons
+
+---
+
+### 🏁 Phase 15: Distribution & V1 Launch
+
+**Goal:** Public release and update mechanism.
+
+**Implementation:**
+- [ ] Set up GitHub Actions for automated multi-platform releases
+- [ ] Configure Code Signing (Apple Developer / Windows Certs)
+- [ ] Direct download server / S3 bucket setup
+- [ ] Initial social launch (Product Hunt / Twitter)
+
+---
+
 ## 🎙️ Voice UX Specification
 
 - **Primary Input:** Push-to-talk (click to start/stop)
@@ -359,9 +406,9 @@ ai-worker-app/
 
 ## 🧠 LLM Provider Priority
 
-1. Browser LLMs (Gemini Nano, Phi) - detect & use if available
-2. Ollama (qwen2.5:3b) - local, fast, tool-capable
-3. OpenAI-compatible API - user provides key
+1. **Browser LLMs** (Gemini Nano, Phi) - detect & use if available
+2. **Standard APIs** (OpenAI, Gemini, OpenRouter) - cloud-scale intelligence
+3. **Local LLMs** (Ollama: qwen2.5:3b) - privacy-focused fallback
 
 ---
 
@@ -394,8 +441,4 @@ ai-worker-app/
 
 ---
 
-<<<<<<< HEAD
-**Current Status:** Phases 1-12 complete. Codebase refactored for maintainability. Production-ready with modular architecture and enhanced feature flags.
-=======
-**Current Status:** Phases 1-12 complete. Default MCP servers configured. Codebase refactored for maintainability. Production-ready with modular architecture.
->>>>>>> c9cd8f5 (updating plan and artitechure)
+**Current Status:** Phases 1-13 complete. Full Gemini and OpenRouter support validated. Filesystem logging and Technical Inspector enriched with model/provider tracking. Launch preparation (Phase 14) is now the primary focus.
