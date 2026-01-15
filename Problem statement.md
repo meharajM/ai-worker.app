@@ -1,3 +1,12 @@
+# Immediate Implementations
+
+1. **End-to-end working automated workflows**
+2. **Deciding list of white labeling of the apps for specific workflows**
+3. **Implementing preinstalled MCP server and workflow execution prompts for decided workflow application**
+4. **Making workable installers for beta testing and listing**
+
+
+
 # AI-Worker: Problem Statement & Requirements
 
 AI-Worker is a voice-first desktop workspace designed to revolutionize productivity by integrating Large Language Models (LLMs) with everyday applications and files using the Model Context Protocol (MCP). We are currently in the active MVP development stage, providing high-performance orchestration via secure cloud-based LLM connectivity.
