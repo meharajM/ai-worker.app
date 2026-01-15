@@ -1,6 +1,7 @@
 import React from 'react'
 import { Plus, MessageSquare, Trash2, Edit2 } from 'lucide-react'
 import { useChatStore, ChatSession } from '../stores/chatStore'
+import { useLogStore } from '../stores/logStore'
 
 export function ChatSidebar() {
     const {
@@ -11,12 +12,21 @@ export function ChatSidebar() {
         setActiveSession,
         updateSessionTitle
     } = useChatStore()
+    const { addLog } = useLogStore()
 
     const [editingId, setEditingId] = React.useState<string | null>(null)
     const [editTitle, setEditTitle] = React.useState('')
 
     const handleCreateSession = () => {
-        createSession()
+        const newSessionId = createSession()
+        addLog({
+            eventType: 'SESSION_START',
+            sessionId: newSessionId,
+            component: 'ChatSidebar',
+            details: {
+                metadata: { createdAt: new Date().toISOString() }
+            }
+        })
     }
 
     const handleDeleteSession = (e: React.MouseEvent, id: string) => {

@@ -44,8 +44,8 @@ const electronAPI = {
     // Logging operations
     logs: {
         add: (entry: any) => ipcRenderer.invoke('logs:add', entry),
-        getSession: (sessionId: string) => ipcRenderer.invoke('logs:get-session', sessionId),
-        clear: (sessionId?: string) => ipcRenderer.invoke('logs:clear', sessionId),
+        getPath: () => ipcRenderer.invoke('logs:get-path'),
+        openFolder: () => ipcRenderer.invoke('logs:open-folder'),
     },
 }
 

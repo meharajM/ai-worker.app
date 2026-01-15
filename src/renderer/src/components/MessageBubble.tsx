@@ -38,7 +38,7 @@ export function MessageBubble({ message, onDelete }: MessageBubbleProps) {
             )}
 
             {/* Message bubble */}
-            <div className="relative max-w-[70%]">
+            <div className="relative max-w-[70%] min-w-0 overflow-hidden">
                 <div
                     className={`rounded-2xl px-4 py-3 ${isUser
                         ? 'bg-[#4fd1c5] text-white'

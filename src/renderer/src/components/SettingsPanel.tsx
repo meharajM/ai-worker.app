@@ -16,8 +16,11 @@ import {
     Download,
     HardDrive,
     Trash2,
-    FolderOpen
+
+    FolderOpen,
+    FileText
 } from 'lucide-react'
+import { useLogStore } from '../stores/logStore'
 import { useSettingsStore, Theme, LLMProviderType } from '../stores/settingsStore'
 import { useAuthStore } from '../stores/authStore'
 import { FEATURE_FLAGS, APP_INFO } from '../lib/constants'
@@ -42,7 +45,7 @@ import {
 } from '../lib/llm'
 import { ModelSelect } from './ModelSelect'
 
-type SettingsSection = 'account' | 'llm' | 'voice' | 'appearance' | 'flags' | 'about'
+type SettingsSection = 'account' | 'llm' | 'voice' | 'appearance' | 'logs' | 'flags' | 'about'
 
 interface ProviderStatus {
     ollama: { available: boolean; model?: string; models?: string[]; error?: string; modelsEndpointAvailable?: boolean }
@@ -80,6 +83,12 @@ export function SettingsPanel() {
 
     const settings = useSettingsStore()
     const auth = useAuthStore()
+    const { openLogFolder, getLogPath } = useLogStore()
+    const [logPath, setLogPath] = useState<string>('')
+
+    useEffect(() => {
+        getLogPath().then(setLogPath)
+    }, [getLogPath])
 
     // Check model compatibility on mount
     useEffect(() => {
@@ -241,6 +250,7 @@ export function SettingsPanel() {
         { id: 'llm', label: 'LLM Provider', icon: <Cpu size={20} /> },
         { id: 'voice', label: 'Voice', icon: <Volume2 size={20} /> },
         { id: 'appearance', label: 'Appearance', icon: <Palette size={20} /> },
+        { id: 'logs', label: 'Auditing', icon: <FileText size={20} /> },
         ...(isDevelopmentMode() ? [{ id: 'flags' as const, label: 'Feature Flags', icon: <Flag size={20} /> }] : []),
         { id: 'about', label: 'About', icon: <Info size={20} /> },
     ]
@@ -1246,6 +1256,42 @@ export function SettingsPanel() {
                             <p className="text-xs text-white/40 mt-2">
                                 Note: Light theme coming soon. Currently dark mode only.
                             </p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Audit Logs Section */}
+                {activeSection === 'logs' && (
+                    <div>
+                        <h3 className="text-xl font-bold mb-6">Audit Logs</h3>
+                        <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-6">
+                            <div className="flex items-start gap-4 mb-6">
+                                <div className="p-3 bg-blue-500/10 rounded-lg">
+                                    <FileText className="text-blue-400" size={24} />
+                                </div>
+                                <div>
+                                    <h4 className="font-medium mb-1">Corporate Logging Enabled</h4>
+                                    <p className="text-sm text-white/60">
+                                        All chat sessions, prompts, and tool executions are logged to the local file system for auditing purposes.
+                                        Logs are strictly append-only.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="bg-black/20 rounded-lg p-4 mb-4">
+                                <label className="text-[10px] uppercase font-bold text-white/30 mb-2 block">Local Log Path</label>
+                                <code className="text-xs text-white/80 font-mono break-all block select-all">
+                                    {logPath || 'Loading...'}
+                                </code>
+                            </div>
+
+                            <button
+                                onClick={() => openLogFolder()}
+                                className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg transition-colors text-sm"
+                            >
+                                <FolderOpen size={16} />
+                                Reveal in File Explorer
+                            </button>
                         </div>
                     </div>
                 )}
