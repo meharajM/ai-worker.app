@@ -1,0 +1,51 @@
+name: Auto Tag on Merge
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+
+jobs:
+  tag:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+
+      - name: Determine Bump Type
+        id: bump_type
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          # Get the first word (before the first colon, trimmed)
+          FIRST_WORD=$(echo "$TITLE" | cut -d':' -f1 | head -n1 | xargs | tr '[:upper:]' '[:lower:]')
+          
+          if [[ "$FIRST_WORD" == "major" ]]; then
+            echo "Bump type identified: major"
+            echo "should_tag=true" >> $GITHUB_OUTPUT
+            echo "bump=major" >> $GITHUB_OUTPUT
+          elif [[ "$FIRST_WORD" == "minor" ]]; then
+            echo "Bump type identified: minor"
+            echo "should_tag=true" >> $GITHUB_OUTPUT
+            echo "bump=minor" >> $GITHUB_OUTPUT
+          elif [[ "$FIRST_WORD" == "patch" ]]; then
+            echo "Bump type identified: patch"
+            echo "should_tag=true" >> $GITHUB_OUTPUT
+            echo "bump=patch" >> $GITHUB_OUTPUT
+          else
+            echo "No matching bump type found in the first word of the title: $FIRST_WORD"
+            echo "should_tag=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Tag Bump
+        if: steps.bump_type.outputs.should_tag == 'true'
+        uses: anothrNick/github-tag-action@1.64.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BUMP: ${{ steps.bump_type.outputs.bump }}
+          WITH_V: true
