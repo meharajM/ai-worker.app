@@ -3,13 +3,13 @@ import { Plus, MessageSquare, Trash2, Edit2 } from 'lucide-react'
 import { useChatStore, ChatSession } from '../stores/chatStore'
 
 export function ChatSidebar() {
-    const { 
-        sessions, 
-        activeSessionId, 
-        createSession, 
-        deleteSession, 
+    const {
+        sessions,
+        activeSessionId,
+        createSession,
+        deleteSession,
         setActiveSession,
-        updateSessionTitle 
+        updateSessionTitle
     } = useChatStore()
 
     const [editingId, setEditingId] = React.useState<string | null>(null)
@@ -48,7 +48,7 @@ export function ChatSidebar() {
     }
 
     return (
-        <div className="w-64 bg-[#1a1d23] border-r border-white/5 flex flex-col h-full">
+        <div className="w-64 flex-shrink-0 bg-[#1a1d23] border-r border-white/5 flex flex-col h-full">
             <div className="p-4 border-b border-white/5">
                 <button
                     onClick={handleCreateSession}
@@ -71,7 +71,7 @@ export function ChatSidebar() {
                             }`}
                     >
                         <MessageSquare size={16} className="flex-shrink-0" />
-                        
+
                         {editingId === session.id ? (
                             <input
                                 autoFocus

@@ -248,7 +248,7 @@ export function SettingsPanel() {
     return (
         <div className="flex-1 flex overflow-hidden">
             {/* Sidebar */}
-            <div className="w-48 bg-[#1a1d23]/50 border-r border-white/5 p-4">
+            <div className="w-48 flex-shrink-0 bg-[#1a1d23]/50 border-r border-white/5 p-4">
                 <h2 className="text-lg font-bold mb-4 px-2">Settings</h2>
                 <nav className="space-y-1">
                     {sections.map((section) => (
@@ -268,7 +268,7 @@ export function SettingsPanel() {
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex-1 min-w-0 overflow-y-auto p-6">
                 {/* Account Section */}
                 {activeSection === 'account' && FEATURE_FLAGS.AUTH_ENABLED && (
                     <div>
