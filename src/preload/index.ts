@@ -40,6 +40,13 @@ const electronAPI = {
         getVersion: () => ipcRenderer.invoke('app:get-version'),
         getName: () => ipcRenderer.invoke('app:get-name'),
     },
+
+    // Logging operations
+    logs: {
+        add: (entry: any) => ipcRenderer.invoke('logs:add', entry),
+        getPath: () => ipcRenderer.invoke('logs:get-path'),
+        openFolder: () => ipcRenderer.invoke('logs:open-folder'),
+    },
 }
 
 // Expose APIs to renderer

@@ -38,11 +38,11 @@ export function MessageBubble({ message, onDelete }: MessageBubbleProps) {
             )}
 
             {/* Message bubble */}
-            <div className="relative max-w-[70%]">
+            <div className="relative max-w-[70%] min-w-0 overflow-hidden">
                 <div
                     className={`rounded-2xl px-4 py-3 ${isUser
-                            ? 'bg-[#4fd1c5] text-white'
-                            : 'bg-[#1a1d23] border border-white/10 text-white/90'
+                        ? 'bg-[#4fd1c5] text-white'
+                        : 'bg-[#1a1d23] border border-white/10 text-white/90'
                         }`}
                 >
                     <p className="whitespace-pre-wrap break-words">{message.content}</p>
@@ -54,7 +54,7 @@ export function MessageBubble({ message, onDelete }: MessageBubbleProps) {
                                 <div key={tool.id} className="text-xs text-white/50">
                                     <span className="font-mono">🔧 {tool.name}</span>
                                     {tool.result && (
-                                        <div className="mt-1 p-2 bg-black/20 rounded text-white/40">
+                                        <div className="mt-1 p-2 bg-black/20 rounded text-white/40 break-all overflow-hidden text-[10px]">
                                             {tool.result}
                                         </div>
                                     )}

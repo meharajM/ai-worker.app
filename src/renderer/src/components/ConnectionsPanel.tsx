@@ -93,9 +93,8 @@ export function ConnectionsPanel() {
     if (!server.error) return;
 
     const chatStore = useChatStore.getState();
-    const prompt = `I'm having trouble connecting to an MCP server named "${
-      server.name
-    }".
+    const prompt = `I'm having trouble connecting to an MCP server named "${server.name
+      }".
         
 **Server Configuration:**
 - Type: ${server.type}
@@ -121,7 +120,7 @@ Can you help me troubleshoot this?`;
   const editingServer = servers.find((s) => s.id === editingServerId) || null;
 
   return (
-    <div className="flex-1 p-6 overflow-y-auto">
+    <div className="flex-1 min-w-0 p-6 overflow-y-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-xl font-bold">MCP Connections</h2>
@@ -145,8 +144,8 @@ Can you help me troubleshoot this?`;
           {editingServerId
             ? "Add New Instead"
             : showForm
-            ? "Hide Form"
-            : "Add Connection"}
+              ? "Hide Form"
+              : "Add Connection"}
         </button>
       </div>
 

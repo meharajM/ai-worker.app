@@ -5,8 +5,9 @@ export const BASE_FEATURE_FLAGS = {
     TTS_ENABLED: true,            // Text-to-speech readout
     BROWSER_LLM_ENABLED: true,    // Try Gemini Nano / Phi first
     OLLAMA_ENABLED: true,         // Local Ollama models
-    CLOUD_LLM_ENABLED: true,      // OpenAI-compatible APIs
-    
+    CLOUD_LLM_ENABLED: true,      // OpenAI/OpenRouter compatible APIs
+    GEMINI_ENABLED: true,         // Google Gemini models
+
     // // New flags for demonstration of auto-detection
     // EXPERIMENTAL_FEATURES_ENABLED: false, // Enable experimental/beta features
     // DARK_MODE_ONLY: true,           // Force dark mode theme
@@ -22,7 +23,7 @@ export const FEATURE_FLAGS = getEffectiveFeatureFlags()
 
 // Export a function to get fresh feature flags (useful for development mode)
 export function getFeatureFlags() {
-  return getEffectiveFeatureFlags()
+    return getEffectiveFeatureFlags()
 }
 
 // Rate Limits for anonymous users (easily adjustable)
@@ -46,6 +47,14 @@ export const LLM_CONFIG = {
     OPENAI_COMPATIBLE: {
         BASE_URL: '', // User configurable
         DEFAULT_MODEL: 'gpt-4o-mini',
+    },
+    OPENROUTER: {
+        BASE_URL: 'https://openrouter.ai/api/v1',
+        DEFAULT_MODEL: 'anthropic/claude-3.5-sonnet',
+    },
+    GEMINI: {
+        BASE_URL: 'https://generativelanguage.googleapis.com/v1beta',
+        DEFAULT_MODEL: 'gemini-1.5-flash',
     }
 }
 

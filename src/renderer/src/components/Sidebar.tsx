@@ -10,7 +10,7 @@ interface SidebarProps {
 
 export function Sidebar({ currentView, onViewChange }: SidebarProps) {
     return (
-        <div className="w-16 bg-[#1a1d23] flex flex-col items-center py-6 border-r border-white/5">
+        <div className="w-16 flex-shrink-0 bg-[#1a1d23] flex flex-col items-center py-6 border-r border-white/5">
             <div className="flex-1 flex flex-col gap-4">
                 {/* Chat Tab */}
                 <SidebarItem

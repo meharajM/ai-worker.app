@@ -30,8 +30,11 @@ export {
 };
 
 export interface LLMMessage {
-  role: "system" | "user" | "assistant";
+  role: "user" | "assistant" | "system" | "tool";
   content: string;
+  tool_calls?: any[];
+  tool_call_id?: string;
+  name?: string; // For Gemini/OpenAI tool names
 }
 
 export interface LLMTool {
@@ -58,15 +61,19 @@ export interface LLMResponse {
   model: string;
 }
 
-export type LLMProvider = "browser" | "ollama" | "openai";
+export type LLMProvider = "browser" | "ollama" | "openai" | "gemini" | "openrouter";
 
 export interface LLMSettings {
-  preferredProvider?: "auto" | "ollama" | "openai" | "browser";
+  preferredProvider?: "auto" | "ollama" | "openai" | "browser" | "gemini" | "openrouter";
   ollamaModel?: string;
   ollamaBaseUrl?: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   openaiModel?: string;
+  geminiApiKey?: string;
+  geminiModel?: string;
+  openrouterApiKey?: string;
+  openrouterModel?: string;
 }
 
 interface ProviderStatus {
@@ -108,6 +115,34 @@ async function getOpenAISettings(
     "https://api.openai.com/v1";
   const model =
     settings?.openaiModel || LLM_CONFIG.OPENAI_COMPATIBLE.DEFAULT_MODEL;
+  return { apiKey, baseUrl, model };
+}
+
+// Get Gemini settings from store or use defaults
+async function getGeminiSettings(
+  settings?: LLMSettings
+): Promise<{ apiKey: string; baseUrl: string; model: string }> {
+  const electron = (await import("./electron")).default;
+  const apiKey =
+    settings?.geminiApiKey ||
+    (await electron.store.get<string>("gemini_api_key")) ||
+    "";
+  const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
+  const model = settings?.geminiModel || LLM_CONFIG.GEMINI.DEFAULT_MODEL;
+  return { apiKey, baseUrl, model };
+}
+
+// Get OpenRouter settings from store or use defaults
+async function getOpenRouterSettings(
+  settings?: LLMSettings
+): Promise<{ apiKey: string; baseUrl: string; model: string }> {
+  const electron = (await import("./electron")).default;
+  const apiKey =
+    settings?.openrouterApiKey ||
+    (await electron.store.get<string>("openrouter_api_key")) ||
+    "";
+  const baseUrl = LLM_CONFIG.OPENROUTER.BASE_URL;
+  const model = settings?.openrouterModel || LLM_CONFIG.OPENROUTER.DEFAULT_MODEL;
   return { apiKey, baseUrl, model };
 }
 
@@ -243,15 +278,23 @@ export async function testWebLLMConnection(): Promise<{ success: boolean; error?
 
 // Check if OpenAI-compatible API is configured and fetch available models
 export async function checkOpenAI(
-  settings?: LLMSettings
+  settings?: LLMSettings,
+  providerOverride?: "openai" | "openrouter"
 ): Promise<ProviderStatus> {
   if (!FEATURE_FLAGS.CLOUD_LLM_ENABLED) {
     return { available: false, error: "Cloud LLM disabled" };
   }
 
-  const { apiKey, baseUrl, model } = await getOpenAISettings(settings);
+  const { apiKey, baseUrl, model } =
+    providerOverride === "openrouter"
+      ? await getOpenRouterSettings(settings)
+      : await getOpenAISettings(settings);
+
   if (!apiKey) {
-    return { available: false, error: "No API key configured" };
+    return {
+      available: false,
+      error: `${providerOverride === "openrouter" ? "OpenRouter" : "OpenAI"} API Key not set`,
+    };
   }
 
   try {
@@ -349,6 +392,100 @@ export async function checkOpenAI(
   }
 }
 
+// Check if OpenRouter is configured and available
+export async function checkOpenRouter(
+  settings?: LLMSettings
+): Promise<ProviderStatus> {
+  const { apiKey, baseUrl, model } = await getOpenRouterSettings(settings);
+  if (!apiKey) return { available: false, error: "OpenRouter API Key not set" };
+
+  // reuse OpenAI check with OpenRouter specific headers if needed
+  return checkOpenAI(settings, "openrouter");
+}
+
+// Check if Gemini is configured and available
+export async function checkGemini(
+  settings?: LLMSettings
+): Promise<ProviderStatus> {
+  const { apiKey, model } = await getGeminiSettings(settings);
+  if (!apiKey) return { available: false, error: "Gemini API Key not set" };
+
+  try {
+    const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
+    const response = await fetch(`${baseUrl}/models?key=${apiKey}`);
+
+    if (response.ok) {
+      const data = await response.json();
+      const models = (data.models || [])
+        .filter((m: { name: string }) => m.name.includes("gemini"))
+        .map((m: { name: string }) => m.name.split("/").pop())
+        .filter(Boolean) as string[];
+
+      return {
+        available: true,
+        model: models.find(m => m === model) || models[0] || model,
+        models: models,
+        modelsEndpointAvailable: true,
+      };
+    }
+    return {
+      available: true,
+      model: model,
+      models: [model],
+      modelsEndpointAvailable: false,
+      error: "Could not fetch Gemini models list",
+    };
+  } catch (error) {
+    return {
+      available: true,
+      model: model,
+      models: [model],
+      modelsEndpointAvailable: false,
+    };
+  }
+}
+
+// Test Gemini connection and fetch models
+export async function testGeminiConnection(
+  apiKey: string,
+  model: string
+): Promise<{
+  success: boolean;
+  error?: string;
+  models?: string[];
+  modelsEndpointAvailable?: boolean;
+}> {
+  try {
+    const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
+    const response = await fetch(`${baseUrl}/models?key=${apiKey}`);
+
+    if (response.ok) {
+      const data = await response.json();
+      const models = (data.models || [])
+        .filter((m: { name: string }) => m.name.includes("gemini"))
+        .map((m: { name: string }) => m.name.split("/").pop())
+        .filter(Boolean) as string[];
+
+      return {
+        success: true,
+        models,
+        modelsEndpointAvailable: true,
+      };
+    } else {
+      const error = await response.json().catch(() => ({}));
+      return {
+        success: false,
+        error: error.error?.message || "Connection failed",
+      };
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Connection failed",
+    };
+  }
+}
+
 // Test OpenAI connection and fetch models
 export async function testOpenAIConnection(
   baseUrl: string,
@@ -423,47 +560,29 @@ export async function testOpenAIConnection(
 }
 
 // Get available providers
-export async function getAvailableProviders(settings?: LLMSettings): Promise<Record<LLMProvider, ProviderStatus>> {
-  const preferred = settings?.preferredProvider || 'auto'
-
-  if (preferred === 'ollama') {
-    const ollama = await checkOllama(settings)
-    return {
-      browser: { available: false, error: "Not implemented yet" },
-      ollama,
-      openai: { available: false },
-    };
-  }
-
-  if (preferred === 'openai') {
-    const openai = await checkOpenAI(settings)
-    return {
-      browser: { available: false, error: "Not implemented yet" },
-      ollama: { available: false },
-      openai,
-    };
-  }
-
-  if (preferred === 'browser') {
-    const browser = await checkBrowserLLM()
-    return {
-      browser,
-      ollama: { available: false },
-      openai: { available: false },
-    };
-  }
-
-  // Auto mode - check all providers
-  const [browser, ollama, openai] = await Promise.all([
-    checkBrowserLLM(),
+export async function getAvailableProviders(
+  settings?: LLMSettings
+): Promise<Record<LLMProvider, ProviderStatus>> {
+  const [webLLM, ollama, openai, gemini, openrouter] = await Promise.all([
+    getWebLLMStatus(),
     checkOllama(settings),
-    checkOpenAI(settings),
-  ])
+    checkOpenAI(settings, "openai"),
+    checkGemini(settings),
+    checkOpenRouter(settings),
+  ]);
+
+  const browser: ProviderStatus = {
+    ...webLLM,
+    error: webLLM.error || undefined,
+    available: webLLM.isSupported,
+  };
 
   return {
     browser,
     ollama,
     openai,
+    gemini,
+    openrouter,
   };
 }
 
@@ -539,7 +658,9 @@ async function callBrowserLLM(
     // Don't pass tools to WebLLM - the system prompt already contains tool definitions
     // Models will output JSON tool calls in their response content
     const response = await chatWithWebLLM(
-      messages.map(m => ({ role: m.role, content: m.content }))
+      messages
+        .filter(m => m.role !== 'tool')
+        .map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content }))
       // No tools passed - avoids "model doesn't support tools" error
     );
 
@@ -566,13 +687,26 @@ async function callOpenAI(
   messages: LLMMessage[],
   tools?: LLMTool[],
   settings?: LLMSettings,
-  useJsonFallback = false,
-  servers?: ServerInfo[]
+  useJsonFallback: boolean = false,
+  servers?: ServerInfo[],
+  isOpenRouter: boolean = false
 ): Promise<LLMResponse> {
-  const { apiKey, baseUrl, model } = await getOpenAISettings(settings);
+  const { apiKey, baseUrl, model } = isOpenRouter
+    ? await getOpenRouterSettings(settings)
+    : await getOpenAISettings(settings);
 
   if (!apiKey) {
     throw new Error("OpenAI API key not configured");
+  }
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+  };
+
+  if (isOpenRouter) {
+    headers["HTTP-Referer"] = "https://ai-worker.app";
+    headers["X-Title"] = "AI-Worker";
   }
 
   // If using JSON fallback, rebuild system message with JSON instructions
@@ -788,10 +922,10 @@ function buildSystemPrompt(
     const reasoningNote =
       reasoningServers.length > 0
         ? `\n\n**Reasoning Servers Available**: ${reasoningServers
-            .map((s) => s.name)
-            .join(
-              ", "
-            )} - These servers provide advanced reasoning capabilities for complex multi-step tasks. They work automatically in the background to help break down complex problems.`
+          .map((s) => s.name)
+          .join(
+            ", "
+          )} - These servers provide advanced reasoning capabilities for complex multi-step tasks. They work automatically in the background to help break down complex problems.`
         : "";
 
     serverContext = `\n\n## Connected MCP Servers\nThese are Model Context Protocol (MCP) servers that provide the tools listed above:\n${serverList}${reasoningNote}\n\nWhen users ask about "MCP servers" or "what tools do you have", refer to the tools and servers listed above.`;
@@ -889,6 +1023,10 @@ export async function chat(
       provider = "ollama";
     } else if (providers.openai.available) {
       provider = "openai";
+    } else if (providers.gemini.available) {
+      provider = "gemini";
+    } else if (providers.openrouter.available) {
+      provider = "openrouter";
     }
   } else if (preferredProvider === "browser" && providers.browser.available) {
     provider = "browser";
@@ -896,11 +1034,15 @@ export async function chat(
     provider = "ollama";
   } else if (preferredProvider === "openai" && providers.openai.available) {
     provider = "openai";
+  } else if (preferredProvider === "gemini" && providers.gemini.available) {
+    provider = "gemini";
+  } else if (preferredProvider === "openrouter" && providers.openrouter.available) {
+    provider = "openrouter";
   }
 
   if (!provider) {
     throw new Error(
-      "No LLM provider available. Please enable a provider (Browser LLM, Ollama, or OpenAI) and configure it appropriately."
+      "No LLM provider available. Please enable a provider (Browser LLM, Ollama, OpenAI, Gemini, or OpenRouter) and configure it appropriately."
     );
   }
 
@@ -938,16 +1080,108 @@ export async function chat(
     case "ollama":
       return callOllama(messagesWithSystem, tools, settings);
     case "openai":
-      return callOpenAI(
-        messagesWithSystem,
-        tools,
-        settings,
-        useJsonFallback,
-        servers
-      );
+      return callOpenAI(messagesWithSystem, tools, settings, useJsonFallback, servers, false);
+    case "gemini":
+      return callGemini(messagesWithSystem, tools, settings);
+    case "openrouter":
+      return callOpenAI(messagesWithSystem, tools, settings, useJsonFallback, servers, true);
     default:
       throw new Error(`Provider ${provider} not implemented`);
   }
+}
+
+// Gemini specific caller
+async function callGemini(
+  messages: LLMMessage[],
+  tools?: LLMTool[],
+  settings?: LLMSettings
+): Promise<LLMResponse> {
+  const { apiKey, model } = await getGeminiSettings(settings);
+  const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
+
+  // Convert messages to Gemini format, including tool history
+  const contents = messages.filter(m => m.role !== 'system').map(m => {
+    const role = m.role === 'assistant' ? 'model' : m.role === 'tool' ? 'function' : 'user';
+
+    const parts: any[] = [];
+    if (m.content) {
+      parts.push({ text: m.content });
+    }
+
+    // Handle assistant tool calls
+    if (m.role === 'assistant' && (m as any).tool_calls) {
+      (m as any).tool_calls.forEach((tc: any) => {
+        parts.push({
+          functionCall: {
+            name: tc.function.name,
+            args: typeof tc.function.arguments === 'string'
+              ? JSON.parse(tc.function.arguments)
+              : tc.function.arguments
+          }
+        });
+      });
+    }
+
+    // Handle tool results
+    if (m.role === 'tool') {
+      parts.push({
+        functionResponse: {
+          name: (m as any).name || (m as any).tool_call_id, // Fallback to tool_call_id if name is missing
+          response: { result: m.content }
+        }
+      });
+    }
+
+    return { role, parts };
+  });
+
+  const systemInstruction = messages.find(m => m.role === 'system')?.content;
+
+  // Build tool definitions
+  const toolConfig = tools && tools.length > 0 ? {
+    function_declarations: tools.map(t => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters
+    }))
+  } : undefined;
+
+  const payload = {
+    contents,
+    system_instruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
+    tools: toolConfig ? [{ function_declarations: toolConfig.function_declarations }] : undefined,
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 2048,
+    }
+  };
+
+  const response = await fetch(`${baseUrl}/models/${model}:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const errorDetails = await response.json().catch(() => ({}));
+    throw new Error(`Gemini API error: ${response.statusText}. ${JSON.stringify(errorDetails)}`);
+  }
+
+  const data = await response.json();
+  const candidate = data.candidates?.[0];
+  const content = candidate?.content?.parts?.[0]?.text || "";
+  const toolCalls = candidate?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => ({
+    id: `gemini-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    name: p.functionCall.name,
+    arguments: p.functionCall.args
+  }));
+
+  return {
+    content,
+    toolCalls: toolCalls && toolCalls.length > 0 ? toolCalls : undefined,
+    provider: 'gemini',
+    model: model
+  };
 }
 
 // Load WebLLM model (download if needed)

@@ -4,10 +4,12 @@ import { ChatView } from "./components/ChatView";
 import { ChatSidebar } from "./components/ChatSidebar";
 import { ConnectionsPanel } from "./components/ConnectionsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+
 import { Sidebar, View } from "./components/Sidebar";
 import { Header } from "./components/Header";
 import { useChatStore } from "./stores/chatStore";
 import { useSettingsStore } from "./stores/settingsStore";
+import { useLogStore } from "./stores/logStore";
 import { useSpeechSynthesis } from "./hooks/useSpeechSynthesis";
 import {
   chat,
@@ -30,6 +32,7 @@ function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
   const { sessions, activeSessionId, addMessage, setProcessing, isProcessing } =
     useChatStore();
+  const { addLog } = useLogStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const messages = activeSession?.messages || [];
   const settings = useSettingsStore();
@@ -80,6 +83,10 @@ function App() {
           openaiApiKey: settings.openaiApiKey,
           openaiBaseUrl: settings.openaiBaseUrl,
           openaiModel: settings.openaiModel,
+          geminiApiKey: settings.geminiApiKey,
+          geminiModel: settings.geminiModel,
+          openrouterApiKey: settings.openrouterApiKey,
+          openrouterModel: settings.openrouterModel,
         };
         const providers = await getAvailableProviders(settingsForLLM);
         if (providers.browser.available) {
@@ -98,6 +105,16 @@ function App() {
               provider: `Ollama (${providers.ollama.model})`,
               available: true,
             });
+          } else if (providers.gemini.available) {
+            setLlmStatus({
+              provider: `Gemini (${providers.gemini.model})`,
+              available: true,
+            });
+          } else if (providers.openrouter.available) {
+            setLlmStatus({
+              provider: `OpenRouter (${providers.openrouter.model})`,
+              available: true,
+            });
           } else if (providers.openai.available) {
             setLlmStatus({
               provider: `OpenAI (${providers.openai.model})`,
@@ -109,6 +126,16 @@ function App() {
         } else if (providers.ollama.available) {
           setLlmStatus({
             provider: `Ollama (${providers.ollama.model})`,
+            available: true,
+          });
+        } else if (providers.gemini.available) {
+          setLlmStatus({
+            provider: `Gemini (${providers.gemini.model})`,
+            available: true,
+          });
+        } else if (providers.openrouter.available) {
+          setLlmStatus({
+            provider: `OpenRouter (${providers.openrouter.model})`,
             available: true,
           });
         } else if (providers.openai.available) {
@@ -190,6 +217,16 @@ function App() {
         content: content.trim(),
       });
 
+      // Log the user message
+      addLog({
+        eventType: 'USER_MESSAGE',
+        sessionId: activeSessionId || "default",
+        component: "App.handleSubmit",
+        details: {
+          input: content.trim()
+        },
+      });
+
       setProcessing(true);
 
       try {
@@ -209,14 +246,17 @@ function App() {
         const mcpTools = getAllTools();
         const servers = getServers();
 
-        console.log(`[MCP App] Preparing LLM request with MCP tools`, {
-          timestamp: new Date().toISOString(),
-          operation: "prepareLLMRequest",
-          mcpToolCount: mcpTools.length,
-          connectedServerCount: servers.filter((s) => s.connected).length,
-          totalServerCount: servers.length,
-          toolNames: mcpTools.map((t) => t.name),
-          serverNames: servers.filter((s) => s.connected).map((s) => s.name),
+        addLog({
+          eventType: 'DEBUG',
+          sessionId: activeSessionId || "default",
+          component: "App.handleSubmit",
+          details: {
+            metadata: {
+              mcpToolCount: mcpTools.length,
+              connectedServerCount: servers.filter((s) => s.connected).length,
+              toolNames: mcpTools.map((t) => t.name),
+            }
+          },
         });
 
         // Convert to LLM format (minimal for token efficiency)
@@ -253,6 +293,10 @@ function App() {
           openaiApiKey: settings.openaiApiKey,
           openaiBaseUrl: settings.openaiBaseUrl,
           openaiModel: settings.openaiModel,
+          geminiApiKey: settings.geminiApiKey,
+          geminiModel: settings.geminiModel,
+          openrouterApiKey: settings.openrouterApiKey,
+          openrouterModel: settings.openrouterModel,
         };
 
         let currentMessages = [...llmMessages];
@@ -266,16 +310,19 @@ function App() {
         }> = [];
 
         while (iterationCount < maxIterations) {
-          console.log(
-            `[MCP App] Starting LLM call (iteration ${iterationCount + 1})`,
-            {
-              timestamp: new Date().toISOString(),
-              operation: "llmCall",
-              iteration: iterationCount + 1,
-              messageCount: currentMessages.length,
-              hasTools: llmTools.length > 0,
-            }
-          );
+          addLog({
+            eventType: 'LLM_REQUEST',
+            sessionId: activeSessionId || "default",
+            component: "App",
+            correlationId: `iter_${iterationCount + 1}_${Date.now()}`, // Simple correlation ID for this iteration
+            details: {
+              metadata: {
+                iteration: iterationCount + 1,
+                provider: settingsForLLM.preferredProvider,
+              },
+              input: currentMessages, // LOGGING FULL CONTEXT
+            },
+          });
 
           let response: Awaited<ReturnType<typeof chat>>;
           try {
@@ -298,15 +345,15 @@ function App() {
           } catch (error) {
             const errorMessage =
               error instanceof Error ? error.message : "Unknown error";
-            console.error(
-              `[MCP App] LLM call failed (iteration ${iterationCount + 1})`,
-              {
-                timestamp: new Date().toISOString(),
-                operation: "llmCall",
-                iteration: iterationCount + 1,
+            addLog({
+              eventType: 'ERROR',
+              sessionId: activeSessionId || "default",
+              component: "App",
+              details: {
                 error: errorMessage,
+                metadata: { iteration: iterationCount + 1 }
               }
-            );
+            });
 
             // If it's a timeout or error, break the loop and show error
             finalResponse = {
@@ -317,20 +364,20 @@ function App() {
             break;
           }
 
-          console.log(
-            `[MCP App] LLM call completed (iteration ${iterationCount + 1})`,
-            {
-              timestamp: new Date().toISOString(),
-              operation: "llmCall",
-              iteration: iterationCount + 1,
-              hasContent: !!response.content,
-              hasToolCalls: !!(
-                response.toolCalls && response.toolCalls.length > 0
-              ),
-              toolCallCount: response.toolCalls?.length || 0,
-              contentPreview: response.content?.substring(0, 100),
-            }
-          );
+          addLog({
+            eventType: 'LLM_RESPONSE',
+            sessionId: activeSessionId || "default",
+            component: "App",
+            details: {
+              model: response.model,
+              output: response.content, // FULL RESPONSE CONTENT
+              metadata: {
+                provider: response.provider,
+                iteration: iterationCount + 1,
+                toolCallCount: response.toolCalls?.length || 0,
+              }
+            },
+          });
 
           finalResponse = response;
 
@@ -362,20 +409,8 @@ function App() {
 
           // Execute tool calls
           const toolExecutionStartTime = Date.now();
-          console.log(
-            `[MCP App] Tool execution batch started (iteration ${
-              iterationCount + 1
-            })`,
-            {
-              timestamp: new Date().toISOString(),
-              operation: "executeToolCalls",
-              iteration: iterationCount + 1,
-              toolCallCount: response.toolCalls.length,
-              toolNames: response.toolCalls.map((tc) => tc.name),
-              llmProvider: response.provider,
-              llmModel: response.model,
-            }
-          );
+
+
 
           // Add assistant message with tool calls to conversation (for OpenAI API format)
           currentMessages.push({
@@ -403,8 +438,7 @@ function App() {
             const toolCallStartTime = Date.now();
 
             console.log(
-              `[MCP App] Executing tool call ${i + 1}/${
-                response.toolCalls.length
+              `[MCP App] Executing tool call ${i + 1}/${response.toolCalls.length
               }`,
               {
                 timestamp: new Date().toISOString(),
@@ -417,6 +451,20 @@ function App() {
               }
             );
 
+            // Log TOOL_CALL (AI's intention before execution)
+            addLog({
+              eventType: 'TOOL_CALL',
+              sessionId: activeSessionId || "default",
+              component: "App.ToolExecutor",
+              correlationId: toolCall.id,
+              details: {
+                input: {
+                  toolName: toolCall.name,
+                  arguments: toolCall.arguments,
+                }
+              }
+            });
+
             try {
               const result = await executeToolCall(
                 toolCall.name,
@@ -426,13 +474,16 @@ function App() {
               const toolCallDuration = Date.now() - toolCallStartTime;
 
               if (result.error) {
-                console.error(`[MCP App] Tool call ${i + 1} failed`, {
-                  timestamp: new Date().toISOString(),
-                  operation: "executeToolCall",
-                  toolName: toolCall.name,
-                  toolIndex: i + 1,
-                  error: result.error,
-                  duration: toolCallDuration,
+                addLog({
+                  eventType: 'ERROR',
+                  sessionId: activeSessionId || "default",
+                  component: "App",
+                  correlationId: toolCall.id, // Linking back to the tool call request
+                  durationMs: toolCallDuration,
+                  details: {
+                    error: result.error,
+                    input: { toolName: toolCall.name }
+                  }
                 });
 
                 toolResults.push({
@@ -447,15 +498,16 @@ function App() {
                     ? result.result.substring(0, 100)
                     : JSON.stringify(result.result).substring(0, 100);
 
-                console.log(`[MCP App] Tool call ${i + 1} completed`, {
-                  timestamp: new Date().toISOString(),
-                  operation: "executeToolCall",
-                  toolName: toolCall.name,
-                  toolIndex: i + 1,
-                  duration: toolCallDuration,
-                  resultSize,
-                  resultPreview:
-                    resultPreview + (resultSize > 100 ? "..." : ""),
+                addLog({
+                  eventType: 'TOOL_RESULT',
+                  sessionId: activeSessionId || "default",
+                  component: "App",
+                  correlationId: toolCall.id, // Linking back to the tool call request
+                  durationMs: toolCallDuration,
+                  details: {
+                    output: result.result, // RAW TOOL OUTPUT
+                    input: { toolName: toolCall.name, args: toolCall.arguments } // REPEATING ARGS FOR CLARITY
+                  }
                 });
 
                 const resultStr =
@@ -583,14 +635,14 @@ function App() {
     <div className="flex h-screen bg-[#0f1115] text-white font-sans overflow-hidden">
       <Sidebar currentView={currentView} onViewChange={setCurrentView} />
 
-      <div className="flex-1 flex flex-col relative">
+      <div className="flex-1 flex flex-col relative min-w-0">
         <Header status={llmStatus} />
 
-        <main className="flex-1 flex flex-col overflow-hidden">
+        <main className="flex-1 flex flex-col overflow-hidden min-w-0">
           {currentView === "chat" && (
-            <div className="flex-1 flex overflow-hidden">
+            <div className="flex-1 flex overflow-hidden min-w-0">
               <ChatSidebar />
-              <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex-1 flex flex-col overflow-hidden min-w-0">
                 <ChatView />
                 <div className="p-4 flex-shrink-0 border-t border-white/5">
                   <VoiceInput onSubmit={handleSubmit} disabled={isProcessing} />
@@ -601,6 +653,7 @@ function App() {
 
           {currentView === "connections" && <ConnectionsPanel />}
           {currentView === "settings" && <SettingsPanel />}
+
         </main>
       </div>
     </div>
