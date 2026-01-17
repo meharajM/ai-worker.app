@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { FEATURE_FLAGS, RATE_LIMITS } from '../lib/constants'
+import { 
+    signInWithGoogle as firebaseSignIn, 
+    signOutFromFirebase, 
+    onAuthChange, 
+    initializeFirebase 
+} from '../lib/firebase'
 
 export interface User {
     uid: string
@@ -28,6 +34,7 @@ interface AuthState {
     setError: (error: string | null) => void
     signInWithGoogle: () => Promise<void>
     signOut: () => Promise<void>
+    initializeAuthListener: () => Promise<() => void>
 
     // Rate limiting
     canChat: () => boolean
@@ -66,21 +73,18 @@ export const useAuthStore = create<AuthState>()(
                 set({ loading: true, error: null })
 
                 try {
-                    // TODO: Implement actual Firebase Google sign-in
-                    // For now, simulate auth
-                    await new Promise((resolve) => setTimeout(resolve, 1000))
-
-                    // Mock user for development
+                    const firebaseUser = await firebaseSignIn()
                     set({
                         user: {
-                            uid: 'mock_user_123',
-                            email: 'user@example.com',
-                            displayName: 'Test User',
-                            photoURL: null,
+                            uid: firebaseUser.uid,
+                            email: firebaseUser.email,
+                            displayName: firebaseUser.displayName,
+                            photoURL: firebaseUser.photoURL,
                         },
                         loading: false,
                     })
                 } catch (error) {
+                    console.error('Sign in failed:', error)
                     set({
                         error: error instanceof Error ? error.message : 'Sign in failed',
                         loading: false,
@@ -92,14 +96,53 @@ export const useAuthStore = create<AuthState>()(
                 set({ loading: true })
 
                 try {
-                    // TODO: Implement actual Firebase sign out
-                    await new Promise((resolve) => setTimeout(resolve, 500))
+                    await signOutFromFirebase()
                     set({ user: null, loading: false })
                 } catch (error) {
+                    console.error('Sign out failed:', error)
                     set({
                         error: error instanceof Error ? error.message : 'Sign out failed',
                         loading: false,
                     })
+                }
+            },
+
+            initializeAuthListener: async () => {
+                if (!FEATURE_FLAGS.AUTH_ENABLED) {
+                    console.log('[Auth] Feature flag disabled, skipping listener')
+                    return () => {}
+                }
+
+                try {
+                    console.log('[Auth] Initializing Firebase...')
+                    await initializeFirebase()
+                    console.log('[Auth] Firebase initialized, setting up listener...')
+                    
+                    // Set up auth state listener
+                    const unsubscribe = await onAuthChange((firebaseUser) => {
+                        console.log('[Auth] Auth state changed:', firebaseUser ? 'User Logged In' : 'User Null', firebaseUser?.uid)
+                        
+                        if (firebaseUser) {
+                            const userData = {
+                                uid: firebaseUser.uid,
+                                email: firebaseUser.email,
+                                displayName: firebaseUser.displayName,
+                                photoURL: firebaseUser.photoURL,
+                            }
+                            console.log('[Auth] Updating store with user:', userData)
+                            set({
+                                user: userData,
+                                loading: false,
+                            })
+                        } else {
+                            console.log('[Auth] Clearing user from store')
+                            set({ user: null, loading: false })
+                        }
+                    })
+                    return unsubscribe
+                } catch (error) {
+                    console.error('[Auth] Failed to initialize auth listener:', error)
+                    return () => {}
                 }
             },
 

@@ -46,7 +46,28 @@ function createWindow(): void {
     })
 
     mainWindow.webContents.setWindowOpenHandler((details) => {
-        shell.openExternal(details.url)
+        const url = details.url
+        
+        // Allow Firebase/Google OAuth popups to open in new window
+        if (url.includes('accounts.google.com') || 
+            url.includes('.firebaseapp.com') ||
+            url.includes('googleapis.com')) {
+            return { 
+                action: 'allow',
+                overrideBrowserWindowOptions: {
+                    width: 500,
+                    height: 600,
+                    autoHideMenuBar: true,
+                    webPreferences: {
+                        nodeIntegration: false,
+                        contextIsolation: true,
+                    }
+                }
+            }
+        }
+        
+        // Open other external links in system browser
+        shell.openExternal(url)
         return { action: 'deny' }
     })
 

@@ -292,6 +292,11 @@ export function SettingsPanel() {
                                             src={auth.user.photoURL}
                                             alt="Profile"
                                             className="w-12 h-12 rounded-full"
+                                            referrerPolicy="no-referrer"
+                                            onError={(e) => {
+                                                console.error('[Profile] Image load error:', e)
+                                                e.currentTarget.style.display = 'none' 
+                                            }}
                                         />
                                     )}
                                     <div>
