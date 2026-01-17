@@ -21,7 +21,7 @@ For local testing details, see [TESTING.md](./TESTING.md).
 
 ### Prerequisites
 
-- Node.js
+- Node.js (Version defined in `.nvmrc` - run `nvm install` to setup)
 - NPM/Yarn/PNPM
 
 ### Build for Host OS
