@@ -27,7 +27,6 @@ export function registerSpeechHandlers(): void {
 
     ipcMain.handle('speech:download-model', async (event, options: { modelId: string, url: string, modelName: string }) => {
         return await modelManager!.downloadModel(
-            options.modelId,
             options.modelName,
             options.url, // Pass dynamic URL
             (progress) => {

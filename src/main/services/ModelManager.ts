@@ -58,7 +58,6 @@ export class ModelManager {
     }
 
     public async downloadModel(
-        modelId: string,
         modelName: string,
         modelUrl: string, // New argument
         onProgress: (progress: number) => void
