@@ -6,8 +6,16 @@ import type { FirebaseApp } from 'firebase/app'
 import type { Auth, User, UserCredential } from 'firebase/auth'
 import type { AppCheck } from 'firebase/app-check'
 
-// Firebase config from environment variables
-// Safe to expose - security enforced by Firebase Security Rules & App Check
+export type { User, UserCredential, Auth, FirebaseApp, AppCheck }
+
+/**
+ * Firebase Config from environment variables
+ * 
+ * Note: These public keys are safe to expose in the tailored Electron environment
+ * because actual data security is enforced by:
+ * 1. Firebase Security Rules (server-side)
+ * 2. App Check (validates request legitimacy)
+ */
 export const firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'placeholder-api-key',
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'placeholder.firebaseapp.com',

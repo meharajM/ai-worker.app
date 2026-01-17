@@ -11,7 +11,7 @@ import { useChatStore } from "./stores/chatStore";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useLogStore } from "./stores/logStore";
 import { useSpeechSynthesis } from "./hooks/useSpeechSynthesis";
-import { useAuthStore } from "./stores/authStore";
+import { useAuthPersistence } from "./hooks/useAuthPersistence";
 import {
   chat,
   getAvailableProviders,
@@ -46,19 +46,8 @@ function App() {
     available: false,
   });
   
-  const { initializeAuthListener } = useAuthStore();
-
-  // Initialize Auth Listener (Firebase Persistence)
-  useEffect(() => {
-    const initAuth = async () => {
-      const unsubscribe = await initializeAuthListener();
-      return unsubscribe;
-    };
-    const unsubscribePromise = initAuth();
-    return () => {
-      unsubscribePromise.then(unsub => unsub && unsub());
-    };
-  }, [initializeAuthListener]);
+  // Initialize Auth Persistence
+  useAuthPersistence();
 
   // Initialize MCP servers and auto-connect on mount
   useEffect(() => {
