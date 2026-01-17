@@ -353,12 +353,17 @@ export async function checkOpenAI(
       }
     } else {
       // Fallback to direct fetch if IPC not available (for development/testing)
+      console.log(`[LLM Check] Checking OpenAI models at: ${baseUrl}/models`);
       const response = await fetch(`${baseUrl}/models`, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${apiKey}`,
         },
       });
+
+      if (!response) {
+        throw new Error("Fetch returned undefined response");
+      }
 
       if (response.ok) {
         const data = await response.json();
@@ -391,6 +396,11 @@ export async function checkOpenAI(
           modelsEndpointAvailable: true,
         };
       } else {
+        if (response.status === 404) {
+          console.error(`[LLM Check] 404 Error: Models endpoint not found at ${baseUrl}/models`);
+        } else {
+          console.error(`[LLM Check] HTTP Error ${response.status}: ${response.statusText} at ${baseUrl}/models`);
+        }
         return {
           available: true,
           model: model,
@@ -616,6 +626,7 @@ async function callOllama(
 ): Promise<LLMResponse> {
   const { baseUrl, model } = getOllamaSettings(settings);
 
+  console.log(`[LLM Chat] Calling Ollama at: ${baseUrl}/api/chat`);
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -638,9 +649,12 @@ async function callOllama(
     }),
   });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || `Ollama error: ${response.statusText}`);
+  if (!response || !response.ok) {
+    if (response?.status === 404) {
+      console.error(`[LLM Chat] 404 Error: Ollama endpoint not found at ${baseUrl}/api/chat`);
+    }
+    const error = response ? await response.json().catch(() => ({})) : { error: "Fetch failed" };
+    throw new Error(error.error || `Ollama error: ${response?.statusText || "Unknown"}`);
   }
 
   const data = await response.json();
@@ -755,6 +769,7 @@ async function callOpenAI(
     }
   }
 
+  console.log(`[LLM Chat] Calling OpenAI-compatible API at: ${baseUrl}/chat/completions`);
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers,
@@ -777,10 +792,13 @@ async function callOpenAI(
     }),
   });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
+  if (!response || !response.ok) {
+    if (response?.status === 404) {
+      console.error(`[LLM Chat] 404 Error: OpenAI-compatible endpoint not found at ${baseUrl}/chat/completions`);
+    }
+    const error = response ? await response.json().catch(() => ({})) : { error: "Fetch failed" };
     const errorMessage =
-      error.error?.message || `OpenAI error: ${response.statusText}`;
+      error.error?.message || `OpenAI error: ${response?.statusText || "Unknown"}`;
 
     // Check if it's a tool calling not supported error
     if (

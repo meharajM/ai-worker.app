@@ -7,11 +7,6 @@ export type Theme = 'dark' | 'light' | 'system'
 export type LLMProviderType = 'auto' | 'ollama' | 'openai' | 'gemini' | 'openrouter' | 'browser'
 
 interface SettingsState {
-    // Voice settings
-    ttsEnabled: boolean
-    ttsRate: number
-    ttsPitch: number
-    ttsVoice: string | null
     speechLang: string
     offlineSpeech: boolean
     voskModel: string
@@ -33,10 +28,6 @@ interface SettingsState {
     theme: Theme
 
     // Actions
-    setTtsEnabled: (enabled: boolean) => void
-    setTtsRate: (rate: number) => void
-    setTtsPitch: (pitch: number) => void
-    setTtsVoice: (voice: string | null) => void
     setSpeechLang: (lang: string) => void
     setOfflineSpeech: (enabled: boolean) => void
     setVoskModel: (model: string) => void
@@ -56,10 +47,7 @@ interface SettingsState {
 }
 
 const defaultSettings = {
-    ttsEnabled: FEATURE_FLAGS.TTS_ENABLED,
-    ttsRate: VOICE_CONFIG.TTS_RATE,
-    ttsPitch: VOICE_CONFIG.TTS_PITCH,
-    ttsVoice: null,
+
     speechLang: VOICE_CONFIG.SPEECH_LANG,
     // Force offline speech in Electron, enforce online in browser
     offlineSpeech: !!(window.electron),
@@ -119,10 +107,7 @@ export const useSettingsStore = create<SettingsState>()(
         (set) => ({
             ...defaultSettings,
 
-            setTtsEnabled: (enabled) => set({ ttsEnabled: enabled }),
-            setTtsRate: (rate) => set({ ttsRate: rate }),
-            setTtsPitch: (pitch) => set({ ttsPitch: pitch }),
-            setTtsVoice: (voice) => set({ ttsVoice: voice }),
+
             setSpeechLang: (lang) => set({ speechLang: lang }),
             setOfflineSpeech: (enabled) => set({ offlineSpeech: enabled }),
             setVoskModel: (model: string) => set({ voskModel: model }),

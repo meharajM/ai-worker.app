@@ -22,7 +22,7 @@ export function FeatureFlagsPanel({ isDevMode }: FeatureFlagsPanelProps) {
   useEffect(() => {
     // Get fresh feature flags
     const currentFlags = getFeatureFlags()
-    
+
     // Initialize flags from current feature flags
     const initialFlags: FeatureFlag[] = [
       {
@@ -32,13 +32,7 @@ export function FeatureFlagsPanel({ isDevMode }: FeatureFlagsPanelProps) {
         category: 'Authentication',
         enabled: currentFlags.AUTH_ENABLED,
       },
-      {
-        key: 'TTS_ENABLED',
-        label: 'Text-to-Speech',
-        description: 'Enable AI response voice readout',
-        category: 'Voice',
-        enabled: currentFlags.TTS_ENABLED,
-      },
+
       {
         key: 'OLLAMA_ENABLED',
         label: 'Ollama Integration',
@@ -74,7 +68,7 @@ export function FeatureFlagsPanel({ isDevMode }: FeatureFlagsPanelProps) {
   }, [])
 
   const handleFlagToggle = (key: keyof typeof FEATURE_FLAGS, enabled: boolean) => {
-    setFlags(prev => prev.map(flag => 
+    setFlags(prev => prev.map(flag =>
       flag.key === key ? { ...flag, enabled } : flag
     ))
     setHasChanges(true)
@@ -82,7 +76,7 @@ export function FeatureFlagsPanel({ isDevMode }: FeatureFlagsPanelProps) {
 
   const refreshFlags = () => {
     const currentFlags = getFeatureFlags()
-    setFlags(prevFlags => 
+    setFlags(prevFlags =>
       prevFlags.map(flag => ({
         ...flag,
         enabled: currentFlags[flag.key as keyof typeof currentFlags]
@@ -96,12 +90,12 @@ export function FeatureFlagsPanel({ isDevMode }: FeatureFlagsPanelProps) {
       acc[flag.key] = flag.enabled
       return acc
     }, {} as Record<string, boolean>)
-    
+
     localStorage.setItem('ai-worker-dev-flags', JSON.stringify(flagsData))
-    
+
     // Show success message
     alert('Feature flags saved! Restart the app to apply changes.')
-    
+
     // Refresh the flags to show updated values
     refreshFlags()
     setOriginalFlags([...flags])
@@ -194,16 +188,14 @@ export function FeatureFlagsPanel({ isDevMode }: FeatureFlagsPanelProps) {
                     </div>
                     <button
                       onClick={() => handleFlagToggle(flag.key, !flag.enabled)}
-                      className={`w-12 h-6 rounded-full transition-colors ${
-                        flag.enabled ? 'bg-[#4fd1c5]' : 'bg-white/20'
-                      }`}
+                      className={`w-12 h-6 rounded-full transition-colors ${flag.enabled ? 'bg-[#4fd1c5]' : 'bg-white/20'
+                        }`}
                       title={flag.enabled ? 'Disable feature' : 'Enable feature'}
                       aria-label={`${flag.enabled ? 'Disable' : 'Enable'} ${flag.label}`}
                     >
                       <div
-                        className={`w-5 h-5 bg-white rounded-full transition-transform ${
-                          flag.enabled ? 'translate-x-6' : 'translate-x-0.5'
-                        }`}
+                        className={`w-5 h-5 bg-white rounded-full transition-transform ${flag.enabled ? 'translate-x-6' : 'translate-x-0.5'
+                          }`}
                       />
                     </button>
                   </div>

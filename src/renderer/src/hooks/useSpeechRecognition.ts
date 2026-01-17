@@ -3,6 +3,8 @@ import { VOICE_CONFIG } from '../lib/constants'
 import { useSettingsStore } from '../stores/settingsStore'
 import { isElectron } from '../lib/electron'
 import { voskService } from '../lib/vosk'
+import { useLogStore } from '../stores/logStore'
+import { useChatStore } from '../stores/chatStore'
 
 interface UseSpeechRecognitionReturn {
     isListening: boolean
@@ -19,11 +21,13 @@ interface UseSpeechRecognitionReturn {
     isFirstSetup: boolean
     setupProgress: number
     notification: string | null
+    setText: (text: string) => void
 }
 
 export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     const settings = useSettingsStore()
     const useNativeSpeech = isElectron()
+    const { addLog } = useLogStore()
 
     const [isListening, setIsListening] = useState(false)
     const [transcript, setTranscript] = useState('')
@@ -128,14 +132,23 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
 
                 processor.onaudioprocess = (event) => {
                     try {
-                        recognizer.acceptWaveform(event.inputBuffer)
+                        const buffer = event.inputBuffer
+                        if (buffer.numberOfChannels > 0) {
+                            recognizer.acceptWaveform(event.inputBuffer)
+                        }
                     } catch (e) {
                         console.error('WASM processing error:', e)
                     }
                 }
 
                 source.connect(processor)
-                processor.connect(audioContext.destination)
+
+                // CRITICAL: Processor MUST be connected to destination for the audio clock to run in Chrome/Electron
+                // We connect via a GainNode with 0 gain to prevent feedback (hearing yourself)
+                const muteNode = audioContext.createGain()
+                muteNode.gain.value = 0
+                processor.connect(muteNode)
+                muteNode.connect(audioContext.destination)
             }
 
             const analyser = audioContext.createAnalyser()
@@ -186,15 +199,24 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
         shouldListenRef.current = true
         setError(null)
         setNotification(null)
-        setTranscript('')
+        // Do NOT clear transcript here - allows appending to manual edits
         setInterimTranscript('')
+
+        const sessionId = useChatStore.getState().activeSessionId || 'unknown'
+
+        addLog({
+            eventType: 'STATE_CHANGE',
+            sessionId,
+            component: 'useSpeechRecognition',
+            details: { metadata: { state: 'initializing', useNativeSpeech } }
+        })
 
         if (useNativeSpeech) {
             setIsInitializing(true)
-
+            // ... rest of native logic
             try {
                 const electron = (window as any).electron
-
+                // ... (rest of function remains same)
                 // 1. Ensure Model is Downloaded
                 const modelId = 'en-us'
                 const check = await electron.speech.checkSupport(modelId)
@@ -205,6 +227,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
                     setIsFirstSetup(true)
                     setSetupProgress(0)
                     console.log('[Speech] Downloading model...')
+                    addLog({ eventType: 'SYSTEM_INIT', sessionId, component: 'useSpeechRecognition', details: { metadata: { action: 'download_model_start', model: 'vosk-model-small-en-us-0.15' } } })
 
                     const result = await electron.speech.downloadModel({
                         modelId: 'en-us',
@@ -212,6 +235,8 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
                     })
 
                     if (!result.success) throw new Error(result.error)
+
+                    addLog({ eventType: 'SYSTEM_INIT', sessionId, component: 'useSpeechRecognition', details: { metadata: { action: 'download_model_complete', success: true } } })
 
                     // STOP after initial download (Do not auto-record)
                     setIsFirstSetup(false)
@@ -225,21 +250,27 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
 
                 // 2. Load Model into WASM (if not ready)
                 if (!voskService.isReady()) {
-                    const modelUrl = '/models/vosk-model-small-en-us-0.15'
-                    await voskService.loadModel(modelUrl)
+                    // Get the correct model path from main process
+                    const modelPath = await electron.speech.getModelPath('vosk-model-small-en-us-0.15')
+                    if (!modelPath) {
+                        throw new Error('Model path not available')
+                    }
+                    await voskService.loadModel(modelPath)
                 }
 
                 if (!shouldListenRef.current) return
 
                 // 3. Start Audio
                 setIsListening(true)
+                addLog({ eventType: 'STATE_CHANGE', sessionId, component: 'useSpeechRecognition', details: { metadata: { state: 'listening_started', method: 'native' } } })
                 await startVisualization()
 
-            } catch (e) {
+            } catch (e: any) {
                 if (shouldListenRef.current) {
                     console.error('[Speech] Start failed:', e)
                     setError(`Setup failed: \${e}`)
                     setIsListening(false)
+                    addLog({ eventType: 'ERROR', sessionId, component: 'useSpeechRecognition', details: { error: e.message || String(e) } })
                 }
                 setIsFirstSetup(false)
             } finally {
@@ -247,11 +278,17 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
                 if (shouldListenRef.current) setIsInitializing(false)
             }
         } else {
-            // Web Speech API Fallback
+            // Web Speech API fallback would go here
+            if (recognitionRef.current) recognitionRef.current.start()
+            setIsListening(true)
+            addLog({ eventType: 'STATE_CHANGE', sessionId, component: 'useSpeechRecognition', details: { metadata: { state: 'listening_started', method: 'web_speech' } } })
         }
-    }, [isListening, isInitializing, useNativeSpeech])
+    }, [isListening, isInitializing, useNativeSpeech, addLog])
 
     const stopListening = useCallback(async () => {
+        const sessionId = useChatStore.getState().activeSessionId || 'unknown'
+        addLog({ eventType: 'STATE_CHANGE', sessionId, component: 'useSpeechRecognition', details: { metadata: { state: 'listening_stopped' } } })
+
         shouldListenRef.current = false
         if (useNativeSpeech) {
             setIsListening(false)
@@ -263,10 +300,15 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
             setIsListening(false)
             stopVisualization()
         }
-    }, [useNativeSpeech])
+    }, [useNativeSpeech, addLog])
 
     const resetTranscript = useCallback(() => {
         setTranscript('')
+        setInterimTranscript('')
+    }, [])
+
+    const setText = useCallback((text: string) => {
+        setTranscript(text)
         setInterimTranscript('')
     }, [])
 
@@ -282,6 +324,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
         startListening,
         stopListening,
         resetTranscript,
+        setText, // Exported
         audioLevel,
         isFirstSetup,
         setupProgress

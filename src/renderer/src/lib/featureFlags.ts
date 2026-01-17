@@ -2,10 +2,10 @@ import { BASE_FEATURE_FLAGS } from './constants'
 
 export interface FeatureFlags {
   AUTH_ENABLED: boolean
-  TTS_ENABLED: boolean
   OLLAMA_ENABLED: boolean
   CLOUD_LLM_ENABLED: boolean
   BROWSER_LLM_ENABLED: boolean
+  GEMINI_ENABLED: boolean
   RATE_LIMITING_ENABLED: boolean
 }
 
@@ -56,7 +56,7 @@ export function saveFeatureFlags(flags: Partial<FeatureFlags>): void {
  */
 export function getEffectiveFeatureFlags(): FeatureFlags {
   const defaultFlags = { ...BASE_FEATURE_FLAGS }
-  
+
   // Only apply localStorage overrides in development mode
   if (isDevelopmentMode()) {
     const storedFlags = loadFeatureFlags()
@@ -67,7 +67,7 @@ export function getEffectiveFeatureFlags(): FeatureFlags {
       }
     }
   }
-  
+
   return defaultFlags
 }
 

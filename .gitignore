@@ -44,10 +44,7 @@ public/models/*.zip
 resources/speech/speech_macos
 
 # Test Artifacts (Screenshots, Reports)
-*-failure.png
-*-start.png
-*-listening.png
-speech-test-*.png
+tests/screenshots/*.png
 test-results/
 playwright-report/
 blob-report/

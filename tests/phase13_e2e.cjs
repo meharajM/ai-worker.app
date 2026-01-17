@@ -2,10 +2,20 @@ const { _electron: electron } = require('playwright');
 const path = require('path');
 const fs = require('fs');
 
+const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
+
 (async () => {
     console.log('🚀 Starting Phase 13 E2E Tests...');
 
-    if (fs.existsSync('test-phase13-failure.png')) fs.unlinkSync('test-phase13-failure.png');
+    // Ensure screenshot directory exists and is empty
+    if (!fs.existsSync(SCREENSHOT_DIR)) {
+        fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+    } else {
+        const files = fs.readdirSync(SCREENSHOT_DIR);
+        for (const file of files) {
+            if (file.endsWith('.png')) fs.unlinkSync(path.join(SCREENSHOT_DIR, file));
+        }
+    }
 
     const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/electron');
     const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
@@ -193,7 +203,7 @@ const fs = require('fs');
         console.error('\n❌ TEST FAILED:', error);
         try {
             const window = await electronApp.firstWindow();
-            await window.screenshot({ path: 'test-phase13-failure.png' });
+            await window.screenshot({ path: path.join(SCREENSHOT_DIR, 'test-phase13-failure.png') });
         } catch (e) { }
         process.exit(1);
     } finally {

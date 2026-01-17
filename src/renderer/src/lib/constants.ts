@@ -2,7 +2,7 @@
 export const BASE_FEATURE_FLAGS = {
     AUTH_ENABLED: false,          // Flip to true when Firebase is configured
     RATE_LIMITING_ENABLED: false, // Flip to true when auth is ready
-    TTS_ENABLED: true,            // Text-to-speech readout
+
     BROWSER_LLM_ENABLED: true,    // Try Gemini Nano / Phi first
     OLLAMA_ENABLED: true,         // Local Ollama models
     CLOUD_LLM_ENABLED: true,      // OpenAI/OpenRouter compatible APIs
@@ -61,8 +61,6 @@ export const LLM_CONFIG = {
 // Voice Configuration
 export const VOICE_CONFIG = {
     SPEECH_LANG: 'en-US',
-    TTS_RATE: 1.0,
-    TTS_PITCH: 1.0,
     VOSK_MODELS: [
         { id: 'en-us', name: 'English (United States) - Small', url: 'https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip', modelName: 'vosk-model-small-en-us-0.15' },
         { id: 'en-in', name: 'English (India) - Small', url: 'https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip', modelName: 'vosk-model-small-en-in-0.4' },

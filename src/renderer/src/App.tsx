@@ -10,7 +10,7 @@ import { Header } from "./components/Header";
 import { useChatStore } from "./stores/chatStore";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useLogStore } from "./stores/logStore";
-import { useSpeechSynthesis } from "./hooks/useSpeechSynthesis";
+
 import {
   chat,
   getAvailableProviders,
@@ -38,7 +38,6 @@ function App() {
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const messages = activeSession?.messages || [];
   const settings = useSettingsStore();
-  const { speak } = useSpeechSynthesis();
   const [llmStatus, setLlmStatus] = useState<{
     provider: string | null;
     available: boolean;
@@ -235,6 +234,7 @@ function App() {
 
       setProcessing(true);
 
+      let iterationCount = 0;
       try {
         // Build message history for LLM
         const llmMessages: LLMMessage[] = messages.map((m) => ({
@@ -307,7 +307,7 @@ function App() {
 
         let currentMessages = [...llmMessages];
         let finalResponse: Awaited<ReturnType<typeof chat>> | null = null;
-        let iterationCount = 0;
+        iterationCount = 0;
         const maxIterations = 10; // Safety limit to prevent infinite loops
         const allToolCalls: Array<{
           id: string;
@@ -651,32 +651,31 @@ function App() {
           toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
         });
 
-        // Use speech synthesis for the response
-        if (finalResponse.content) {
-          speak(finalResponse.content);
-        }
-
         // Update provider status
         setLlmStatus({
           provider: `${finalResponse.provider} (${finalResponse.model})`,
           available: true,
         });
       } catch (error) {
-        console.error("LLM error:", error);
+        console.error("LLM Error in handleSubmit:", error);
         const errorMessage =
           error instanceof Error ? error.message : "Unknown error";
+
+        console.log("[App] Error Details:", {
+          message: errorMessage,
+          stack: error instanceof Error ? error.stack : undefined,
+          iteration: iterationCount
+        });
 
         addMessage({
           role: "assistant",
           content: `Sorry, I couldn't process that. ${errorMessage}`,
         });
-
-        speak("Sorry, I couldn't process that request.");
       } finally {
         setProcessing(false);
       }
     },
-    [messages, addMessage, setProcessing, speak, settings]
+    [messages, addMessage, setProcessing, settings]
   );
 
   return (

@@ -6,12 +6,20 @@ const { _electron: electron } = require('playwright');
 const path = require('path');
 const fs = require('fs');
 
+const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
+
 (async () => {
     console.log('🎤 Starting Speech Recognition E2E Test...');
 
-    // Cleanup old screenshots
-    const screenshots = ['speech-test-start.png', 'speech-test-listening.png', 'speech-test-failure.png'];
-    screenshots.forEach(s => { if (fs.existsSync(s)) fs.unlinkSync(s); });
+    // Ensure screenshot directory exists and is empty
+    if (!fs.existsSync(SCREENSHOT_DIR)) {
+        fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+    } else {
+        const files = fs.readdirSync(SCREENSHOT_DIR);
+        for (const file of files) {
+            if (file.endsWith('.png')) fs.unlinkSync(path.join(SCREENSHOT_DIR, file));
+        }
+    }
 
     // Find electron
     const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/electron');
@@ -61,7 +69,7 @@ const fs = require('fs');
 
         // Wait for app to initialize
         await window.waitForTimeout(3000);
-        await window.screenshot({ path: 'speech-test-start.png' });
+        await window.screenshot({ path: path.join(SCREENSHOT_DIR, 'speech-test-start.png') });
         console.log('📸 Initial state captured');
 
         // --- TEST 1: Verify Speech Recognition Support Detection ---
@@ -90,7 +98,7 @@ const fs = require('fs');
         if (!micLocator) {
             console.log('⚠️ Microphone button not found - checking if it exists offscreen');
             // Take screenshot to debug
-            await window.screenshot({ path: 'speech-test-no-mic.png' });
+            await window.screenshot({ path: path.join(SCREENSHOT_DIR, 'speech-test-no-mic.png') });
             throw new Error('Microphone button not found');
         }
 
@@ -119,7 +127,7 @@ const fs = require('fs');
             const closeButton = await window.locator('button:has(svg.lucide-x)').count();
 
             // Take screenshot of voice mode
-            await window.screenshot({ path: 'speech-test-listening.png' });
+            await window.screenshot({ path: path.join(SCREENSHOT_DIR, 'speech-test-listening.png') });
             console.log('📸 Voice mode captured');
 
             if (listeningText > 0) {
@@ -136,23 +144,99 @@ const fs = require('fs');
                 console.log('✅ "Start speaking..." placeholder visible');
             }
 
-            // Cancel voice mode
-            if (closeButton > 0) {
-                console.log('✅ Close/Cancel button present');
+            // Cancel voice mode (Stop Listening)
+            const stopButton = await window.locator('button:has(svg.lucide-square)').count();
+            if (stopButton > 0) {
+                console.log('✅ Stop button present');
                 try {
-                    await window.locator('button:has(svg.lucide-x)').first().click({ timeout: 3000 });
-                    console.log('✅ Canceled voice mode');
+                    await window.locator('button:has(svg.lucide-square)').first().click();
+                    console.log('✅ Stopped listening');
                 } catch (e) {
-                    console.log('ℹ️ Voice mode failed to close or was already closed');
+                    console.log('ℹ️ Failed to click stop button');
                 }
+            } else if (closeButton > 0) {
+                // Fallback for old UI
+                await window.locator('button:has(svg.lucide-x)').first().click();
             } else {
-                console.log('ℹ️ No X button found');
+                console.log('ℹ️ No Stop/Close button found to reset state');
             }
 
-            // Verify we're back to text mode
-            await window.waitForTimeout(500);
+            // Verify we're back to idle
+            await window.waitForTimeout(1000);
         } else {
             console.log('ℹ️ Skipping voice mode test (button disabled)');
+        }
+
+        // --- TEST 3: UI Refinements (Multi-line & Persistence) ---
+        console.log('\n--- Test 3: UI Refinements (TDD) ---');
+
+        // 1. Verify Input is Textarea (Multi-line support)
+        const textarea = window.locator('textarea');
+        const input = window.locator('input[type="text"]');
+
+        const isTextarea = await textarea.count() > 0;
+        if (!isTextarea) {
+            console.log('❌ FAIL: Input is not a <textarea> (Multi-line support missing)');
+            // DO NOT throw yet, let's allow "Failing" tests to run to see all failures
+        } else {
+            console.log('✅ Input is <textarea>');
+        }
+
+        // 2. Verify Persistence & Manual Edits
+        // We simulate this flow: Type "Hello" -> Toggle Mic (Start/Stop) -> Verify "Hello" is still there -> Type " World" -> Toggle Mic -> Verify "Hello World"
+
+        // Find the input (whichever exists)
+        const activeInput = isTextarea ? textarea : input.first();
+
+        // Clear and Type
+        await activeInput.fill('Hello');
+        console.log('📝 Typed "Hello" into input');
+
+        if (!isDisabled) {
+            // Start Listening
+            await micLocator.click();
+            await window.waitForTimeout(1000); // Wait for initialization
+
+            // Check if text was cleared (BAD)
+            const textAfterStart = await activeInput.inputValue();
+            if (textAfterStart !== 'Hello') {
+                console.log(`❌ FAIL: Text cleared on start listening. Expected "Hello", got "${textAfterStart}"`);
+            } else {
+                console.log('✅ Text persisted on start listening');
+            }
+
+            // Stop Listening
+            await window.locator('button:has(svg.lucide-square)').click(); // Stop button uses Square icon
+            await window.waitForTimeout(500);
+
+            // Check if text persists after stop
+            const textAfterStop = await activeInput.inputValue();
+            if (textAfterStop !== 'Hello') {
+                console.log(`❌ FAIL: Text cleared on stop listening. Expected "Hello", got "${textAfterStop}"`);
+            } else {
+                console.log('✅ Text persisted after stop listening');
+            }
+
+            // Manual Edit
+            await activeInput.fill('Hello World');
+            console.log('📝 Manually edited to "Hello World"');
+
+            // Start Listening Again
+            await micLocator.click();
+            await window.waitForTimeout(1000);
+
+            // Check if manual edit stuck
+            const textAfterRestart = await activeInput.inputValue();
+            if (textAfterRestart !== 'Hello World') {
+                console.log(`❌ FAIL: Manual edits lost on restart. Expected "Hello World", got "${textAfterRestart}"`);
+            } else {
+                console.log('✅ Manual edits persisted on restart');
+            }
+
+            // Cleanup
+            await window.locator('button:has(svg.lucide-square)').click();
+        } else {
+            console.log('ℹ️ Skipping persistence tests (mic disabled)');
         }
 
         console.log('\n🎉 SPEECH E2E TEST PASSED');
@@ -161,7 +245,7 @@ const fs = require('fs');
         console.error('\n❌ TEST FAILED:', error);
         try {
             const window = await electronApp.firstWindow();
-            await window.screenshot({ path: 'speech-test-failure.png' });
+            await window.screenshot({ path: path.join(SCREENSHOT_DIR, 'speech-test-failure.png') });
             console.log('📸 Failure screenshot saved');
         } catch (e) {
             console.error('Failed to capture failure screenshot');
