@@ -16,6 +16,7 @@ interface ElectronAPI {
         chat: (messages: unknown[], tools?: unknown[]) => Promise<unknown>
         getProviders: () => Promise<Record<string, { available: boolean }>>
         fetchOpenAIModels: (baseUrl: string, apiKey: string) => Promise<{ success: boolean; models?: string[]; error?: string }>
+        fetchOllamaModels: (baseUrl: string) => Promise<{ success: boolean; models?: string[]; error?: string }>
     }
 
     store: {
@@ -31,6 +32,39 @@ interface ElectronAPI {
     app: {
         getVersion: () => Promise<string>
         getName: () => Promise<string>
+    }
+
+    speech: {
+        checkSupport: () => Promise<{
+            supported: boolean
+            modelDownloaded: boolean
+            modelsPath: string
+            error: string | null
+        }>
+        initialize: (options?: { modelName?: string }) => Promise<{ success: boolean; error?: string }>
+        startListening: () => Promise<{ success: boolean; error?: string; message?: string }>
+        stopListening: () => Promise<{ success: boolean; error?: string; message?: string }>
+        processAudio: (audioData: ArrayBuffer) => Promise<{
+            success: boolean
+            isFinal?: boolean
+            transcript?: string
+            error?: string
+        }>
+        getFinalResult: () => Promise<{ success: boolean; transcript?: string; error?: string }>
+        downloadModel: (modelUrl?: string) => Promise<{
+            success: boolean
+            error?: string
+            downloadUrl?: string
+            targetPath?: string
+        }>
+        getStatus: () => Promise<{
+            isInitialized: boolean
+            isListening: boolean
+            error: string | null
+            modelsPath: string
+            modelDownloaded: boolean
+        }>
+        cleanup: () => Promise<{ success: boolean; error?: string }>
     }
 }
 

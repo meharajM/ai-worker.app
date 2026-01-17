@@ -28,12 +28,15 @@ interface ChatState {
     sessions: ChatSession[]
     activeSessionId: string | null
     isProcessing: boolean
+    abortController: AbortController | null
+    offlineSpeech: boolean
 
     // Session Actions
     createSession: () => string
     deleteSession: (id: string) => void
     setActiveSession: (id: string) => void
     updateSessionTitle: (id: string, title: string) => void
+    setOfflineSpeech: (enabled: boolean) => void
 
     // Message Actions (operate on active session)
     addMessage: (message: Omit<Message, 'id' | 'timestamp'>) => Message
@@ -41,7 +44,9 @@ interface ChatState {
     removeMessage: (id: string) => void
     clearMessages: () => void
     setProcessing: (processing: boolean) => void
-    
+    abortProcessing: () => void
+    getAbortSignal: () => AbortSignal | null
+
     // Helpers
     getActiveSession: () => ChatSession | undefined
 }
@@ -52,6 +57,7 @@ export const useChatStore = create<ChatState>()(
             sessions: [],
             activeSessionId: null,
             isProcessing: false,
+            abortController: null,
 
             getActiveSession: () => {
                 const { sessions, activeSessionId } = get()
@@ -60,7 +66,7 @@ export const useChatStore = create<ChatState>()(
 
             createSession: () => {
                 const newSession: ChatSession = {
-                    id: `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    id: `chat_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
                     title: 'New Chat',
                     messages: [],
                     createdAt: Date.now(),
@@ -102,10 +108,10 @@ export const useChatStore = create<ChatState>()(
             addMessage: (message) => {
                 const newMessage: Message = {
                     ...message,
-                    id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
                     timestamp: Date.now(),
                 }
-                
+
                 set((state) => {
                     let activeId = state.activeSessionId
                     let sessions = state.sessions
@@ -118,7 +124,7 @@ export const useChatStore = create<ChatState>()(
                     // Auto-create session if none exists
                     if (!activeId) {
                         const newSession: ChatSession = {
-                            id: `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                            id: `chat_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
                             title: 'New Chat',
                             messages: [],
                             createdAt: Date.now(),
@@ -138,12 +144,12 @@ export const useChatStore = create<ChatState>()(
                     return {
                         sessions: sessions.map((s) =>
                             s.id === activeId
-                                ? { 
-                                    ...s, 
-                                    messages: [...s.messages, newMessage], 
+                                ? {
+                                    ...s,
+                                    messages: [...s.messages, newMessage],
                                     updatedAt: Date.now(),
                                     title: newTitle || s.title
-                                  }
+                                }
                                 : s
                         ),
                         activeSessionId: activeId
@@ -159,12 +165,12 @@ export const useChatStore = create<ChatState>()(
                         sessions: state.sessions.map((s) =>
                             s.id === state.activeSessionId
                                 ? {
-                                      ...s,
-                                      messages: s.messages.map((msg) =>
-                                          msg.id === id ? { ...msg, ...updates } : msg
-                                      ),
-                                      updatedAt: Date.now()
-                                  }
+                                    ...s,
+                                    messages: s.messages.map((msg) =>
+                                        msg.id === id ? { ...msg, ...updates } : msg
+                                    ),
+                                    updatedAt: Date.now()
+                                }
                                 : s
                         ),
                     }
@@ -178,10 +184,10 @@ export const useChatStore = create<ChatState>()(
                         sessions: state.sessions.map((s) =>
                             s.id === state.activeSessionId
                                 ? {
-                                      ...s,
-                                      messages: s.messages.filter((msg) => msg.id !== id),
-                                      updatedAt: Date.now()
-                                  }
+                                    ...s,
+                                    messages: s.messages.filter((msg) => msg.id !== id),
+                                    updatedAt: Date.now()
+                                }
                                 : s
                         ),
                     }
@@ -202,15 +208,38 @@ export const useChatStore = create<ChatState>()(
             },
 
             setProcessing: (processing) => {
-                set({ isProcessing: processing })
+                if (processing) {
+                    // Create new AbortController when starting processing
+                    set({ isProcessing: true, abortController: new AbortController() })
+                } else {
+                    // Clear AbortController when done
+                    set({ isProcessing: false, abortController: null })
+                }
             },
+
+            abortProcessing: () => {
+                const { abortController } = get()
+                if (abortController) {
+                    abortController.abort()
+                }
+                set({ isProcessing: false, abortController: null })
+            },
+
+            getAbortSignal: () => {
+                const { abortController } = get()
+                return abortController?.signal || null
+            },
+
+            offlineSpeech: false, // Default to online (Google)
+            setOfflineSpeech: (enabled) => set({ offlineSpeech: enabled }),
         }),
         {
             name: 'ai-worker-chat-v2', // Versioned storage to avoid conflicts
             storage: createJSONStorage(() => localStorage),
-            partialize: (state) => ({ 
-                sessions: state.sessions, 
-                activeSessionId: state.activeSessionId 
+            partialize: (state) => ({
+                sessions: state.sessions,
+                activeSessionId: state.activeSessionId,
+                offlineSpeech: state.offlineSpeech
             }),
         }
     )

@@ -7,11 +7,12 @@ interface HeaderProps {
 
 export function Header({ status }: HeaderProps) {
     return (
-        <header className="h-12 flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0">
-            <div />
-            <div className="text-[10px] uppercase tracking-widest text-white/20 flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                local-session: active
+        <header className="h-12 flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0 bg-[#0f1115]/50 backdrop-blur-md">
+            <div className="flex items-center gap-4">
+                <div className="text-[10px] uppercase tracking-widest text-white/20 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                    local-session: active
+                </div>
             </div>
 
             {/* LLM Status */}

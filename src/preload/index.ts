@@ -21,6 +21,8 @@ const electronAPI = {
         getProviders: () => ipcRenderer.invoke('llm:get-providers'),
         fetchOpenAIModels: (baseUrl: string, apiKey: string) =>
             ipcRenderer.invoke('llm:fetch-openai-models', baseUrl, apiKey),
+        fetchOllamaModels: (baseUrl: string) =>
+            ipcRenderer.invoke('llm:fetch-ollama-models', baseUrl),
     },
 
     // Storage operations (using electron-store in main process)
@@ -46,6 +48,31 @@ const electronAPI = {
         add: (entry: any) => ipcRenderer.invoke('logs:add', entry),
         getPath: () => ipcRenderer.invoke('logs:get-path'),
         openFolder: () => ipcRenderer.invoke('logs:open-folder'),
+    },
+
+    // Speech recognition operations (native Vosk-based)
+    speech: {
+        checkSupport: (modelId?: string) => ipcRenderer.invoke('speech:check-support', modelId),
+        initialize: (options?: { modelId?: string }) =>
+            ipcRenderer.invoke('speech:initialize', options),
+        startListening: () => ipcRenderer.invoke('speech:start-listening'),
+        stopListening: () => ipcRenderer.invoke('speech:stop-listening'),
+        processAudio: (audioData: ArrayBuffer) =>
+            ipcRenderer.send('speech:process-audio', audioData),
+        downloadModel: (options: { modelId: string, url: string, modelName: string }) =>
+            ipcRenderer.invoke('speech:download-model', options),
+        getStatus: (modelId?: string) => ipcRenderer.invoke('speech:get-status', modelId),
+        cleanup: () => ipcRenderer.invoke('speech:cleanup'),
+        onResult: (callback: (result: { text: string, final: boolean }) => void) => {
+            const listener = (_event: any, result: { text: string, final: boolean }) => callback(result)
+            ipcRenderer.on('speech:result', listener)
+            return () => ipcRenderer.removeListener('speech:result', listener)
+        },
+        onDownloadProgress: (callback: (data: { modelId: string, progress: number }) => void) => {
+            const listener = (_event: any, data: { modelId: string, progress: number }) => callback(data)
+            ipcRenderer.on('speech:download-progress', listener)
+            return () => ipcRenderer.removeListener('speech:download-progress', listener)
+        },
     },
 }
 

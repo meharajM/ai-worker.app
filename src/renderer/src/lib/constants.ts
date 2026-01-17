@@ -63,6 +63,11 @@ export const VOICE_CONFIG = {
     SPEECH_LANG: 'en-US',
     TTS_RATE: 1.0,
     TTS_PITCH: 1.0,
+    VOSK_MODELS: [
+        { id: 'en-us', name: 'English (United States) - Small', url: 'https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip', modelName: 'vosk-model-small-en-us-0.15' },
+        { id: 'en-in', name: 'English (India) - Small', url: 'https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip', modelName: 'vosk-model-small-en-in-0.4' },
+        { id: 'hi-in', name: 'Hindi (India) - Small', url: 'https://alphacephei.com/vosk/models/vosk-model-small-hi-0.22.zip', modelName: 'vosk-model-small-hi-0.22' },
+    ]
 }
 
 // App Info

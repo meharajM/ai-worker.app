@@ -13,6 +13,8 @@ interface SettingsState {
     ttsPitch: number
     ttsVoice: string | null
     speechLang: string
+    offlineSpeech: boolean
+    voskModel: string
 
     // LLM settings
     preferredProvider: LLMProviderType
@@ -36,15 +38,17 @@ interface SettingsState {
     setTtsPitch: (pitch: number) => void
     setTtsVoice: (voice: string | null) => void
     setSpeechLang: (lang: string) => void
+    setOfflineSpeech: (enabled: boolean) => void
+    setVoskModel: (model: string) => void
     setPreferredProvider: (provider: LLMProviderType) => void
     setOllamaModel: (model: string) => void
     setOllamaBaseUrl: (url: string) => void
-    setOpenaiApiKey: (key: string) => Promise<void>
-    setOpenaiBaseUrl: (url: string) => Promise<void>
+    setOpenaiApiKey: (key: string) => void
+    setOpenaiBaseUrl: (url: string) => void
     setOpenaiModel: (model: string) => void
-    setGeminiApiKey: (key: string) => Promise<void>
+    setGeminiApiKey: (key: string) => void
     setGeminiModel: (model: string) => void
-    setOpenrouterApiKey: (key: string) => Promise<void>
+    setOpenrouterApiKey: (key: string) => void
     setOpenrouterModel: (model: string) => void
     setBrowserModel: (model: string) => void
     setTheme: (theme: Theme) => void
@@ -57,6 +61,9 @@ const defaultSettings = {
     ttsPitch: VOICE_CONFIG.TTS_PITCH,
     ttsVoice: null,
     speechLang: VOICE_CONFIG.SPEECH_LANG,
+    // Force offline speech in Electron, enforce online in browser
+    offlineSpeech: !!(window.electron),
+    voskModel: 'en-us',
     preferredProvider: 'auto' as LLMProviderType,
     ollamaModel: LLM_CONFIG.OLLAMA.DEFAULT_MODEL,
     ollamaBaseUrl: LLM_CONFIG.OLLAMA.BASE_URL,
@@ -117,28 +124,24 @@ export const useSettingsStore = create<SettingsState>()(
             setTtsPitch: (pitch) => set({ ttsPitch: pitch }),
             setTtsVoice: (voice) => set({ ttsVoice: voice }),
             setSpeechLang: (lang) => set({ speechLang: lang }),
+            setOfflineSpeech: (enabled) => set({ offlineSpeech: enabled }),
+            setVoskModel: (model: string) => set({ voskModel: model }),
             setPreferredProvider: (provider) => set({ preferredProvider: provider }),
             setOllamaModel: (model) => set({ ollamaModel: model }),
             setOllamaBaseUrl: (url) => set({ ollamaBaseUrl: url }),
-            setOpenaiApiKey: async (key) => {
+            setOpenaiApiKey: (key) => {
                 set({ openaiApiKey: key })
-                // Persist to electron-store
-                await electron.store.set('openai_api_key', key || '')
             },
-            setOpenaiBaseUrl: async (url) => {
+            setOpenaiBaseUrl: (url) => {
                 set({ openaiBaseUrl: url })
-                // Persist to electron-store
-                await electron.store.set('openai_base_url', url)
             },
             setOpenaiModel: (model) => set({ openaiModel: model }),
-            setGeminiApiKey: async (key) => {
+            setGeminiApiKey: (key) => {
                 set({ geminiApiKey: key })
-                await electron.store.set('gemini_api_key', key || '')
             },
             setGeminiModel: (model) => set({ geminiModel: model }),
-            setOpenrouterApiKey: async (key) => {
+            setOpenrouterApiKey: (key) => {
                 set({ openrouterApiKey: key })
-                await electron.store.set('openrouter_api_key', key || '')
             },
             setOpenrouterModel: (model) => set({ openrouterModel: model }),
             setBrowserModel: (model) => set({ browserModel: model }),

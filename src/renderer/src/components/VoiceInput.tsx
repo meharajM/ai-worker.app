@@ -1,14 +1,17 @@
 import React, { useState, useCallback, useEffect } from 'react'
-import { Mic, MicOff, Send, Volume2, VolumeX } from 'lucide-react'
+import { Mic, MicOff, Send, Volume2, VolumeX, X, Maximize2, Minimize2 } from 'lucide-react'
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
 import { useSpeechSynthesis } from '../hooks/useSpeechSynthesis'
+import { VoiceVisualizer } from './VoiceVisualizer'
+import { Square } from 'lucide-react'
 
 interface VoiceInputProps {
     onSubmit: (message: string) => void
     disabled?: boolean
+    onAbort?: () => void
 }
 
-export function VoiceInput({ onSubmit, disabled = false }: VoiceInputProps) {
+export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputProps) {
     const [textInput, setTextInput] = useState('')
     const {
         isListening,
@@ -18,6 +21,10 @@ export function VoiceInput({ onSubmit, disabled = false }: VoiceInputProps) {
         startListening,
         stopListening,
         resetTranscript,
+        isInitializing,
+        audioLevel,
+        isFirstSetup,
+        setupProgress
     } = useSpeechRecognition()
 
     const {
@@ -33,16 +40,38 @@ export function VoiceInput({ onSubmit, disabled = false }: VoiceInputProps) {
 
         if (isListening) {
             stopListening()
-            // Submit the transcript when stopping
-            const finalTranscript = transcript.trim()
+            // Submit the full transcript (including interim) when stopping
+            const finalTranscript = (transcript + ' ' + interimTranscript).trim()
             if (finalTranscript) {
                 onSubmit(finalTranscript)
                 resetTranscript()
+                setTextInput('') // Clear manual input after submission
             }
         } else {
+            // Before starting, if we have text in the input box, maybe we want to keep it?
+            // For now, let's just start fresh or append.
+            // If user explicitly started voice, they likely want to talk.
             startListening()
         }
-    }, [isListening, disabled, transcript, startListening, stopListening, onSubmit, resetTranscript])
+    }, [isListening, disabled, transcript, interimTranscript, startListening, stopListening, onSubmit, resetTranscript])
+
+    // Update text input as we get transcript results so it's ready for editing
+    useEffect(() => {
+        if (isListening && transcript) {
+            setTextInput(transcript.trim())
+        }
+    }, [transcript, isListening])
+
+    // Manual stop without sending
+    const handleCancel = useCallback(() => {
+        // Sync one last time before resetting
+        const finalTranscript = (transcript + ' ' + interimTranscript).trim()
+        if (finalTranscript) {
+            setTextInput(finalTranscript)
+        }
+        stopListening()
+        resetTranscript()
+    }, [stopListening, resetTranscript, transcript, interimTranscript])
 
     // Handle text input submission
     const handleTextSubmit = useCallback(() => {
@@ -62,107 +91,147 @@ export function VoiceInput({ onSubmit, disabled = false }: VoiceInputProps) {
     }, [handleTextSubmit])
 
     // Display text (transcript or interim)
-    const displayText = isListening
-        ? (transcript + ' ' + interimTranscript).trim() || 'Listening...'
-        : transcript || ''
+    const displayText = (transcript + ' ' + interimTranscript).trim()
 
     // Status text
     const getStatusText = () => {
         if (disabled) return 'Processing...'
-        if (isListening) return 'LISTENING'
-        if (isSpeaking) return 'SPEAKING'
-        return 'READY'
+        if (isFirstSetup) return 'Setting up Voice...'
+        if (isInitializing) return 'Starting...'
+        if (isListening) return 'Listening...'
+        if (isSpeaking) return 'Speaking...'
+        return 'Ready'
     }
 
-    const getHelperText = () => {
-        if (disabled) return 'Please wait...'
-        if (isListening) return 'Click mic to stop and send'
-        if (!sttSupported) return 'Voice not supported - use text input'
-        return 'Click mic to speak or type below'
-    }
-
-    return (
-        <div className="bg-[#1a1d23]/80 backdrop-blur-md border border-white/10 rounded-2xl p-4 space-y-4">
-            {/* Voice Input Area */}
-            <div className="flex items-center gap-4">
-                {/* Mic Button */}
+    // New "Voice Mode" UI when listening
+    if (isListening || isInitializing) {
+        return (
+            <div className="bg-[#1a1d23]/95 backdrop-blur-xl border border-white/10 rounded-2xl p-6 relative overflow-hidden transition-all duration-300 min-h-[160px] flex flex-col items-center justify-center">
+                {/* Close Button */}
                 <button
-                    onClick={handleMicClick}
-                    disabled={disabled || !sttSupported}
-                    className={`
-            w-14 h-14 rounded-xl flex items-center justify-center 
-            transition-all active:scale-95 shadow-lg group
-            ${isListening
-                            ? 'bg-red-500 shadow-red-500/30 animate-pulse'
-                            : 'bg-[#ee5d5d] shadow-[#ee5d5d]/20 hover:bg-[#ff6e6e]'
-                        }
-            ${(disabled || !sttSupported) ? 'opacity-50 cursor-not-allowed' : ''}
-          `}
+                    onClick={handleCancel}
+                    className="absolute top-4 right-4 p-2 text-white/50 hover:text-white hover:bg-white/10 rounded-full transition-colors"
                 >
-                    {isListening ? (
-                        <MicOff size={28} className="text-white" />
-                    ) : (
-                        <Mic size={28} className="text-white group-hover:scale-110 transition-transform" />
-                    )}
+                    <X size={20} />
                 </button>
 
-                {/* Status & Transcript */}
-                <div className="flex-1 min-w-0">
-                    <div className={`text-[10px] uppercase tracking-widest font-bold mb-1 ${isListening ? 'text-red-500' : 'text-[#ee5d5d]'
-                        }`}>
-                        {getStatusText()}
-                    </div>
-                    <div className="text-lg text-white/80 font-medium truncate">
-                        {displayText || getHelperText()}
-                    </div>
+                {/* Status Indicator */}
+                <div className="absolute top-4 left-4 text-xs font-bold tracking-widest text-white/50 uppercase">
+                    {getStatusText()}
                 </div>
 
-                {/* Mute Toggle */}
-                {ttsSupported && (
+                {/* Main Visualizer Area */}
+                <div className="w-full flex-1 flex flex-col items-center justify-center relative my-2">
+                    {isFirstSetup ? (
+                        <div className="flex flex-col items-center gap-3 w-full max-w-[240px]">
+                            <div className="text-white/80 text-sm font-medium">Setting up voice options for you...</div>
+                            <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                <div
+                                    className="h-full bg-blue-500 rounded-full transition-all duration-300 ease-out"
+                                    style={{ width: `${setupProgress || 0}%` }}
+                                />
+                            </div>
+                            <div className="text-xs text-white/40">Ensuring native engine dependencies...</div>
+                        </div>
+                    ) : isInitializing ? (
+                        <div className="text-white/60 animate-pulse text-sm">Initializing native engine...</div>
+                    ) : (
+                        <div className="w-full h-24 flex items-center justify-center">
+                            <VoiceVisualizer audioLevel={audioLevel} isListening={isListening} />
+                        </div>
+                    )}
+                </div>
+
+                {/* Live Transcript */}
+                {displayText && (
+                    <div className="text-white/80 text-center font-medium text-lg max-w-xl animate-fade-in mt-4 mb-8 min-h-[1.5em]">
+                        "{displayText}"
+                    </div>
+                )}
+
+                {/* Controls */}
+                <div className="flex items-center gap-6 mt-auto">
+                    {/* Mute output */}
+                    {ttsSupported && (
+                        <button
+                            onClick={toggleMute}
+                            className={`p-3 rounded-full transition-colors ${isMuted ? 'text-red-400 bg-red-400/10' : 'text-white/50 hover:bg-white/10'}`}
+                        >
+                            {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                        </button>
+                    )}
+
+                    {/* Stop/Send Button */}
                     <button
-                        onClick={toggleMute}
-                        className={`
-              p-3 rounded-lg transition-colors
-              ${isMuted
-                                ? 'bg-white/5 text-white/40'
-                                : 'bg-white/10 text-white/80 hover:bg-white/15'
-                            }
-            `}
-                        title={isMuted ? 'Unmute voice responses' : 'Mute voice responses'}
+                        onClick={handleMicClick}
+                        className="w-16 h-16 rounded-full bg-white text-black flex items-center justify-center shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:scale-105 active:scale-95 transition-all"
                     >
-                        {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                        <div className="w-4 h-4 bg-black rounded-[2px]" />
+                    </button>
+                </div>
+            </div>
+        )
+    }
+
+    // Standard "Text Mode" UI
+    return (
+        <div className="bg-[#1a1d23]/80 backdrop-blur-md border border-white/10 rounded-2xl p-4 transition-all duration-300">
+            <div className="flex items-center gap-3">
+                {/* Mic Trigger or Stop Button */}
+                {disabled && onAbort ? (
+                    <button
+                        onClick={onAbort}
+                        className="p-3 rounded-xl flex items-center justify-center transition-all active:scale-95 bg-red-500/20 hover:bg-red-500/30 text-red-400"
+                        title="Stop Generation"
+                    >
+                        <Square size={16} className="fill-current" />
+                    </button>
+                ) : (
+                    <button
+                        onClick={handleMicClick}
+                        disabled={disabled || !sttSupported}
+                        className={`
+                            p-3 rounded-xl flex items-center justify-center 
+                            transition-all active:scale-95 shadow-lg group
+                            bg-white/5 hover:bg-white/10 text-white/80 hover:text-white
+                            ${(disabled || !sttSupported) ? 'opacity-50 cursor-not-allowed' : ''}
+                        `}
+                        title="Start Voice Mode"
+                    >
+                        <Mic size={20} />
                     </button>
                 )}
-            </div>
 
-            {/* Text Input Area */}
-            <div className="flex items-center gap-2">
-                <input
-                    type="text"
-                    value={textInput}
-                    onChange={(e) => setTextInput(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    disabled={disabled}
-                    placeholder="Or type your message here..."
-                    className="
-            flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3
-            text-white placeholder-white/40 outline-none
-            focus:border-white/20 focus:bg-white/10 transition-all
-            disabled:opacity-50 disabled:cursor-not-allowed
-          "
-                />
+                {/* Text Input */}
+                <div className="flex-1 relative">
+                    <input
+                        type="text"
+                        value={textInput}
+                        onChange={(e) => setTextInput(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        disabled={disabled}
+                        placeholder="Message..."
+                        className="
+                            w-full bg-transparent border-none outline-none
+                            text-white placeholder-white/30 text-base
+                            py-2
+                        "
+                    />
+                </div>
+
+                {/* Send Button */}
                 <button
                     onClick={handleTextSubmit}
                     disabled={disabled || !textInput.trim()}
                     className={`
-            p-3 rounded-xl transition-all
-            ${textInput.trim() && !disabled
-                            ? 'bg-[#4fd1c5] text-white hover:bg-[#5fe0d4] shadow-lg shadow-[#4fd1c5]/20'
-                            : 'bg-white/5 text-white/30 cursor-not-allowed'
+                        p-2 rounded-lg transition-all
+                        ${textInput.trim() && !disabled
+                            ? 'bg-white text-black hover:bg-gray-200'
+                            : 'bg-transparent text-white/20 cursor-not-allowed'
                         }
-          `}
+                    `}
                 >
-                    <Send size={20} />
+                    <Send size={18} />
                 </button>
             </div>
         </div>

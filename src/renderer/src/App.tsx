@@ -27,10 +27,12 @@ import {
   autoConnectServers,
   initializeMcpServers,
 } from "./lib/mcp";
+import { voskService } from "./lib/vosk";
+import { isElectron } from "./lib/electron";
 
 function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
-  const { sessions, activeSessionId, addMessage, setProcessing, isProcessing } =
+  const { sessions, activeSessionId, addMessage, setProcessing, isProcessing, abortProcessing } =
     useChatStore();
   const { addLog } = useLogStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId);
@@ -163,6 +165,10 @@ function App() {
     settings.openaiApiKey,
     settings.openaiBaseUrl,
     settings.openaiModel,
+    settings.geminiApiKey,
+    settings.geminiModel,
+    settings.openrouterApiKey,
+    settings.openrouterModel,
     currentView,
   ]);
 
@@ -310,6 +316,18 @@ function App() {
         }> = [];
 
         while (iterationCount < maxIterations) {
+          // Check if aborted
+          const abortSignal = useChatStore.getState().getAbortSignal();
+          if (abortSignal?.aborted) {
+            console.log('[MCP App] Request aborted by user');
+            finalResponse = {
+              content: "Request cancelled.",
+              provider: "cancelled",
+              model: "unknown",
+            };
+            break;
+          }
+
           addLog({
             eventType: 'LLM_REQUEST',
             sessionId: activeSessionId || "default",
@@ -327,11 +345,13 @@ function App() {
           let response: Awaited<ReturnType<typeof chat>>;
           try {
             // Add timeout to prevent infinite hanging
+            const signal = useChatStore.getState().getAbortSignal();
             const chatPromise = chat(
               currentMessages,
               llmTools.length > 0 ? llmTools : undefined,
               settingsForLLM,
-              serverInfo.length > 0 ? serverInfo : undefined
+              serverInfo.length > 0 ? serverInfo : undefined,
+              signal || undefined
             );
 
             const timeoutPromise = new Promise<never>((_, reject) => {
@@ -341,10 +361,33 @@ function App() {
               );
             });
 
-            response = await Promise.race([chatPromise, timeoutPromise]);
+            // Abort promise that rejects when user clicks Stop
+            const abortPromise = new Promise<never>((_, reject) => {
+              const signal = useChatStore.getState().getAbortSignal();
+              if (signal) {
+                signal.addEventListener('abort', () => reject(new Error('Aborted by user')), { once: true });
+                if (signal.aborted) {
+                  reject(new Error('Aborted by user'));
+                }
+              }
+            });
+
+            response = await Promise.race([chatPromise, timeoutPromise, abortPromise]);
           } catch (error) {
             const errorMessage =
               error instanceof Error ? error.message : "Unknown error";
+
+            // Handle user abort gracefully
+            if (errorMessage === 'Aborted by user') {
+              console.log('[MCP App] Request aborted by user');
+              finalResponse = {
+                content: "Request cancelled.",
+                provider: "cancelled",
+                model: "unknown",
+              };
+              break;
+            }
+
             addLog({
               eventType: 'ERROR',
               sessionId: activeSessionId || "default",
@@ -608,6 +651,11 @@ function App() {
           toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
         });
 
+        // Use speech synthesis for the response
+        if (finalResponse.content) {
+          speak(finalResponse.content);
+        }
+
         // Update provider status
         setLlmStatus({
           provider: `${finalResponse.provider} (${finalResponse.model})`,
@@ -645,7 +693,7 @@ function App() {
               <div className="flex-1 flex flex-col overflow-hidden min-w-0">
                 <ChatView />
                 <div className="p-4 flex-shrink-0 border-t border-white/5">
-                  <VoiceInput onSubmit={handleSubmit} disabled={isProcessing} />
+                  <VoiceInput onSubmit={handleSubmit} disabled={isProcessing} onAbort={abortProcessing} />
                 </div>
               </div>
             </div>

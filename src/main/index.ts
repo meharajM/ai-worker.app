@@ -10,13 +10,34 @@ import { setupIpcHandlers } from './ipc'
 app.commandLine.appendSwitch('enable-features',
     'PromptAPIForGeminiNano,' +
     'OptimizationGuideOnDeviceModel:bypass_perf_requirement/true,' +
-    'LanguageDetectionAPI'
+    'LanguageDetectionAPI,' +
+    'ExperimentalWebPlatformFeatures'  // Enables modern web APIs
 )
 app.commandLine.appendSwitch('optimization-guide-on-device-model-execution', 'performance_class:0')
+
+// Enable Web Speech API in Electron
+// These flags ensure speech recognition works properly
+app.commandLine.appendSwitch('enable-speech-dispatcher')  // Linux speech support
+app.commandLine.appendSwitch('enable-speech-input')       // Enable speech input
+app.commandLine.appendSwitch('enable-experimental-web-platform-features')  // Web Speech API
+app.commandLine.appendSwitch('allow-file-access-from-files') // Allow fetch from file:// in Workers
 
 
 // Initialize environment (fix PATH, etc.)
 initEnv()
+
+// PRODUCTION: Inject Google API Keys if available
+// These are required for Web Speech API to work in built/packaged apps
+// You must provide them via environment variables
+if (process.env.GOOGLE_API_KEY) {
+    process.env.GOOGLE_API_KEY = process.env.GOOGLE_API_KEY
+}
+if (process.env.GOOGLE_DEFAULT_CLIENT_ID) {
+    process.env.GOOGLE_DEFAULT_CLIENT_ID = process.env.GOOGLE_DEFAULT_CLIENT_ID
+}
+if (process.env.GOOGLE_DEFAULT_CLIENT_SECRET) {
+    process.env.GOOGLE_DEFAULT_CLIENT_SECRET = process.env.GOOGLE_DEFAULT_CLIENT_SECRET
+}
 
 function createWindow(): void {
     const mainWindow = new BrowserWindow({
@@ -34,7 +55,7 @@ function createWindow(): void {
             sandbox: false,
             contextIsolation: true,
             nodeIntegration: false,
-            webSecurity: true,
+            webSecurity: false, // Required for Vosk Worker to fetch local model files (file://)
         }
     })
 
@@ -70,8 +91,12 @@ function createWindow(): void {
 app.whenReady().then(() => {
     electronApp.setAppUserModelId('com.aiworker.app')
 
-    // Setup modular IPC handlers
+    // Verify environment and paths
     setupIpcHandlers()
+
+    // Workers cannot fetch file:// URLs easily. We serve the model over HTTP locally.
+    // Check for production env explicitly to ensure it runs during e2e tests
+    // (Server code removed due to hang - reverting to file access attempt)
 
     app.on('browser-window-created', (_, window) => {
         optimizer.watchWindowShortcuts(window)
