@@ -61,6 +61,7 @@ const electronAPI = {
             ipcRenderer.send('speech:process-audio', audioData),
         downloadModel: (options: { modelId: string, url: string, modelName: string }) =>
             ipcRenderer.invoke('speech:download-model', options),
+        getPreferredModel: () => ipcRenderer.invoke('speech:get-preferred-model'), // NEW
         getModelPath: (modelName: string) => ipcRenderer.invoke('speech:get-model-path', modelName),
         getStatus: (modelId?: string) => ipcRenderer.invoke('speech:get-status', modelId),
         cleanup: () => ipcRenderer.invoke('speech:cleanup'),

@@ -60,10 +60,13 @@ export class ModelManager {
     public async downloadModel(
         modelId: string,
         modelName: string,
+        modelUrl: string, // New argument
         onProgress: (progress: number) => void
     ): Promise<{ success: boolean; error?: string }> {
-        // Use fixed ZIP url for reliability
-        const url = 'https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip'
+        // Use provided URL, fallback if empty (though logic should ensure it's provided)
+        const url = modelUrl
+        if (!url) return { success: false, error: 'No model URL provided' }
+
         const zipPath = path.join(this.modelsDir, `${modelName}.zip`)
         const targetDir = this.getModelDirPath(modelName)
 

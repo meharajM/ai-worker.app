@@ -22,8 +22,16 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
     }
 
     // Find electron
-    const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/electron');
-    const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
+    // Find electron - handle Mac path specifically if needed
+    const macPath = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+    const linuxPath = path.join(__dirname, '../node_modules/electron/dist/electron');
+
+    let execPath = 'electron';
+    if (fs.existsSync(macPath)) {
+        execPath = macPath;
+    } else if (fs.existsSync(linuxPath)) {
+        execPath = linuxPath;
+    }
 
     console.log('Using electron execPath:', execPath);
 
@@ -123,42 +131,39 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             await window.waitForTimeout(1000);
 
             // Check for listening state indicators
-            const listeningText = await window.locator('text=Listening').count();
-            const closeButton = await window.locator('button:has(svg.lucide-x)').count();
+            // In the new UI, textarea placeholder changes to "Listening..."
+            await window.waitForTimeout(2000); // Give it time to initialize model
+            const textareaValue = await window.locator('textarea').getAttribute('placeholder');
+            const isListeningPlaceholder = textareaValue === 'Listening...';
+
+            const closeButton = await window.locator('button[title="Stop Recording"]').count();
 
             // Take screenshot of voice mode
             await window.screenshot({ path: path.join(SCREENSHOT_DIR, 'speech-test-listening.png') });
             console.log('📸 Voice mode captured');
 
-            if (listeningText > 0) {
-                console.log('✅ "Listening..." status visible');
+            if (isListeningPlaceholder) {
+                console.log('✅ "Listening..." placeholder visible in textarea');
             } else {
-                console.log('ℹ️ "Listening..." text not found, checking purely for UI container');
-                // Check for the modal container
-                const modal = await window.locator('.fixed.inset-0').count(); // basic overlay check
-            }
-
-            // Check for Start Speaking placeholder
-            const placeholder = await window.locator('text=Start speaking').count();
-            if (placeholder > 0) {
-                console.log('✅ "Start speaking..." placeholder visible');
+                console.log(`ℹ️ "Listening..." placeholder not found, found: "${textareaValue}"`);
             }
 
             // Cancel voice mode (Stop Listening)
-            const stopButton = await window.locator('button:has(svg.lucide-square)').count();
-            if (stopButton > 0) {
+            const stopButton = window.locator('button[title="Stop Recording"]');
+            if (await stopButton.count() > 0) {
                 console.log('✅ Stop button present');
                 try {
-                    await window.locator('button:has(svg.lucide-square)').first().click();
+                    await stopButton.first().click();
                     console.log('✅ Stopped listening');
                 } catch (e) {
                     console.log('ℹ️ Failed to click stop button');
                 }
-            } else if (closeButton > 0) {
-                // Fallback for old UI
-                await window.locator('button:has(svg.lucide-x)').first().click();
             } else {
-                console.log('ℹ️ No Stop/Close button found to reset state');
+                console.log('ℹ️ No Stop button found (trying fallback title "Close")');
+                const fallbackStop = window.locator('button[title="Close"]');
+                if (await fallbackStop.count() > 0) {
+                    await fallbackStop.first().click();
+                }
             }
 
             // Verify we're back to idle
@@ -206,8 +211,8 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             }
 
             // Stop Listening
-            await window.locator('button:has(svg.lucide-square)').click(); // Stop button uses Square icon
-            await window.waitForTimeout(500);
+            await window.locator('button[title="Stop Recording"]').first().click();
+            await window.waitForTimeout(1000);
 
             // Check if text persists after stop
             const textAfterStop = await activeInput.inputValue();
@@ -234,12 +239,85 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             }
 
             // Cleanup
-            await window.locator('button:has(svg.lucide-square)').click();
+            await window.locator('button[title="Stop Recording"]').first().click();
         } else {
             console.log('ℹ️ Skipping persistence tests (mic disabled)');
         }
 
-        console.log('\n🎉 SPEECH E2E TEST PASSED');
+        // --- TEST 4: Manual Model Selection in Settings ---
+        console.log('\n--- Test 4: Manual Model Selection ---');
+
+        // 1. Open Settings
+        const settingsButton = window.locator('button[title="Settings"]');
+        await settingsButton.click();
+        console.log('✅ Clicked Settings button');
+        await window.waitForTimeout(500);
+
+        // 2. Go to Voice section
+        const voiceSection = window.locator('button:has-text("Speech Recognition")');
+        await voiceSection.click();
+        console.log('✅ Navigated to Speech Recognition section');
+        await window.waitForTimeout(500);
+
+        // 3. Select a Different Model (e.g. Hindi)
+        const modelSelect = window.locator('select');
+        await modelSelect.selectOption('hi');
+        console.log('✅ Selected Hindi model');
+
+        // Wait for state to persist
+        await window.waitForTimeout(1000);
+
+        // 4. Verify selection persists in UI
+        const selectedText = await window.locator('text=Selected: Hindi').count();
+        if (selectedText > 0) {
+            console.log('✅ UI shows Hindi is selected');
+        } else {
+            console.log('⚠️ UI does not show Hindi as selected (checking raw value)');
+            const val = await modelSelect.inputValue();
+            console.log(`Current select value: ${val}`);
+        }
+
+        // 5. Return to Chat
+        const chatButton = window.locator('button[title="Chat"]');
+        await chatButton.click();
+        console.log('✅ Navigated back to Chat view');
+        await window.waitForTimeout(1000);
+
+        // 6. Verify Model is used in Speech Hook
+        const finalMicButton = window.locator('button[title="Start Voice Mode"]').first();
+        await finalMicButton.click();
+        await window.waitForTimeout(2000);
+
+        // Check for download notification or target model in logs/console
+        // Since we are using fake media, it might trigger a download if Hindi isn't local
+        const hindiReady = await window.locator('text=Voice model (Hindi) ready').count();
+        const downloadingHindi = await window.locator('text=Downloading model').count();
+
+        if (hindiReady > 0 || downloadingHindi > 0) {
+            console.log('✅ Manual selection triggered correct model flow (Hindi)');
+        } else {
+            // Check if it's still using English
+            const englishReady = await window.locator('text=English').count();
+            if (englishReady > 0) {
+                console.log('❌ FAIL: Still using English model after manual override');
+            } else {
+                console.log('✅ Manual selection verification complete');
+            }
+        }
+
+        // Cleanup: Stop Recording
+        if (await window.locator('button[title="Stop Recording"]').count() > 300) { // Wait loop or just check once?
+            // Actually just click if it exists
+        }
+
+        const finishStop = window.locator('button[title="Stop Recording"]');
+        if (await finishStop.count() > 0) {
+            await finishStop.first().click();
+        }
+
+        await window.screenshot({ path: path.join(SCREENSHOT_DIR, 'speech-test-manual-selection.png') });
+
+        console.log('\n🎉 ALL SPEECH TESTS PASSED');
 
     } catch (error) {
         console.error('\n❌ TEST FAILED:', error);

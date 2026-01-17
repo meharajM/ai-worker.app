@@ -1188,8 +1188,29 @@ export function SettingsPanel() {
                                     Offline Mode
                                 </div>
                             </div>
+
+                            <div className="mb-4">
+                                <label className="block text-sm text-white/70 mb-2">Language Model</label>
+                                <select
+                                    value={settings.voskModel}
+                                    onChange={(e) => settings.setVoskModel(e.target.value)}
+                                    className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-white/20 focus:outline-none appearance-none"
+                                >
+                                    <option value="auto">Auto-Detect (System Default)</option>
+                                    <option disabled>──────────</option>
+                                    {VOICE_CONFIG.VOSK_MODELS.map((model) => (
+                                        <option key={model.id} value={model.id}>
+                                            {model.name}
+                                        </option>
+                                    ))}
+                                </select>
+                                <p className="text-xs text-white/30 mt-2">
+                                    Selected: {settings.voskModel === 'auto' ? 'Auto (based on system locale)' : VOICE_CONFIG.VOSK_MODELS.find(m => m.id === settings.voskModel)?.name || settings.voskModel}
+                                </p>
+                            </div>
+
                             <p className="text-xs text-white/30">
-                                Runs locally using Vosk engine. First use will download the ~50MB model.
+                                Runs locally using Vosk engine. Changing the model will trigger a new download (~50MB) on next use.
                             </p>
                         </div>
                     </div>

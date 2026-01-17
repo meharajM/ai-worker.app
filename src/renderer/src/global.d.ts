@@ -35,7 +35,7 @@ interface ElectronAPI {
     }
 
     speech: {
-        checkSupport: () => Promise<{
+        checkSupport: (modelId?: string) => Promise<{
             supported: boolean
             modelDownloaded: boolean
             modelsPath: string
@@ -51,13 +51,13 @@ interface ElectronAPI {
             error?: string
         }>
         getFinalResult: () => Promise<{ success: boolean; transcript?: string; error?: string }>
-        downloadModel: (modelUrl?: string) => Promise<{
+        downloadModel: (options: { modelId: string; url: string; modelName: string }) => Promise<{
             success: boolean
             error?: string
-            downloadUrl?: string
-            targetPath?: string
         }>
-        getStatus: () => Promise<{
+        getPreferredModel: () => Promise<{ id: string; name: string; url: string; lang: string }>
+        getModelPath: (modelName: string) => Promise<string | null>
+        getStatus: (modelId?: string) => Promise<{
             isInitialized: boolean
             isListening: boolean
             error: string | null
@@ -65,6 +65,8 @@ interface ElectronAPI {
             modelDownloaded: boolean
         }>
         cleanup: () => Promise<{ success: boolean; error?: string }>
+        onResult: (callback: (result: { text: string; final: boolean }) => void) => () => void
+        onDownloadProgress: (callback: (data: { modelId: string; progress: number }) => void) => () => void
     }
 }
 

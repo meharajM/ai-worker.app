@@ -59,13 +59,28 @@ export const LLM_CONFIG = {
 }
 
 // Voice Configuration
+export interface VoskModel {
+    id: string
+    name: string
+    url: string
+    modelName: string
+    locale: string  // For auto-detection matching
+}
+
 export const VOICE_CONFIG = {
     SPEECH_LANG: 'en-US',
+    DEFAULT_MODEL_ID: 'en-us',
     VOSK_MODELS: [
-        { id: 'en-us', name: 'English (United States) - Small', url: 'https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip', modelName: 'vosk-model-small-en-us-0.15' },
-        { id: 'en-in', name: 'English (India) - Small', url: 'https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip', modelName: 'vosk-model-small-en-in-0.4' },
-        { id: 'hi-in', name: 'Hindi (India) - Small', url: 'https://alphacephei.com/vosk/models/vosk-model-small-hi-0.22.zip', modelName: 'vosk-model-small-hi-0.22' },
-    ]
+        { id: 'en-us', name: 'English (US)', url: 'https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip', modelName: 'vosk-model-small-en-us-0.15', locale: 'en-US' },
+        { id: 'en-in', name: 'English (India)', url: 'https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip', modelName: 'vosk-model-small-en-in-0.4', locale: 'en-IN' },
+        { id: 'zh-cn', name: 'Mandarin (Chinese)', url: 'https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip', modelName: 'vosk-model-small-cn-0.22', locale: 'zh-CN' },
+        { id: 'ja', name: 'Japanese', url: 'https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip', modelName: 'vosk-model-small-ja-0.22', locale: 'ja-JP' },
+        { id: 'fr', name: 'French', url: 'https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip', modelName: 'vosk-model-small-fr-0.22', locale: 'fr-FR' },
+        { id: 'de', name: 'German', url: 'https://alphacephei.com/vosk/models/vosk-model-small-de-0.15.zip', modelName: 'vosk-model-small-de-0.15', locale: 'de-DE' },
+        { id: 'es', name: 'Spanish', url: 'https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip', modelName: 'vosk-model-small-es-0.42', locale: 'es-ES' },
+        { id: 'it', name: 'Italian', url: 'https://alphacephei.com/vosk/models/vosk-model-small-it-0.22.zip', modelName: 'vosk-model-small-it-0.22', locale: 'it-IT' },
+        { id: 'hi', name: 'Hindi', url: 'https://alphacephei.com/vosk/models/vosk-model-small-hi-0.22.zip', modelName: 'vosk-model-small-hi-0.22', locale: 'hi-IN' },
+    ] as VoskModel[]
 }
 
 // App Info

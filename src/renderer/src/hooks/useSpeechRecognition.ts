@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { VOICE_CONFIG } from '../lib/constants'
+import { VOICE_CONFIG, VoskModel } from '../lib/constants'
 import { useSettingsStore } from '../stores/settingsStore'
 import { isElectron } from '../lib/electron'
 import { voskService } from '../lib/vosk'
@@ -22,6 +22,7 @@ interface UseSpeechRecognitionReturn {
     setupProgress: number
     notification: string | null
     setText: (text: string) => void
+    currentModel: VoskModel | null
 }
 
 export function useSpeechRecognition(): UseSpeechRecognitionReturn {
@@ -39,6 +40,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     const [isFirstSetup, setIsFirstSetup] = useState(false)
     const [setupProgress, setSetupProgress] = useState(0)
     const [notification, setNotification] = useState<string | null>(null)
+    const [currentModel, setCurrentModel] = useState<VoskModel | null>(null)
 
     // Track intent to prevent race conditions during async setup
     const shouldListenRef = useRef(false)
@@ -51,6 +53,33 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     const visAudioContextRef = useRef<AudioContext | null>(null)
     const visAnimationFrameRef = useRef<number | null>(null)
     const visProcessorRef = useRef<ScriptProcessorNode | null>(null)
+
+    // Initialize: Select Model based on settings
+    useEffect(() => {
+        if (useNativeSpeech) {
+            const preferredModelId = settings.voskModel || 'auto'
+
+            if (preferredModelId === 'auto') {
+                // Auto-detect: Use default model for now (in future could detect system locale)
+                const defaultModel = VOICE_CONFIG.VOSK_MODELS.find(m => m.id === VOICE_CONFIG.DEFAULT_MODEL_ID)
+                    || VOICE_CONFIG.VOSK_MODELS[0]
+                console.log('[Speech] Using default model (Auto):', defaultModel)
+                setCurrentModel(defaultModel)
+            } else {
+                // Manual selection - Find in VOICE_CONFIG
+                const selected = VOICE_CONFIG.VOSK_MODELS.find(m => m.id === preferredModelId)
+
+                if (selected) {
+                    console.log('[Speech] Using selected model:', selected)
+                    setCurrentModel(selected)
+                } else {
+                    console.warn('[Speech] Selected model not found, falling back to default')
+                    const defaultModel = VOICE_CONFIG.VOSK_MODELS[0]
+                    setCurrentModel(defaultModel)
+                }
+            }
+        }
+    }, [useNativeSpeech, settings.voskModel])
 
     // Setup IPC listeners for Download Progress
     useEffect(() => {
@@ -106,6 +135,8 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
             const source = audioContext.createMediaStreamSource(stream)
 
             if (useNativeSpeech) {
+                // Reset recognizer to clear any previous listeners from prior toggle
+                voskService.resetRecognizer()
                 const recognizer = voskService.getRecognizer()
                 if (!recognizer) {
                     console.error('Recognizer not ready')
@@ -208,7 +239,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
             eventType: 'STATE_CHANGE',
             sessionId,
             component: 'useSpeechRecognition',
-            details: { metadata: { state: 'initializing', useNativeSpeech } }
+            details: { metadata: { state: 'initializing', useNativeSpeech, model: currentModel?.name } }
         })
 
         if (useNativeSpeech) {
@@ -216,22 +247,42 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
             // ... rest of native logic
             try {
                 const electron = (window as any).electron
-                // ... (rest of function remains same)
+
+                // Wait for model config if not yet loaded (though useEffect should have fired)
+                let targetModel = currentModel
+                if (!targetModel) {
+                    console.warn('[Speech] currentModel is null in startListening, resolving fallback...')
+                    const preferredModelId = settings.voskModel || 'auto'
+                    if (preferredModelId === 'auto') {
+                        targetModel = VOICE_CONFIG.VOSK_MODELS.find(m => m.id === VOICE_CONFIG.DEFAULT_MODEL_ID)
+                            || VOICE_CONFIG.VOSK_MODELS[0]
+                    } else {
+                        targetModel = VOICE_CONFIG.VOSK_MODELS.find(m => m.id === preferredModelId)
+                            || VOICE_CONFIG.VOSK_MODELS[0]
+                    }
+                    setCurrentModel(targetModel)
+                }
+
+                if (!targetModel) throw new Error("Could not determine speech model")
+
+                const modelId = targetModel.id
+                const modelName = targetModel.modelName // Use modelName (slug) instead of human-readable name
+
                 // 1. Ensure Model is Downloaded
-                const modelId = 'en-us'
-                const check = await electron.speech.checkSupport(modelId)
+                const check = await electron.speech.checkSupport(modelName)
 
                 if (!shouldListenRef.current) return
 
                 if (!check.modelDownloaded) {
                     setIsFirstSetup(true)
                     setSetupProgress(0)
-                    console.log('[Speech] Downloading model...')
-                    addLog({ eventType: 'SYSTEM_INIT', sessionId, component: 'useSpeechRecognition', details: { metadata: { action: 'download_model_start', model: 'vosk-model-small-en-us-0.15' } } })
+                    console.log(`[Speech] Downloading model ${modelName}...`)
+                    addLog({ eventType: 'SYSTEM_INIT', sessionId, component: 'useSpeechRecognition', details: { metadata: { action: 'download_model_start', model: modelName } } })
 
                     const result = await electron.speech.downloadModel({
-                        modelId: 'en-us',
-                        modelName: 'vosk-model-small-en-us-0.15'
+                        modelId: modelId,
+                        modelName: modelName,
+                        url: targetModel.url
                     })
 
                     if (!result.success) throw new Error(result.error)
@@ -242,7 +293,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
                     setIsFirstSetup(false)
                     setIsInitializing(false)
                     shouldListenRef.current = false
-                    setNotification("Voice model ready! Click Mic to start.")
+                    setNotification(`Voice model (${targetModel.name}) ready! Click Mic to start.`)
                     return
                 }
 
@@ -251,7 +302,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
                 // 2. Load Model into WASM (if not ready)
                 if (!voskService.isReady()) {
                     // Get the correct model path from main process
-                    const modelPath = await electron.speech.getModelPath('vosk-model-small-en-us-0.15')
+                    const modelPath = await electron.speech.getModelPath(modelName)
                     if (!modelPath) {
                         throw new Error('Model path not available')
                     }
@@ -262,7 +313,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
 
                 // 3. Start Audio
                 setIsListening(true)
-                addLog({ eventType: 'STATE_CHANGE', sessionId, component: 'useSpeechRecognition', details: { metadata: { state: 'listening_started', method: 'native' } } })
+                addLog({ eventType: 'STATE_CHANGE', sessionId, component: 'useSpeechRecognition', details: { metadata: { state: 'listening_started', method: 'native', model: modelName } } })
                 await startVisualization()
 
             } catch (e: any) {
@@ -283,7 +334,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
             setIsListening(true)
             addLog({ eventType: 'STATE_CHANGE', sessionId, component: 'useSpeechRecognition', details: { metadata: { state: 'listening_started', method: 'web_speech' } } })
         }
-    }, [isListening, isInitializing, useNativeSpeech, addLog])
+    }, [isListening, isInitializing, useNativeSpeech, addLog, currentModel])
 
     const stopListening = useCallback(async () => {
         const sessionId = useChatStore.getState().activeSessionId || 'unknown'
@@ -327,6 +378,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
         setText, // Exported
         audioLevel,
         isFirstSetup,
-        setupProgress
+        setupProgress,
+        currentModel
     }
 }

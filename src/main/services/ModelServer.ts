@@ -47,6 +47,17 @@ export class ModelServer {
     }
 
     private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+        // CORS Headers
+        res.setHeader('Access-Control-Allow-Origin', '*')
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        res.setHeader('Access-Control-Allow-Headers', '*')
+
+        if (req.method === 'OPTIONS') {
+            res.statusCode = 204
+            res.end()
+            return
+        }
+
         if (!req.url) {
             res.statusCode = 400
             res.end('Bad Request')

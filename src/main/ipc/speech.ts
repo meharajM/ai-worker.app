@@ -16,18 +16,20 @@ export function registerSpeechHandlers(): void {
     // Initialize manager
     modelManager = new ModelManager(getBaseModelsDir())
 
-    ipcMain.handle('speech:check-support', async (_event, modelId: string = 'en-us') => {
-        return await modelManager!.checkSupport('vosk-model-small-en-us-0.15')
+    ipcMain.handle('speech:check-support', async (_event, modelName: string) => {
+        // modelName passed from renderer (dynamic now)
+        return await modelManager!.checkSupport(modelName)
     })
 
     ipcMain.handle('speech:initialize', async () => ({ success: true }))
     ipcMain.handle('speech:start-listening', async () => ({ success: true }))
     ipcMain.handle('speech:stop-listening', async () => ({ success: true }))
 
-    ipcMain.handle('speech:download-model', async (event, options: { modelId: string, url?: string, modelName: string }) => {
+    ipcMain.handle('speech:download-model', async (event, options: { modelId: string, url: string, modelName: string }) => {
         return await modelManager!.downloadModel(
             options.modelId,
             options.modelName,
+            options.url, // Pass dynamic URL
             (progress) => {
                 try {
                     event.sender.send('speech:download-progress', { modelId: options.modelId, progress })
