@@ -1230,45 +1230,22 @@ export function SettingsPanel() {
                             </div>
                         </div>
 
-                        {/* Offline Speech Settings */}
+                        {/* Speech Recognition Settings */}
                         <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
                             <div className="flex items-center justify-between mb-4">
                                 <div>
                                     <p className="font-medium">Speech Recognition Engine</p>
                                     <p className="text-xs text-white/40">
-                                        {settings.offlineSpeech
-                                            ? 'Using Vosk (Offline/Local) - Electron Environment'
-                                            : 'Using Web Speech API (Online) - Browser Environment'}
+                                        Using Native Vosk (Offline/Local) - WebAssembly
                                     </p>
                                 </div>
-                                <div className={`px-3 py-1 rounded-full text-xs font-medium ${settings.offlineSpeech
-                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                    : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                                    }`}>
-                                    {settings.offlineSpeech ? 'Offline Mode' : 'Online Mode'}
+                                <div className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                    Offline Mode
                                 </div>
                             </div>
-
-                            {settings.offlineSpeech && (
-                                <div className="mt-4 pt-4 border-t border-white/5 space-y-3">
-                                    <label className="block text-sm text-white/60 mb-1">Language Model</label>
-                                    <select
-                                        value={settings.voskModel}
-                                        onChange={(e) => settings.setVoskModel(e.target.value)}
-                                        className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm
-                                             placeholder-white/30 focus:border-white/20 focus:outline-none"
-                                    >
-                                        {(VOICE_CONFIG.VOSK_MODELS || []).map((model) => (
-                                            <option key={model.id} value={model.id}>
-                                                {model.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <p className="text-[10px] text-white/30">
-                                        Note: Changing the model might require a one-time download on the first use.
-                                    </p>
-                                </div>
-                            )}
+                            <p className="text-xs text-white/30">
+                                Runs locally using Vosk engine. First use will download the ~50MB model.
+                            </p>
                         </div>
                     </div>
                 )}

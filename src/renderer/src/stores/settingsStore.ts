@@ -162,6 +162,16 @@ export const useSettingsStore = create<SettingsState>()(
                     await electron.store.delete(name)
                 },
             })),
+            // Force offlineSpeech to true in Electron after rehydration
+            onRehydrateStorage: () => (state) => {
+                if (state && window.electron) {
+                    // In Electron, always use offline speech (native Vosk)
+                    if (!state.offlineSpeech) {
+                        console.log('[Settings] Forcing offlineSpeech=true in Electron environment')
+                        state.setOfflineSpeech(true)
+                    }
+                }
+            },
         }
     )
 )

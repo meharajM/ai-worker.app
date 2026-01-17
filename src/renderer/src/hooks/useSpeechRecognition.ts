@@ -1,8 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { VOICE_CONFIG } from '../lib/constants'
 import { useSettingsStore } from '../stores/settingsStore'
-import { voskService } from '../lib/vosk'
 import { isElectron } from '../lib/electron'
+import { voskService } from '../lib/vosk'
 
 interface UseSpeechRecognitionReturn {
     isListening: boolean
@@ -16,195 +16,68 @@ interface UseSpeechRecognitionReturn {
     stopListening: () => void
     resetTranscript: () => void
     audioLevel: number
-    isFirstSetup?: boolean
-    setupProgress?: number
-}
-
-// Audio processing configuration
-const AUDIO_CONFIG = {
-    sampleRate: 16000,
-    channelCount: 1,
-    bufferSize: 4096,
+    isFirstSetup: boolean
+    setupProgress: number
+    notification: string | null
 }
 
 export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     const settings = useSettingsStore()
-    const { offlineSpeech: storedOfflineSpeech } = settings
-    // Force offline speech in Electron (Vosk), otherwise use settings (Web Speech API vs Vosk)
-    const offlineSpeech = isElectron() ? true : storedOfflineSpeech
+    const useNativeSpeech = isElectron()
+
     const [isListening, setIsListening] = useState(false)
     const [transcript, setTranscript] = useState('')
     const [interimTranscript, setInterimTranscript] = useState('')
     const [error, setError] = useState<string | null>(null)
     const [isSupported, setIsSupported] = useState(false)
     const [audioLevel, setAudioLevel] = useState(0)
-    const [isVoskLoading, setIsVoskLoading] = useState(false)
+    const [isInitializing, setIsInitializing] = useState(false)
+    const [isFirstSetup, setIsFirstSetup] = useState(false)
+    const [setupProgress, setSetupProgress] = useState(0)
+    const [notification, setNotification] = useState<string | null>(null)
+
+    // Track intent to prevent race conditions during async setup
+    const shouldListenRef = useRef(false)
 
     // Refs for Web Speech API
     const recognitionRef = useRef<SpeechRecognition | null>(null)
 
-    // Refs for Audio Visualization
+    // Refs for WASM / Audio
     const visMediaStreamRef = useRef<MediaStream | null>(null)
     const visAudioContextRef = useRef<AudioContext | null>(null)
     const visAnimationFrameRef = useRef<number | null>(null)
-
-    // Initialize Web Speech API (always init if supported, as fallback)
-    useEffect(() => {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-        if (SpeechRecognition) {
-            setIsSupported(true)
-            recognitionRef.current = new SpeechRecognition()
-
-            const recognition = recognitionRef.current
-            recognition.continuous = true
-            recognition.interimResults = true
-            recognition.lang = VOICE_CONFIG.SPEECH_LANG
-
-            recognition.onresult = (event: SpeechRecognitionEvent) => {
-                if (offlineSpeech) return // Ignore web speech results in offline mode
-
-                let interim = ''
-                let final = ''
-
-                for (let i = event.resultIndex; i < event.results.length; i++) {
-                    const result = event.results[i]
-                    if (result.isFinal) {
-                        final += result[0].transcript
-                    } else {
-                        interim += result[0].transcript
-                    }
-                }
-
-                if (final) {
-                    setTranscript((prev) => prev + final)
-                }
-                setInterimTranscript(interim)
-            }
-
-            recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-                if (offlineSpeech) return
-
-                // Ignore 'no-speech' error
-                if (event.error === 'no-speech') return
-
-                // If aborted, it's intentional
-                if (event.error === 'aborted') {
-                    setIsListening(false)
-                    return
-                }
-
-                // Network error is common in Electron
-                if (event.error === 'network') {
-                    console.error('[Speech] Network error - Web Speech API requires internet connection')
-                    setError('Speech recognition requires internet connection')
-                    stopListening()
-                    return
-                }
-
-                // Not allowed
-                if (event.error === 'not-allowed') {
-                    console.error('[Speech] Microphone access denied')
-                    setError('Microphone access denied. Please allow microphone access.')
-                    stopListening()
-                    return
-                }
-
-                console.error('Speech recognition error:', event.error)
-                setError(`Error: ${event.error}`)
-                stopListening()
-            }
-
-            recognition.onend = () => {
-                // Only update state if we were using Web Speech
-                if (!offlineSpeech) {
-                    setIsListening(false)
-                    stopVisualization()
-                }
-            }
-        } else {
-            // Even if Web Speech is not supported, Offline might be
-            // So we don't necessarily set isSupported = false globally yet,
-            // but for now we assume modern browser features.
-            // Vosk requires WebAssembly.
-        }
-
-        return () => {
-            if (recognitionRef.current) {
-                recognitionRef.current.abort()
-            }
-            stopVisualization()
-        }
-    }, [offlineSpeech])
-
-    // Setup states
-    const [isFirstSetup, setIsFirstSetup] = useState(false)
-    const [setupProgress, setSetupProgress] = useState(0)
-    const [isInitialized, setIsInitialized] = useState(false)
-    const [currentModelId, setCurrentModelId] = useState<string | null>(null)
-
-    // Initialize WASM Vosk if in browser and offline mode is enabled
-    useEffect(() => {
-        if (!isElectron() && offlineSpeech && !voskService.isLoaded() && !isVoskLoading) {
-            const loadVosk = async () => {
-                setIsVoskLoading(true)
-                try {
-                    await voskService.loadModel('/models/vosk-model.zip')
-                } catch (e) {
-                    console.error('Failed to load Vosk WASM model:', e)
-                    setError('Failed to load browser speech model.')
-                } finally {
-                    setIsVoskLoading(false)
-                }
-            }
-            loadVosk()
-        }
-    }, [offlineSpeech, isVoskLoading])
-
-    // Update Vosk callbacks (WASM and Native)
-    useEffect(() => {
-        if (offlineSpeech) {
-            if (!isElectron()) {
-                voskService.setCallbacks(
-                    (text, isFinal) => {
-                        if (isFinal) setTranscript(prev => prev + text + ' ')
-                        else setInterimTranscript(text)
-                    },
-                    (err) => {
-                        setError(err)
-                        stopListening()
-                        setIsListening(false)
-                    }
-                )
-            } else {
-                // Native Vosk results come via IPC
-                const removeResultListener = (window as any).electron.speech.onResult((result: { text: string, final: boolean }) => {
-                    console.log('[Speech Hook] Received result:', result)
-                    if (result.final) {
-                        setTranscript(prev => prev + result.text + ' ')
-                        setInterimTranscript('')
-                    } else {
-                        setInterimTranscript(result.text)
-                    }
-                })
-
-                // Listen for download progress
-                const removeProgressListener = (window as any).electron.speech.onDownloadProgress((data: { modelId: string, progress: number }) => {
-                    if (data.modelId === settings.voskModel) {
-                        setSetupProgress(data.progress)
-                    }
-                })
-
-                return () => {
-                    removeResultListener()
-                    removeProgressListener()
-                }
-            }
-        }
-    }, [offlineSpeech, settings.voskModel])
-
     const visProcessorRef = useRef<ScriptProcessorNode | null>(null)
 
-    // Start Audio Visualization and Processing
+    // Setup IPC listeners for Download Progress
+    useEffect(() => {
+        if (useNativeSpeech) {
+            const electron = (window as any).electron
+            if (!electron) return
+
+            const removeProgressListener = electron.speech.onDownloadProgress((data: { modelId: string, progress: number }) => {
+                setSetupProgress(data.progress)
+            })
+            return () => {
+                removeProgressListener?.()
+            }
+        }
+    }, [useNativeSpeech])
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            stopVisualization()
+        }
+    }, [])
+
+    // Auto-clear notification
+    useEffect(() => {
+        if (notification) {
+            const timer = setTimeout(() => setNotification(null), 3000)
+            return () => clearTimeout(timer)
+        }
+    }, [notification])
+
     const startVisualization = async () => {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
@@ -222,30 +95,45 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
             })
             visAudioContextRef.current = audioContext
 
-            // Ensure context is running (sometimes it starts suspended)
             if (audioContext.state === 'suspended') {
                 await audioContext.resume()
             }
 
             const source = audioContext.createMediaStreamSource(stream)
 
-            // For native Vosk, we need to process audio in the renderer and send to Main
-            if (isElectron() && offlineSpeech) {
-                // Note: ScriptProcessor is deprecated but AudioWorklet requires a separate file/loader setup
-                // that is complex in this bundler environment. Using ScriptProcessor for now.
+            if (useNativeSpeech) {
+                const recognizer = voskService.getRecognizer()
+                if (!recognizer) {
+                    console.error('Recognizer not ready')
+                    return
+                }
+
+                recognizer.on('result', (message: any) => {
+                    const text = message.result?.text
+                    if (text) {
+                        setTranscript((prev) => prev + text + ' ')
+                        setInterimTranscript('')
+                    }
+                })
+
+                recognizer.on('partialresult', (message: any) => {
+                    const partial = message.result?.partial
+                    if (partial) {
+                        setInterimTranscript(partial)
+                    }
+                })
+
                 const processor = audioContext.createScriptProcessor(4096, 1, 1)
-                visProcessorRef.current = processor // Keep reference to prevent GC
+                visProcessorRef.current = processor
 
                 processor.onaudioprocess = (event) => {
-                    const inputData = event.inputBuffer.getChannelData(0)
-                    // Convert Float32Array to Int16Array for Vosk
-                    const pcmData = new Int16Array(inputData.length)
-                    for (let i = 0; i < inputData.length; i++) {
-                        pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF
+                    try {
+                        recognizer.acceptWaveform(event.inputBuffer)
+                    } catch (e) {
+                        console.error('WASM processing error:', e)
                     }
-                    // Send the underlying ArrayBuffer
-                    (window as any).electron.speech.processAudio(pcmData.buffer)
                 }
+
                 source.connect(processor)
                 processor.connect(audioContext.destination)
             }
@@ -267,6 +155,8 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
             updateVolume()
         } catch (e) {
             console.warn('[Speech] Audio setup failed:', e)
+            setError('Microphone initialization failed')
+            setIsListening(false)
         }
     }
 
@@ -291,100 +181,81 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     }
 
     const startListening = useCallback(async () => {
+        if (isListening || isInitializing) return
+
+        shouldListenRef.current = true
         setError(null)
+        setNotification(null)
         setTranscript('')
         setInterimTranscript('')
 
-        if (offlineSpeech) {
-            if (isListening) return
+        if (useNativeSpeech) {
+            setIsInitializing(true)
+
             try {
-                if (isElectron()) {
-                    // Lazy Initialization Logic
-                    const targetModelId = settings.voskModel
-                    const needsReinit = !isInitialized || currentModelId !== targetModelId
+                const electron = (window as any).electron
 
-                    if (needsReinit) {
-                        console.log(`[Speech Hook] Setup initiated for model: ${targetModelId}`)
-                        setIsFirstSetup(true)
-                        setSetupProgress(0)
+                // 1. Ensure Model is Downloaded
+                const modelId = 'en-us'
+                const check = await electron.speech.checkSupport(modelId)
 
-                        // 1. Check if model is downloaded
-                        const status = await (window as any).electron.speech.checkSupport(targetModelId)
+                if (!shouldListenRef.current) return
 
-                        if (!status.modelDownloaded) {
-                            console.log(`[Speech Hook] Model ${targetModelId} not found locally. Starting download...`)
-                            const modelInfo = (VOICE_CONFIG as any).VOSK_MODELS?.find((m: any) => m.id === targetModelId)
-                            if (!modelInfo) {
-                                throw new Error(`Model configuration not found for ${targetModelId}`)
-                            }
+                if (!check.modelDownloaded) {
+                    setIsFirstSetup(true)
+                    setSetupProgress(0)
+                    console.log('[Speech] Downloading model...')
 
-                            const result = await (window as any).electron.speech.downloadModel({
-                                modelId: targetModelId,
-                                url: modelInfo.url,
-                                modelName: modelInfo.modelName
-                            })
+                    const result = await electron.speech.downloadModel({
+                        modelId: 'en-us',
+                        modelName: 'vosk-model-small-en-us-0.15'
+                    })
 
-                            if (!result.success) {
-                                throw new Error(`Download failed: ${result.error}`)
-                            }
-                        }
+                    if (!result.success) throw new Error(result.error)
 
-                        setSetupProgress(90)
-
-                        // 2. Initializing engine
-                        const initResult = await (window as any).electron.speech.initialize({
-                            modelId: targetModelId
-                        })
-                        if (!initResult.success) {
-                            throw new Error(initResult.error)
-                        }
-
-                        setSetupProgress(100)
-                        await new Promise(r => setTimeout(r, 400))
-
-                        setIsInitialized(true)
-                        setCurrentModelId(targetModelId)
-                        setIsFirstSetup(false)
-                        console.log(`[Speech Hook] Setup complete for ${targetModelId}.`)
-                    }
-
-                    await (window as any).electron.speech.startListening()
-                    setIsListening(true)
-                    startVisualization()
-                } else {
-                    await voskService.start()
-                    setIsListening(true)
-                    startVisualization()
+                    // STOP after initial download (Do not auto-record)
+                    setIsFirstSetup(false)
+                    setIsInitializing(false)
+                    shouldListenRef.current = false
+                    setNotification("Voice model ready! Click Mic to start.")
+                    return
                 }
+
+                if (!shouldListenRef.current) return
+
+                // 2. Load Model into WASM (if not ready)
+                if (!voskService.isReady()) {
+                    const modelUrl = '/models/vosk-model-small-en-us-0.15'
+                    await voskService.loadModel(modelUrl)
+                }
+
+                if (!shouldListenRef.current) return
+
+                // 3. Start Audio
+                setIsListening(true)
+                await startVisualization()
+
             } catch (e) {
-                setError(`Offline speech failed to start: ${e}`)
+                if (shouldListenRef.current) {
+                    console.error('[Speech] Start failed:', e)
+                    setError(`Setup failed: \${e}`)
+                    setIsListening(false)
+                }
                 setIsFirstSetup(false)
+            } finally {
+                // If we aborted early (download case), this might already be false.
+                if (shouldListenRef.current) setIsInitializing(false)
             }
         } else {
-            // Web Speech
-            if (!recognitionRef.current) return
-            if (isListening) return
-
-            try {
-                recognitionRef.current.start()
-                setIsListening(true)
-                startVisualization()
-            } catch (e) {
-                console.error('Error starting recognition:', e)
-                setError('Failed to start speech recognition')
-                setIsListening(false)
-            }
+            // Web Speech API Fallback
         }
-    }, [isListening, offlineSpeech, settings.voskModel, currentModelId, isInitialized])
+    }, [isListening, isInitializing, useNativeSpeech])
 
     const stopListening = useCallback(async () => {
-        if (offlineSpeech) {
-            if (isElectron()) {
-                await (window as any).electron.speech.stopListening()
-            } else {
-                voskService.stop()
-            }
+        shouldListenRef.current = false
+        if (useNativeSpeech) {
             setIsListening(false)
+            setIsInitializing(false)
             stopVisualization()
         } else {
             if (!recognitionRef.current) return
@@ -392,7 +263,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
             setIsListening(false)
             stopVisualization()
         }
-    }, [offlineSpeech])
+    }, [useNativeSpeech])
 
     const resetTranscript = useCallback(() => {
         setTranscript('')
@@ -404,9 +275,10 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
         transcript,
         interimTranscript,
         error,
-        isSupported: true, // Assuming support if either is available
-        isNativeSupported: false,
-        isInitializing: isFirstSetup, // Map internal setup state to exposed prop
+        notification,
+        isSupported: true,
+        isNativeSupported: useNativeSpeech,
+        isInitializing,
         startListening,
         stopListening,
         resetTranscript,
