@@ -441,4 +441,43 @@ ai-worker-app/
 
 ---
 
-**Current Status:** Phases 1-13 complete. Full Gemini and OpenRouter support validated. Filesystem logging and Technical Inspector enriched with model/provider tracking. Launch preparation (Phase 14) is now the primary focus.
+---
+
+**Current Status:** Phases 1-13 complete. Full Gemini and OpenRouter support validated. Filesystem logging and Technical Inspector enriched with model/provider tracking. Launch preparation (Phase 14) is now the primary focus. Phase 16 (Decision Model) is planned for the next major release.
+
+## 🧠 Phase 16: Qwen Decision Model & Auto-Routing [PLANNED]
+
+This phase integrates the **Qwen 2.5 0.5B** model as the primary "Decision Model" for AI-Worker.
+
+### 1. Objectives
+- **Out-of-the-Box Local AI**: Model installs silently in the background on app startup.
+- **Smart Routing**: Use the lightweight local model to decide between local execution or cloud forwarding.
+- **Prompt Enrichment**: Automatically ask clarifying questions for vague user inputs.
+- **Seamless UX**: Show "Getting ready..." during install and "Routing..." during analysis.
+- **Full Traceability**: Log all decisions and transitions in the integrated logging system.
+
+### 2. Component Details
+
+#### A. Model & WebLLM Integration
+- **Model**: `Qwen2.5-0.5B-Instruct-q4f16_1-MLC`.
+- **Auto-Install**: Trigger `downloadWebLLMModelOnly` on App mount if missing.
+- **Status UI**: Show a welcoming message like "Getting ready for your tasks..." in the Header/Chat during first-run download.
+
+#### B. Decision Logic (`llm.ts`)
+- **Phase 1: Analysis**: Send every prompt to the local 0.5B model first.
+- **Phase 2: Classification**:
+    - **Vague**: Ask up to 2 follow-up questions to clarify intent.
+    - **Simple**: Resolve locally via the 0.5B model.
+    - **Complex**: Route to Cloud LLM.
+- **Phase 3: Connection Guard**:
+    - If Cloud is needed but no keys are present, respond with a direct link to the Settings page.
+
+#### C. UI & Feedback
+- **Chat State**: Add a `routing` state to the message list or status bar.
+- **Interactions**: Suggestions or follow-up buttons rendered for "vague" prompt results.
+
+#### D. Logging Strategy
+- Use `useLogStore` to capture:
+    - **Download Progress**: `STATE_CHANGE` at 25/50/75/100%.
+    - **Routing Decisions**: `DEBUG` with `correlationId` linking analysis to final response.
+    - **Clarification Events**: `STATE_CHANGE` when a follow-up is triggered.
