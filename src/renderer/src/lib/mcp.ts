@@ -32,23 +32,23 @@ const DEFAULT_MCP_SERVERS: Omit<
   MCPServer,
   "id" | "connected" | "tools" | "autoConnect"
 >[] = [
-  {
-    name: "playwright",
-    description:
-      "Playwright MCP Server - Browser automation and web interaction tools",
-    type: "stdio",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-playwright"],
-  },
-  {
-    name: "sequential-thinking",
-    description:
-      "Sequential Thinking MCP Server - Enables step-by-step reasoning for complex tasks",
-    type: "stdio",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
-  },
-];
+    {
+      name: "playwright",
+      description:
+        "Playwright MCP Server - Browser automation and web interaction tools",
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-playwright"],
+    },
+    {
+      name: "sequential-thinking",
+      description:
+        "Sequential Thinking MCP Server - Enables step-by-step reasoning for complex tasks",
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+    },
+  ];
 
 // Store for connected servers
 let connectedServers: Map<string, MCPServer> = new Map();
@@ -189,10 +189,10 @@ export async function connectServer(serverId: string): Promise<void> {
       // Handle servers that might not expose tools (like sequential-thinking)
       if (toolsResult.tools && toolsResult.tools.length > 0) {
         server.tools = toolsResult.tools.map(
-          (t: { name: string; description: string }) => ({
+          (t: { name: string; description: string; inputSchema?: any }) => ({
             name: t.name,
             description: t.description,
-            inputSchema: { type: "object", properties: {} },
+            inputSchema: t.inputSchema || { type: "object", properties: {} },
           })
         );
         logMcpRenderer("info", "MCP server tools loaded", {

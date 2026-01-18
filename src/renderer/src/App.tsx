@@ -1,9 +1,11 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
+import { FEATURE_FLAGS } from "./lib/constants";
 import { VoiceInput } from "./components/VoiceInput";
 import { ChatView } from "./components/ChatView";
 import { ChatSidebar } from "./components/ChatSidebar";
 import { ConnectionsPanel } from "./components/ConnectionsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { PlanCard } from "./components/PlanCard";
 
 import { Sidebar, View } from "./components/Sidebar";
 import { Header } from "./components/Header";
@@ -27,17 +29,48 @@ import {
   autoConnectServers,
   initializeMcpServers,
 } from "./lib/mcp";
+import { analyzeRequest, isOrchestratorReady, isLikelySimpleTask } from "./lib/orchestrator";
+import { executePlan } from "./lib/executor";
+import { ToolRegistry } from "./lib/tool-registry";
+import { AppModeId } from "./types/modes";
 
 function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
-  const { sessions, activeSessionId, addMessage, setProcessing, isProcessing } =
-    useChatStore();
+  const [activeMode, setActiveMode] = useState<AppModeId>("general");
+  const {
+    sessions,
+    activeSessionId,
+    addMessage,
+    setProcessing,
+    isProcessing,
+    currentPlan,
+    planningPhase,
+    executionProgress,
+    setCurrentPlan,
+    setPlanningPhase,
+    setExecutionProgress,
+    approvePlan,
+    rejectPlan,
+  } = useChatStore();
   const { addLog } = useLogStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const messages = activeSession?.messages || [];
   const settings = useSettingsStore();
   const { speak } = useSpeechSynthesis();
-  const [llmStatus, setLlmStatus] = useState<{
+
+
+  // Independent statuses for Local and Remote
+  const [localStatus, setLocalStatus] = useState<{
+    provider: string | null;
+    available: boolean;
+    isDownloading?: boolean;
+  }>({
+    provider: null,
+    available: false,
+    isDownloading: false,
+  });
+
+  const [remoteStatus, setRemoteStatus] = useState<{
     provider: string | null;
     available: boolean;
   }>({
@@ -53,17 +86,39 @@ function App() {
         await initializeMcpServers();
         // Auto-connect servers with autoConnect enabled
         await autoConnectServers();
+
+        // Index tools after connections match
+        setTimeout(() => {
+          ToolRegistry.indexTools().catch(err => console.error("Failed to index tools:", err));
+        }, 2000); // Small delay to let servers connect
+
       } catch (error) {
         console.error("Error initializing MCP servers:", error);
       }
     };
     initializeAndAutoConnect();
+
+    // OPTIMIZATION: Trigger immediate background load of local model
+    if (FEATURE_FLAGS.BROWSER_LLM_ENABLED) {
+      const qwenModelId = 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC';
+      import('./lib/webllm').then(({ loadWebLLMModel }) => {
+        loadWebLLMModel(qwenModelId).catch(err => console.warn('[App] Background model load failed:', err));
+      });
+    }
   }, []);
 
-  // Check LLM availability on mount and when settings change (debounced)
+  // AUTO-SYNC Tool Registry whenever planning starts or servers list might have changed
+  useEffect(() => {
+    if (planningPhase === 'analyzing') {
+      console.log('[App] Auto-syncing Tool Registry before analysis...');
+      ToolRegistry.indexTools().catch(err => console.error("Failed to re-index tools:", err));
+    }
+  }, [planningPhase]);
+
+  // Check Remote LLM availability on mount and when settings change
   // Only check when not in settings view to avoid duplicate calls
   const checkLLMRef = React.useRef<Promise<void> | null>(null);
-  const checkLLM = React.useCallback(async () => {
+  const checkRemoteLLM = React.useCallback(async () => {
     // Skip if we're in settings view (SettingsPanel handles it)
     if (currentView === "settings") {
       return;
@@ -88,67 +143,36 @@ function App() {
           openrouterApiKey: settings.openrouterApiKey,
           openrouterModel: settings.openrouterModel,
         };
+
+        // Use getAvailableProviders but ignore browser status here (handled via subscription)
         const providers = await getAvailableProviders(settingsForLLM);
-        if (providers.browser.available) {
-          if (providers.browser.isLoaded) {
-            setLlmStatus({
-              provider: `On-Device (${providers.browser.model})`,
-              available: true,
-            });
-          } else if (providers.browser.isLoading) {
-            setLlmStatus({
-              provider: `On-Device (Loading...)`,
-              available: false,
-            });
-          } else if (providers.ollama.available) {
-            setLlmStatus({
-              provider: `Ollama (${providers.ollama.model})`,
-              available: true,
-            });
-          } else if (providers.gemini.available) {
-            setLlmStatus({
-              provider: `Gemini (${providers.gemini.model})`,
-              available: true,
-            });
-          } else if (providers.openrouter.available) {
-            setLlmStatus({
-              provider: `OpenRouter (${providers.openrouter.model})`,
-              available: true,
-            });
-          } else if (providers.openai.available) {
-            setLlmStatus({
-              provider: `OpenAI (${providers.openai.model})`,
-              available: true,
-            });
-          } else {
-            setLlmStatus({ provider: null, available: false });
-          }
-        } else if (providers.ollama.available) {
-          setLlmStatus({
+
+        if (providers.ollama.available) {
+          setRemoteStatus({
             provider: `Ollama (${providers.ollama.model})`,
             available: true,
           });
         } else if (providers.gemini.available) {
-          setLlmStatus({
+          setRemoteStatus({
             provider: `Gemini (${providers.gemini.model})`,
             available: true,
           });
         } else if (providers.openrouter.available) {
-          setLlmStatus({
+          setRemoteStatus({
             provider: `OpenRouter (${providers.openrouter.model})`,
             available: true,
           });
         } else if (providers.openai.available) {
-          setLlmStatus({
+          setRemoteStatus({
             provider: `OpenAI (${providers.openai.model})`,
             available: true,
           });
         } else {
-          setLlmStatus({ provider: null, available: false });
+          setRemoteStatus({ provider: null, available: false });
         }
       } catch (error) {
-        console.error("Error checking LLM:", error);
-        setLlmStatus({ provider: null, available: false });
+        console.error("Error checking Remote LLM:", error);
+        setRemoteStatus({ provider: null, available: false });
       } finally {
         checkLLMRef.current = null;
       }
@@ -169,10 +193,10 @@ function App() {
   useEffect(() => {
     // Debounce to avoid rapid calls when settings change
     const timer = setTimeout(() => {
-      checkLLM();
+      checkRemoteLLM();
     }, 500);
     return () => clearTimeout(timer);
-  }, [checkLLM]);
+  }, [checkRemoteLLM]);
 
   // Re-check every 60 seconds (reduced from 30s) when not in settings
   useEffect(() => {
@@ -180,33 +204,38 @@ function App() {
       return; // Don't poll when in settings view
     }
     const interval = setInterval(() => {
-      checkLLM();
-    }, 60000); // Increased to 60 seconds
+      checkRemoteLLM();
+    }, 60000);
     return () => clearInterval(interval);
-  }, [checkLLM, currentView]);
+  }, [checkRemoteLLM, currentView]);
 
-  // Subscribe to WebLLM status for real-time updates
+  // Subscribe to WebLLM status for real-time updates (Local Only)
   useEffect(() => {
     const unsubscribe = subscribeToWebLLMStatus((status: WebLLMStatus) => {
       if (status.isLoaded && status.currentModel) {
-        setLlmStatus({
+        setLocalStatus({
           provider: `On-Device (${status.currentModel})`,
           available: true,
+          isDownloading: false
         });
       } else if (status.isLoading || status.backgroundDownload) {
-        setLlmStatus({
-          provider: `On-Device (Loading ${status.loadingProgress.toFixed(0)}%)`,
-          available: false, // Show as yellow/inactive while loading
+        setLocalStatus({
+          provider: `Loading ${status.loadingProgress.toFixed(0)}%`,
+          available: false,
+          isDownloading: true
         });
       } else {
-        // Fallback to regular check if WebLLM is not loaded or loading
-        checkLLM();
+        setLocalStatus({
+          provider: null,
+          available: false,
+          isDownloading: false
+        });
       }
     });
     return () => unsubscribe();
-  }, [checkLLM]);
+  }, []);
 
-  // Handle message submission
+  // Handle message submission - uses orchestrator for planning
   const handleSubmit = useCallback(
     async (content: string) => {
       if (!content.trim()) return;
@@ -227,65 +256,176 @@ function App() {
         },
       });
 
+      console.log('>>> [App.handleSubmit] Processing:', content.trim());
       setProcessing(true);
 
       try {
-        // Build message history for LLM
+        const orchestratorReady = isOrchestratorReady();
+        console.log('>>> [App.handleSubmit] Orchestrator Ready:', orchestratorReady);
+
+        // Use orchestrator for planning if:
+        // 1. Orchestrator (WebLLM) is loaded
+        // OPTIMIZATION: We do NOT fetch tools here yet. We let the orchestrator decide if it needs them.
+        if (orchestratorReady) {
+          setPlanningPhase('analyzing');
+
+          addLog({
+            eventType: 'DEBUG',
+            sessionId: activeSessionId || "default",
+            component: "App.handleSubmit",
+            details: {
+              metadata: {
+                usingOrchestrator: true,
+                stage: 'initial_analysis',
+                msg: 'Checking if tools are needed'
+              }
+            },
+          });
+
+          try {
+            // Fetch relevant tools immediately based on mode + query for 1-step analysis
+            // This helps smaller models like Qwen 2.5 0.5B see availability right away
+            let mcpTools = ToolRegistry.searchTools(content.trim(), activeMode);
+            let llmTools: LLMTool[] = mcpTools.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.parameters,
+            }));
+
+            addLog({
+              eventType: 'DEBUG',
+              sessionId: activeSessionId || "default",
+              component: "App.handleSubmit",
+              details: {
+                metadata: {
+                  msg: 'Hydrating tools for planning',
+                  mode: activeMode,
+                  toolCount: mcpTools.length,
+                  tools: mcpTools.map(t => t.name)
+                }
+              }
+            });
+
+            // Analyze request WITH tools immediately
+            let plan = await analyzeRequest(content.trim(), llmTools);
+            console.log('>>> [App.handleSubmit] Orchestrator Plan Result:', plan);
+
+            // If the model still thinks it needs more tools (unlikely with RAG)
+            // or if it specifically flagged need for them, we could re-try,
+            // but for now, 1-step with RAG is the most robust path for latency.
+
+            addLog({
+              eventType: 'DEBUG',
+              sessionId: activeSessionId || "default",
+              component: "App.handleSubmit",
+              details: {
+                metadata: {
+                  planComplexity: plan.complexity,
+                  planSteps: plan.plan.length,
+                  requiresConfirmation: plan.requiresConfirmation,
+                  recommendedProvider: plan.recommendedProvider,
+                }
+              },
+            });
+
+            if (!plan.requiresConfirmation) {
+              console.log('>>> [App.handleSubmit] Simple/Read-only task detected, auto-executing with provider:', plan.recommendedProvider);
+              setPlanningPhase('executing');
+              setCurrentPlan(plan);
+
+              // Execute immediately without showing PlanCard
+              const settingsForExec = {
+                preferredProvider: settings.preferredProvider,
+                ollamaModel: settings.ollamaModel,
+                ollamaBaseUrl: settings.ollamaBaseUrl,
+                openaiApiKey: settings.openaiApiKey,
+                openaiBaseUrl: settings.openaiBaseUrl,
+                openaiModel: settings.openaiModel,
+                geminiApiKey: settings.geminiApiKey,
+                geminiModel: settings.geminiModel,
+                openrouterApiKey: settings.openrouterApiKey,
+                openrouterModel: settings.openrouterModel,
+              };
+
+              const availableToolsForExec = mcpTools.map((tool) => ({
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.parameters,
+              }));
+
+              const result = await executePlan(
+                {
+                  plan: plan,
+                  provider: plan.recommendedProvider,
+                  userMessage: content.trim(),
+                  availableTools: availableToolsForExec,
+                },
+                settingsForExec,
+                (step, description) => {
+                  setExecutionProgress({ step, description });
+                }
+              );
+
+              // Add assistant response
+              addMessage({
+                role: "assistant",
+                content: result.content || result.error || "No response generated.",
+                provider: result.provider || plan.recommendedProvider,
+                model: result.model || 'unknown',
+              });
+
+              if (result.success && result.provider !== 'browser') {
+                setRemoteStatus({
+                  provider: `${result.provider} (${result.model})`,
+                  available: true,
+                });
+              }
+
+              setProcessing(false);
+              setCurrentPlan(null);
+              setPlanningPhase('idle');
+              setExecutionProgress(null);
+              return;
+            }
+
+            // NORMAL PATH: Show PlanCard for complex tasks
+            setCurrentPlan(plan);
+            setPlanningPhase('waiting_approval');
+            // Don't setProcessing(false) here - the plan approval flow handles it
+            return;
+
+          } catch (analysisError) {
+            console.warn('[Orchestrator] Analysis failed, falling back to direct execution:', analysisError);
+            // Fall through to direct execution below
+            setPlanningPhase('idle');
+          }
+        }
+
+        // Direct execution path (fallback or for simple tasks without orchestrator)
+        setPlanningPhase('analyzing');
+        // This preserves the original behavior for backwards compatibility
         const llmMessages: LLMMessage[] = messages.map((m) => ({
           role: m.role as "user" | "assistant",
           content: m.content,
         }));
-
-        // Add the new user message
         llmMessages.push({
           role: "user",
           content: content.trim(),
         });
 
-        // Get available MCP tools and servers
-        const mcpTools = getAllTools();
         const servers = getServers();
-
-        addLog({
-          eventType: 'DEBUG',
-          sessionId: activeSessionId || "default",
-          component: "App.handleSubmit",
-          details: {
-            metadata: {
-              mcpToolCount: mcpTools.length,
-              connectedServerCount: servers.filter((s) => s.connected).length,
-              toolNames: mcpTools.map((t) => t.name),
-            }
-          },
-        });
-
-        // Convert to LLM format (minimal for token efficiency)
-        const llmTools: LLMTool[] = mcpTools.map((tool) => ({
-          name: tool.name,
-          description: tool.description, // Keep full description for tool schema
-          parameters: tool.inputSchema,
-        }));
-
-        // Build compact server info
-        // Include all connected servers, even if they have no tools (reasoning servers)
-        // Note: Reasoning servers are included for context but don't affect tool execution
         const serverInfo: ServerInfo[] = servers
           .filter((server) => server.connected)
-          .map((server) => {
-            const isReasoningServer =
+          .map((server) => ({
+            name: server.name,
+            description: server.description.substring(0, 40),
+            toolCount: server.tools.length,
+            isReasoningServer:
               server.name.includes("sequential-thinking") ||
               server.name.includes("sequential") ||
-              server.description.toLowerCase().includes("reasoning");
+              server.description.toLowerCase().includes("reasoning"),
+          }));
 
-            return {
-              name: server.name,
-              description: server.description.substring(0, 40), // Truncate for token efficiency
-              toolCount: server.tools.length,
-              isReasoningServer,
-            };
-          });
-
-        // Tool execution loop - continue until no more tool calls are needed
         const settingsForLLM = {
           preferredProvider: settings.preferredProvider,
           ollamaModel: settings.ollamaModel,
@@ -299,320 +439,91 @@ function App() {
           openrouterModel: settings.openrouterModel,
         };
 
-        let currentMessages = [...llmMessages];
-        let finalResponse: Awaited<ReturnType<typeof chat>> | null = null;
-        let iterationCount = 0;
-        const maxIterations = 10; // Safety limit to prevent infinite loops
-        const allToolCalls: Array<{
-          id: string;
-          name: string;
-          arguments: Record<string, unknown>;
-        }> = [];
+        // Ensure tools are available for direct execution
+        // If orchestrator didn't run or decided not to fetch tools, we fetch them here for direct fallback
+        // Use Registry to find relevant tools contextually
+        const mcpToolsForFallback = ToolRegistry.searchTools(content.trim(), activeMode);
+        const llmToolsForFallback: LLMTool[] = mcpToolsForFallback.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+        }));
 
-        while (iterationCount < maxIterations) {
-          addLog({
-            eventType: 'LLM_REQUEST',
-            sessionId: activeSessionId || "default",
-            component: "App",
-            correlationId: `iter_${iterationCount + 1}_${Date.now()}`, // Simple correlation ID for this iteration
-            details: {
-              metadata: {
-                iteration: iterationCount + 1,
-                provider: settingsForLLM.preferredProvider,
-              },
-              input: currentMessages, // LOGGING FULL CONTEXT
-            },
-          });
+        // Simple direct execution - single LLM call
+        const response = await chat(
+          llmMessages,
+          llmToolsForFallback.length > 0 ? llmToolsForFallback : undefined,
+          settingsForLLM,
+          serverInfo.length > 0 ? serverInfo : undefined
+        );
 
-          let response: Awaited<ReturnType<typeof chat>>;
-          try {
-            // Add timeout to prevent infinite hanging
-            const chatPromise = chat(
+        // Handle tool calls if any (simplified for direct path)
+        if (response.toolCalls && response.toolCalls.length > 0) {
+          // Execute tools and get final response
+          let currentMessages = [...llmMessages];
+          let finalResponse = response;
+          let iterationCount = 0;
+          const maxIterations = 10;
+
+          while (iterationCount < maxIterations && finalResponse.toolCalls?.length) {
+            currentMessages.push({
+              role: "assistant",
+              content: finalResponse.content || "",
+              tool_calls: finalResponse.toolCalls.map((tc) => ({
+                id: tc.id,
+                type: "function",
+                function: {
+                  name: tc.name,
+                  arguments: JSON.stringify(tc.arguments),
+                },
+              })),
+            } as LLMMessage);
+
+            for (const toolCall of finalResponse.toolCalls) {
+              const result = await executeToolCall(toolCall.name, toolCall.arguments);
+              const resultStr = result.error
+                ? JSON.stringify({ error: result.error })
+                : typeof result.result === 'string'
+                  ? result.result
+                  : JSON.stringify(result.result);
+
+              currentMessages.push({
+                role: "tool",
+                content: resultStr.length > 4000 ? resultStr.substring(0, 4000) + '\n...(truncated)' : resultStr,
+                tool_call_id: toolCall.id,
+                name: toolCall.name,
+              } as LLMMessage);
+            }
+
+            finalResponse = await chat(
               currentMessages,
-              llmTools.length > 0 ? llmTools : undefined,
+              llmToolsForFallback.length > 0 ? llmToolsForFallback : undefined,
               settingsForLLM,
               serverInfo.length > 0 ? serverInfo : undefined
             );
-
-            const timeoutPromise = new Promise<never>((_, reject) => {
-              setTimeout(
-                () => reject(new Error("LLM call timeout after 60 seconds")),
-                60000
-              );
-            });
-
-            response = await Promise.race([chatPromise, timeoutPromise]);
-          } catch (error) {
-            const errorMessage =
-              error instanceof Error ? error.message : "Unknown error";
-            addLog({
-              eventType: 'ERROR',
-              sessionId: activeSessionId || "default",
-              component: "App",
-              details: {
-                error: errorMessage,
-                metadata: { iteration: iterationCount + 1 }
-              }
-            });
-
-            // If it's a timeout or error, break the loop and show error
-            finalResponse = {
-              content: `Error during tool execution: ${errorMessage}. The task may be incomplete.`,
-              provider: "error",
-              model: "unknown",
-            };
-            break;
+            iterationCount++;
           }
 
-          addLog({
-            eventType: 'LLM_RESPONSE',
-            sessionId: activeSessionId || "default",
-            component: "App",
-            details: {
-              model: response.model,
-              output: response.content, // FULL RESPONSE CONTENT
-              metadata: {
-                provider: response.provider,
-                iteration: iterationCount + 1,
-                toolCallCount: response.toolCalls?.length || 0,
-              }
-            },
-          });
-
-          finalResponse = response;
-
-          // If no tool calls, we're done
-          if (!response.toolCalls || response.toolCalls.length === 0) {
-            console.log(`[MCP App] No more tool calls, completing task`, {
-              timestamp: new Date().toISOString(),
-              operation: "complete",
-              iteration: iterationCount + 1,
-              totalIterations: iterationCount + 1,
-              finalContent: response.content?.substring(0, 200),
-            });
-            break;
-          }
-
-          // Log what tool calls we're about to execute
-          console.log(
-            `[MCP App] LLM requested ${response.toolCalls.length} tool call(s)`,
-            {
-              timestamp: new Date().toISOString(),
-              operation: "toolCallsRequested",
-              iteration: iterationCount + 1,
-              toolNames: response.toolCalls.map((tc) => tc.name),
-            }
-          );
-
-          // Track all tool calls for display
-          allToolCalls.push(...response.toolCalls);
-
-          // Execute tool calls
-          const toolExecutionStartTime = Date.now();
-
-
-
-          // Add assistant message with tool calls to conversation (for OpenAI API format)
-          currentMessages.push({
+          addMessage({
             role: "assistant",
-            content: response.content || "",
-            tool_calls: response.toolCalls.map((tc) => ({
-              id: tc.id,
-              type: "function",
-              function: {
-                name: tc.name,
-                arguments: JSON.stringify(tc.arguments),
-              },
-            })),
-          } as any); // Type assertion needed for tool_calls support
-
-          // Execute all tool calls
-          const toolResults: Array<{
-            toolCallId: string;
-            name: string;
-            result: string;
-          }> = [];
-
-          for (let i = 0; i < response.toolCalls.length; i++) {
-            const toolCall = response.toolCalls[i];
-            const toolCallStartTime = Date.now();
-
-            console.log(
-              `[MCP App] Executing tool call ${i + 1}/${response.toolCalls.length
-              }`,
-              {
-                timestamp: new Date().toISOString(),
-                operation: "executeToolCall",
-                toolName: toolCall.name,
-                toolIndex: i + 1,
-                totalTools: response.toolCalls.length,
-                argsKeys: Object.keys(toolCall.arguments || {}),
-                argsSize: JSON.stringify(toolCall.arguments).length,
-              }
-            );
-
-            // Log TOOL_CALL (AI's intention before execution)
-            addLog({
-              eventType: 'TOOL_CALL',
-              sessionId: activeSessionId || "default",
-              component: "App.ToolExecutor",
-              correlationId: toolCall.id,
-              details: {
-                input: {
-                  toolName: toolCall.name,
-                  arguments: toolCall.arguments,
-                }
-              }
-            });
-
-            try {
-              const result = await executeToolCall(
-                toolCall.name,
-                toolCall.arguments
-              );
-
-              const toolCallDuration = Date.now() - toolCallStartTime;
-
-              if (result.error) {
-                addLog({
-                  eventType: 'ERROR',
-                  sessionId: activeSessionId || "default",
-                  component: "App",
-                  correlationId: toolCall.id, // Linking back to the tool call request
-                  durationMs: toolCallDuration,
-                  details: {
-                    error: result.error,
-                    input: { toolName: toolCall.name }
-                  }
-                });
-
-                toolResults.push({
-                  toolCallId: toolCall.id,
-                  name: toolCall.name,
-                  result: JSON.stringify({ error: result.error }),
-                });
-              } else {
-                const resultSize = JSON.stringify(result.result).length;
-                const resultPreview =
-                  typeof result.result === "string"
-                    ? result.result.substring(0, 100)
-                    : JSON.stringify(result.result).substring(0, 100);
-
-                addLog({
-                  eventType: 'TOOL_RESULT',
-                  sessionId: activeSessionId || "default",
-                  component: "App",
-                  correlationId: toolCall.id, // Linking back to the tool call request
-                  durationMs: toolCallDuration,
-                  details: {
-                    output: result.result, // RAW TOOL OUTPUT
-                    input: { toolName: toolCall.name, args: toolCall.arguments } // REPEATING ARGS FOR CLARITY
-                  }
-                });
-
-                const resultStr =
-                  typeof result.result === "string"
-                    ? result.result
-                    : JSON.stringify(result.result);
-                toolResults.push({
-                  toolCallId: toolCall.id,
-                  name: toolCall.name,
-                  result: resultStr,
-                });
-              }
-            } catch (error) {
-              const toolCallDuration = Date.now() - toolCallStartTime;
-              const errorMessage =
-                error instanceof Error ? error.message : "Unknown error";
-
-              console.error(`[MCP App] Tool call ${i + 1} threw exception`, {
-                timestamp: new Date().toISOString(),
-                operation: "executeToolCall",
-                toolName: toolCall.name,
-                toolIndex: i + 1,
-                error: errorMessage,
-                duration: toolCallDuration,
-              });
-
-              toolResults.push({
-                toolCallId: toolCall.id,
-                name: toolCall.name,
-                result: JSON.stringify({ error: errorMessage }),
-              });
-            }
-          }
-
-          const totalDuration = Date.now() - toolExecutionStartTime;
-          const successCount = toolResults.filter(
-            (r) => !r.result.includes('"error"')
-          ).length;
-          const failureCount = toolResults.length - successCount;
-
-          console.log(`[MCP App] Tool execution batch completed`, {
-            timestamp: new Date().toISOString(),
-            operation: "executeToolCalls",
-            iteration: iterationCount + 1,
-            totalTools: response.toolCalls.length,
-            successCount,
-            failureCount,
-            totalDuration,
-            averageDuration: totalDuration / response.toolCalls.length,
+            content: finalResponse.content,
+            provider: finalResponse.provider,
+            model: finalResponse.model,
           });
-
-          // Add tool results to conversation (for OpenAI API format)
-          for (const toolResult of toolResults) {
-            currentMessages.push({
-              role: "tool",
-              content: toolResult.result,
-              tool_call_id: toolResult.toolCallId,
-            } as any); // Type assertion needed for tool role support
-          }
-
-          console.log(
-            `[MCP App] Tool results added to conversation, continuing loop`,
-            {
-              timestamp: new Date().toISOString(),
-              operation: "continueLoop",
-              iteration: iterationCount + 1,
-              totalMessages: currentMessages.length,
-              toolResultsCount: toolResults.length,
-            }
-          );
-
-          iterationCount++;
+        } else {
+          addMessage({
+            role: "assistant",
+            content: response.content,
+            provider: response.provider,
+            model: response.model,
+          });
         }
 
-        console.log(`[MCP App] Tool execution loop completed`, {
-          timestamp: new Date().toISOString(),
-          operation: "loopComplete",
-          totalIterations: iterationCount,
-          reachedMaxIterations: iterationCount >= maxIterations,
-          hasFinalResponse: !!finalResponse,
-        });
-
-        // If we hit max iterations, warn
-        if (iterationCount >= maxIterations) {
-          console.warn(
-            `[MCP App] Reached max iterations (${maxIterations}), stopping tool execution loop`
-          );
-        }
-
-        if (!finalResponse) {
-          throw new Error("No response from LLM");
-        }
-
-        // Add assistant response
-        addMessage({
-          role: "assistant",
-          content: finalResponse.content,
-          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-        });
-
-        // Update provider status
-        setLlmStatus({
-          provider: `${finalResponse.provider} (${finalResponse.model})`,
+        setRemoteStatus({
+          provider: `${response.provider} (${response.model})`,
           available: true,
         });
+
       } catch (error) {
         console.error("LLM error:", error);
         const errorMessage =
@@ -626,17 +537,131 @@ function App() {
         speak("Sorry, I couldn't process that request.");
       } finally {
         setProcessing(false);
+        setPlanningPhase('idle');
       }
     },
-    [messages, addMessage, setProcessing, speak, settings]
+    [messages, addMessage, setProcessing, speak, settings, activeSessionId, addLog, setCurrentPlan, setPlanningPhase]
   );
+
+  // Handle plan approval - execute the plan
+  const handlePlanApproval = useCallback(async () => {
+    if (!currentPlan) return;
+
+    approvePlan();
+    setProcessing(true);
+
+    try {
+      const settingsForLLM = {
+        preferredProvider: settings.preferredProvider,
+        ollamaModel: settings.ollamaModel,
+        ollamaBaseUrl: settings.ollamaBaseUrl,
+        openaiApiKey: settings.openaiApiKey,
+        openaiBaseUrl: settings.openaiBaseUrl,
+        openaiModel: settings.openaiModel,
+        geminiApiKey: settings.geminiApiKey,
+        geminiModel: settings.geminiModel,
+        openrouterApiKey: settings.openrouterApiKey,
+        openrouterModel: settings.openrouterModel,
+      };
+
+      // Get available tools for executor - Optimized via Registry
+      const extraIntent = currentPlan.intent; // or original message
+      const mcpTools = ToolRegistry.searchTools(extraIntent, activeMode, 20); // Get top 20 relevant tools
+
+      const availableTools = mcpTools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters, // Normalized property
+      }));
+
+      // Get the user message from the last user message in the session
+      const lastUserMessage = messages.filter(m => m.role === 'user').pop();
+      const userMessage = lastUserMessage?.content || currentPlan.intent;
+
+      const result = await executePlan(
+        {
+          plan: currentPlan,
+          provider: currentPlan.recommendedProvider,
+          userMessage,
+          availableTools,
+        },
+        settingsForLLM,
+        (step, description) => {
+          setExecutionProgress({ step, description });
+        }
+      );
+
+      // Add assistant response
+      addMessage({
+        role: "assistant",
+        content: result.content || result.error || "No response generated.",
+        provider: result.provider,
+        model: result.model,
+      });
+
+      // Update LLM status
+      if (result.success) {
+        // We assume plan execution updates the remote status if it was a remote execution
+        // Or local status if it was local. For simplicity here, if provider is not 'browser', update remote.
+        if (result.provider !== 'browser') {
+          setRemoteStatus({
+            provider: `${result.provider} (${result.model})`,
+            available: true,
+          });
+        }
+      }
+
+      addLog({
+        eventType: 'LLM_RESPONSE',
+        sessionId: activeSessionId || "default",
+        component: "App.handlePlanApproval",
+        details: {
+          output: result.content,
+          metadata: {
+            provider: result.provider,
+            model: result.model,
+            success: result.success,
+            totalDuration: result.totalDuration,
+            stepsExecuted: result.executedSteps.length,
+          }
+        },
+      });
+
+    } catch (error) {
+      console.error("Plan execution error:", error);
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
+      addMessage({
+        role: "assistant",
+        content: `Sorry, I couldn't complete that. ${errorMessage}`,
+      });
+
+      speak("Sorry, I couldn't complete that request.");
+    } finally {
+      setProcessing(false);
+      setCurrentPlan(null);
+      setPlanningPhase('idle');
+      setExecutionProgress(null);
+    }
+  }, [currentPlan, approvePlan, settings, messages, addMessage, speak, activeSessionId, addLog, setProcessing, setCurrentPlan, setPlanningPhase, setExecutionProgress]);
+
+  // Handle plan rejection
+  const handlePlanRejection = useCallback(() => {
+    rejectPlan();
+    setProcessing(false);
+  }, [rejectPlan, setProcessing]);
 
   return (
     <div className="flex h-screen bg-[#0f1115] text-white font-sans overflow-hidden">
       <Sidebar currentView={currentView} onViewChange={setCurrentView} />
 
       <div className="flex-1 flex flex-col relative min-w-0">
-        <Header status={llmStatus} />
+        <Header
+          localStatus={localStatus}
+          remoteStatus={remoteStatus}
+          activeMode={activeMode}
+          onModeChange={setActiveMode}
+        />
 
         <main className="flex-1 flex flex-col overflow-hidden min-w-0">
           {currentView === "chat" && (
@@ -644,8 +669,51 @@ function App() {
               <ChatSidebar />
               <div className="flex-1 flex flex-col overflow-hidden min-w-0">
                 <ChatView />
+
+                {/* Plan Card - shows when waiting for approval */}
+                {(() => {
+                  if (planningPhase !== 'idle') {
+                    console.log('>>> [App.render] Current Planning Phase:', planningPhase);
+                  }
+                  return null;
+                })()}
+
+                {planningPhase === 'waiting_approval' && currentPlan && (
+                  <div className="p-4 border-t border-white/5">
+                    <PlanCard
+                      plan={currentPlan}
+                      onApprove={handlePlanApproval}
+                      onReject={handlePlanRejection}
+                      autoApproving={!currentPlan.requiresConfirmation}
+                    />
+                  </div>
+                )}
+
+                {/* Execution Progress - shows when executing */}
+                {planningPhase === 'executing' && executionProgress && (
+                  <div className="p-4 border-t border-white/5">
+                    <div className="bg-gradient-to-br from-[#1a1d23] to-[#252930] border border-white/10 rounded-xl p-4 flex items-center gap-3">
+                      <div className="animate-spin w-5 h-5 border-2 border-white/20 border-t-[#00a896] rounded-full" />
+                      <div>
+                        <p className="text-sm font-medium text-white">Step {executionProgress.step}</p>
+                        <p className="text-xs text-white/60">{executionProgress.description}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Analyzing indicator */}
+                {planningPhase === 'analyzing' && (
+                  <div className="p-4 border-t border-white/5">
+                    <div className="bg-gradient-to-br from-[#1a1d23] to-[#252930] border border-white/10 rounded-xl p-4 flex items-center gap-3">
+                      <div className="animate-pulse w-5 h-5 bg-[#00a896] rounded-full" />
+                      <p className="text-sm text-white/80">Understanding your request...</p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="p-4 flex-shrink-0 border-t border-white/5">
-                  <VoiceInput onSubmit={handleSubmit} disabled={isProcessing} />
+                  <VoiceInput onSubmit={handleSubmit} disabled={isProcessing || planningPhase !== 'idle'} />
                 </div>
               </div>
             </div>

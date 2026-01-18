@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
+import type { PlanningResponse } from '../types/orchestrator'
 
 export interface Message {
     id: string
@@ -7,6 +8,10 @@ export interface Message {
     content: string
     timestamp: number
     toolCalls?: ToolCall[]
+    /** Provider used (local/cloud) - for display purposes */
+    provider?: string
+    /** Model used - for display purposes */
+    model?: string
 }
 
 export interface ToolCall {
@@ -24,10 +29,18 @@ export interface ChatSession {
     updatedAt: number
 }
 
+/** Orchestration phase */
+export type PlanningPhase = 'idle' | 'analyzing' | 'waiting_approval' | 'executing'
+
 interface ChatState {
     sessions: ChatSession[]
     activeSessionId: string | null
     isProcessing: boolean
+
+    // Orchestration state
+    currentPlan: PlanningResponse | null
+    planningPhase: PlanningPhase
+    executionProgress: { step: number; description: string } | null
 
     // Session Actions
     createSession: () => string
@@ -41,7 +54,14 @@ interface ChatState {
     removeMessage: (id: string) => void
     clearMessages: () => void
     setProcessing: (processing: boolean) => void
-    
+
+    // Orchestration Actions
+    setCurrentPlan: (plan: PlanningResponse | null) => void
+    setPlanningPhase: (phase: PlanningPhase) => void
+    setExecutionProgress: (progress: { step: number; description: string } | null) => void
+    approvePlan: () => void
+    rejectPlan: () => void
+
     // Helpers
     getActiveSession: () => ChatSession | undefined
 }
@@ -52,6 +72,11 @@ export const useChatStore = create<ChatState>()(
             sessions: [],
             activeSessionId: null,
             isProcessing: false,
+
+            // Orchestration initial state
+            currentPlan: null,
+            planningPhase: 'idle',
+            executionProgress: null,
 
             getActiveSession: () => {
                 const { sessions, activeSessionId } = get()
@@ -105,7 +130,7 @@ export const useChatStore = create<ChatState>()(
                     id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                     timestamp: Date.now(),
                 }
-                
+
                 set((state) => {
                     let activeId = state.activeSessionId
                     let sessions = state.sessions
@@ -138,12 +163,12 @@ export const useChatStore = create<ChatState>()(
                     return {
                         sessions: sessions.map((s) =>
                             s.id === activeId
-                                ? { 
-                                    ...s, 
-                                    messages: [...s.messages, newMessage], 
+                                ? {
+                                    ...s,
+                                    messages: [...s.messages, newMessage],
                                     updatedAt: Date.now(),
                                     title: newTitle || s.title
-                                  }
+                                }
                                 : s
                         ),
                         activeSessionId: activeId
@@ -159,12 +184,12 @@ export const useChatStore = create<ChatState>()(
                         sessions: state.sessions.map((s) =>
                             s.id === state.activeSessionId
                                 ? {
-                                      ...s,
-                                      messages: s.messages.map((msg) =>
-                                          msg.id === id ? { ...msg, ...updates } : msg
-                                      ),
-                                      updatedAt: Date.now()
-                                  }
+                                    ...s,
+                                    messages: s.messages.map((msg) =>
+                                        msg.id === id ? { ...msg, ...updates } : msg
+                                    ),
+                                    updatedAt: Date.now()
+                                }
                                 : s
                         ),
                     }
@@ -178,10 +203,10 @@ export const useChatStore = create<ChatState>()(
                         sessions: state.sessions.map((s) =>
                             s.id === state.activeSessionId
                                 ? {
-                                      ...s,
-                                      messages: s.messages.filter((msg) => msg.id !== id),
-                                      updatedAt: Date.now()
-                                  }
+                                    ...s,
+                                    messages: s.messages.filter((msg) => msg.id !== id),
+                                    updatedAt: Date.now()
+                                }
                                 : s
                         ),
                     }
@@ -204,13 +229,39 @@ export const useChatStore = create<ChatState>()(
             setProcessing: (processing) => {
                 set({ isProcessing: processing })
             },
+
+            // Orchestration Actions
+            setCurrentPlan: (plan) => {
+                set({ currentPlan: plan })
+            },
+
+            setPlanningPhase: (phase) => {
+                set({ planningPhase: phase })
+            },
+
+            setExecutionProgress: (progress) => {
+                set({ executionProgress: progress })
+            },
+
+            approvePlan: () => {
+                set({ planningPhase: 'executing' })
+            },
+
+            rejectPlan: () => {
+                set({
+                    currentPlan: null,
+                    planningPhase: 'idle',
+                    executionProgress: null
+                })
+            },
         }),
         {
             name: 'ai-worker-chat-v2', // Versioned storage to avoid conflicts
             storage: createJSONStorage(() => localStorage),
-            partialize: (state) => ({ 
-                sessions: state.sessions, 
-                activeSessionId: state.activeSessionId 
+            partialize: (state) => ({
+                sessions: state.sessions,
+                activeSessionId: state.activeSessionId
+                // Don't persist orchestration state - it's runtime only
             }),
         }
     )

@@ -46,6 +46,7 @@ graph TB
     Preload -->|Context Bridge| Renderer
     Main -->|HTTP| Ollama
     Renderer -->|HTTP| OpenAI
+    Renderer -->|Indexing/Search| ToolRegistry[Tool Registry<br/>minisearch]
     Main -->|Stdio/SSE| MCPServers
     Main -->|Read/Write| FileSystem
     Renderer -->|Access| BrowserAPIs
@@ -156,6 +157,9 @@ graph TB
     subgraph "Libraries"
         LLMLib[llm.ts]
         WebLLMLib[webllm.ts]
+        OrchestratorLib[orchestrator.ts]
+        ExecutorLib[executor.ts]
+        RegistryLib[tool-registry.ts]
         MCPLib[mcp.ts]
         ElectronLib[electron.ts]
         Constants[constants.ts]
@@ -166,6 +170,8 @@ graph TB
     Components --> Lib
     Stores --> Lib
     Lib --> ElectronLib
+    OrchestratorLib --> RegistryLib
+    ExecutorLib --> RegistryLib
     
     subgraph "Web Worker"
         LLMWorker[llm-worker.ts<br/>Model Inference]
@@ -202,6 +208,7 @@ graph TD
     Main --> FeatureFlagsPanel[FeatureFlagsPanel<br/>Dev Mode Flags]
     
     ChatView --> MessageBubble[MessageBubble<br/>Message Display]
+    ChatView --> PlanCard[PlanCard<br/>Task Approval]
     ChatView --> VoiceInput[VoiceInput<br/>Input Component]
 
     ConnectionsPanel --> McpServerForm[McpServerForm<br/>Server Configuration]
@@ -242,23 +249,37 @@ graph LR
 ```mermaid
 sequenceDiagram
     participant User
-    participant VoiceInput
-    participant ChatStore
     participant App
-    participant LLMLib
-    participant Ollama/OpenAI
-    participant TTS
-
-    User->>VoiceInput: Speak or Type
-    VoiceInput->>ChatStore: addMessage(user)
-    ChatStore->>App: Message Added
-    App->>LLMLib: chat(messages)
-    LLMLib->>Ollama/OpenAI: HTTP Request
-    Ollama/OpenAI-->>LLMLib: Response
-    LLMLib-->>App: LLM Response
-    App->>ChatStore: addMessage(assistant)
-    App->>TTS: speak(response)
-    TTS-->>User: Audio Output
+    participant Orchestrator
+    participant WebLLM
+    participant PlanCard
+    participant Executor
+    participant LLM/MCP
+    
+    User->>App: Submit Message
+    App->>Registry: searchTools(query, mode)
+    Registry-->>App: Filtered Tools (Top 20)
+    App->>Orchestrator: analyzeRequest(query, tools)
+    Orchestrator->>WebLLM: Generate Plan (JSON)
+    WebLLM-->>Orchestrator: PlanningResponse
+    Orchestrator-->>App: Plan
+    
+    alt Needs Approval
+        App->>PlanCard: Show Plan
+        User->>PlanCard: Approve
+    else Auto-Approve
+        App->>Executor: Execute Plan
+    end
+    
+    loop Execution
+        Executor->>Registry: searchTools(intent, mode)
+        Registry-->>Executor: Relevant Tools
+        Executor->>LLM/MCP: LLM or Tool Call
+        Executor-->>App: Progress Update
+    end
+    
+    Executor-->>App: Final Result
+    App-->>User: Show Response
 ```
 
 ### MCP Connection Flow
@@ -1004,13 +1025,85 @@ ai-worker-app/
 
 ---
 
-**Last Updated:** 2024-12-29  
-**Version:** 0.1.0  
-**Architecture Version:** 1.1
+## AI Orchestration Layer
+
+### Orchestration Architecture
+
+The AI Orchestrator serves as the intelligent brain of the application, intercepting user requests to plan and execute multi-step tasks.
+
+```mermaid
+graph TB
+    subgraph "Planning Phase (Local)"
+        UserRequest[User Request]
+        Orchestrator[Orchestrator<br/>orchestrator.ts]
+        WebLLM[WebLLM Model<br/>Hermes/Llama]
+        Plan[Execution Plan]
+    end
+
+    subgraph "Execution Phase"
+        Executor[Executor<br/>executor.ts]
+        Tools[MCP Tools]
+        CloudLLM[Cloud LLM<br/>OpenAI/Anthropic]
+    end
+
+    UserRequest --> Orchestrator
+    Orchestrator -->|Analyze| WebLLM
+    WebLLM -->|JSON Plan| Orchestrator
+    Orchestrator -->|Proposed Plan| Plan
+    Plan -->|Approval| Executor
+    Executor -->|Step 1| Tools
+    Executor -->|Step 2| CloudLLM
+    Tools --> Executor
+    CloudLLM --> Executor
+```
+
+### Key Components
+
+1.  **Orchestrator (`orchestrator.ts`)**
+    *   **Role**: Analyzes user intent and generates structured execution plans.
+    *   **Privacy**: Uses on-device WebLLM by default to ensure privacy during planning.
+    *   **Complexity Analysis**: Categorizes tasks as Simple (Auto-approve) or Complex (User review).
+
+2.  **Executor (`executor.ts`)**
+    *   **Role**: Manages the state machine for plan execution.
+    *   **Capabilities**: Handles multi-turn conversations, tool execution loops, and error recovery.
+    *   **Context**: Maintains execution context including tool results and step history.
+
+3.  **PlanCard (`PlanCard.tsx`)**
+    *   **Role**: UI for user transparency and control.
+    *   **Features**: Displays plan complexity, steps, and allows cancellation or approval.
+
+4.  **Tool Registry (`tool-registry.ts`)**
+    *   **Role**: Manages scalable tool selection using App Modes and Semantic Search.
+    *   **Technology**: `minisearch` for local indexing.
+    *   **Process**: Filters tools by mode (Hard Filter) then ranks by relevance to query (Dynamic Hydration).
+
+---
+
+## Tool Selection Architecture
+
+### Scalability Strategy
+As total tool count exceeds the context window (100+ tools), AI-Worker uses a hybrid approach:
+
+1.  **App Modes**: Users select a high-level workspace (General, Developer, Researcher, Finance). Each mode has a pre-defined set of tool patterns (e.g., `git_*`, `fs_*`).
+2.  **Dynamic Hydration (RAG)**: The Registry performs a real-time semantic search within the mode's tools to select the top ~20 most relevant tools for the current prompt.
+
+```mermaid
+graph LR
+    Query[User Query] --> Mode[Active App Mode]
+    Mode --> Filter[Registry Filter]
+    Filter --> Search[Minisearch Rank]
+    Search --> Injection[Top 20 Tool Schemas]
+    Injection --> LLM[Local/Cloud LLM]
+```
+
+---
+
+**Last Updated:** 2026-01-18  
+**Architecture Version:** 1.3
 
 **Recent Updates:**
 
-- Added default MCP server configuration (Playwright, Sequential Thinking)
-- Implemented automatic server initialization on first run
-- Added form pre-filling with Sequential Thinking defaults
-- Enhanced server management with automatic default restoration
+- **Scalable Tool Selection**: Implemented Tool Registry with App Modes and Dynamic Hydration (RAG) using `minisearch`.
+- **AI Orchestrator**: Integrated local planning layer with intelligent tool filtering.
+- **Header updates**: Added Mode Switcher for multi-workspace tool management.

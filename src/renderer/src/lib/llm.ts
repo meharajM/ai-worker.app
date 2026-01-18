@@ -8,13 +8,14 @@ import {
   chatWithWebLLM,
   subscribeToWebLLMStatus,
   WEBLLM_MODELS,
-  type WebLLMStatus,
-  type WebLLMModelId,
   checkDownloadedWebLLMModels,
   deleteWebLLMModel,
   downloadWebLLMModelOnly,
   getWebLLMDownloadStatus,
-  checkWebLLMModelCompatibility
+  checkWebLLMModelCompatibility,
+  type WebLLMStatus,
+  type WebLLMModelId,
+  type WebLLMMessage,
 } from "./webllm";
 
 export {
@@ -27,6 +28,7 @@ export {
   getWebLLMDownloadStatus,
   checkWebLLMModelCompatibility,
   type WebLLMStatus,
+  type WebLLMMessage,
 };
 
 export interface LLMMessage {
@@ -575,6 +577,7 @@ export async function getAvailableProviders(
     ...webLLM,
     error: webLLM.error || undefined,
     available: webLLM.isSupported,
+    isWebGPUSupported: webLLM.isSupported,
   };
 
   return {
@@ -657,12 +660,26 @@ async function callBrowserLLM(
 
     // Don't pass tools to WebLLM - the system prompt already contains tool definitions
     // Models will output JSON tool calls in their response content
-    const response = await chatWithWebLLM(
-      messages
-        .filter(m => m.role !== 'tool')
-        .map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content }))
-      // No tools passed - avoids "model doesn't support tools" error
-    );
+    const webllmMessages: WebLLMMessage[] = [];
+
+    // WebLLM/MLC requires alternating roles: system?, user, assistant, user, assistant...
+    // We map 'tool' to 'user' and combine consecutive roles to satisfy this.
+    for (const m of messages) {
+      const role = m.role === 'tool' ? 'user' : (m.role as 'user' | 'assistant' | 'system');
+      const content = m.role === 'tool'
+        ? `RESULT of tool call [${(m as any).name || m.tool_call_id || 'unknown'}]:\n${m.content}`
+        : (m.content || (m.role === 'assistant' ? '(thinking...)' : ''));
+
+      const lastMsg = webllmMessages[webllmMessages.length - 1];
+      if (lastMsg && lastMsg.role === role) {
+        // Combine consecutive messages of the same role
+        lastMsg.content += `\n\n${content}`;
+      } else {
+        webllmMessages.push({ role, content });
+      }
+    }
+
+    const response = await chatWithWebLLM(webllmMessages);
 
     // Parse tool calls from JSON in response content (same as existing JSON fallback)
     let toolCalls = response.toolCalls;
@@ -882,26 +899,29 @@ function buildSystemPrompt(
 - If you need to use tools, return ONLY the JSON object, nothing else
 - If no tools are needed, respond with normal text
 - The JSON must be valid and parseable
+- **IMPORTANT: Do NOT provide 'null' for any parameter.** If a parameter is optional and you don't have a value, omit it entirely from the JSON.
 - Use the exact tool names from the "Available Tools" section above`
     : "";
 
-  // Build tools description - compact format with name and description
+  // Build tools description - detailed format with parameters and types
   const toolsDescription =
     tools
       ?.map((tool, idx) => {
-        // Extract key parameters for context (if available)
-        const params = tool.parameters as
-          | { properties?: Record<string, unknown>; required?: string[] }
-          | undefined;
+        const params = tool.parameters as any;
         const properties = params?.properties || {};
-        const paramNames = Object.keys(properties).slice(0, 3).join(", ");
-        const paramHint = paramNames
-          ? ` (params: ${paramNames}${Object.keys(properties).length > 3 ? "..." : ""
-          })`
-          : "";
+        const required = params?.required || [];
 
-        return `${idx + 1}. **${tool.name}**${paramHint}\n   ${tool.description
-          }`;
+        const paramDetails = Object.entries(properties).map(([name, schema]: [string, any]) => {
+          const isRequired = required.includes(name);
+          const type = schema.type || 'any';
+          const enumValues = schema.enum ? ` [${schema.enum.join('|')}]` : '';
+          const desc = schema.description ? ` - ${schema.description}` : '';
+          return `${name} (${type}${isRequired ? ', required' : ''})${enumValues}${desc}`;
+        }).join('\n      - ');
+
+        const paramSection = paramDetails ? `\n   Parameters:\n      - ${paramDetails}` : "";
+
+        return `${idx + 1}. **${tool.name}**\n   ${tool.description}${paramSection}`;
       })
       .join("\n\n") || "";
 
@@ -965,7 +985,15 @@ DO NOT stop after just navigating - complete the entire workflow!`;
 
   return `You are a helpful AI assistant with access to ${toolCount} tool${toolCount !== 1 ? "s" : ""
     } from ${serverCount} connected server${serverCount !== 1 ? "s" : ""
-    }. When users ask you to perform actions, you MUST use the appropriate tools instead of providing manual instructions.${jsonFormatNote}
+    }. 
+
+**CRITICAL: REAL-TIME DATA & TOOLS**
+You MUST use tools for any information that is not permanent general knowledge. This includes:
+- Current time/date (use \`get_current_time\`)
+- Weather (use \`get_weather\`)
+- File system access or browser navigation.
+
+Do NOT guess or use your internal training data for these. If a tool exists to get the current state, you MUST use it. Be concise for voice output.${jsonFormatNote}
 
 # Available Tools
 ${toolsDescription}${serverContext}${browserCapabilityNote}
@@ -1016,17 +1044,17 @@ export async function chat(
   const preferredProvider = settings?.preferredProvider;
 
   if (preferredProvider === "auto" || !preferredProvider) {
-    // Auto-select: try browser first (if enabled), then ollama, then openai
-    if (providers.browser.available) {
-      provider = "browser";
-    } else if (providers.ollama.available) {
-      provider = "ollama";
+    // Auto-select: prioritize cloud models for power, then local for cost/speed
+    if (providers.gemini.available) {
+      provider = "gemini";
     } else if (providers.openai.available) {
       provider = "openai";
-    } else if (providers.gemini.available) {
-      provider = "gemini";
     } else if (providers.openrouter.available) {
       provider = "openrouter";
+    } else if (providers.ollama.available) {
+      provider = "ollama";
+    } else if (providers.browser.available) {
+      provider = "browser";
     }
   } else if (preferredProvider === "browser" && providers.browser.available) {
     provider = "browser";

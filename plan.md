@@ -367,7 +367,47 @@ ai-worker-app/
 
 ---
 
-### 🚀 Phase 14: App Launch Preparation [IN PROGRESS]
+### ✅ Phase 14: AI Orchestrator [COMPLETED]
+
+**Goal:** Transform app into a privacy-first agent capable of planning and executing complex tasks using local AI.
+
+**Implementation:**
+- [x] Create Orchestrator module (WebLLM-based planning)
+- [x] Create Executor module (Multi-step tool execution)
+- [x] Implement PlanCard UI for user approval
+- [x] Refactor App.tsx to route messages through Orchestrator
+- [x] Add auto-approval for simple tasks
+- [x] **Fast-Path UX**: Skip PlanCard entirely for simple/safe tasks (instant response)
+
+**Validation:** ✅
+- [x] Simple tasks -> Auto-execute immediately (no PlanCard shown)
+- [x] Complex tasks -> PlanCard -> User Approval -> Execute
+- [x] Local planning via WebLLM
+
+---
+
+---
+
+### ✅ Phase 15: Scalable Tool Selection (App Modes + RAG) [COMPLETED]
+
+**Goal:** Handle 100+ tools without context window overflow by implementing App Modes and Dynamic Tool Hydration.
+
+**Implementation:**
+- [x] Create `ToolRegistryService` with `minisearch` indexing
+- [x] Implement **App Modes** (General, Developer, Finance, Researcher)
+- [x] Index tools on app startup (non-blocking)
+- [x] Implement **Dynamic Tool Hydration** (Semantic search for relevant tools)
+- [x] Add **Mode Switcher** dropdown in the Header
+- [x] Update Orchestrator to use filtered toolsets based on user intent and mode
+
+**Validation:** ✅
+- [x] `npm run typecheck` passes
+- [x] Header shows mode selector; switching works
+- [x] Complex queries fetch relevant tools from the Registry
+
+---
+
+### 🚀 Phase 16: App Launch Preparation [IN PROGRESS]
 
 **Goal:** Finalize distribution, assets, and production stability.
 
@@ -384,7 +424,7 @@ ai-worker-app/
 
 ---
 
-### 🏁 Phase 15: Distribution & V1 Launch
+### 🏁 Phase 17: Distribution & V1 Launch
 
 **Goal:** Public release and update mechanism.
 
@@ -441,4 +481,4 @@ ai-worker-app/
 
 ---
 
-**Current Status:** Phases 1-13 complete. Full Gemini and OpenRouter support validated. Filesystem logging and Technical Inspector enriched with model/provider tracking. Launch preparation (Phase 14) is now the primary focus.
+**Current Status:** Phases 1-15 complete. Scalable Tool Selection (App Modes + RAG) implemented. Launch preparation (Phase 16) is next.

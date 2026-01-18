@@ -55,6 +55,16 @@ export const WEBLLM_MODELS = [
         supportsTools: false,
     },
     {
+        id: 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC',
+        name: 'Qwen 2.5 0.5B (Ultra Fast)',
+        description: 'Blazing fast orchestration, tiny footprint',
+        size: '~500MB',
+        vram: '~1GB',
+        requiredRamGB: 2,
+        requiredVramGB: 1,
+        supportsTools: false,
+    },
+    {
         id: 'Hermes-3-Llama-3.1-8B-q4f16_1-MLC',
         name: 'Hermes 3 8B (Advanced)',
         description: 'Best quality, native tool calling',
@@ -301,13 +311,18 @@ class WebLLMManager {
         }
     }
 
-    public async loadModel(modelId: string = WEBLLM_MODELS[0].id): Promise<void> {
+    public async loadModel(modelId: string = 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC'): Promise<void> {
         if (!this.status.isSupported) {
             throw new Error(this.status.error || 'WebGPU not supported');
         }
 
         if (this.currentModelId === modelId && this.status.isLoaded) {
             console.log('[WebLLM] Model already loaded:', modelId);
+            return;
+        }
+
+        if (this.status.isLoading) {
+            console.log('[WebLLM] Model is already loading, skipping:', modelId);
             return;
         }
 
