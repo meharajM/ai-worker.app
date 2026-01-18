@@ -100,7 +100,7 @@ function sanitizeArgs(args: unknown): unknown {
 export function registerMcpHandlers(): void {
     ipcMain.handle('mcp:connect', async (_event, serverConfig) => {
         const startTime = Date.now()
-        const { id, type, command, args, url } = serverConfig
+        const { id, type, command, args, url, env } = serverConfig
 
         logMcpOperation('info', 'MCP connection requested', {
             operation: 'connect',
@@ -109,6 +109,7 @@ export function registerMcpHandlers(): void {
             command,
             args: args?.join(' '),
             url: type === 'sse' ? url : undefined,
+            hasEnv: !!env,
         })
 
         try {
@@ -125,7 +126,7 @@ export function registerMcpHandlers(): void {
 
             if (type === 'stdio') {
                 let finalCommand = command
-                const finalEnv = { ...process.env } as Record<string, string>
+                const finalEnv = { ...process.env, ...(env || {}) } as Record<string, string>
 
                 // Fallback to internal Node.js if 'node' is requested
                 if (command === 'node' || command === 'node.exe') {

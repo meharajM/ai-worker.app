@@ -1,11 +1,16 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
+import { useSettingsStore } from './settingsStore'
+import { useMcpStore } from './mcpStore'
 import { FEATURE_FLAGS, RATE_LIMITS } from '../lib/constants'
 import { 
     signInWithGoogle as firebaseSignIn, 
     signOutFromFirebase, 
     onAuthChange, 
-    initializeFirebase 
+    initializeFirebase,
+    signInWithEmail as firebaseSignInEmail,
+    signUpWithEmail as firebaseSignUpEmail,
+    updateUserProfile
 } from '../lib/firebase'
 
 export interface User {
@@ -33,6 +38,8 @@ interface AuthState {
     setLoading: (loading: boolean) => void
     setError: (error: string | null) => void
     signInWithGoogle: () => Promise<void>
+    signInWithEmail: (email: string, pass: string) => Promise<void>
+    signUpWithEmail: (email: string, pass: string, name: string) => Promise<void>
     signOut: () => Promise<void>
     initializeAuthListener: () => Promise<() => void>
 
@@ -92,6 +99,61 @@ export const useAuthStore = create<AuthState>()(
                 }
             },
 
+            signInWithEmail: async (email, password) => {
+                if (!FEATURE_FLAGS.AUTH_ENABLED) return
+                set({ loading: true, error: null })
+                try {
+                    const firebaseUser = await firebaseSignInEmail(email, password)
+                     set({
+                        user: {
+                            uid: firebaseUser.uid,
+                            email: firebaseUser.email,
+                            displayName: firebaseUser.displayName,
+                            photoURL: firebaseUser.photoURL,
+                        },
+                        loading: false,
+                    })
+                } catch (error) {
+                    console.error('Email sign in failed:', error)
+                    set({
+                        error: error instanceof Error ? error.message : 'Sign in failed',
+                        loading: false
+                    })
+                    throw error // Re-throw for UI to handle
+                }
+            },
+
+            signUpWithEmail: async (email, password, name) => {
+                if (!FEATURE_FLAGS.AUTH_ENABLED) return
+                set({ loading: true, error: null })
+                try {
+                    const firebaseUser = await firebaseSignUpEmail(email, password)
+                    
+                    // Update profile with name
+                    if (name) {
+                        await updateUserProfile(firebaseUser, { displayName: name })
+                        // User profile updated on server, proceed to update store
+                    }
+
+                    set({
+                        user: {
+                            uid: firebaseUser.uid,
+                            email: firebaseUser.email,
+                            displayName: name || firebaseUser.displayName,
+                            photoURL: firebaseUser.photoURL,
+                        },
+                        loading: false,
+                    })
+                } catch (error) {
+                     console.error('Email sign up failed:', error)
+                    set({
+                        error: error instanceof Error ? error.message : 'Sign up failed',
+                        loading: false
+                    })
+                    throw error
+                }
+            },
+
             signOut: async () => {
                 set({ loading: true })
 
@@ -119,7 +181,7 @@ export const useAuthStore = create<AuthState>()(
                     console.log('[Auth] Firebase initialized, setting up listener...')
                     
                     // Set up auth state listener
-                    const unsubscribe = await onAuthChange((firebaseUser) => {
+                    const unsubscribe = await onAuthChange(async (firebaseUser) => {
                         console.log('[Auth] Auth state changed:', firebaseUser ? 'User Logged In' : 'User Null', firebaseUser?.uid)
                         
                         if (firebaseUser) {
@@ -130,12 +192,26 @@ export const useAuthStore = create<AuthState>()(
                                 photoURL: firebaseUser.photoURL,
                             }
                             console.log('[Auth] Updating store with user:', userData)
+                            
+                            // Load scoped secrets/servers
+                            try {
+                                await useSettingsStore.getState().loadUserSecrets(firebaseUser.uid)
+                                await useMcpStore.getState().loadUserServers(firebaseUser.uid)
+                            } catch (err) {
+                                console.error('[Auth] Failed to load user data:', err)
+                            }
+
                             set({
                                 user: userData,
                                 loading: false,
                             })
                         } else {
                             console.log('[Auth] Clearing user from store')
+                            
+                            // Clear scoped secrets/servers
+                            useSettingsStore.getState().clearUserSecrets()
+                            useMcpStore.getState().clearUserServers().catch(console.error)
+
                             set({ user: null, loading: false })
                         }
                     })

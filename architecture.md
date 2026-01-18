@@ -649,16 +649,24 @@ graph LR
 
     DefaultServers --> MCPLib
 
-    subgraph "API Keys"
-        SettingsStore2[settingsStore]
-        ElectronStore2[electron-store<br/>Secure Storage]
+    subgraph "API Keys & Secrets"
+        SettingsStore2[settingsStore<br/>Memory: Cleared on Logout]
+        ElectronStore2[electron-store<br/>Disk: User-Scoped]
     end
 
     ChatStore --> ChatLocalStorage
     SettingsStore --> SettingsLocalStorage
     MCPLib --> MCPStorage
-    SettingsStore2 --> ElectronStore2
+    SettingsStore2 -->|"Read/Write (user_{uid}_key)"| ElectronStore2
 ```
+
+### User-Scoped Persistence Strategy
+
+To balance security and convenience, sensitive data like API keys follows a strict scoping strategy:
+
+1.  **Disk Storage**: Secrets are stored in `electron-store`, prefixed with the User ID (e.g., `user_123_openai_api_key`). This allows multiple users to share a device without leaking secrets.
+2.  **Memory State**: When a user logs in, their scoped secrets are loaded into the store state.
+3.  **Logout**: When a user logs out, the store state is **cleared** from memory, preventing unauthorized access. The encrypted file on disk remains for their return.
 
 ---
 

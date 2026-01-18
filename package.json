@@ -47,10 +47,13 @@
         "electron-store": "^11.0.2",
         "firebase": "^12.8.0",
         "fix-path": "^5.0.0",
+        "formik": "^2.4.9",
+        "framer-motion": "^12.26.2",
         "lucide-react": "^0.468.0",
         "playwright": "^1.57.0",
         "react": "^18.2.0",
         "react-dom": "^18.2.0",
+        "yup": "^1.7.1",
         "zustand": "^5.0.9"
     },
     "devDependencies": {

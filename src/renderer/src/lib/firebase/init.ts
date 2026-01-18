@@ -1,21 +1,13 @@
-// Firebase Configuration with App Check
-// API keys are safe to bundle - security is handled via Firebase Security Rules
-
-import { FEATURE_FLAGS } from './constants'
+// Firebase Initialization & Configuration
+import { FEATURE_FLAGS } from '../constants'
 import type { FirebaseApp } from 'firebase/app'
 import type { Auth, User, UserCredential } from 'firebase/auth'
 import type { AppCheck } from 'firebase/app-check'
+import type { Firestore } from 'firebase/firestore'
 
-export type { User, UserCredential, Auth, FirebaseApp, AppCheck }
+export type { User, UserCredential, Auth, FirebaseApp, AppCheck, Firestore }
 
-/**
- * Firebase Config from environment variables
- * 
- * Note: These public keys are safe to expose in the tailored Electron environment
- * because actual data security is enforced by:
- * 1. Firebase Security Rules (server-side)
- * 2. App Check (validates request legitimacy)
- */
+// Config
 export const firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'placeholder-api-key',
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'placeholder.firebaseapp.com',
@@ -25,10 +17,8 @@ export const firebaseConfig = {
     appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:000000000000:web:placeholder',
 }
 
-// App Check reCAPTCHA site key (optional, for enhanced security)
 const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || ''
 
-// Check if Firebase is properly configured
 export const isFirebaseConfigured = (): boolean => {
     return (
         FEATURE_FLAGS.AUTH_ENABLED &&
@@ -37,13 +27,14 @@ export const isFirebaseConfigured = (): boolean => {
     )
 }
 
-// Singleton instances
+// Singletons
 let firebaseApp: FirebaseApp | null = null
 let firebaseAuth: Auth | null = null
+let firebaseFirestore: Firestore | null = null
 let appCheck: AppCheck | null = null
 
-// Firebase module references (lazy loaded)
-let firebaseModules: {
+// Module references (exported for other modules to use)
+export let firebaseModules: {
     initializeApp: typeof import('firebase/app').initializeApp
     getAuth: typeof import('firebase/auth').getAuth
     GoogleAuthProvider: typeof import('firebase/auth').GoogleAuthProvider
@@ -55,15 +46,19 @@ let firebaseModules: {
     browserPopupRedirectResolver: typeof import('firebase/auth').browserPopupRedirectResolver
     initializeAppCheck?: typeof import('firebase/app-check').initializeAppCheck
     ReCaptchaEnterpriseProvider?: typeof import('firebase/app-check').ReCaptchaEnterpriseProvider
+    createUserWithEmailAndPassword: typeof import('firebase/auth').createUserWithEmailAndPassword
+    signInWithEmailAndPassword: typeof import('firebase/auth').signInWithEmailAndPassword
+    updateProfile: typeof import('firebase/auth').updateProfile
+    getFirestore: typeof import('firebase/firestore').getFirestore
+    doc: typeof import('firebase/firestore').doc
+    setDoc: typeof import('firebase/firestore').setDoc
+    getDoc: typeof import('firebase/firestore').getDoc
 } | null = null
 
-/**
- * Initialize Firebase with App Check support
- * Uses lazy loading to avoid bundling Firebase when auth is disabled
- */
 export async function initializeFirebase(): Promise<{
     app: FirebaseApp
     auth: Auth
+    firestore: Firestore
     appCheck: AppCheck | null
 } | null> {
     if (!FEATURE_FLAGS.AUTH_ENABLED) {
@@ -76,15 +71,15 @@ export async function initializeFirebase(): Promise<{
         return null
     }
 
-    if (firebaseApp && firebaseAuth) {
-        return { app: firebaseApp, auth: firebaseAuth, appCheck }
+    if (firebaseApp && firebaseAuth && firebaseFirestore) {
+        return { app: firebaseApp, auth: firebaseAuth, firestore: firebaseFirestore, appCheck }
     }
 
     try {
-        // Dynamic import to avoid bundling Firebase when not needed
-        const [firebaseAppModule, firebaseAuthModule] = await Promise.all([
+        const [firebaseAppModule, firebaseAuthModule, firebaseFirestoreModule] = await Promise.all([
             import('firebase/app'),
             import('firebase/auth'),
+            import('firebase/firestore'),
         ])
 
         firebaseModules = {
@@ -97,15 +92,20 @@ export async function initializeFirebase(): Promise<{
             signOut: firebaseAuthModule.signOut,
             onAuthStateChanged: firebaseAuthModule.onAuthStateChanged,
             browserPopupRedirectResolver: firebaseAuthModule.browserPopupRedirectResolver,
+            createUserWithEmailAndPassword: firebaseAuthModule.createUserWithEmailAndPassword,
+            signInWithEmailAndPassword: firebaseAuthModule.signInWithEmailAndPassword,
+            updateProfile: firebaseAuthModule.updateProfile,
+            getFirestore: firebaseFirestoreModule.getFirestore,
+            doc: firebaseFirestoreModule.doc,
+            setDoc: firebaseFirestoreModule.setDoc,
+            getDoc: firebaseFirestoreModule.getDoc,
         }
 
-        // Initialize Firebase App
         firebaseApp = firebaseModules.initializeApp(firebaseConfig)
         firebaseAuth = firebaseModules.getAuth(firebaseApp)
+        firebaseFirestore = firebaseModules.getFirestore(firebaseApp)
 
-        // Set persistence to local (critical for Electron)
         try {
-            // Using indexedDBLocalPersistence is often more robust for Electron
             const { indexedDBLocalPersistence, setPersistence } = await import('firebase/auth')
             await setPersistence(firebaseAuth, indexedDBLocalPersistence)
             console.log('Firebase auth persistence set to indexedDBLocalPersistence')
@@ -113,7 +113,6 @@ export async function initializeFirebase(): Promise<{
             console.error('Failed to set auth persistence:', persistenceError)
         }
 
-        // Initialize App Check if reCAPTCHA key is configured
         if (RECAPTCHA_SITE_KEY && typeof window !== 'undefined') {
             try {
                 const appCheckModule = await import('firebase/app-check')
@@ -131,75 +130,9 @@ export async function initializeFirebase(): Promise<{
         }
 
         console.log('Firebase initialized successfully')
-        return { app: firebaseApp, auth: firebaseAuth, appCheck }
+        return { app: firebaseApp, auth: firebaseAuth, firestore: firebaseFirestore, appCheck }
     } catch (error) {
         console.error('Failed to initialize Firebase:', error)
         return null
     }
-}
-
-/**
- * Sign in with Google
- * Uses popup with explicit resolver for better Electron compatibility
- */
-export async function signInWithGoogle(): Promise<User> {
-    const firebase = await initializeFirebase()
-    if (!firebase || !firebaseModules) {
-        throw new Error('Firebase is not configured')
-    }
-
-    const provider = new firebaseModules.GoogleAuthProvider()
-    // Add scopes for profile info
-    provider.addScope('profile')
-    provider.addScope('email')
-    
-    // Set custom parameters for better popup handling
-    provider.setCustomParameters({
-        prompt: 'select_account'
-    })
-
-    try {
-        // Try popup with explicit resolver
-        const result: UserCredential = await firebaseModules.signInWithPopup(
-            firebase.auth, 
-            provider,
-            firebaseModules.browserPopupRedirectResolver
-        )
-        return result.user
-    } catch (popupError) {
-        console.error('Popup sign-in failed:', popupError)
-        throw popupError
-    }
-}
-
-/**
- * Sign out the current user
- */
-export async function signOutFromFirebase(): Promise<void> {
-    const firebase = await initializeFirebase()
-    if (!firebase || !firebaseModules) return
-
-    await firebaseModules.signOut(firebase.auth)
-}
-
-/**
- * Subscribe to auth state changes
- * Returns an unsubscribe function
- */
-export async function onAuthChange(callback: (user: User | null) => void): Promise<() => void> {
-    const firebase = await initializeFirebase()
-    if (!firebase || !firebaseModules) {
-        return () => {}
-    }
-
-    return firebaseModules.onAuthStateChanged(firebase.auth, callback)
-}
-
-/**
- * Get the current authenticated user (if any)
- */
-export async function getCurrentUser(): Promise<User | null> {
-    const firebase = await initializeFirebase()
-    if (!firebase) return null
-    return firebase.auth.currentUser
 }
