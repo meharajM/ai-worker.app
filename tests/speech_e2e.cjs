@@ -91,14 +91,14 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         // Try titled button first
         try {
-            await micButtonTitled.first().waitFor({ state: 'visible', timeout: 10000 });
-            micLocator = micButtonTitled.first();
+            await micButtonTitled.waitFor({ state: 'visible', timeout: 10000 });
+            micLocator = micButtonTitled;
             console.log('✅ Microphone button found (with title)');
         } catch (e) {
             // Try icon button if title not found
             const iconCount = await micButtonIcon.count();
             if (iconCount > 0) {
-                micLocator = micButtonIcon.first();
+                micLocator = micButtonIcon;
                 console.log('✅ Microphone button found (via icon)');
             }
         }
@@ -148,12 +148,11 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                 console.log(`ℹ️ "Listening..." placeholder not found, found: "${textareaValue}"`);
             }
 
-            // Cancel voice mode (Stop Listening)
             const stopButton = window.locator('button[title="Stop Recording"]');
             if (await stopButton.count() > 0) {
                 console.log('✅ Stop button present');
                 try {
-                    await stopButton.first().click();
+                    await stopButton.click();
                     console.log('✅ Stopped listening');
                 } catch (e) {
                     console.log('ℹ️ Failed to click stop button');
@@ -162,7 +161,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                 console.log('ℹ️ No Stop button found (trying fallback title "Close")');
                 const fallbackStop = window.locator('button[title="Close"]');
                 if (await fallbackStop.count() > 0) {
-                    await fallbackStop.first().click();
+                    await fallbackStop.click();
                 }
             }
 
@@ -191,7 +190,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         // We simulate this flow: Type "Hello" -> Toggle Mic (Start/Stop) -> Verify "Hello" is still there -> Type " World" -> Toggle Mic -> Verify "Hello World"
 
         // Find the input (whichever exists)
-        const activeInput = isTextarea ? textarea : input.first();
+        const activeInput = isTextarea ? textarea : input;
 
         // Clear and Type
         await activeInput.fill('Hello');
@@ -211,7 +210,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             }
 
             // Stop Listening
-            await window.locator('button[title="Stop Recording"]').first().click();
+            await window.locator('button[title="Stop Recording"]').click();
             await window.waitForTimeout(1000);
 
             // Check if text persists after stop
@@ -239,7 +238,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             }
 
             // Cleanup
-            await window.locator('button[title="Stop Recording"]').first().click();
+            await window.locator('button[title="Stop Recording"]').click();
         } else {
             console.log('ℹ️ Skipping persistence tests (mic disabled)');
         }
@@ -284,7 +283,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await window.waitForTimeout(1000);
 
         // 6. Verify Model is used in Speech Hook
-        const finalMicButton = window.locator('button[title="Start Voice Mode"]').first();
+        const finalMicButton = window.locator('button[title="Start Voice Mode"]');
         await finalMicButton.click();
         await window.waitForTimeout(2000);
 
@@ -312,7 +311,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         const finishStop = window.locator('button[title="Stop Recording"]');
         if (await finishStop.count() > 0) {
-            await finishStop.first().click();
+            await finishStop.click();
         }
 
         await window.screenshot({ path: path.join(SCREENSHOT_DIR, 'speech-test-manual-selection.png') });

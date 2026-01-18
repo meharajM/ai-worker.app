@@ -173,12 +173,14 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         // Wait for card to appear
         console.log('  - Waiting for MockServer card...');
-        const mockServerCard = window.locator('div:has-text("MockServer")').first();
+        // Match the card by its heading text precisely and use .first() to handle duplicated cards from previous runs
+        const mockServerCard = window.locator('div', { has: window.locator('h3', { hasText: /^MockServer$/ }) }).first();
         await mockServerCard.waitFor({ state: 'visible', timeout: 10000 });
 
         // Click Connect on the card
         console.log('  - Clicking Connect on card...');
-        await mockServerCard.locator('button[title="Connect"]').click();
+        // Use .first() to handle cases where multiple buttons might be found in a duplicated card
+        await mockServerCard.getByRole('button', { name: 'Connect' }).first().click();
 
         // Verify Connection and Tools
         // Use "Active" which is the status text for a connected server, 
@@ -190,7 +192,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         console.log('Server Card Text:', await mockServerCard.textContent());
 
         // Expand to see tools
-        await mockServerCard.locator('button').first().click(); // Click chevron/expand
+        await mockServerCard.locator('button').filter({ has: window.locator('svg.lucide-chevron-right, svg.lucide-chevron-down') }).first().click();
 
         // Wait for tool count to update. It says "Available Tools (1)"
         try {

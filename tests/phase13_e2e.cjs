@@ -115,29 +115,28 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         // --- 2. CONFIGURE GEMINI ---
         console.log('\n--- Testing Gemini Configuration ---');
         await window.click('button[title="Settings"]');
-        await window.waitForSelector('text=LLM Provider');
+        await window.click('button:has-text("LLM Provider")');
+        await window.waitForSelector('text=Preferred Provider');
 
         // Click Gemini provider button to show config
-        const preferredProviderSection = window.locator('div:has-text("Preferred Provider")');
-        await preferredProviderSection.locator('button:has-text("Gemini")').click();
+        await window.getByRole('button', { name: 'Select Gemini provider', exact: true }).first().click();
 
         await window.fill('input[placeholder="Enter Gemini API Key..."]', 'mock-gemini-key');
 
-        const geminiSection = window.locator('div:has-text("Google Gemini")');
-        await geminiSection.locator('button:has-text("Test Connection")').click();
+        const geminiSection = window.locator('div', { has: window.locator('h4', { hasText: 'Google Gemini' }) }).first();
+        await geminiSection.getByRole('button', { name: /Test Connection/ }).click();
 
         await window.waitForSelector('text=Connection successful!', { timeout: 15000 });
         console.log('✅ Gemini Connection Verified');
 
         // --- 3. CONFIGURE OPENROUTER ---
         console.log('\n--- Testing OpenRouter Configuration ---');
-        // Click OpenRouter provider button to show config
-        await preferredProviderSection.locator('button:has-text("OpenRouter")').click();
+        await window.getByRole('button', { name: 'Select OpenRouter provider', exact: true }).first().click();
 
         await window.fill('input[placeholder="Enter OpenRouter API Key..."]', 'mock-openrouter-key');
 
-        const orSection = window.locator('div:has-text("OpenRouter")');
-        await orSection.locator('button:has-text("Test Connection")').click();
+        const orSection = window.locator('div', { has: window.locator('h4', { hasText: 'OpenRouter' }) }).first();
+        await orSection.getByRole('button', { name: /Test Connection/ }).click();
 
         await window.waitForSelector('text=Connection successful!', { timeout: 15000 });
         console.log('✅ OpenRouter Connection Verified');
@@ -145,7 +144,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         // --- 4. SWITCH PROVIDER & CHAT ---
         console.log('\n--- Testing Chat with Gemini ---');
         // Select Gemini as preferred provider
-        await preferredProviderSection.locator('button:has-text("Gemini")').click();
+        await window.getByRole('button', { name: 'Select Gemini provider', exact: true }).first().click();
         await window.waitForTimeout(500); // Small wait for state to settle
 
         await window.click('button[title="Chat"]');
