@@ -306,7 +306,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         }
 
         // Cleanup: Stop Recording
-        if (await window.locator('button[title="Stop Recording"]').count() > 300) { // Wait loop or just check once?
+        if (await window.locator('button[title="Stop Recording"]').count() > 0) {
             // Actually just click if it exists
         }
 

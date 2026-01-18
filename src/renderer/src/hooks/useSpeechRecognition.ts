@@ -81,6 +81,88 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
         }
     }, [useNativeSpeech, settings.voskModel])
 
+    // Check Web Speech API support in browser
+    useEffect(() => {
+        if (!useNativeSpeech) {
+            const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+            if (SpeechRecognitionAPI) {
+                setIsSupported(true)
+                console.log('[Speech] Web Speech API supported')
+            } else {
+                setIsSupported(false)
+                console.warn('[Speech] Web Speech API not supported in this browser')
+            }
+        } else {
+            // Native speech is always "supported" (we download model if needed)
+            setIsSupported(true)
+        }
+    }, [useNativeSpeech])
+
+    // Initialize Web Speech API recognition instance
+    useEffect(() => {
+        if (useNativeSpeech) return // Skip for Electron
+
+        const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        if (!SpeechRecognitionAPI) return
+
+        const recognition = new SpeechRecognitionAPI()
+        recognition.continuous = true
+        recognition.interimResults = true
+        recognition.lang = VOICE_CONFIG.SPEECH_LANG // 'en-US'
+
+        recognition.onresult = (event: any) => {
+            let finalTranscript = ''
+            let interimResult = ''
+
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const result = event.results[i]
+                if (result.isFinal) {
+                    finalTranscript += result[0].transcript
+                } else {
+                    interimResult += result[0].transcript
+                }
+            }
+
+            if (finalTranscript) {
+                setTranscript((prev) => prev + finalTranscript + ' ')
+            }
+            setInterimTranscript(interimResult)
+        }
+
+        recognition.onerror = (event: any) => {
+            console.error('[Speech] Web Speech API error:', event.error)
+            if (event.error !== 'no-speech' && event.error !== 'aborted') {
+                setError(`Speech recognition error: ${event.error}`)
+            }
+            setIsListening(false)
+        }
+
+        recognition.onend = () => {
+            // Only update if we didn't manually stop
+            if (shouldListenRef.current) {
+                // Auto-restart for continuous recognition
+                try {
+                    recognition.start()
+                } catch (e) {
+                    console.log('[Speech] Recognition ended')
+                    setIsListening(false)
+                }
+            } else {
+                setIsListening(false)
+            }
+        }
+
+        recognitionRef.current = recognition
+
+        return () => {
+            if (recognitionRef.current) {
+                recognitionRef.current.abort()
+                recognitionRef.current = null
+            }
+        }
+    }, [useNativeSpeech])
+
+
     // Setup IPC listeners for Download Progress
     useEffect(() => {
         if (useNativeSpeech) {
@@ -329,10 +411,25 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
                 if (shouldListenRef.current) setIsInitializing(false)
             }
         } else {
-            // Web Speech API fallback would go here
-            if (recognitionRef.current) recognitionRef.current.start()
-            setIsListening(true)
-            addLog({ eventType: 'STATE_CHANGE', sessionId, component: 'useSpeechRecognition', details: { metadata: { state: 'listening_started', method: 'web_speech' } } })
+            // Web Speech API fallback
+            if (!recognitionRef.current) {
+                setError('Speech recognition not available')
+                return
+            }
+            try {
+                recognitionRef.current.start()
+                setIsListening(true)
+                await startVisualization()
+                addLog({
+                    eventType: 'STATE_CHANGE',
+                    sessionId,
+                    component: 'useSpeechRecognition',
+                    details: { metadata: { state: 'listening_started', method: 'web_speech' } }
+                })
+            } catch (e: any) {
+                console.error('[Speech] Failed to start Web Speech API:', e)
+                setError(`Failed to start: ${e.message}`)
+            }
         }
     }, [isListening, isInitializing, useNativeSpeech, addLog, currentModel])
 
@@ -369,7 +466,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
         interimTranscript,
         error,
         notification,
-        isSupported: true,
+        isSupported,
         isNativeSupported: useNativeSpeech,
         isInitializing,
         startListening,

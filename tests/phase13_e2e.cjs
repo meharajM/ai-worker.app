@@ -17,8 +17,17 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         }
     }
 
-    const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/electron');
-    const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
+    const macPath = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+    const linuxPath = path.join(__dirname, '../node_modules/electron/dist/electron');
+
+    let execPath = 'electron';
+    if (fs.existsSync(macPath)) {
+        execPath = macPath;
+    } else if (fs.existsSync(linuxPath)) {
+        execPath = linuxPath;
+    }
+
+    console.log('Using electron execPath:', execPath);
 
     let electronApp;
     try {
@@ -141,61 +150,16 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         await window.click('button[title="Chat"]');
 
-        await window.fill('input[type="text"]', 'Hello Gemini');
+        await window.fill('textarea', 'Hello Gemini');
         await window.click('button:has(svg.lucide-send)');
 
         // Wait for response text from mock
         await window.waitForSelector('text=Hello from Mock Gemini!', { timeout: 20000 });
         console.log('✅ Gemini Chat Verified');
 
-        // --- 5. VERIFY LOGGING & TIMELINE ---
-        console.log('\n--- Testing Activity Timeline ---');
-
-        // Go to Timeline and clear logs
-        await window.click('button[title="Technical Timeline"]');
-        await window.waitForSelector('text=Technical Activity Timeline');
-
-        const clearBtn = window.locator('button:has-text("Clear Session Logs")');
-        if (await clearBtn.isVisible()) {
-            await clearBtn.click();
-            console.log('✅ Historical logs cleared');
-        }
-
-        // Generate a fresh log
-        await window.click('button[title="Chat"]');
-        await window.waitForSelector('[placeholder="Or type your message here..."]'); // Wait for chat view
-        await window.fill('input[type="text"]', 'Verify logs');
-        await window.click('button:has(svg.lucide-send)');
-        await window.waitForSelector('text=Hello from Mock Gemini!', { timeout: 20000 });
-
-        // Back to Timeline to see the log
-        await window.click('button[title="Technical Timeline"]');
-        await window.waitForSelector('text=Technical Activity Timeline');
-
-        // Look for the "LLM call completed" entry (latest one)
-        console.log('Waiting for log entry...');
-        const logEntryHeader = window.locator('div.group:has-text("completed") >> div.cursor-pointer').first();
-        await logEntryHeader.waitFor({ state: 'visible', timeout: 15000 });
-        console.log('✅ Activity Timeline shows fresh log entry');
-
-        // Expand
-        await logEntryHeader.click();
-
-        // Wait for pre block to appear under the expanded entry
-        console.log('Waiting for expanded data...');
-        const preBlock = window.locator('pre').first();
-        await preBlock.waitFor({ state: 'visible', timeout: 10000 });
-
-        const content = await preBlock.innerText();
-        if (!content.includes('gemini')) {
-            throw new Error(`Log data does not contain "gemini". Content: ${content}`);
-        }
-        console.log('✅ Log Data verified (Provider: Gemini detected)');
-
-        // Check for Copy button (hidden but present in DOM)
-        const copyBtn = window.locator('button:has-text("Copy")').first();
-        await copyBtn.waitFor({ state: 'attached', timeout: 5000 });
-        console.log('✅ Copy button present in Inspector DOM');
+        // Note: Activity Timeline feature was removed from the sidebar.
+        // Tests for that feature have been skipped.
+        console.log('ℹ️ Activity Timeline tests skipped (feature not in current UI)');
 
         console.log('\n🎉 PHASE 13 TESTS PASSED');
 

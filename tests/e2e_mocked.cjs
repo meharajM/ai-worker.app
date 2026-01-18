@@ -18,8 +18,15 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
     }
 
     // Find the installed electron binary
-    const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/electron');
-    const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
+    const macPath = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+    const linuxPath = path.join(__dirname, '../node_modules/electron/dist/electron');
+
+    let execPath = 'electron';
+    if (fs.existsSync(macPath)) {
+        execPath = macPath;
+    } else if (fs.existsSync(linuxPath)) {
+        execPath = linuxPath;
+    }
 
     console.log('Using electron execPath:', execPath);
     console.log('exists execPath?', fs.existsSync(execPath));
