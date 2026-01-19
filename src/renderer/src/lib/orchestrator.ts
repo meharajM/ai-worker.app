@@ -1,7 +1,16 @@
 import { FEATURE_FLAGS } from './constants';
-import { chatWithWebLLM, getWebLLMStatus, loadWebLLMModel } from './webllm';
+import { chatWithWebLLM, getWebLLMStatus, loadWebLLMModel, webLLMManager } from './webllm';
 import type { PlanningResponse, TaskComplexity } from '../types/orchestrator';
 import type { LLMTool } from './llm';
+
+// Platform detection for better fallback behavior
+function getCurrentPlatform(): 'windows' | 'macos' | 'linux' | 'unknown' {
+    const userAgent = navigator.userAgent;
+    if (userAgent.includes('Win')) return 'windows';
+    if (userAgent.includes('Mac')) return 'macos';
+    if (userAgent.includes('Linux') || userAgent.includes('X11')) return 'linux';
+    return 'unknown';
+}
 
 /**
  * System prompt for plan generation
@@ -82,11 +91,27 @@ export async function analyzeRequest(
             return createFallbackPlan(userMessage, availableTools || []);
         }
 
-        // Ensure local model is loaded
+        // Check WebGPU support first before any initialization
+        console.log('[Orchestrator] Checking WebGPU support...');
+        await webLLMManager.initialize();
         const status = getWebLLMStatus();
+        console.log('[Orchestrator] WebLLM status:', status);
+        
+        // If WebGPU is not supported, redirect all requests to cloud
+        if (!status.isSupported) {
+            console.log('[Orchestrator] WebGPU not supported, redirecting to cloud LLM');
+            return createDirectCloudPlan(userMessage, availableTools || []);
+        }
+        
+        // If WebGPU is supported but model not loaded, try to load it
         if (!status.isLoaded) {
             console.log('[Orchestrator] Loading 0.5B model for analysis...');
-            await loadWebLLMModel('Qwen2.5-0.5B-Instruct-q4f16_1-MLC');
+            try {
+                await loadWebLLMModel('Qwen2.5-0.5B-Instruct-q4f16_1-MLC');
+            } catch (loadError) {
+                console.warn('[Orchestrator] Failed to load local model, redirecting to cloud:', loadError);
+                return createDirectCloudPlan(userMessage, availableTools || []);
+            }
         }
 
         // Build tool list for context if available
@@ -104,10 +129,16 @@ export async function analyzeRequest(
         }
 
         // Call local model for analysis
-        const response = await chatWithWebLLM([
-            { role: 'system', content: PLANNING_SYSTEM_PROMPT + toolContext },
-            { role: 'user', content: `Analyze this request and create a plan:\n\n"${userMessage}"` },
-        ]);
+        let response;
+        try {
+            response = await chatWithWebLLM([
+                { role: 'system', content: PLANNING_SYSTEM_PROMPT + toolContext },
+                { role: 'user', content: `Analyze this request and create a plan:\n\n"${userMessage}"` },
+            ]);
+        } catch (chatError) {
+            console.warn('[Orchestrator] WebLLM chat failed, using cloud fallback:', chatError);
+            return createFallbackPlan(userMessage, availableTools || []);
+        }
 
         // Parse JSON response
         let planData: Record<string, unknown>;
@@ -121,7 +152,6 @@ export async function analyzeRequest(
             }
         } catch (parseError) {
             console.warn('[Orchestrator] Failed to parse plan JSON, using fallback', parseError);
-            // Fallback to moderate complexity with cloud provider
             return createFallbackPlan(userMessage, availableTools || []);
         }
 
@@ -139,14 +169,14 @@ export async function analyzeRequest(
                 },
             ],
             suggestedTools: (planData.suggestedTools as string[]) || [],
-            recommendedProvider: (planData.recommendedProvider as 'local' | 'cloud') || 'cloud',
-            reasoning: (planData.reasoning as string) || 'Automatic analysis',
-            requiresConfirmation: planData.requiresConfirmation !== false,
+            recommendedProvider: 'local', // Use local since we successfully analyzed with it
+            reasoning: (planData.reasoning as string) || 'Analyzed with local model',
+            requiresConfirmation: (planData.requiresConfirmation as boolean) !== false,
             autoApproveTimeout: (planData.autoApproveTimeout as number | null) || null,
             needsTools: (planData.needsTools as boolean) || (planData.needsRealtimeData as boolean) || false
         };
 
-        console.log('[Orchestrator] Plan generated:', plan);
+        console.log('[Orchestrator] Plan generated with local model:', plan);
         return plan;
     } catch (error) {
         console.error('[Orchestrator] Analysis failed:', error);
@@ -156,9 +186,73 @@ export async function analyzeRequest(
 }
 
 /**
+ * Creates a direct cloud plan when local model is not available
+ * Bypasses local analysis and goes straight to cloud execution
+ */
+function createDirectCloudPlan(userMessage: string, tools: LLMTool[]): PlanningResponse {
+    const platform = getCurrentPlatform();
+    let reasoning = 'Using cloud AI (local model unavailable)';
+    
+    // Add platform-specific context
+    switch (platform) {
+        case 'linux':
+            reasoning += ' (WebGPU may require Vulkan drivers on Linux)';
+            break;
+        case 'windows':
+            reasoning += ' (WebGPU requires DirectX 12 support)';
+            break;
+        case 'macos':
+            reasoning += ' (WebGPU requires macOS 13.0+ with Metal support)';
+            break;
+        default:
+            reasoning += ' (WebGPU not available or unsupported)';
+    }
+    
+    return {
+        type: 'plan',
+        complexity: 'moderate',
+        intent: userMessage,
+        plan: [
+            {
+                stepNumber: 1,
+                description: 'Process your request with cloud AI',
+                requiresLLM: true,
+                estimatedTime: 3,
+            },
+        ],
+        suggestedTools: [],
+        recommendedProvider: 'cloud',
+        reasoning,
+        requiresConfirmation: false, // Always auto-execute for direct cloud
+        autoApproveTimeout: 5, // Quick auto-approve for cloud requests
+    };
+}
+
+/**
  * Creates a fallback plan when analysis fails
  */
 function createFallbackPlan(userMessage: string, _tools: LLMTool[]): PlanningResponse {
+    const platform = getCurrentPlatform();
+    let reasoning = 'Using cloud AI for reliability';
+    
+    // Add platform-specific context
+    switch (platform) {
+        case 'linux':
+            reasoning += ' (WebGPU may require Vulkan drivers on Linux)';
+            break;
+        case 'windows':
+            reasoning += ' (WebGPU requires DirectX 12 support)';
+            break;
+        case 'macos':
+            reasoning += ' (WebGPU requires macOS 13.0+ with Metal support)';
+            break;
+        default:
+            reasoning += ' (WebGPU not available or unsupported)';
+    }
+    
+    // Check if this is a simple request that doesn't need confirmation
+    const isSimpleRequest = /^(hi|hello|hey|what(\s+can\s+you\s+do)|how\s+are|thanks|bye|goodbye)/i.test(userMessage.trim());
+    
     return {
         type: 'plan',
         complexity: 'moderate',
@@ -173,9 +267,9 @@ function createFallbackPlan(userMessage: string, _tools: LLMTool[]): PlanningRes
         ],
         suggestedTools: [],
         recommendedProvider: 'cloud',
-        reasoning: 'Using cloud AI for reliability',
-        requiresConfirmation: true,
-        autoApproveTimeout: null,
+        reasoning,
+        requiresConfirmation: !isSimpleRequest,
+        autoApproveTimeout: isSimpleRequest ? 3 : null,
     };
 }
 

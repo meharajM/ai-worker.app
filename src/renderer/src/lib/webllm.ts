@@ -144,6 +144,14 @@ class WebLLMManager {
         this.checkDownloadedModels();
     }
 
+    public async initialize(): Promise<void> {
+        console.log('[WebLLM] Initializing WebLLM manager...');
+        // Ensure WebGPU check is complete
+        await this.checkWebGPUSupport();
+        await this.checkDownloadedModels();
+        console.log('[WebLLM] Initialization complete. Status:', this.status);
+    }
+
     public async checkDownloadedModels(): Promise<void> {
         try {
             const downloaded: string[] = [];
@@ -203,26 +211,121 @@ class WebLLMManager {
 
     private async checkWebGPUSupport(): Promise<void> {
         try {
+            console.log('[WebLLM] Checking WebGPU support...');
+            
+            // Check if navigator.gpu exists
             if (!navigator.gpu) {
+                console.warn('[WebLLM] navigator.gpu not available - WebGPU not supported');
                 this.status.isSupported = false;
-                this.status.error = 'WebGPU is not supported in this browser/environment';
+                this.status.error = this.getPlatformSpecificWebGPUMessage(false);
                 return;
             }
 
-            const adapter = await navigator.gpu.requestAdapter();
+            console.log('[WebLLM] navigator.gpu found, requesting adapter...');
+            
+            // Try to request adapter with more detailed error handling
+            const adapter = await navigator.gpu.requestAdapter({
+                powerPreference: 'high-performance'
+            });
+            
             if (!adapter) {
+                console.warn('[WebLLM] No WebGPU adapter found');
                 this.status.isSupported = false;
-                this.status.error = 'No WebGPU adapter found. Please ensure your GPU drivers are up to date.';
+                this.status.error = this.getPlatformSpecificWebGPUMessage(true);
                 return;
             }
+
+            // Get adapter info for debugging
+            const adapterInfo = await adapter.requestAdapterInfo();
+            console.log('[WebLLM] WebGPU adapter found:', {
+                name: adapterInfo.name || 'Unknown',
+                vendor: adapterInfo.vendor || 'Unknown',
+                architecture: adapterInfo.architecture || 'Unknown',
+                device: adapterInfo.device || 'Unknown'
+            });
 
             this.status.isSupported = true;
             this.status.error = null;
+            console.log('[WebLLM] WebGPU support confirmed');
         } catch (error) {
+            console.error('[WebLLM] WebGPU check failed:', error);
             this.status.isSupported = false;
-            this.status.error = error instanceof Error ? error.message : 'WebGPU check failed';
+            this.status.error = `WebGPU check failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
         }
         this.notifyStatusChange();
+    }
+
+    private getPlatformSpecificWebGPUMessage(adapterNotFound: boolean): string {
+        const userAgent = navigator.userAgent;
+        let platform = 'Unknown';
+        
+        if (userAgent.includes('Win')) platform = 'Windows';
+        else if (userAgent.includes('Mac')) platform = 'macOS';
+        else if (userAgent.includes('Linux')) platform = 'Linux';
+        else if (userAgent.includes('X11')) platform = 'Linux';
+
+        if (!adapterNotFound) {
+            // navigator.gpu not available
+            switch (platform) {
+                case 'Windows':
+                    return 'WebGPU is not supported. Please:\n' +
+                        '1. Update Windows to version 10/11 with latest updates\n' +
+                        '2. Update GPU drivers (NVIDIA, AMD, or Intel)\n' +
+                        '3. Use a supported browser (Chrome 113+, Edge 113+)\n' +
+                        '4. Enable WebGPU in chrome://flags/#enable-webgpu';
+                        
+                case 'macOS':
+                    return 'WebGPU is not supported. Please:\n' +
+                        '1. Update macOS to 13.0 (Ventura) or later\n' +
+                        '2. Use Safari 16.0+ or Chrome 113+\n' +
+                        '3. For Safari, enable WebGPU in Developer menu\n' +
+                        '4. For Chrome, enable in chrome://flags/#enable-webgpu';
+                        
+                case 'Linux':
+                    return 'WebGPU is not supported. Please:\n' +
+                        '1. Install Vulkan drivers for your GPU\n' +
+                        '2. For Intel: sudo apt install mesa-vulkan-drivers\n' +
+                        '3. For NVIDIA: Install latest NVIDIA drivers\n' +
+                        '4. For AMD: sudo apt install mesa-vulkan-drivers\n' +
+                        '5. Use Chrome 113+ with chrome://flags/#enable-webgpu enabled';
+                        
+                default:
+                    return 'WebGPU is not supported in this browser/environment. Try using a Chromium-based browser with WebGPU enabled.';
+            }
+        } else {
+            // navigator.gpu exists but no adapter found
+            switch (platform) {
+                case 'Windows':
+                    return 'No WebGPU adapter found. Please:\n' +
+                        '1. Update GPU drivers to latest version\n' +
+                        '2. Ensure DirectX 12 support is available\n' +
+                        '3. Try enabling hardware acceleration in browser settings\n' +
+                        '4. Restart browser after driver updates';
+                        
+                case 'macOS':
+                    return 'No WebGPU adapter found. Please:\n' +
+                        '1. Ensure you have a Metal-compatible Mac (2012+)\n' +
+                        '2. Update macOS to the latest version\n' +
+                        '3. Update browser to latest version\n' +
+                        '4. Try restarting the application';
+                        
+                case 'Linux':
+                    return 'No WebGPU adapter found. Please:\n' +
+                        '1. Verify Vulkan installation: vulkaninfo --summary\n' +
+                        '2. Install proper drivers for your GPU:\n' +
+                        '   Intel: mesa-vulkan-drivers\n' +
+                        '   NVIDIA: nvidia-driver-535+\n' +
+                        '   AMD: mesa-vulkan-drivers\n' +
+                        '3. Check if running in virtual machine (may not support GPU passthrough)\n' +
+                        '4. Try running with --disable-gpu-compositing flag';
+                        
+                default:
+                    return 'No WebGPU adapter found. Please ensure:\n' +
+                        '1. GPU drivers are up to date\n' +
+                        '2. WebGPU is enabled in browser flags\n' +
+                        '3. You are not in a virtual environment without GPU support';
+            }
+        }
     }
 
     private notifyStatusChange(): void {

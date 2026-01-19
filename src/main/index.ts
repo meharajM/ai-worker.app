@@ -14,6 +14,43 @@ app.commandLine.appendSwitch('enable-features',
 )
 app.commandLine.appendSwitch('optimization-guide-on-device-model-execution', 'performance_class:0')
 
+// Platform-specific WebGPU support
+function setupWebGPUSupport() {
+    const platform = process.platform
+    
+    // Enable WebGPU on all platforms
+    app.commandLine.appendSwitch('enable-webgpu')
+    
+    switch (platform) {
+        case 'linux':
+            // Linux requires Vulkan for WebGPU
+            app.commandLine.appendSwitch('enable-features', 'WebGPU,Vulkan')
+            app.commandLine.appendSwitch('enable-vulkan')
+            app.commandLine.appendSwitch('use-vulkan=native')
+            console.log('[Main] WebGPU configured for Linux with Vulkan backend')
+            break
+            
+        case 'win32':
+            // Windows uses DirectX 12 for WebGPU
+            app.commandLine.appendSwitch('enable-features', 'WebGPU')
+            app.commandLine.appendSwitch('use-angle', 'd3d11') // Fallback to D3D11 if D3D12 not available
+            console.log('[Main] WebGPU configured for Windows with DirectX backend')
+            break
+            
+        case 'darwin':
+            // macOS uses Metal for WebGPU
+            app.commandLine.appendSwitch('enable-features', 'WebGPU')
+            console.log('[Main] WebGPU configured for macOS with Metal backend')
+            break
+            
+        default:
+            console.warn(`[Main] Unknown platform ${platform}, using default WebGPU configuration`)
+            app.commandLine.appendSwitch('enable-features', 'WebGPU')
+    }
+}
+
+setupWebGPUSupport()
+
 
 // Initialize environment (fix PATH, etc.)
 initEnv()

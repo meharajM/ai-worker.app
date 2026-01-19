@@ -33,13 +33,62 @@ const DEFAULT_MCP_SERVERS: Omit<
   "id" | "connected" | "tools" | "autoConnect"
 >[] = [
     {
+      name: "filesystem",
+      description: "File System MCP Server - Access to local files",
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "."],
+    },
+    {
+      name: "memory",
+      description: "Memory MCP Server - persistent knowledge graph",
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-memory"],
+    },
+    {
+      name: "git",
+      description: "Git MCP Server - Local version control (Requires 'pip install mcp-server-git')",
+      type: "stdio",
+      command: "python",
+      args: ["-m", "mcp_server_git"],
+    },
+    {
+      name: "finance",
+      description: "Finance MCP Server - Stock and crypto data",
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "mcp-server-finance"],
+    },
+    {
+      name: "brave-search",
+      description: "Brave Search - Web search capabilities (Requires API Key)",
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-brave-search"],
+    },
+    {
+      name: "fetch",
+      description: "Fetch - Web content fetching",
+      type: "stdio",
+      command: "uvx",
+      args: ["mcp-server-fetch"],
+    },
+    {
       name: "playwright",
       description:
         "Playwright MCP Server - Browser automation and web interaction tools",
       type: "stdio",
       command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-playwright"],
+      args: ["-y", "@playwright/mcp@latest"],
     },
+    // {
+    //   name: "weather"
+    //   description: "Weather - Current weather data (Requires OpenWeatherMap API Key)",
+    //   type: "stdio",
+    //   command: "npx",
+    //   args: ["-y", "@modelcontextprotocol/server-weather"],
+    // },
     {
       name: "sequential-thinking",
       description:

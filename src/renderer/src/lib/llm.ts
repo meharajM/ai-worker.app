@@ -1037,7 +1037,10 @@ export async function chat(
   settings?: LLMSettings,
   servers?: ServerInfo[]
 ): Promise<LLMResponse> {
+  console.log('[LLM] Chat called with settings:', settings);
+  
   const providers = await getAvailableProviders(settings);
+  console.log('[LLM] Available providers:', providers);
 
   // Determine which provider to use
   let provider: LLMProvider | null = null;
@@ -1068,10 +1071,16 @@ export async function chat(
     provider = "openrouter";
   }
 
+  console.log('[LLM] Selected provider:', provider);
+
   if (!provider) {
-    throw new Error(
-      "No LLM provider available. Please enable a provider (Browser LLM, Ollama, OpenAI, Gemini, or OpenRouter) and configure it appropriately."
-    );
+    const error = "No LLM provider available. Please enable a provider (Browser LLM, Ollama, OpenAI, Gemini, or OpenRouter) and configure it appropriately.";
+    console.error('[LLM]', error);
+    return {
+      content: `⚠️ ${error}`,
+      provider: 'none',
+      model: 'none'
+    };
   }
 
   // Try to detect if we need JSON fallback (will be handled in callOpenAI if error occurs)
