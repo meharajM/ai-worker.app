@@ -4,8 +4,9 @@ import type { FirebaseApp } from 'firebase/app'
 import type { Auth, User, UserCredential } from 'firebase/auth'
 import type { AppCheck } from 'firebase/app-check'
 import type { Firestore } from 'firebase/firestore'
+import type { Analytics } from 'firebase/analytics'
 
-export type { User, UserCredential, Auth, FirebaseApp, AppCheck, Firestore }
+export type { User, UserCredential, Auth, FirebaseApp, AppCheck, Firestore, Analytics }
 
 // Config
 export const firebaseConfig = {
@@ -15,6 +16,7 @@ export const firebaseConfig = {
     storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'placeholder.appspot.com',
     messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '000000000000',
     appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:000000000000:web:placeholder',
+    measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || 'G-XXXXXXXXXX',
 }
 
 const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY || ''
@@ -32,6 +34,7 @@ let firebaseApp: FirebaseApp | null = null
 let firebaseAuth: Auth | null = null
 let firebaseFirestore: Firestore | null = null
 let appCheck: AppCheck | null = null
+let firebaseAnalytics: Analytics | null = null
 
 // Module references (exported for other modules to use)
 export let firebaseModules: {
@@ -53,6 +56,8 @@ export let firebaseModules: {
     doc: typeof import('firebase/firestore').doc
     setDoc: typeof import('firebase/firestore').setDoc
     getDoc: typeof import('firebase/firestore').getDoc
+    getAnalytics?: typeof import('firebase/analytics').getAnalytics
+    logEvent?: typeof import('firebase/analytics').logEvent
 } | null = null
 
 export async function initializeFirebase(): Promise<{
@@ -60,6 +65,7 @@ export async function initializeFirebase(): Promise<{
     auth: Auth
     firestore: Firestore
     appCheck: AppCheck | null
+    analytics: Analytics | null
 } | null> {
     if (!FEATURE_FLAGS.AUTH_ENABLED) {
         console.log('Firebase auth is disabled via feature flag')
@@ -72,14 +78,15 @@ export async function initializeFirebase(): Promise<{
     }
 
     if (firebaseApp && firebaseAuth && firebaseFirestore) {
-        return { app: firebaseApp, auth: firebaseAuth, firestore: firebaseFirestore, appCheck }
+        return { app: firebaseApp, auth: firebaseAuth, firestore: firebaseFirestore, appCheck, analytics: firebaseAnalytics }
     }
 
     try {
-        const [firebaseAppModule, firebaseAuthModule, firebaseFirestoreModule] = await Promise.all([
+        const [firebaseAppModule, firebaseAuthModule, firebaseFirestoreModule, firebaseAnalyticsModule] = await Promise.all([
             import('firebase/app'),
             import('firebase/auth'),
             import('firebase/firestore'),
+            import('firebase/analytics'),
         ])
 
         firebaseModules = {
@@ -99,11 +106,20 @@ export async function initializeFirebase(): Promise<{
             doc: firebaseFirestoreModule.doc,
             setDoc: firebaseFirestoreModule.setDoc,
             getDoc: firebaseFirestoreModule.getDoc,
+            getAnalytics: firebaseAnalyticsModule.getAnalytics,
+            logEvent: firebaseAnalyticsModule.logEvent,
         }
 
         firebaseApp = firebaseModules.initializeApp(firebaseConfig)
         firebaseAuth = firebaseModules.getAuth(firebaseApp)
         firebaseFirestore = firebaseModules.getFirestore(firebaseApp)
+        if (typeof window !== 'undefined') {
+             try {
+                firebaseAnalytics = firebaseAnalyticsModule.getAnalytics(firebaseApp)
+             } catch (e) {
+                console.warn('Firebase analytics failed to init', e)
+             }
+        }
 
         try {
             const { indexedDBLocalPersistence, setPersistence } = await import('firebase/auth')
@@ -130,7 +146,7 @@ export async function initializeFirebase(): Promise<{
         }
 
         console.log('Firebase initialized successfully')
-        return { app: firebaseApp, auth: firebaseAuth, firestore: firebaseFirestore, appCheck }
+        return { app: firebaseApp, auth: firebaseAuth, firestore: firebaseFirestore, appCheck, analytics: firebaseAnalytics }
     } catch (error) {
         console.error('Failed to initialize Firebase:', error)
         return null
