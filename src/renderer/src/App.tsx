@@ -260,13 +260,9 @@ function App() {
       setProcessing(true);
 
       try {
-        const orchestratorReady = isOrchestratorReady();
-        console.log('>>> [App.handleSubmit] Orchestrator Ready:', orchestratorReady);
-
-        // Use orchestrator for planning if:
-        // 1. Orchestrator (WebLLM) is loaded
-        // OPTIMIZATION: We do NOT fetch tools here yet. We let the orchestrator decide if it needs them.
-        if (orchestratorReady) {
+        // Use orchestrator for planning if enabled in flags
+        // This ensures a plan is always generated (and progress shown if loading)
+        if (FEATURE_FLAGS.BROWSER_LLM_ENABLED) {
           setPlanningPhase('analyzing');
 
           addLog({

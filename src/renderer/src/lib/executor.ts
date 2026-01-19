@@ -38,12 +38,19 @@ export async function executePlan(
             },
         ];
 
-        // Get available tools
-        const mcpTools = getAllTools();
+        // Get available tools - prioritize those passed in context (RAG filtered)
+        const mcpTools = context.availableTools.length > 0 
+            ? context.availableTools 
+            : getAllTools().map(t => ({
+                name: t.name,
+                description: t.description,
+                parameters: t.inputSchema
+            }));
+            
         const llmTools: LLMTool[] = mcpTools.map((tool) => ({
             name: tool.name,
             description: tool.description,
-            parameters: tool.inputSchema,
+            parameters: tool.parameters,
         }));
 
         // Get server info for context
@@ -61,16 +68,18 @@ export async function executePlan(
             }));
 
         // Determine effective settings based on provider preference
-        // "local" -> browser (fastest local)
-        // "cloud" -> use settings if it's a cloud provider, otherwise default to a cloud-only auto choice
+        // "local" -> use browser or ollama (based on user preference)
+        // "cloud" -> use auto (let chat decide based on availability)
         let effectiveProvider: any = context.provider;
         if (effectiveProvider === 'local') {
-            effectiveProvider = 'browser';
+            // Respect user preference for local if it's Ollama, otherwise default to Browser
+            effectiveProvider = settings.preferredProvider === 'ollama' ? 'ollama' : 'browser';
         } else if (effectiveProvider === 'cloud') {
+            // If user preferred a cloud provider, keep it. 
+            // Otherwise use "auto" which will prioritize cloud in the chat() function.
             const userPref = settings.preferredProvider;
             const isCloudPref = userPref === 'gemini' || userPref === 'openai' || userPref === 'openrouter';
-            // If user preferred a cloud model, keep it. Otherwise, force cloud-only auto.
-            effectiveProvider = isCloudPref ? userPref : 'gemini'; // Default to gemini for cloud power
+            effectiveProvider = isCloudPref ? userPref : 'auto'; 
         }
 
         const effectiveSettings: LLMSettings = {

@@ -38,11 +38,18 @@ class ToolRegistryService {
             const mcpTools = getAllTools();
 
             // Convert MCP tools to LLM tools (mapping inputSchema -> parameters)
-            this.allTools = mcpTools.map(tool => ({
-                name: tool.name,
-                description: tool.description,
-                parameters: tool.inputSchema
-            }));
+            // Use a Map to de-duplicate tools by name (last one wins)
+            const toolMap = new Map<string, LLMTool>();
+            
+            for (const tool of mcpTools) {
+                toolMap.set(tool.name, {
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.inputSchema
+                });
+            }
+
+            this.allTools = Array.from(toolMap.values());
 
             console.log(`[ToolRegistry] Indexing ${this.allTools.length} tools...`);
 
