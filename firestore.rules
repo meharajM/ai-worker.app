@@ -1,0 +1,35 @@
+rules_version = '2';
+
+// Firestore Security Rules for AI-Worker
+// These rules ensure users can only access their own data 
+// and enforce authentication requirements
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // User profiles - users can only read/write their own profile
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // User's settings subcollection
+      match /settings/{settingId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // User's chat history (if synced to cloud in future)
+      match /chats/{chatId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // User's MCP server configurations (if synced to cloud in future)
+      match /mcpServers/{serverId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+    
+    // Deny all other access by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

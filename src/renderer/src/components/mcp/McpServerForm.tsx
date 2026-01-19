@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { Server, Terminal, Globe } from "lucide-react";
-import { MCPServer } from "../../lib/mcp";
+import { Server, Terminal, Globe, Plus, Trash2 } from "lucide-react";
+import { MCPServer } from "../../stores/mcpStore";
 
 interface McpServerFormProps {
   editingServer: MCPServer | null;
-  onSubmit: (config: any) => void;
+  onSubmit: (config: any) => void; 
   onCancel: () => void;
 }
 
@@ -17,7 +17,7 @@ const DEFAULT_SEQUENTIAL_THINKING = {
 
 export function McpServerForm({
   editingServer,
-  onSubmit,
+  onSubmit, 
   onCancel,
 }: McpServerFormProps) {
   const [name, setName] = useState(
@@ -33,6 +33,31 @@ export function McpServerForm({
     editingServer?.args?.join(" ") || DEFAULT_SEQUENTIAL_THINKING.args
   );
   const [url, setUrl] = useState(editingServer?.url || "");
+  // Using explicit Record<string, string> to match the type
+  const [env, setEnv] = useState<Record<string, string>>(editingServer?.env || {});
+
+  // Refactoring to use array state for stability during editing
+  const [envPairs, setEnvPairs] = useState<{key: string, value: string}[]>([]);
+
+  useEffect(() => {
+    if (editingServer?.env) {
+        setEnvPairs(Object.entries(editingServer.env).map(([key, value]) => ({ key, value })));
+    } else {
+        setEnvPairs([]);
+    }
+  }, [editingServer]);
+
+  const addEnvPair = () => setEnvPairs([...envPairs, { key: "", value: "" }]);
+  
+  const updateEnvPair = (index: number, field: 'key' | 'value', text: string) => {
+      const newPairs = [...envPairs];
+      newPairs[index][field] = text;
+      setEnvPairs(newPairs);
+  };
+
+  const removeEnvPair = (index: number) => {
+      setEnvPairs(envPairs.filter((_, i) => i !== index));
+  };
 
   useEffect(() => {
     if (editingServer) {
@@ -67,6 +92,12 @@ export function McpServerForm({
         "Sequential Thinking MCP Server - Enables step-by-step reasoning for complex tasks";
     }
 
+    // Convert envPairs back to object
+    const envObject = envPairs.reduce((acc, { key, value }) => {
+        if (key.trim()) acc[key.trim()] = value; // Only include if key exists
+        return acc;
+    }, {} as Record<string, string>);
+
     onSubmit({
       name: name.trim(),
       description: description,
@@ -75,6 +106,7 @@ export function McpServerForm({
       args:
         serverType === "stdio" ? args.split(" ").filter(Boolean) : undefined,
       url: serverType === "sse" ? url.trim() : undefined,
+      env: Object.keys(envObject).length > 0 ? envObject : undefined
     });
   };
 
@@ -183,6 +215,60 @@ export function McpServerForm({
                                  placeholder-white/30 focus:border-[#4fd1c5]/50 focus:outline-none focus:ring-1 focus:ring-[#4fd1c5]/50 font-mono"
             />
           </div>
+        )}
+
+        {/* Environment Variables (Local Only) */}
+        {serverType === "stdio" && (
+            <div className="space-y-3 pt-2 border-t border-white/5">
+                <div className="flex items-center gap-2 mb-2">
+                    <label className="text-xs text-white/40 uppercase tracking-wider">
+                        Environment Variables
+                    </label>
+                    <span className="px-1.5 py-0.5 rounded bg-[#4fd1c5]/10 text-[#4fd1c5] text-[10px] font-bold border border-[#4fd1c5]/20">
+                        LOCAL ONLY
+                    </span>
+                </div>
+                
+                <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg mb-3">
+                    <p className="text-yellow-200/80 text-[11px] leading-relaxed flex gap-2">
+                        <span className="shrink-0">⚠️</span>
+                        Secrets like API Keys are stored locally on this device only. We do not sync them to the cloud. If you switch devices or clear data, you will need to re-enter them.
+                    </p>
+                </div>
+
+                {/* Env Vars Editor */}
+                <div className="space-y-2">
+                    {envPairs.map((pair, index) => (
+                        <div key={index} className="flex gap-2">
+                            <input 
+                                placeholder="KEY" 
+                                value={pair.key}
+                                onChange={(e) => updateEnvPair(index, 'key', e.target.value)}
+                                className="flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm font-mono placeholder-white/20 focus:border-[#4fd1c5]/50 focus:outline-none"
+                            />
+                            <input 
+                                placeholder="VALUE" 
+                                value={pair.value}
+                                type="password"
+                                onChange={(e) => updateEnvPair(index, 'value', e.target.value)}
+                                className="flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm font-mono placeholder-white/20 focus:border-[#4fd1c5]/50 focus:outline-none"
+                            />
+                            <button 
+                                onClick={() => removeEnvPair(index)}
+                                className="p-2 text-white/40 hover:text-red-400 hover:bg-white/5 rounded-lg transition-colors"
+                            >
+                                <Trash2 size={16} />
+                            </button>
+                        </div>
+                    ))}
+                    <button 
+                        onClick={addEnvPair}
+                        className="text-xs text-[#4fd1c5] hover:text-[#4fd1c5]/80 flex items-center gap-1 font-medium px-1"
+                    >
+                        <Plus size={14} /> Add Variable
+                    </button>
+                </div>
+            </div>
         )}
 
         {/* Actions */}

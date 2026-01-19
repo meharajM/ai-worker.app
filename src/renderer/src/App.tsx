@@ -10,7 +10,8 @@ import { Header } from "./components/Header";
 import { useChatStore } from "./stores/chatStore";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useLogStore } from "./stores/logStore";
-
+import { useAuthPersistence } from "./hooks/useAuthPersistence";
+import { useSettingsSync } from "./hooks/useSettingsSync";
 import {
   chat,
   getAvailableProviders,
@@ -45,6 +46,10 @@ function App() {
     provider: null,
     available: false,
   });
+  
+  // Initialize Auth Persistence
+  useAuthPersistence();
+  useSettingsSync();
 
   // Initialize MCP servers and auto-connect on mount
   useEffect(() => {

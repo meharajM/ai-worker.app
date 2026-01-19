@@ -48,3 +48,28 @@ tests/screenshots/*.png
 test-results/
 playwright-report/
 blob-report/
+node_modules
+out
+dist
+
+# Environment files (NEVER commit these!)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.tsbuildinfo

@@ -2,11 +2,17 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { FEATURE_FLAGS, VOICE_CONFIG, LLM_CONFIG, STORAGE_KEYS } from '../lib/constants'
 import electron from '../lib/electron'
+import { saveUserSettings, getUserProfile } from '../lib/firebase'
 
 export type Theme = 'dark' | 'light' | 'system'
 export type LLMProviderType = 'auto' | 'ollama' | 'openai' | 'gemini' | 'openrouter' | 'browser'
 
 interface SettingsState {
+    // Voice settings
+    ttsEnabled: boolean
+    ttsRate: number
+    ttsPitch: number
+    ttsVoice: string | null
     speechLang: string
     offlineSpeech: boolean
     voskModel: string
@@ -27,7 +33,16 @@ interface SettingsState {
     // Appearance
     theme: Theme
 
+    // Sync State
+    activeUserId: string | null
+    isSyncing: boolean
+    lastSyncTime: number
+
     // Actions
+    setTtsEnabled: (enabled: boolean) => void
+    setTtsRate: (rate: number) => void
+    setTtsPitch: (pitch: number) => void
+    setTtsVoice: (voice: string | null) => void
     setSpeechLang: (lang: string) => void
     setOfflineSpeech: (enabled: boolean) => void
     setVoskModel: (model: string) => void
@@ -44,10 +59,22 @@ interface SettingsState {
     setBrowserModel: (model: string) => void
     setTheme: (theme: Theme) => void
     resetToDefaults: () => void
+    
+    // Sync Actions
+    setActiveUserId: (uid: string | null) => void
+    loadRemoteSettings: (uid: string) => Promise<void>
+    hydrateSettings: (settings: Partial<SettingsState>) => void
+    loadUserSecrets: (uid: string) => Promise<void>
+    clearUserSecrets: () => void
+    forceSync: () => Promise<void>
+    setIsSyncing: (isSyncing: boolean) => void
 }
 
 const defaultSettings = {
-
+    ttsEnabled: true,
+    ttsRate: 1,
+    ttsPitch: 1,
+    ttsVoice: null,
     speechLang: VOICE_CONFIG.SPEECH_LANG,
     // Force offline speech in Electron, enforce online in browser
     offlineSpeech: !!(window.electron),
@@ -64,74 +91,193 @@ const defaultSettings = {
     openrouterModel: LLM_CONFIG.OPENROUTER.DEFAULT_MODEL,
     browserModel: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', // Default small model
     theme: 'dark' as Theme,
+    activeUserId: null,
+    isSyncing: false,
+    lastSyncTime: 0,
 }
 
-// Migrate OpenAI credentials from localStorage to electron-store
-async function migrateOpenAICredentials(): Promise<void> {
+// Migrate API credentials from localStorage/plaintext store to secure storage
+async function migrateToSecureStorage(): Promise<void> {
     try {
-        // Check if we need to migrate OpenAI credentials
-        const existingApiKey = await electron.store.get<string>('openai_api_key')
-        const existingBaseUrl = await electron.store.get<string>('openai_base_url')
-
-        if (!existingApiKey && !existingBaseUrl) {
-            // Try to migrate from localStorage
-            const localApiKey = localStorage.getItem('openai_api_key')
-            const localBaseUrl = localStorage.getItem('openai_base_url')
-
-            if (localApiKey) {
-                await electron.store.set('openai_api_key', localApiKey)
-                console.log('[Settings] Migrated OpenAI API key from localStorage to electron-store')
-            }
-
-            if (localBaseUrl) {
-                await electron.store.set('openai_base_url', localBaseUrl)
-                console.log('[Settings] Migrated OpenAI base URL from localStorage to electron-store')
-            }
-
-            // Clear localStorage after successful migration
-            if (localApiKey || localBaseUrl) {
-                localStorage.removeItem('openai_api_key')
-                localStorage.removeItem('openai_base_url')
-            }
+        // Try to migrate from localStorage (legacy)
+        const localApiKey = localStorage.getItem('openai_api_key')
+        if (localApiKey) {
+            await electron.secure.set('openai_api_key', localApiKey)
+            localStorage.removeItem('openai_api_key')
+            console.log('[Settings] Migrated OpenAI API key from localStorage to secure storage')
         }
+
+        // Migrate base URL (not sensitive, stays in regular store)
+        const localBaseUrl = localStorage.getItem('openai_base_url')
+        if (localBaseUrl) {
+            await electron.store.set('openai_base_url', localBaseUrl)
+            localStorage.removeItem('openai_base_url')
+        }
+
+        // Note: Old plaintext keys in electron-store will be blocked by store.ts
+        // They can be manually migrated if needed, but new keys will use secure storage
     } catch (error) {
-        console.error('[Settings] Error migrating OpenAI credentials:', error)
+        console.error('[Settings] Error migrating to secure storage:', error)
     }
 }
 
 // Run migration on module load
-migrateOpenAICredentials().catch(console.error)
+migrateToSecureStorage().catch(console.error)
 
 export const useSettingsStore = create<SettingsState>()(
     persist(
-        (set) => ({
+        (set, get) => ({
             ...defaultSettings,
 
 
+            setTtsEnabled: (enabled) => set({ ttsEnabled: enabled }),
+            setTtsRate: (rate) => set({ ttsRate: rate }),
+            setTtsPitch: (pitch) => set({ ttsPitch: pitch }),
+            setTtsVoice: (voice) => set({ ttsVoice: voice }),
             setSpeechLang: (lang) => set({ speechLang: lang }),
             setOfflineSpeech: (enabled) => set({ offlineSpeech: enabled }),
             setVoskModel: (model: string) => set({ voskModel: model }),
             setPreferredProvider: (provider) => set({ preferredProvider: provider }),
             setOllamaModel: (model) => set({ ollamaModel: model }),
             setOllamaBaseUrl: (url) => set({ ollamaBaseUrl: url }),
-            setOpenaiApiKey: (key) => {
+            setOpenaiApiKey: async (key) => {
                 set({ openaiApiKey: key })
+                const uid = get().activeUserId || undefined
+                // Store API key in encrypted secure storage
+                await electron.secure.set('openai_api_key', key || '', uid)
             },
-            setOpenaiBaseUrl: (url) => {
+            setOpenaiBaseUrl: async (url) => {
                 set({ openaiBaseUrl: url })
+                const uid = get().activeUserId
+                // Base URL is not sensitive, use regular store
+                const storeKey = uid ? `user_${uid}_openai_base_url` : 'openai_base_url'
+                await electron.store.set(storeKey, url)
             },
             setOpenaiModel: (model) => set({ openaiModel: model }),
-            setGeminiApiKey: (key) => {
+            setGeminiApiKey: async (key) => {
                 set({ geminiApiKey: key })
+                const uid = get().activeUserId || undefined
+                // Store API key in encrypted secure storage
+                await electron.secure.set('gemini_api_key', key || '', uid)
             },
             setGeminiModel: (model) => set({ geminiModel: model }),
-            setOpenrouterApiKey: (key) => {
+            setOpenrouterApiKey: async (key) => {
                 set({ openrouterApiKey: key })
+                const uid = get().activeUserId || undefined
+                // Store API key in encrypted secure storage
+                await electron.secure.set('openrouter_api_key', key || '', uid)
             },
             setOpenrouterModel: (model) => set({ openrouterModel: model }),
             setBrowserModel: (model) => set({ browserModel: model }),
             setTheme: (theme) => set({ theme }),
             resetToDefaults: () => set(defaultSettings),
+
+            setActiveUserId: (uid) => set({ activeUserId: uid }),
+
+            hydrateSettings: (remoteSettings: Partial<SettingsState>) => {
+                set((state) => ({
+                    ...state,
+                    ...remoteSettings,
+                    isSyncing: false,
+                    lastSyncTime: Date.now()
+                }))
+            },
+
+            loadUserSecrets: async (uid: string) => {
+                set({ activeUserId: uid })
+                // Load scoped secrets from encrypted secure storage
+                const openaiResult = await electron.secure.get('openai_api_key', uid)
+                const geminiResult = await electron.secure.get('gemini_api_key', uid)
+                const openrouterResult = await electron.secure.get('openrouter_api_key', uid)
+                // Base URL is not sensitive, use regular store
+                const openaiUrl = await electron.store.get<string>(`user_${uid}_openai_base_url`)
+
+                set({
+                    openaiApiKey: openaiResult.value || '',
+                    openaiBaseUrl: openaiUrl || 'https://api.openai.com/v1',
+                    geminiApiKey: geminiResult.value || '',
+                    openrouterApiKey: openrouterResult.value || ''
+                })
+                console.log(`[Settings] Loaded secrets for user ${uid} (encrypted: ${openaiResult.encrypted})`)
+            },
+
+            clearUserSecrets: () => {
+                set({ 
+                    activeUserId: null,
+                    openaiApiKey: '', 
+                    geminiApiKey: '', 
+                    openrouterApiKey: '' 
+                    // We might typically clear Base URL too, or leave it as default?
+                    // Let's clear it to be safe/reset to default
+                })
+                console.log('[Settings] Cleared user secrets from memory')
+            },
+
+            loadRemoteSettings: async (uid) => {
+                if (!uid) return
+                set({ isSyncing: true })
+                try {
+                    const remoteData = await getUserProfile(uid)
+                    if (remoteData && remoteData.settings) {
+                        console.log('[Settings] Loaded remote settings:', remoteData.settings)
+                        // Merge remote settings with local defaults/current
+                        // We filter out API keys from remote sync if we decided not to store them
+                        // But for now, we just merge what we get, excluding potentially sensitive defaults if needed.
+                        // Assuming remote settings structure matches store partially.
+                        
+                        // Extract only syncable fields
+                        const {
+                            theme,
+                            preferredProvider,
+                            ollamaModel,
+                            ollamaBaseUrl,
+                            // api keys might not be there if we don't save them
+                            openaiModel,
+                            geminiModel,
+                            openrouterModel,
+                            browserModel,
+                            ttsEnabled,
+                            ttsRate,
+                            ttsPitch,
+                            ttsVoice,
+                            speechLang
+                        } = remoteData.settings
+
+                        set((state) => ({
+                            ...state,
+                            theme: theme ?? state.theme,
+                            preferredProvider: preferredProvider ?? state.preferredProvider,
+                            ollamaModel: ollamaModel ?? state.ollamaModel,
+                            ollamaBaseUrl: ollamaBaseUrl ?? state.ollamaBaseUrl,
+                            openaiModel: openaiModel ?? state.openaiModel,
+                            geminiModel: geminiModel ?? state.geminiModel,
+                            openrouterModel: openrouterModel ?? state.openrouterModel,
+                            browserModel: browserModel ?? state.browserModel,
+                            ttsEnabled: ttsEnabled ?? state.ttsEnabled,
+                            ttsRate: ttsRate ?? state.ttsRate,
+                            ttsPitch: ttsPitch ?? state.ttsPitch,
+                            ttsVoice: ttsVoice ?? state.ttsVoice,
+                            speechLang: speechLang ?? state.speechLang,
+                            isSyncing: false,
+                            lastSyncTime: Date.now()
+                        }))
+                    } else {
+                        set({ isSyncing: false })
+                    }
+                } catch (error) {
+                    console.error('[Settings] Failed to load remote settings:', error)
+                    set({ isSyncing: false })
+                }
+            },
+
+            forceSync: async () => {
+                const state = get()
+                if (!state.activeUserId) return
+                // Trigger the debounced sync immediately or calling save directly
+                // implementation handled by subscription
+            },
+
+            setIsSyncing: (isSyncing) => set({ isSyncing })
         }),
         {
             name: STORAGE_KEYS.SETTINGS,

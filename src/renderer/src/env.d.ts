@@ -8,6 +8,7 @@ interface ImportMetaEnv {
     readonly VITE_FIREBASE_STORAGE_BUCKET?: string
     readonly VITE_FIREBASE_MESSAGING_SENDER_ID?: string
     readonly VITE_FIREBASE_APP_ID?: string
+    readonly VITE_RECAPTCHA_SITE_KEY?: string
 }
 
 interface ImportMeta {
@@ -44,6 +45,20 @@ interface ElectronAPI {
     app: {
         getVersion: () => Promise<string>
         getName: () => Promise<string>
+    }
+
+    logs?: {
+        add: (entry: unknown) => Promise<void>
+        getPath: () => Promise<string>
+        openFolder: () => Promise<void>
+    }
+
+    secure?: {
+        isAvailable: () => Promise<boolean>
+        set: (key: string, value: string, userId?: string) => Promise<{ success: boolean; encrypted?: boolean; error?: string }>
+        get: (key: string, userId?: string) => Promise<{ success: boolean; value?: string | null; encrypted?: boolean; error?: string }>
+        delete: (key: string, userId?: string) => Promise<{ success: boolean; error?: string }>
+        listKeys: (userId?: string) => Promise<{ success: boolean; keys?: string[]; error?: string }>
     }
 }
 

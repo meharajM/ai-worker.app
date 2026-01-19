@@ -1,45 +1,33 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Plus, Database } from "lucide-react";
-import {
-  MCPServer,
-  addCustomServer,
-  updateServer,
-  removeServer,
-  getServers,
-  connectServer,
-  disconnectServer,
-  setAutoConnect,
-} from "../lib/mcp";
+import { Plus, Database, AlertCircle } from "lucide-react";
+import { useMcpStore, MCPServer } from "../stores/mcpStore";
 import { useChatStore } from "../stores/chatStore";
 import { McpServerCard } from "./mcp/McpServerCard";
 import { McpServerForm } from "./mcp/McpServerForm";
 
 export function ConnectionsPanel() {
-  const [servers, setServers] = useState<MCPServer[]>([]);
+  const mcp = useMcpStore();
   const [showForm, setShowForm] = useState(false);
   const [editingServerId, setEditingServerId] = useState<string | null>(null);
   const [expandedServer, setExpandedServer] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
 
-  // Load servers on mount
+  // Initialize store on mount
   useEffect(() => {
-    setServers(getServers());
-  }, []);
+    mcp.initialize();
+  }, [mcp.initialize]);
 
-  // Refresh servers
-  const refreshServers = useCallback(() => {
-    setServers(getServers());
-  }, []);
+  // Refresh servers (handled automatically by Zustand reactivity)
+  const servers = mcp.servers;
 
   // Add or Update server
   const handleFormSubmit = async (config: any) => {
     try {
       if (editingServerId) {
-        await updateServer(editingServerId, config);
+        await mcp.updateServer(editingServerId, config);
       } else {
-        await addCustomServer(config);
+        await mcp.addServer(config);
       }
-      refreshServers();
       setShowForm(false);
       setEditingServerId(null);
     } catch (error) {
@@ -61,26 +49,24 @@ export function ConnectionsPanel() {
       setConnecting(server.id);
       try {
         if (server.connected) {
-          await disconnectServer(server.id);
+          await mcp.disconnectServer(server.id);
         } else {
-          await connectServer(server.id);
+          await mcp.connectServer(server.id);
         }
-        refreshServers();
       } catch (error) {
         console.error("Connection error:", error);
       } finally {
         setConnecting(null);
       }
     },
-    [refreshServers]
+    [mcp]
   );
 
   // Remove server
   const handleRemove = async (serverId: string) => {
     if (window.confirm("Remove this MCP server?")) {
       try {
-        await removeServer(serverId);
-        refreshServers();
+        await mcp.removeServer(serverId);
       } catch (error) {
         console.error("Error removing server:", error);
         alert("Failed to remove server");
@@ -189,8 +175,7 @@ Can you help me troubleshoot this?`;
               onTroubleshoot={() => handleTroubleshoot(server)}
               onToggleAutoConnect={async (enabled) => {
                 try {
-                  await setAutoConnect(server.id, enabled);
-                  refreshServers();
+                  await mcp.setAutoConnect(server.id, enabled);
                 } catch (error) {
                   console.error("Error updating auto-connect:", error);
                 }

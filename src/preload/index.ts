@@ -76,6 +76,18 @@ const electronAPI = {
             return () => ipcRenderer.removeListener('speech:download-progress', listener)
         },
     },
+    // Secure storage operations (encrypted with OS keychain)
+    secure: {
+        isAvailable: () => ipcRenderer.invoke('secure:is-available'),
+        set: (key: string, value: string, userId?: string) => 
+            ipcRenderer.invoke('secure:set', key, value, userId),
+        get: (key: string, userId?: string) => 
+            ipcRenderer.invoke('secure:get', key, userId),
+        delete: (key: string, userId?: string) => 
+            ipcRenderer.invoke('secure:delete', key, userId),
+        listKeys: (userId?: string) => 
+            ipcRenderer.invoke('secure:list-keys', userId),
+    },
 }
 
 // Expose APIs to renderer

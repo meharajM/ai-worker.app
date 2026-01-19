@@ -1,6 +1,6 @@
 // Base Feature Flags - Default values, can be overridden in development mode
 export const BASE_FEATURE_FLAGS = {
-    AUTH_ENABLED: false,          // Flip to true when Firebase is configured
+    AUTH_ENABLED: true,          // Flip to true when Firebase is configured
     RATE_LIMITING_ENABLED: false, // Flip to true when auth is ready
 
     BROWSER_LLM_ENABLED: true,    // Try Gemini Nano / Phi first
