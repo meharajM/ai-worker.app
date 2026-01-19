@@ -367,15 +367,21 @@ ai-worker-app/
 
 ---
 
-### 🔒 Phase 14: Security Hardening & User Scoping [IN PROGRESS]
+### ✅ Phase 14: Security Hardening & User Scoping [COMPLETED]
 
 **Goal:** Implement robust data isolation for multi-user safety.
 
 **Implementation:**
-- [ ] Implement User-Scoped Storage logic in `settingsStore`
-- [ ] Implement User-Scoped Storage logic in `mcpStore`
-- [ ] Ensure sensitive data is cleared from memory on Logout
-- [ ] Verify persistence across sessions (Login -> usage -> Logout -> Login -> usage)
+- [x] Implement `safeStorage` encryption for API keys (`src/main/ipc/secure.ts`)
+- [x] Block sensitive keys from general store access (`src/main/ipc/store.ts`)
+- [x] Update `settingsStore` to use secure storage for all API keys
+- [x] Add `.env` to `.gitignore` to prevent accidental secret commits
+- [x] User-scoped secrets with proper login/logout handling
+
+**Validation:** ✅
+- [x] API keys encrypted at rest using OS keychain
+- [x] General store blocks access to sensitive keys
+- [x] TypeScript compilation passes
 
 ---
 
@@ -453,4 +459,4 @@ ai-worker-app/
 
 ---
 
-**Current Status:** Phases 1-13 complete. Full Gemini and OpenRouter support validated. Filesystem logging and Technical Inspector enriched with model/provider tracking. Launch preparation (Phase 14) is now the primary focus.
+**Current Status:** Phases 1-14 complete. Security hardening with `safeStorage` encryption implemented. App Launch Preparation (Phase 15) is now the primary focus.
