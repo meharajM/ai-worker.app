@@ -76,25 +76,30 @@ export function useSettingsSync() {
                      ttsEnabled: state.ttsEnabled,
                      ttsRate: state.ttsRate,
                      ttsPitch: state.ttsPitch,
-                     ttsVoice: state.ttsVoice,
+                     ttsVoice: state.ttsVoice ?? null,
                      speechLang: state.speechLang,
                  }
+
+                 // Sanitize settings (Firestore doesn't like undefined)
+                 const sanitizedSettings = Object.fromEntries(
+                    Object.entries(settingsToSave).map(([k, v]) => [k, v === undefined ? null : v])
+                 )
                  
                  // Prepare MCP Payload (filter out secrets)
                  const mcpServersToSave = mcpState.servers.map(server => ({
                      name: server.name,
-                     description: server.description,
+                     description: server.description || '',
                      type: server.type,
-                     command: server.command,
-                     args: server.args,
-                     url: server.url,
+                     command: server.command || null,
+                     args: server.args || null,
+                     url: server.url || null,
                      autoConnect: server.autoConnect,
                      // EXPLICITLY OMIT env
                  }))
 
                  try {
                      await saveUserSettings(user.uid, {
-                         settings: settingsToSave,
+                         settings: sanitizedSettings,
                          mcpServers: mcpServersToSave
                      })
                      console.log('[Sync] Save complete')
