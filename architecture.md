@@ -649,16 +649,24 @@ graph LR
 
     DefaultServers --> MCPLib
 
-    subgraph "API Keys"
-        SettingsStore2[settingsStore]
-        ElectronStore2[electron-store<br/>Secure Storage]
+    subgraph "API Keys & Secrets"
+        SettingsStore2[settingsStore<br/>Memory: Cleared on Logout]
+        ElectronStore2[electron-store<br/>Disk: User-Scoped]
     end
 
     ChatStore --> ChatLocalStorage
     SettingsStore --> SettingsLocalStorage
     MCPLib --> MCPStorage
-    SettingsStore2 --> ElectronStore2
+    SettingsStore2 -->|"Read/Write (user_{uid}_key)"| ElectronStore2
 ```
+
+### User-Scoped Persistence Strategy
+
+To balance security and convenience, sensitive data like API keys follows a strict scoping strategy:
+
+1.  **Disk Storage**: Secrets are stored in `electron-store`, prefixed with the User ID (e.g., `user_123_openai_api_key`). This allows multiple users to share a device without leaking secrets.
+2.  **Memory State**: When a user logs in, their scoped secrets are loaded into the store state.
+3.  **Logout**: When a user logs out, the store state is **cleared** from memory, preventing unauthorized access. The encrypted file on disk remains for their return.
 
 ---
 
@@ -717,6 +725,106 @@ graph LR
     Eval --> Security
     UnsafeInline --> Security
 ```
+
+---
+
+## Firebase Authentication
+
+AI-Worker uses Firebase Authentication with Google Sign-in for optional user identification. Authentication is feature-flagged via `AUTH_ENABLED`.
+
+### Authentication Architecture
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant App
+    participant Firebase Auth
+    participant App Check
+    
+    User->>App: Click Sign In
+    App->>Firebase Auth: signInWithPopup(GoogleProvider)
+    Firebase Auth->>User: Google OAuth Consent
+    User->>Firebase Auth: Grant Permission
+    Firebase Auth->>App Check: Validate App Token
+    App Check->>Firebase Auth: Token Valid
+    Firebase Auth->>App: User Credential
+    App->>App: Store user in authStore
+    App->>User: Show authenticated state
+```
+
+### Security Layers
+
+| Layer | Purpose | Implementation |
+|-------|---------|----------------|
+| **Firebase Auth** | User identity | Google Sign-in via popup |
+| **App Check** | Request validation | reCAPTCHA Enterprise |
+| **Security Rules** | Data access control | Firestore rules |
+| **Feature Flags** | Gradual rollout | `AUTH_ENABLED` flag |
+
+### Why Firebase API Keys Are Safe to Bundle
+
+Firebase API keys are **designed to be public** because:
+
+1. They only identify the Firebase project (not authorize access)
+2. Security is enforced by **Firebase Security Rules**
+3. **App Check** validates requests come from legitimate apps
+4. Authentication is required for data access
+
+### App Check Integration
+
+App Check prevents abuse by verifying requests originate from authentic apps:
+
+```mermaid
+graph LR
+    subgraph "App Check Flow"
+        App[AI-Worker App]
+        reCAPTCHA[reCAPTCHA Enterprise]
+        Firebase[Firebase Services]
+    end
+    
+    App -->|Request Token| reCAPTCHA
+    reCAPTCHA -->|App Check Token| App
+    App -->|Token + Request| Firebase
+    Firebase -->|Verify Token| reCAPTCHA
+    Firebase -->|Allow/Deny| App
+```
+
+- **Development**: Use debug tokens from Firebase Console
+- **Production**: reCAPTCHA Enterprise provider
+- Auto-refresh enabled for seamless token rotation
+
+### Firestore Security Rules
+
+Security rules enforce user-scoped data access:
+
+```javascript
+// Users can only access their own data
+match /users/{userId} {
+  allow read, write: if request.auth != null 
+                      && request.auth.uid == userId;
+}
+
+// All other access denied by default
+match /{document=**} {
+  allow read, write: if false;
+}
+```
+
+Rules file: [firestore.rules](file:///Users/suhail/ai-worker-app/firestore.rules)
+
+### Configuration
+
+Required environment variables (`.env`):
+
+| Variable | Description |
+|----------|-------------|
+| `VITE_FIREBASE_API_KEY` | Firebase project API key |
+| `VITE_FIREBASE_AUTH_DOMAIN` | Auth domain (`project.firebaseapp.com`) |
+| `VITE_FIREBASE_PROJECT_ID` | Firebase project ID |
+| `VITE_FIREBASE_APP_ID` | Firebase app ID |
+| `VITE_RECAPTCHA_SITE_KEY` | reCAPTCHA Enterprise site key (optional) |
+
+See `.env.example` for full template.
 
 ---
 

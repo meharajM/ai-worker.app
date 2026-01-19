@@ -367,6 +367,18 @@ ai-worker-app/
 
 ---
 
+### 🔒 Phase 14: Security Hardening & User Scoping [IN PROGRESS]
+
+**Goal:** Implement robust data isolation for multi-user safety.
+
+**Implementation:**
+- [ ] Implement User-Scoped Storage logic in `settingsStore`
+- [ ] Implement User-Scoped Storage logic in `mcpStore`
+- [ ] Ensure sensitive data is cleared from memory on Logout
+- [ ] Verify persistence across sessions (Login -> usage -> Logout -> Login -> usage)
+
+---
+
 ### 🚀 Phase 14: App Launch Preparation [IN PROGRESS]
 
 **Goal:** Finalize distribution, assets, and production stability.
