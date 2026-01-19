@@ -46,6 +46,20 @@ interface ElectronAPI {
         getVersion: () => Promise<string>
         getName: () => Promise<string>
     }
+
+    logs?: {
+        add: (entry: unknown) => Promise<void>
+        getPath: () => Promise<string>
+        openFolder: () => Promise<void>
+    }
+
+    secure?: {
+        isAvailable: () => Promise<boolean>
+        set: (key: string, value: string, userId?: string) => Promise<{ success: boolean; encrypted?: boolean; error?: string }>
+        get: (key: string, userId?: string) => Promise<{ success: boolean; value?: string | null; encrypted?: boolean; error?: string }>
+        delete: (key: string, userId?: string) => Promise<{ success: boolean; error?: string }>
+        listKeys: (userId?: string) => Promise<{ success: boolean; keys?: string[]; error?: string }>
+    }
 }
 
 // Web Speech API types

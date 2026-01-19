@@ -89,41 +89,33 @@ const defaultSettings = {
     lastSyncTime: 0,
 }
 
-// Migrate OpenAI credentials from localStorage to electron-store
-async function migrateOpenAICredentials(): Promise<void> {
+// Migrate API credentials from localStorage/plaintext store to secure storage
+async function migrateToSecureStorage(): Promise<void> {
     try {
-        // Check if we need to migrate OpenAI credentials
-        const existingApiKey = await electron.store.get<string>('openai_api_key')
-        const existingBaseUrl = await electron.store.get<string>('openai_base_url')
-
-        if (!existingApiKey && !existingBaseUrl) {
-            // Try to migrate from localStorage
-            const localApiKey = localStorage.getItem('openai_api_key')
-            const localBaseUrl = localStorage.getItem('openai_base_url')
-
-            if (localApiKey) {
-                await electron.store.set('openai_api_key', localApiKey)
-                console.log('[Settings] Migrated OpenAI API key from localStorage to electron-store')
-            }
-
-            if (localBaseUrl) {
-                await electron.store.set('openai_base_url', localBaseUrl)
-                console.log('[Settings] Migrated OpenAI base URL from localStorage to electron-store')
-            }
-
-            // Clear localStorage after successful migration
-            if (localApiKey || localBaseUrl) {
-                localStorage.removeItem('openai_api_key')
-                localStorage.removeItem('openai_base_url')
-            }
+        // Try to migrate from localStorage (legacy)
+        const localApiKey = localStorage.getItem('openai_api_key')
+        if (localApiKey) {
+            await electron.secure.set('openai_api_key', localApiKey)
+            localStorage.removeItem('openai_api_key')
+            console.log('[Settings] Migrated OpenAI API key from localStorage to secure storage')
         }
+
+        // Migrate base URL (not sensitive, stays in regular store)
+        const localBaseUrl = localStorage.getItem('openai_base_url')
+        if (localBaseUrl) {
+            await electron.store.set('openai_base_url', localBaseUrl)
+            localStorage.removeItem('openai_base_url')
+        }
+
+        // Note: Old plaintext keys in electron-store will be blocked by store.ts
+        // They can be manually migrated if needed, but new keys will use secure storage
     } catch (error) {
-        console.error('[Settings] Error migrating OpenAI credentials:', error)
+        console.error('[Settings] Error migrating to secure storage:', error)
     }
 }
 
 // Run migration on module load
-migrateOpenAICredentials().catch(console.error)
+migrateToSecureStorage().catch(console.error)
 
 export const useSettingsStore = create<SettingsState>()(
     persist(
@@ -140,29 +132,30 @@ export const useSettingsStore = create<SettingsState>()(
             setOllamaBaseUrl: (url) => set({ ollamaBaseUrl: url }),
             setOpenaiApiKey: async (key) => {
                 set({ openaiApiKey: key })
-                const uid = get().activeUserId
-                const storeKey = uid ? `user_${uid}_openai_api_key` : 'openai_api_key'
-                await electron.store.set(storeKey, key || '')
+                const uid = get().activeUserId || undefined
+                // Store API key in encrypted secure storage
+                await electron.secure.set('openai_api_key', key || '', uid)
             },
             setOpenaiBaseUrl: async (url) => {
                 set({ openaiBaseUrl: url })
                 const uid = get().activeUserId
+                // Base URL is not sensitive, use regular store
                 const storeKey = uid ? `user_${uid}_openai_base_url` : 'openai_base_url'
                 await electron.store.set(storeKey, url)
             },
             setOpenaiModel: (model) => set({ openaiModel: model }),
             setGeminiApiKey: async (key) => {
                 set({ geminiApiKey: key })
-                const uid = get().activeUserId
-                const storeKey = uid ? `user_${uid}_gemini_api_key` : 'gemini_api_key'
-                await electron.store.set(storeKey, key || '')
+                const uid = get().activeUserId || undefined
+                // Store API key in encrypted secure storage
+                await electron.secure.set('gemini_api_key', key || '', uid)
             },
             setGeminiModel: (model) => set({ geminiModel: model }),
             setOpenrouterApiKey: async (key) => {
                 set({ openrouterApiKey: key })
-                const uid = get().activeUserId
-                const storeKey = uid ? `user_${uid}_openrouter_api_key` : 'openrouter_api_key'
-                await electron.store.set(storeKey, key || '')
+                const uid = get().activeUserId || undefined
+                // Store API key in encrypted secure storage
+                await electron.secure.set('openrouter_api_key', key || '', uid)
             },
             setOpenrouterModel: (model) => set({ openrouterModel: model }),
             setBrowserModel: (model) => set({ browserModel: model }),
@@ -182,19 +175,20 @@ export const useSettingsStore = create<SettingsState>()(
 
             loadUserSecrets: async (uid: string) => {
                 set({ activeUserId: uid })
-                // Load scoped secrets from disk
-                const openaiKey = await electron.store.get<string>(`user_${uid}_openai_api_key`)
+                // Load scoped secrets from encrypted secure storage
+                const openaiResult = await electron.secure.get('openai_api_key', uid)
+                const geminiResult = await electron.secure.get('gemini_api_key', uid)
+                const openrouterResult = await electron.secure.get('openrouter_api_key', uid)
+                // Base URL is not sensitive, use regular store
                 const openaiUrl = await electron.store.get<string>(`user_${uid}_openai_base_url`)
-                const geminiKey = await electron.store.get<string>(`user_${uid}_gemini_api_key`)
-                const openrouterKey = await electron.store.get<string>(`user_${uid}_openrouter_api_key`)
 
                 set({
-                    openaiApiKey: openaiKey || '',
+                    openaiApiKey: openaiResult.value || '',
                     openaiBaseUrl: openaiUrl || 'https://api.openai.com/v1',
-                    geminiApiKey: geminiKey || '',
-                    openrouterApiKey: openrouterKey || ''
+                    geminiApiKey: geminiResult.value || '',
+                    openrouterApiKey: openrouterResult.value || ''
                 })
-                console.log(`[Settings] Loaded secrets for user ${uid}`)
+                console.log(`[Settings] Loaded secrets for user ${uid} (encrypted: ${openaiResult.encrypted})`)
             },
 
             clearUserSecrets: () => {

@@ -664,9 +664,16 @@ graph LR
 
 To balance security and convenience, sensitive data like API keys follows a strict scoping strategy:
 
-1.  **Disk Storage**: Secrets are stored in `electron-store`, prefixed with the User ID (e.g., `user_123_openai_api_key`). This allows multiple users to share a device without leaking secrets.
-2.  **Memory State**: When a user logs in, their scoped secrets are loaded into the store state.
-3.  **Logout**: When a user logs out, the store state is **cleared** from memory, preventing unauthorized access. The encrypted file on disk remains for their return.
+1.  **Encrypted Storage**: API keys are stored using Electron's `safeStorage` API, which encrypts data using the OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service).
+2.  **User Scoping**: Secrets are prefixed with the User ID (e.g., `user_123_openai_api_key`). This allows multiple users to share a device without leaking secrets.
+3.  **Memory State**: When a user logs in, their scoped secrets are loaded into the store state (decrypted).
+4.  **Logout**: When a user logs out, the store state is **cleared** from memory, preventing unauthorized access. The encrypted file on disk remains for their return.
+5.  **Key Blocking**: The general `store:get/set` IPC handlers block access to sensitive keys (containing `api_key`, `secret`, `token`, `password`). These must go through `secure:get/set` handlers.
+
+**Files involved:**
+- [secure.ts](file:///Users/suhail/ai-worker-app/src/main/ipc/secure.ts) - Encryption handlers
+- [store.ts](file:///Users/suhail/ai-worker-app/src/main/ipc/store.ts) - Key blocking logic
+- [settingsStore.ts](file:///Users/suhail/ai-worker-app/src/renderer/src/stores/settingsStore.ts) - Uses secure storage
 
 ---
 
