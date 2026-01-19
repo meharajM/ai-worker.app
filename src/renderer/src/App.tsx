@@ -10,7 +10,6 @@ import { Header } from "./components/Header";
 import { useChatStore } from "./stores/chatStore";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useLogStore } from "./stores/logStore";
-import { useSpeechSynthesis } from "./hooks/useSpeechSynthesis";
 import { useAuthPersistence } from "./hooks/useAuthPersistence";
 import { useSettingsSync } from "./hooks/useSettingsSync";
 import {
@@ -29,16 +28,17 @@ import {
   autoConnectServers,
   initializeMcpServers,
 } from "./lib/mcp";
+import { voskService } from "./lib/vosk";
+import { isElectron } from "./lib/electron";
 
 function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
-  const { sessions, activeSessionId, addMessage, setProcessing, isProcessing } =
+  const { sessions, activeSessionId, addMessage, setProcessing, isProcessing, abortProcessing } =
     useChatStore();
   const { addLog } = useLogStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId);
   const messages = activeSession?.messages || [];
   const settings = useSettingsStore();
-  const { speak } = useSpeechSynthesis();
   const [llmStatus, setLlmStatus] = useState<{
     provider: string | null;
     available: boolean;
@@ -169,6 +169,10 @@ function App() {
     settings.openaiApiKey,
     settings.openaiBaseUrl,
     settings.openaiModel,
+    settings.geminiApiKey,
+    settings.geminiModel,
+    settings.openrouterApiKey,
+    settings.openrouterModel,
     currentView,
   ]);
 
@@ -235,6 +239,7 @@ function App() {
 
       setProcessing(true);
 
+      let iterationCount = 0;
       try {
         // Build message history for LLM
         const llmMessages: LLMMessage[] = messages.map((m) => ({
@@ -307,7 +312,7 @@ function App() {
 
         let currentMessages = [...llmMessages];
         let finalResponse: Awaited<ReturnType<typeof chat>> | null = null;
-        let iterationCount = 0;
+        iterationCount = 0;
         const maxIterations = 10; // Safety limit to prevent infinite loops
         const allToolCalls: Array<{
           id: string;
@@ -316,6 +321,18 @@ function App() {
         }> = [];
 
         while (iterationCount < maxIterations) {
+          // Check if aborted
+          const abortSignal = useChatStore.getState().getAbortSignal();
+          if (abortSignal?.aborted) {
+            console.log('[MCP App] Request aborted by user');
+            finalResponse = {
+              content: "Request cancelled.",
+              provider: "cancelled",
+              model: "unknown",
+            };
+            break;
+          }
+
           addLog({
             eventType: 'LLM_REQUEST',
             sessionId: activeSessionId || "default",
@@ -333,11 +350,13 @@ function App() {
           let response: Awaited<ReturnType<typeof chat>>;
           try {
             // Add timeout to prevent infinite hanging
+            const signal = useChatStore.getState().getAbortSignal();
             const chatPromise = chat(
               currentMessages,
               llmTools.length > 0 ? llmTools : undefined,
               settingsForLLM,
-              serverInfo.length > 0 ? serverInfo : undefined
+              serverInfo.length > 0 ? serverInfo : undefined,
+              signal || undefined
             );
 
             const timeoutPromise = new Promise<never>((_, reject) => {
@@ -347,10 +366,33 @@ function App() {
               );
             });
 
-            response = await Promise.race([chatPromise, timeoutPromise]);
+            // Abort promise that rejects when user clicks Stop
+            const abortPromise = new Promise<never>((_, reject) => {
+              const signal = useChatStore.getState().getAbortSignal();
+              if (signal) {
+                signal.addEventListener('abort', () => reject(new Error('Aborted by user')), { once: true });
+                if (signal.aborted) {
+                  reject(new Error('Aborted by user'));
+                }
+              }
+            });
+
+            response = await Promise.race([chatPromise, timeoutPromise, abortPromise]);
           } catch (error) {
             const errorMessage =
               error instanceof Error ? error.message : "Unknown error";
+
+            // Handle user abort gracefully
+            if (errorMessage === 'Aborted by user') {
+              console.log('[MCP App] Request aborted by user');
+              finalResponse = {
+                content: "Request cancelled.",
+                provider: "cancelled",
+                model: "unknown",
+              };
+              break;
+            }
+
             addLog({
               eventType: 'ERROR',
               sessionId: activeSessionId || "default",
@@ -620,21 +662,25 @@ function App() {
           available: true,
         });
       } catch (error) {
-        console.error("LLM error:", error);
+        console.error("LLM Error in handleSubmit:", error);
         const errorMessage =
           error instanceof Error ? error.message : "Unknown error";
+
+        console.log("[App] Error Details:", {
+          message: errorMessage,
+          stack: error instanceof Error ? error.stack : undefined,
+          iteration: iterationCount
+        });
 
         addMessage({
           role: "assistant",
           content: `Sorry, I couldn't process that. ${errorMessage}`,
         });
-
-        speak("Sorry, I couldn't process that request.");
       } finally {
         setProcessing(false);
       }
     },
-    [messages, addMessage, setProcessing, speak, settings]
+    [messages, addMessage, setProcessing, settings]
   );
 
   return (
@@ -651,7 +697,7 @@ function App() {
               <div className="flex-1 flex flex-col overflow-hidden min-w-0">
                 <ChatView />
                 <div className="p-4 flex-shrink-0 border-t border-white/5">
-                  <VoiceInput onSubmit={handleSubmit} disabled={isProcessing} />
+                  <VoiceInput onSubmit={handleSubmit} disabled={isProcessing} onAbort={abortProcessing} />
                 </div>
               </div>
             </div>

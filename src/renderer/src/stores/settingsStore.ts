@@ -14,6 +14,8 @@ interface SettingsState {
     ttsPitch: number
     ttsVoice: string | null
     speechLang: string
+    offlineSpeech: boolean
+    voskModel: string
 
     // LLM settings
     preferredProvider: LLMProviderType
@@ -42,15 +44,17 @@ interface SettingsState {
     setTtsPitch: (pitch: number) => void
     setTtsVoice: (voice: string | null) => void
     setSpeechLang: (lang: string) => void
+    setOfflineSpeech: (enabled: boolean) => void
+    setVoskModel: (model: string) => void
     setPreferredProvider: (provider: LLMProviderType) => void
     setOllamaModel: (model: string) => void
     setOllamaBaseUrl: (url: string) => void
-    setOpenaiApiKey: (key: string) => Promise<void>
-    setOpenaiBaseUrl: (url: string) => Promise<void>
+    setOpenaiApiKey: (key: string) => void
+    setOpenaiBaseUrl: (url: string) => void
     setOpenaiModel: (model: string) => void
-    setGeminiApiKey: (key: string) => Promise<void>
+    setGeminiApiKey: (key: string) => void
     setGeminiModel: (model: string) => void
-    setOpenrouterApiKey: (key: string) => Promise<void>
+    setOpenrouterApiKey: (key: string) => void
     setOpenrouterModel: (model: string) => void
     setBrowserModel: (model: string) => void
     setTheme: (theme: Theme) => void
@@ -67,11 +71,14 @@ interface SettingsState {
 }
 
 const defaultSettings = {
-    ttsEnabled: FEATURE_FLAGS.TTS_ENABLED,
-    ttsRate: VOICE_CONFIG.TTS_RATE,
-    ttsPitch: VOICE_CONFIG.TTS_PITCH,
+    ttsEnabled: true,
+    ttsRate: 1,
+    ttsPitch: 1,
     ttsVoice: null,
     speechLang: VOICE_CONFIG.SPEECH_LANG,
+    // Force offline speech in Electron, enforce online in browser
+    offlineSpeech: !!(window.electron),
+    voskModel: 'en-us',
     preferredProvider: 'auto' as LLMProviderType,
     ollamaModel: LLM_CONFIG.OLLAMA.DEFAULT_MODEL,
     ollamaBaseUrl: LLM_CONFIG.OLLAMA.BASE_URL,
@@ -122,11 +129,14 @@ export const useSettingsStore = create<SettingsState>()(
         (set, get) => ({
             ...defaultSettings,
 
+
             setTtsEnabled: (enabled) => set({ ttsEnabled: enabled }),
             setTtsRate: (rate) => set({ ttsRate: rate }),
             setTtsPitch: (pitch) => set({ ttsPitch: pitch }),
             setTtsVoice: (voice) => set({ ttsVoice: voice }),
             setSpeechLang: (lang) => set({ speechLang: lang }),
+            setOfflineSpeech: (enabled) => set({ offlineSpeech: enabled }),
+            setVoskModel: (model: string) => set({ voskModel: model }),
             setPreferredProvider: (provider) => set({ preferredProvider: provider }),
             setOllamaModel: (model) => set({ ollamaModel: model }),
             setOllamaBaseUrl: (url) => set({ ollamaBaseUrl: url }),
@@ -283,6 +293,16 @@ export const useSettingsStore = create<SettingsState>()(
                     await electron.store.delete(name)
                 },
             })),
+            // Force offlineSpeech to true in Electron after rehydration
+            onRehydrateStorage: () => (state) => {
+                if (state && window.electron) {
+                    // In Electron, always use offline speech (native Vosk)
+                    if (!state.offlineSpeech) {
+                        console.log('[Settings] Forcing offlineSpeech=true in Electron environment')
+                        state.setOfflineSpeech(true)
+                    }
+                }
+            },
         }
     )
 )

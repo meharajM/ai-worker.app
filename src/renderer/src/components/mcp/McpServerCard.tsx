@@ -45,11 +45,11 @@ export function McpServerCard({
 }: McpServerCardProps) {
   return (
     <div
-      className={`bg-[#1a1d23] border rounded-xl overflow-hidden shadow-sm hover:border-white/20 transition-colors ${
-        isEditing
+      data-testid={`mcp-server-card-${server.name.toLowerCase().replace(/\s+/g, '-')}`}
+      className={`bg-[#1a1d23] border rounded-xl overflow-hidden shadow-sm hover:border-white/20 transition-colors ${isEditing
           ? "border-[#4fd1c5]/50 ring-1 ring-[#4fd1c5]/20"
           : "border-white/10"
-      }`}
+        }`}
     >
       {/* Server Header */}
       <div className="flex items-center gap-4 p-4">
@@ -61,11 +61,10 @@ export function McpServerCard({
         </button>
 
         <div
-          className={`p-2.5 rounded-lg ${
-            server.connected
+          className={`p-2.5 rounded-lg ${server.connected
               ? "bg-[#4fd1c5]/10 text-[#4fd1c5]"
               : "bg-white/5 text-white/40"
-          }`}
+            }`}
         >
           {getServerIcon(server.type)}
         </div>
@@ -98,11 +97,10 @@ export function McpServerCard({
         <div className="flex items-center gap-2">
           <button
             onClick={onEdit}
-            className={`p-2 rounded-lg transition-all ${
-              isEditing
+            className={`p-2 rounded-lg transition-all ${isEditing
                 ? "bg-[#4fd1c5] text-white"
                 : "bg-white/5 text-white/40 hover:bg-white/10 hover:text-white"
-            }`}
+              }`}
             title="Edit configuration"
           >
             <Edit2 size={18} />
@@ -111,11 +109,10 @@ export function McpServerCard({
           <button
             onClick={onToggleConnection}
             disabled={isConnecting}
-            className={`p-2 rounded-lg transition-all ${
-              server.connected
+            className={`p-2 rounded-lg transition-all ${server.connected
                 ? "bg-red-500/10 text-red-400 hover:bg-red-500/20"
                 : "bg-green-500/10 text-green-400 hover:bg-green-500/20"
-            } disabled:opacity-50`}
+              } disabled:opacity-50`}
             title={server.connected ? "Disconnect" : "Connect"}
           >
             {isConnecting ? (
@@ -182,9 +179,8 @@ export function McpServerCard({
                 <div className="flex items-center gap-3">
                   <Zap
                     size={16}
-                    className={`${
-                      server.autoConnect ? "text-[#4fd1c5]" : "text-white/40"
-                    }`}
+                    className={`${server.autoConnect ? "text-[#4fd1c5]" : "text-white/40"
+                      }`}
                   />
                   <div>
                     <p className="text-white/90 text-sm font-medium">
@@ -199,16 +195,14 @@ export function McpServerCard({
                 </div>
                 <button
                   onClick={() => onToggleAutoConnect(!server.autoConnect)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    server.autoConnect ? "bg-[#4fd1c5]" : "bg-white/20"
-                  }`}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${server.autoConnect ? "bg-[#4fd1c5]" : "bg-white/20"
+                    }`}
                   role="switch"
                   aria-checked={server.autoConnect}
                 >
                   <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      server.autoConnect ? "translate-x-6" : "translate-x-1"
-                    }`}
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${server.autoConnect ? "translate-x-6" : "translate-x-1"
+                      }`}
                   />
                 </button>
               </div>
@@ -243,18 +237,18 @@ export function McpServerCard({
                   {(server.name.includes("sequential-thinking") ||
                     server.name.includes("sequential") ||
                     server.description.toLowerCase().includes("reasoning")) && (
-                    <div className="p-3 rounded-lg bg-[#4fd1c5]/10 border border-[#4fd1c5]/20">
-                      <p className="text-[#4fd1c5] text-xs font-medium mb-1">
-                        ℹ️ Reasoning Server
-                      </p>
-                      <p className="text-white/60 text-[11px] leading-relaxed">
-                        This server works differently - it provides reasoning
-                        capabilities rather than traditional tools. It will be
-                        used automatically by the AI for complex multi-step
-                        tasks.
-                      </p>
-                    </div>
-                  )}
+                      <div className="p-3 rounded-lg bg-[#4fd1c5]/10 border border-[#4fd1c5]/20">
+                        <p className="text-[#4fd1c5] text-xs font-medium mb-1">
+                          ℹ️ Reasoning Server
+                        </p>
+                        <p className="text-white/60 text-[11px] leading-relaxed">
+                          This server works differently - it provides reasoning
+                          capabilities rather than traditional tools. It will be
+                          used automatically by the AI for complex multi-step
+                          tasks.
+                        </p>
+                      </div>
+                    )}
                 </div>
               ) : (
                 <p className="text-white/30 text-sm italic">

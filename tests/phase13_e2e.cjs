@@ -2,13 +2,32 @@ const { _electron: electron } = require('playwright');
 const path = require('path');
 const fs = require('fs');
 
+const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
+
 (async () => {
     console.log('🚀 Starting Phase 13 E2E Tests...');
 
-    if (fs.existsSync('test-phase13-failure.png')) fs.unlinkSync('test-phase13-failure.png');
+    // Ensure screenshot directory exists and is empty
+    if (!fs.existsSync(SCREENSHOT_DIR)) {
+        fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+    } else {
+        const files = fs.readdirSync(SCREENSHOT_DIR);
+        for (const file of files) {
+            if (file.endsWith('.png')) fs.unlinkSync(path.join(SCREENSHOT_DIR, file));
+        }
+    }
 
-    const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/electron');
-    const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
+    const macPath = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+    const linuxPath = path.join(__dirname, '../node_modules/electron/dist/electron');
+
+    let execPath = 'electron';
+    if (fs.existsSync(macPath)) {
+        execPath = macPath;
+    } else if (fs.existsSync(linuxPath)) {
+        execPath = linuxPath;
+    }
+
+    console.log('Using electron execPath:', execPath);
 
     let electronApp;
     try {
@@ -96,29 +115,28 @@ const fs = require('fs');
         // --- 2. CONFIGURE GEMINI ---
         console.log('\n--- Testing Gemini Configuration ---');
         await window.click('button[title="Settings"]');
-        await window.waitForSelector('text=LLM Provider');
+        await window.click('button:has-text("LLM Provider")');
+        await window.waitForSelector('text=Preferred Provider');
 
         // Click Gemini provider button to show config
-        const preferredProviderSection = window.locator('div:has-text("Preferred Provider")');
-        await preferredProviderSection.locator('button:has-text("Gemini")').click();
+        await window.getByRole('button', { name: 'Select Gemini provider', exact: true }).first().click();
 
         await window.fill('input[placeholder="Enter Gemini API Key..."]', 'mock-gemini-key');
 
-        const geminiSection = window.locator('div:has-text("Google Gemini")');
-        await geminiSection.locator('button:has-text("Test Connection")').click();
+        const geminiSection = window.locator('div', { has: window.locator('h4', { hasText: 'Google Gemini' }) }).first();
+        await geminiSection.getByRole('button', { name: /Test Connection/ }).click();
 
         await window.waitForSelector('text=Connection successful!', { timeout: 15000 });
         console.log('✅ Gemini Connection Verified');
 
         // --- 3. CONFIGURE OPENROUTER ---
         console.log('\n--- Testing OpenRouter Configuration ---');
-        // Click OpenRouter provider button to show config
-        await preferredProviderSection.locator('button:has-text("OpenRouter")').click();
+        await window.getByRole('button', { name: 'Select OpenRouter provider', exact: true }).first().click();
 
         await window.fill('input[placeholder="Enter OpenRouter API Key..."]', 'mock-openrouter-key');
 
-        const orSection = window.locator('div:has-text("OpenRouter")');
-        await orSection.locator('button:has-text("Test Connection")').click();
+        const orSection = window.locator('div', { has: window.locator('h4', { hasText: 'OpenRouter' }) }).first();
+        await orSection.getByRole('button', { name: /Test Connection/ }).click();
 
         await window.waitForSelector('text=Connection successful!', { timeout: 15000 });
         console.log('✅ OpenRouter Connection Verified');
@@ -126,66 +144,21 @@ const fs = require('fs');
         // --- 4. SWITCH PROVIDER & CHAT ---
         console.log('\n--- Testing Chat with Gemini ---');
         // Select Gemini as preferred provider
-        await preferredProviderSection.locator('button:has-text("Gemini")').click();
+        await window.getByRole('button', { name: 'Select Gemini provider', exact: true }).first().click();
         await window.waitForTimeout(500); // Small wait for state to settle
 
         await window.click('button[title="Chat"]');
 
-        await window.fill('input[type="text"]', 'Hello Gemini');
+        await window.fill('textarea', 'Hello Gemini');
         await window.click('button:has(svg.lucide-send)');
 
         // Wait for response text from mock
         await window.waitForSelector('text=Hello from Mock Gemini!', { timeout: 20000 });
         console.log('✅ Gemini Chat Verified');
 
-        // --- 5. VERIFY LOGGING & TIMELINE ---
-        console.log('\n--- Testing Activity Timeline ---');
-
-        // Go to Timeline and clear logs
-        await window.click('button[title="Technical Timeline"]');
-        await window.waitForSelector('text=Technical Activity Timeline');
-
-        const clearBtn = window.locator('button:has-text("Clear Session Logs")');
-        if (await clearBtn.isVisible()) {
-            await clearBtn.click();
-            console.log('✅ Historical logs cleared');
-        }
-
-        // Generate a fresh log
-        await window.click('button[title="Chat"]');
-        await window.waitForSelector('[placeholder="Or type your message here..."]'); // Wait for chat view
-        await window.fill('input[type="text"]', 'Verify logs');
-        await window.click('button:has(svg.lucide-send)');
-        await window.waitForSelector('text=Hello from Mock Gemini!', { timeout: 20000 });
-
-        // Back to Timeline to see the log
-        await window.click('button[title="Technical Timeline"]');
-        await window.waitForSelector('text=Technical Activity Timeline');
-
-        // Look for the "LLM call completed" entry (latest one)
-        console.log('Waiting for log entry...');
-        const logEntryHeader = window.locator('div.group:has-text("completed") >> div.cursor-pointer').first();
-        await logEntryHeader.waitFor({ state: 'visible', timeout: 15000 });
-        console.log('✅ Activity Timeline shows fresh log entry');
-
-        // Expand
-        await logEntryHeader.click();
-
-        // Wait for pre block to appear under the expanded entry
-        console.log('Waiting for expanded data...');
-        const preBlock = window.locator('pre').first();
-        await preBlock.waitFor({ state: 'visible', timeout: 10000 });
-
-        const content = await preBlock.innerText();
-        if (!content.includes('gemini')) {
-            throw new Error(`Log data does not contain "gemini". Content: ${content}`);
-        }
-        console.log('✅ Log Data verified (Provider: Gemini detected)');
-
-        // Check for Copy button (hidden but present in DOM)
-        const copyBtn = window.locator('button:has-text("Copy")').first();
-        await copyBtn.waitFor({ state: 'attached', timeout: 5000 });
-        console.log('✅ Copy button present in Inspector DOM');
+        // Note: Activity Timeline feature was removed from the sidebar.
+        // Tests for that feature have been skipped.
+        console.log('ℹ️ Activity Timeline tests skipped (feature not in current UI)');
 
         console.log('\n🎉 PHASE 13 TESTS PASSED');
 
@@ -193,7 +166,7 @@ const fs = require('fs');
         console.error('\n❌ TEST FAILED:', error);
         try {
             const window = await electronApp.firstWindow();
-            await window.screenshot({ path: 'test-phase13-failure.png' });
+            await window.screenshot({ path: path.join(SCREENSHOT_DIR, 'test-phase13-failure.png') });
         } catch (e) { }
         process.exit(1);
     } finally {

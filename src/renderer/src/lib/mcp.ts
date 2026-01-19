@@ -32,23 +32,23 @@ const DEFAULT_MCP_SERVERS: Omit<
   MCPServer,
   "id" | "connected" | "tools" | "autoConnect"
 >[] = [
-  {
-    name: "playwright",
-    description:
-      "Playwright MCP Server - Browser automation and web interaction tools",
-    type: "stdio",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-playwright"],
-  },
-  {
-    name: "sequential-thinking",
-    description:
-      "Sequential Thinking MCP Server - Enables step-by-step reasoning for complex tasks",
-    type: "stdio",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
-  },
-];
+    {
+      name: "playwright",
+      description:
+        "Playwright MCP Server - Browser automation and web interaction tools",
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@playwright/mcp"],
+    },
+    {
+      name: "sequential-thinking",
+      description:
+        "Sequential Thinking MCP Server - Enables step-by-step reasoning for complex tasks",
+      type: "stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+    },
+  ];
 
 // Store for connected servers
 let connectedServers: Map<string, MCPServer> = new Map();

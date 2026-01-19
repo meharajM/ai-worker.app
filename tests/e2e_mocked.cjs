@@ -2,14 +2,31 @@ const { _electron: electron } = require('playwright');
 const path = require('path');
 const fs = require('fs');
 
+const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
+
 (async () => {
     console.log('🚀 Starting E2E Mocked Integration Test...');
 
-    if (fs.existsSync('test-mock-failure.png')) fs.unlinkSync('test-mock-failure.png');
+    // Ensure screenshot directory exists and is empty
+    if (!fs.existsSync(SCREENSHOT_DIR)) {
+        fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+    } else {
+        const files = fs.readdirSync(SCREENSHOT_DIR);
+        for (const file of files) {
+            if (file.endsWith('.png')) fs.unlinkSync(path.join(SCREENSHOT_DIR, file));
+        }
+    }
 
     // Find the installed electron binary
-    const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/electron');
-    const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
+    const macPath = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+    const linuxPath = path.join(__dirname, '../node_modules/electron/dist/electron');
+
+    let execPath = 'electron';
+    if (fs.existsSync(macPath)) {
+        execPath = macPath;
+    } else if (fs.existsSync(linuxPath)) {
+        execPath = linuxPath;
+    }
 
     console.log('Using electron execPath:', execPath);
     console.log('exists execPath?', fs.existsSync(execPath));
@@ -150,21 +167,36 @@ const fs = require('fs');
         await window.fill('input[placeholder="npx, python, node..."]', 'node');
         await window.fill('input[placeholder="--args..."]', mockScriptPath);
 
-        await window.click('button:has-text("Connect")');
+        // Submit form
+        console.log('  - Submitting MCP form...');
+        await window.click('button:has-text("Add Connection")');
+
+        // Wait for card to appear
+        console.log('  - Waiting for MockServer card...');
+        // Match the card by its heading text precisely and use .first() to handle duplicated cards from previous runs
+        const mockServerCard = window.locator('div', { has: window.locator('h3', { hasText: /^MockServer$/ }) }).first();
+        await mockServerCard.waitFor({ state: 'visible', timeout: 10000 });
+
+        // Click Connect on the card
+        console.log('  - Clicking Connect on card...');
+        // Use .first() to handle cases where multiple buttons might be found in a duplicated card
+        await mockServerCard.getByRole('button', { name: 'Connect' }).first().click();
 
         // Verify Connection and Tools
-        await window.waitForSelector('text=MockServer', { timeout: 10000 });
-        await window.waitForSelector('text=Connected', { timeout: 10000 });
+        // Use "Active" which is the status text for a connected server, 
+        // "Connected" matches the "0 connected" summary text at the top!
+        console.log('  - Waiting for "Active" status...');
+        await mockServerCard.locator('text=Active').waitFor({ timeout: 15000 });
 
         // Debug tool count
-        const serverCard = window.locator('div:has-text("MockServer")').first();
-        console.log('Server Card Text:', await serverCard.textContent());
+        console.log('Server Card Text:', await mockServerCard.textContent());
 
-        // Wait for tool count to update. It might say "(1 tool)"
-        // Or "1 tools" depending on pluralization logic. (Logic: 1 tool, N tools)
-        // If it fails here, we know from logs what it was.
+        // Expand to see tools
+        await mockServerCard.locator('button').filter({ has: window.locator('svg.lucide-chevron-right, svg.lucide-chevron-down') }).first().click();
+
+        // Wait for tool count to update. It says "Available Tools (1)"
         try {
-            await window.waitForSelector('text=1 tool', { timeout: 5000 });
+            await window.waitForSelector('text=Available Tools (1)', { timeout: 5000 });
             console.log('✅ Mock MCP Server Connected (1 tool loaded)');
         } catch (e) {
             console.warn('⚠️ Tool count not 1. Proceeding to see what happens...');
@@ -174,7 +206,9 @@ const fs = require('fs');
         await window.click('button[title="Chat"]');
 
         // Send Message
-        await window.fill('input[type="text"]', 'Please use mock_echo');
+        // Selector was input[type="text"], but it is actually a textarea for auto-expanding input
+        const chatInput = window.locator('textarea');
+        await chatInput.fill('Please use mock_echo');
         await window.click('button:has(svg.lucide-send)');
 
         // Check if we got a response
@@ -203,7 +237,7 @@ const fs = require('fs');
         console.error('\n❌ TEST FAILED:', error);
         try {
             const window = await electronApp.firstWindow();
-            await window.screenshot({ path: 'test-mock-failure.png' });
+            await window.screenshot({ path: path.join(SCREENSHOT_DIR, 'test-mock-failure.png') });
         } catch (e) { }
         process.exit(1);
     } finally {

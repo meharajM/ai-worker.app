@@ -1,15 +1,23 @@
-import React, { useState, useCallback, useEffect } from 'react'
-import { Mic, MicOff, Send, Volume2, VolumeX } from 'lucide-react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
+import { Mic, MicOff, Send, X, Maximize2, Minimize2, Square } from 'lucide-react'
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
-import { useSpeechSynthesis } from '../hooks/useSpeechSynthesis'
+import { VoiceVisualizer } from './VoiceVisualizer'
+import { useLogStore } from '../stores/logStore'
+import { useChatStore } from '../stores/chatStore'
 
 interface VoiceInputProps {
     onSubmit: (message: string) => void
     disabled?: boolean
+    onAbort?: () => void
 }
 
-export function VoiceInput({ onSubmit, disabled = false }: VoiceInputProps) {
+export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputProps) {
     const [textInput, setTextInput] = useState('')
+    const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const { addLog } = useLogStore()
+    const { activeSessionId } = useChatStore()
+
+    // Use hook's setText to update transcript manually
     const {
         isListening,
         transcript,
@@ -18,31 +26,87 @@ export function VoiceInput({ onSubmit, disabled = false }: VoiceInputProps) {
         startListening,
         stopListening,
         resetTranscript,
+        setText, // New function from hook
+        isInitializing,
+        audioLevel,
+        isFirstSetup,
+        setupProgress,
+        notification
     } = useSpeechRecognition()
 
-    const {
-        isSpeaking,
-        isMuted,
-        isSupported: ttsSupported,
-        toggleMute,
-    } = useSpeechSynthesis()
+    // Sync input with transcript + interim
+    useEffect(() => {
+        const fullText = (transcript + (interimTranscript ? ' ' + interimTranscript : '')).trim()
+        if (fullText !== textInput) {
+            // Only update if different to avoid cursor jumping (though React handles this mostly ok)
+            // But actually, we SHOULD allow the hook to drive the input value IF we want append to work nicely.
+            // Strategy: We rely on `transcript` being the source of truth.
+        }
+    }, [transcript, interimTranscript])
+
+    // Handle Manual Input
+    // When user types, we update local state AND the hook's transcript state
+    const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const newValue = e.target.value
+        setTextInput(newValue)
+        // Sync back to hook so if we stop/start, we resume from here
+        // Note: interimTranscript is usually cleared on stop, but we just update 'transcript'
+        setText(newValue)
+    }
+
+    // Effect to drive local state from hook (for speech updates)
+    useEffect(() => {
+        // Construct display text: finalized part + ephemeral part
+        // We only overwrite input if the speech engine has something to say
+        // OR if it's the initial load.
+        // A tricky case: Use types "A", speech says "B" -> "AB"?
+        // Current logic: Textarea value = transcript + interim.
+        // If user edits, we update 'transcript'.
+
+        const speechText = (transcript + (interimTranscript ? ' ' + interimTranscript : '')) //.trim() - don't trim or we lose trailing spaces user might type?
+
+        // If the hook state changed and it's different from local, sync it.
+        // This allows speech to update the box.
+        // And since handleInputChange updates the hook, it cycles back but value is same, so no re-render loop.
+        if (speechText !== textInput && (isListening || speechText.length > textInput.length)) {
+            setTextInput(speechText)
+        }
+    }, [transcript, interimTranscript, isListening])
+
+    // Auto-resize effect
+    useEffect(() => {
+        if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto'
+            textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px'
+        }
+    }, [textInput])
+
 
     // Handle mic button click (push-to-talk)
     const handleMicClick = useCallback(() => {
         if (disabled) return
 
-        if (isListening) {
+        if (isListening || isInitializing) {
+            addLog({
+                eventType: 'STATE_CHANGE',
+                sessionId: activeSessionId || 'unknown',
+                component: 'VoiceInput',
+                details: { metadata: { action: 'mic_toggle', intent: 'stop' } }
+            })
             stopListening()
-            // Submit the transcript when stopping
-            const finalTranscript = transcript.trim()
-            if (finalTranscript) {
-                onSubmit(finalTranscript)
-                resetTranscript()
-            }
         } else {
+            addLog({
+                eventType: 'STATE_CHANGE',
+                sessionId: activeSessionId || 'unknown',
+                component: 'VoiceInput',
+                details: { metadata: { action: 'mic_toggle', intent: 'start' } }
+            })
+            // When starting, we ensure the hook has our current text so we append to it
+            // (handled by handleInputChange, but good to ensure)
+            if (transcript !== textInput) setText(textInput)
             startListening()
         }
-    }, [isListening, disabled, transcript, startListening, stopListening, onSubmit, resetTranscript])
+    }, [isListening, isInitializing, disabled, startListening, stopListening, textInput, transcript, setText, addLog, activeSessionId])
 
     // Handle text input submission
     const handleTextSubmit = useCallback(() => {
@@ -50,10 +114,10 @@ export function VoiceInput({ onSubmit, disabled = false }: VoiceInputProps) {
         if (message && !disabled) {
             onSubmit(message)
             setTextInput('')
+            resetTranscript()
         }
-    }, [textInput, disabled, onSubmit])
+    }, [textInput, disabled, onSubmit, resetTranscript])
 
-    // Handle Enter key in text input
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()
@@ -61,109 +125,71 @@ export function VoiceInput({ onSubmit, disabled = false }: VoiceInputProps) {
         }
     }, [handleTextSubmit])
 
-    // Display text (transcript or interim)
-    const displayText = isListening
-        ? (transcript + ' ' + interimTranscript).trim() || 'Listening...'
-        : transcript || ''
-
-    // Status text
-    const getStatusText = () => {
-        if (disabled) return 'Processing...'
-        if (isListening) return 'LISTENING'
-        if (isSpeaking) return 'SPEAKING'
-        return 'READY'
-    }
-
-    const getHelperText = () => {
-        if (disabled) return 'Please wait...'
-        if (isListening) return 'Click mic to stop and send'
-        if (!sttSupported) return 'Voice not supported - use text input'
-        return 'Click mic to speak or type below'
-    }
-
     return (
-        <div className="bg-[#1a1d23]/80 backdrop-blur-md border border-white/10 rounded-2xl p-4 space-y-4">
-            {/* Voice Input Area */}
-            <div className="flex items-center gap-4">
-                {/* Mic Button */}
-                <button
-                    onClick={handleMicClick}
-                    disabled={disabled || !sttSupported}
-                    className={`
-            w-14 h-14 rounded-xl flex items-center justify-center 
-            transition-all active:scale-95 shadow-lg group
-            ${isListening
-                            ? 'bg-red-500 shadow-red-500/30 animate-pulse'
-                            : 'bg-[#ee5d5d] shadow-[#ee5d5d]/20 hover:bg-[#ff6e6e]'
-                        }
-            ${(disabled || !sttSupported) ? 'opacity-50 cursor-not-allowed' : ''}
-          `}
-                >
-                    {isListening ? (
-                        <MicOff size={28} className="text-white" />
-                    ) : (
-                        <Mic size={28} className="text-white group-hover:scale-110 transition-transform" />
-                    )}
-                </button>
+        <div className="bg-[#1a1d23]/80 backdrop-blur-md border border-white/10 rounded-2xl p-4 transition-all duration-300 relative">
 
-                {/* Status & Transcript */}
-                <div className="flex-1 min-w-0">
-                    <div className={`text-[10px] uppercase tracking-widest font-bold mb-1 ${isListening ? 'text-red-500' : 'text-[#ee5d5d]'
-                        }`}>
-                        {getStatusText()}
-                    </div>
-                    <div className="text-lg text-white/80 font-medium truncate">
-                        {displayText || getHelperText()}
-                    </div>
+            {/* Notification Toast (e.g. Download Complete) */}
+            {notification && (
+                <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-emerald-500/90 text-white text-xs px-3 py-1.5 rounded-full shadow-lg whitespace-nowrap animate-in fade-in slide-in-from-bottom-2 duration-300 pointer-events-none border border-emerald-400/50 backdrop-blur-sm">
+                    {notification}
                 </div>
+            )}
 
-                {/* Mute Toggle */}
-                {ttsSupported && (
-                    <button
-                        onClick={toggleMute}
-                        className={`
-              p-3 rounded-lg transition-colors
-              ${isMuted
-                                ? 'bg-white/5 text-white/40'
-                                : 'bg-white/10 text-white/80 hover:bg-white/15'
-                            }
-            `}
-                        title={isMuted ? 'Unmute voice responses' : 'Mute voice responses'}
-                    >
-                        {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+            <div className="flex items-end gap-3">
+                {/* Left Button: Voice Controls ONLY */}
+                {isFirstSetup ? (
+                    <div className="p-2 flex items-center justify-center h-[44px]" title="Downloading Speech Model...">
+                        <div className="relative w-8 h-8">
+                            <svg className="w-full h-full transform -rotate-90">
+                                <circle cx="16" cy="16" r="14" stroke="currentColor" strokeWidth="3" fill="transparent" className="text-white/10" />
+                                <circle cx="16" cy="16" r="14" stroke="currentColor" strokeWidth="3" fill="transparent" className="text-emerald-500 transition-all duration-300 ease-out" strokeDasharray={88} strokeDashoffset={88 - (88 * (setupProgress || 0) / 100)} strokeLinecap="round" />
+                            </svg>
+                            <div className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-emerald-400">{Math.round(setupProgress || 0)}%</div>
+                        </div>
+                    </div>
+                ) : isListening || isInitializing ? (
+                    <button onClick={handleMicClick} className="p-3 mb-[1px] rounded-xl flex items-center justify-center transition-all active:scale-95 bg-red-500/20 hover:bg-red-500/30 text-red-400 animate-pulse ring-1 ring-red-500/50 h-[44px] w-[44px]" title="Stop Recording">
+                        <Square size={16} className="fill-current" />
+                    </button>
+                ) : (
+                    <button onClick={handleMicClick} disabled={disabled || !sttSupported} className={`p-3 mb-[1px] rounded-xl flex items-center justify-center transition-all active:scale-95 shadow-lg group bg-white/5 hover:bg-white/10 text-white/80 hover:text-white h-[44px] w-[44px] ${(disabled || !sttSupported) ? 'opacity-50 cursor-not-allowed' : ''}`} title="Start Voice Mode">
+                        <Mic size={20} />
                     </button>
                 )}
-            </div>
 
-            {/* Text Input Area */}
-            <div className="flex items-center gap-2">
-                <input
-                    type="text"
-                    value={textInput}
-                    onChange={(e) => setTextInput(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    disabled={disabled}
-                    placeholder="Or type your message here..."
-                    className="
-            flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3
-            text-white placeholder-white/40 outline-none
-            focus:border-white/20 focus:bg-white/10 transition-all
-            disabled:opacity-50 disabled:cursor-not-allowed
-          "
-                />
-                <button
-                    onClick={handleTextSubmit}
-                    disabled={disabled || !textInput.trim()}
-                    className={`
-            p-3 rounded-xl transition-all
-            ${textInput.trim() && !disabled
-                            ? 'bg-[#4fd1c5] text-white hover:bg-[#5fe0d4] shadow-lg shadow-[#4fd1c5]/20'
-                            : 'bg-white/5 text-white/30 cursor-not-allowed'
-                        }
-          `}
-                >
-                    <Send size={20} />
-                </button>
+                {/* Text Input - Auto-expanding Textarea */}
+                <div className="flex-1 relative min-h-[44px] flex items-center">
+                    <textarea
+                        ref={textareaRef}
+                        value={textInput}
+                        onChange={handleInputChange}
+                        onKeyDown={handleKeyDown}
+                        disabled={disabled && !onAbort}
+                        placeholder={isListening ? "Listening..." : isFirstSetup ? "Downloading model..." : "Message... (Shift+Enter for new line)"}
+                        rows={1}
+                        style={{
+                            resize: 'none',
+                            minHeight: '24px',
+                            maxHeight: '200px'
+                        }}
+                        className={`
+                            w-full bg-transparent border-none outline-none
+                            text-base py-2 transition-colors scrollbar-hide
+                            ${isListening ? 'text-white/90 placeholder-white/50' : 'text-white placeholder-white/30'}
+                        `}
+                    />
+                </div>
+
+                {/* Right Button: Send OR Stop Generation */}
+                {disabled && onAbort ? (
+                    <button onClick={onAbort} className="p-2 mb-[1px] rounded-lg transition-all bg-red-500/20 hover:bg-red-500/30 text-red-400 h-[44px] w-[36px] flex items-center justify-center" title="Stop Generation">
+                        <Square size={18} className="fill-current" />
+                    </button>
+                ) : (
+                    <button onClick={handleTextSubmit} disabled={disabled || !textInput.trim()} className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${textInput.trim() && !disabled ? 'bg-white text-black hover:bg-gray-200' : 'bg-transparent text-white/20 cursor-not-allowed'}`}>
+                        <Send size={18} />
+                    </button>
+                )}
             </div>
         </div>
     )

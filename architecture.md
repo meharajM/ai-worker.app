@@ -65,6 +65,7 @@ graph LR
         App[app.ts<br/>Application Lifecycle]
         IPC[IPC Handlers<br/>Modular Handlers]
         MCP[MCP Client Manager<br/>@modelcontextprotocol/sdk]
+        Speech[Speech Services<br/>ModelManager & ModelServer]
         Env[Environment Utils<br/>fix-path, ESM shims]
     end
 
@@ -73,6 +74,7 @@ graph LR
         MCPHandlers[mcp.ts<br/>MCP Operations]
         LLMHandlers[llm.ts<br/>LLM Placeholder]
         StoreHandlers[store.ts<br/>Storage Operations]
+        SpeechHandlers[speech.ts<br/>Speech Operations]
     end
 
     App --> IPC
@@ -80,7 +82,9 @@ graph LR
     IPC --> MCPHandlers
     IPC --> LLMHandlers
     IPC --> StoreHandlers
+    IPC --> SpeechHandlers
     MCPHandlers --> MCP
+    SpeechHandlers --> Speech
     App --> Env
 ```
 
@@ -89,6 +93,7 @@ graph LR
 - Window management and lifecycle
 - IPC handler registration
 - MCP server connections (Stdio/SSE)
+- Speech Model Management (Download/Serving)
 - System-level operations (file system, shell)
 - Environment setup (PATH fixing, ESM compatibility)
 
@@ -109,6 +114,7 @@ graph TB
         StoreAPI[Storage Operations]
         ShellAPI[Shell Operations]
         AppAPI[App Info]
+        SpeechAPI[Speech Operations]
     end
 
     ContextBridge --> MCPAPI
@@ -116,6 +122,7 @@ graph TB
     ContextBridge --> StoreAPI
     ContextBridge --> ShellAPI
     ContextBridge --> AppAPI
+    ContextBridge --> SpeechAPI
     IPCInvoke --> ContextBridge
 ```
 
@@ -136,6 +143,7 @@ graph TB
         Components[UI Components]
         Stores[Zustand Stores]
         Lib[Library Modules]
+        Hooks[Custom Hooks]
     end
 
     subgraph "Components"
@@ -158,12 +166,21 @@ graph TB
         WebLLMLib[webllm.ts]
         MCPLib[mcp.ts]
         ElectronLib[electron.ts]
+        VoskLib[vosk.ts]
         Constants[constants.ts]
+    end
+
+    subgraph "Hooks"
+         UseSpeech[useSpeechRecognition]
+         UseVisualizer[useAudioVisualizer]
     end
 
     ReactApp --> Components
     ReactApp --> Stores
     Components --> Lib
+    Components --> Hooks
+    Hooks --> VoskLib
+    Hooks --> UseVisualizer
     Stores --> Lib
     Lib --> ElectronLib
     
@@ -367,6 +384,9 @@ graph TB
 | `electron.store.set()`          | `store:set`           | `store.ts`     | Set stored value       |
 | `electron.shell.openExternal()` | `shell:open-external` | `app.ts`       | Open external URL      |
 | `electron.app.getVersion()`     | `app:get-version`     | `app.ts`       | Get app version        |
+| `electron.speech.checkSupport()`| `speech:check-support`| `speech.ts`    | Check/Verify Model     |
+| `electron.speech.downloadModel()`| `speech:download-model`| `speech.ts`  | Download logic         |
+| `electron.speech.getModelPath()`| `speech:get-model-path`| `speech.ts`   | Get model server URL   |
 
 ---
 
@@ -1129,3 +1149,38 @@ ai-worker-app/
 - Implemented automatic server initialization on first run
 - Added form pre-filling with Sequential Thinking defaults
 - Enhanced server management with automatic default restoration
+
+---
+
+## Known Challenges & Solutions
+
+### Speech Recognition (Vosk Integration)
+
+During the implementation of offline speech recognition using `vosk-browser`, several critical issues were encountered and resolved. These are documented here for future reference.
+
+#### 1. Silent Transcription (Web Audio API)
+- **Issue**: The `onaudioprocess` event (or `AudioWorklet`) would not fire, causing the speech recognizer to receive no data, even though the microphone stream was active.
+- **Root Cause**: Modern browsers (and Electron) optimize resources by pausing the audio clock if the audio graph does not eventually connect to the `AudioContext.destination` (speakers).
+- **Solution**: We created a "mute" connection to fool the browser. The processing graph is connected to a `GainNode` with `gain.value = 0`, which is then connected to `destination`. This forces the audio engine to run without producing feedback loop noise.
+  ```typescript
+  // Trick browser into running the audio clock
+  const muteNode = audioContext.createGain()
+  muteNode.gain.value = 0
+  processor.connect(muteNode)
+  muteNode.connect(audioContext.destination)
+  ```
+
+#### 2. Model Archive Format
+- **Issue**: `vosk-browser` (WASM) failed to load the model with "Unrecognized archive format" when pointed to an extracted directory.
+- **Root Cause**: The WASM version of Vosk specifically utilizes a virtual file system and prefers loading from a single `.zip` file URL to avoid hundreds of individual HTTP requests for model files.
+- **Solution**: Updated `ModelServer` to serve the original `.zip` file with `application/zip` content type, and updated `ModelManager` to preserve the downloaded `.zip` file instead of deleting it after extraction.
+
+#### 3. URL Construction
+- **Issue**: 404 Errors when fetching model files.
+- **Root Cause**: A typo in the URL construction (`${baseUrl} / ${modelName}.zip`) introduced spaces into the URL path, which the server naturally treated as part of the filename.
+- **Solution**: Removed spaces to ensure valid URL paths (`${baseUrl}/${modelName}.zip`).
+
+#### 4. Extraction Commands
+- **Issue**: Model extraction failed initially.
+- **Root Cause**: A typo in the unzip command flags (`unzip - o` instead of `unzip -o`).
+- **Solution**: corrected the command execution string.

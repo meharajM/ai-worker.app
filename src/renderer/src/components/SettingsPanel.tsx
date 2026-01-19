@@ -18,12 +18,13 @@ import {
     Trash2,
 
     FolderOpen,
-    FileText
+    FileText,
+    Mic
 } from 'lucide-react'
 import { useLogStore } from '../stores/logStore'
 import { useSettingsStore, Theme, LLMProviderType } from '../stores/settingsStore'
 import { useAuthStore } from '../stores/authStore'
-import { FEATURE_FLAGS, APP_INFO } from '../lib/constants'
+import { FEATURE_FLAGS, APP_INFO, VOICE_CONFIG } from '../lib/constants'
 import { isDevelopmentMode } from '../lib/featureFlags'
 import { EnhancedFeatureFlagsPanel } from './EnhancedFeatureFlagsPanel'
 import { AccountSettings } from './settings/AccountSettings'
@@ -249,7 +250,7 @@ export function SettingsPanel() {
     const sections: { id: SettingsSection; label: string; icon: React.ReactNode }[] = [
         ...(FEATURE_FLAGS.AUTH_ENABLED ? [{ id: 'account' as const, label: 'Account', icon: <User size={20} /> }] : []),
         { id: 'llm', label: 'LLM Provider', icon: <Cpu size={20} /> },
-        { id: 'voice', label: 'Voice', icon: <Volume2 size={20} /> },
+        { id: 'voice', label: 'Speech Recognition', icon: <Mic size={20} /> },
         { id: 'appearance', label: 'Appearance', icon: <Palette size={20} /> },
         { id: 'logs', label: 'Auditing', icon: <FileText size={20} /> },
         ...(isDevelopmentMode() ? [{ id: 'flags' as const, label: 'Feature Flags', icon: <Flag size={20} /> }] : []),
@@ -1128,62 +1129,45 @@ export function SettingsPanel() {
                 {/* Voice Section */}
                 {activeSection === 'voice' && (
                     <div>
-                        <h3 className="text-xl font-bold mb-6">Voice Settings</h3>
+                        <h3 className="text-xl font-bold mb-6">Speech Recognition</h3>
 
-                        <div className="space-y-4">
-                            {/* TTS Toggle */}
-                            <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        {settings.ttsEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}
-                                        <div>
-                                            <p className="font-medium">Text-to-Speech</p>
-                                            <p className="text-xs text-white/40">Read AI responses aloud</p>
-                                        </div>
-                                    </div>
-                                    <button
-                                        onClick={() => settings.setTtsEnabled(!settings.ttsEnabled)}
-                                        aria-label={settings.ttsEnabled ? 'Disable Text-to-Speech' : 'Enable Text-to-Speech'}
-                                        className={`w-12 h-6 rounded-full transition-colors ${settings.ttsEnabled ? 'bg-[#4fd1c5]' : 'bg-white/20'
-                                            }`}
-                                    >
-                                        <div className={`w-5 h-5 bg-white rounded-full transition-transform ${settings.ttsEnabled ? 'translate-x-6' : 'translate-x-0.5'
-                                            }`} />
-                                    </button>
+                        {/* Speech Recognition Settings */}
+                        <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
+                            <div className="flex items-center justify-between mb-4">
+                                <div>
+                                    <p className="font-medium">Speech Recognition Engine</p>
+                                    <p className="text-xs text-white/40">
+                                        Using Native Vosk (Offline/Local) - WebAssembly
+                                    </p>
+                                </div>
+                                <div className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                    Offline Mode
                                 </div>
                             </div>
 
-                            {/* Speech Rate */}
-                            <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
-                                <label className="block text-sm mb-3" htmlFor="tts-rate">Speech Rate: {settings.ttsRate.toFixed(1)}x</label>
-                                <input
-                                    id="tts-rate"
-                                    type="range"
-                                    min="0.5"
-                                    max="2"
-                                    step="0.1"
-                                    value={settings.ttsRate}
-                                    onChange={(e) => settings.setTtsRate(parseFloat(e.target.value))}
-                                    aria-label="Speech Rate"
-                                    className="w-full"
-                                />
+                            <div className="mb-4">
+                                <label className="block text-sm text-white/70 mb-2">Language Model</label>
+                                <select
+                                    value={settings.voskModel}
+                                    onChange={(e) => settings.setVoskModel(e.target.value)}
+                                    className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-white/20 focus:outline-none appearance-none"
+                                >
+                                    <option value="auto">Auto-Detect (System Default)</option>
+                                    <option disabled>──────────</option>
+                                    {VOICE_CONFIG.VOSK_MODELS.map((model) => (
+                                        <option key={model.id} value={model.id}>
+                                            {model.name}
+                                        </option>
+                                    ))}
+                                </select>
+                                <p className="text-xs text-white/30 mt-2">
+                                    Selected: {settings.voskModel === 'auto' ? 'Auto (based on system locale)' : VOICE_CONFIG.VOSK_MODELS.find(m => m.id === settings.voskModel)?.name || settings.voskModel}
+                                </p>
                             </div>
 
-                            {/* Speech Pitch */}
-                            <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
-                                <label className="block text-sm mb-3" htmlFor="tts-pitch">Speech Pitch: {settings.ttsPitch.toFixed(1)}</label>
-                                <input
-                                    id="tts-pitch"
-                                    type="range"
-                                    min="0.5"
-                                    max="2"
-                                    step="0.1"
-                                    value={settings.ttsPitch}
-                                    onChange={(e) => settings.setTtsPitch(parseFloat(e.target.value))}
-                                    aria-label="Speech Pitch"
-                                    className="w-full"
-                                />
-                            </div>
+                            <p className="text-xs text-white/30">
+                                Runs locally using Vosk engine. Changing the model will trigger a new download (~50MB) on next use.
+                            </p>
                         </div>
                     </div>
                 )}

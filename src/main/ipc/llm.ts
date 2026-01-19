@@ -42,10 +42,34 @@ export function registerLlmHandlers(): void {
 
             return { success: true, models }
         } catch (error) {
-            return { 
-                success: false, 
+            return {
+                success: false,
                 error: error instanceof Error ? error.message : 'Unknown error',
-                models: [] 
+                models: []
+            }
+        }
+    })
+
+    // Fetch Ollama models from main process (bypasses potential CORS issues)
+    ipcMain.handle('llm:fetch-ollama-models', async (_event, baseUrl: string) => {
+        try {
+            const response = await fetch(`${baseUrl}/api/tags`, {
+                method: 'GET',
+            })
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+            }
+
+            const data = await response.json()
+            const models = (data.models || []).map((m: { name: string }) => m.name)
+
+            return { success: true, models }
+        } catch (error) {
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'Ollama not running',
+                models: []
             }
         }
     })
