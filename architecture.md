@@ -72,8 +72,9 @@ graph LR
     subgraph "IPC Modules"
         AppHandlers[app.ts<br/>App Info & Shell]
         MCPHandlers[mcp.ts<br/>MCP Operations]
-        LLMHandlers[llm.ts<br/>LLM Placeholder]
+        LLMHandlers[llm.ts<br/>LLM Operations]
         StoreHandlers[store.ts<br/>Storage Operations]
+        LogHandlers[logs.ts<br/>Log Operations]
     end
 
     App --> IPC
@@ -81,6 +82,7 @@ graph LR
     IPC --> MCPHandlers
     IPC --> LLMHandlers
     IPC --> StoreHandlers
+    IPC --> LogHandlers
     MCPHandlers --> MCP
     App --> Env
 ```
@@ -141,17 +143,22 @@ graph TB
 
     subgraph "Components"
         ChatView[ChatView]
+        ChatSidebar[ChatSidebar]
         VoiceInput[VoiceInput]
         ConnectionsPanel[ConnectionsPanel]
         SettingsPanel[SettingsPanel]
         Header[Header]
         Sidebar[Sidebar]
+        ModelSelect[ModelSelect]
+        ErrorBoundary[ErrorBoundary]
+        EnhancedFeatureFlagsPanel[FeatureFlags]
     end
 
     subgraph "Stores"
         ChatStore[chatStore]
         SettingsStore[settingsStore]
         AuthStore[authStore]
+        LogStore[logStore]
     end
 
     subgraph "Libraries"
@@ -163,6 +170,9 @@ graph TB
         MCPLib[mcp.ts]
         ElectronLib[electron.ts]
         Constants[constants.ts]
+        FeatureFlagsLib[featureFlags.ts]
+        FlagSystemLib[flagSystem.ts]
+        FirebaseLib[firebase.ts]
     end
 
     ReactApp --> Components
@@ -250,6 +260,7 @@ graph LR
 sequenceDiagram
     participant User
     participant App
+    participant Registry
     participant Orchestrator
     participant WebLLM
     participant PlanCard
@@ -262,20 +273,20 @@ sequenceDiagram
     App->>Orchestrator: analyzeRequest(query, tools)
     Orchestrator->>WebLLM: Generate Plan (JSON)
     WebLLM-->>Orchestrator: PlanningResponse
-    Orchestrator-->>App: Plan
+    Orchestrator-->>App: Plan (analyzing)
     
     alt Needs Approval
-        App->>PlanCard: Show Plan
+        App->>PlanCard: Show Plan (waiting_approval)
         User->>PlanCard: Approve
-    else Auto-Approve
-        App->>Executor: Execute Plan
+    else Auto-Approve (simple/moderate)
+        App->>Executor: Execute Plan (executing)
     end
     
     loop Execution
         Executor->>Registry: searchTools(intent, mode)
         Registry-->>Executor: Relevant Tools
         Executor->>LLM/MCP: LLM or Tool Call
-        Executor-->>App: Progress Update
+        Executor-->>App: Progress Update (step, description)
     end
     
     Executor-->>App: Final Result
@@ -363,6 +374,7 @@ graph TB
         MCPH[mcp.ts<br/>MCP Operations]
         LLMH[llm.ts<br/>LLM Operations]
         StoreH[store.ts<br/>Storage]
+        LogH[logs.ts<br/>Log Archiving]
     end
 
     Renderer --> ElectronAPI
@@ -374,6 +386,7 @@ graph TB
     Handlers --> MCPH
     Handlers --> LLMH
     Handlers --> StoreH
+    Handlers --> LogH
 ```
 
 ### IPC Channel Mapping
@@ -386,6 +399,8 @@ graph TB
 | `electron.mcp.callTool()`       | `mcp:call-tool`       | `mcp.ts`       | Execute MCP tool       |
 | `electron.store.get()`          | `store:get`           | `store.ts`     | Get stored value       |
 | `electron.store.set()`          | `store:set`           | `store.ts`     | Set stored value       |
+| `electron.logs.add()`           | `logs:add`            | `logs.ts`      | Append log entry       |
+| `electron.logs.clear()`         | `logs:clear`          | `logs.ts`      | Clear log history      |
 | `electron.shell.openExternal()` | `shell:open-external` | `app.ts`       | Open external URL      |
 | `electron.app.getVersion()`     | `app:get-version`     | `app.ts`       | Get app version        |
 
@@ -543,15 +558,19 @@ graph TB
     end
 
     subgraph "LLM Providers"
-        BrowserLLM[Browser LLM<br/>WebLLM + Worker<br/>Feature-Flagged]
+        BrowserLLM[Browser LLM<br/>WebLLM + Worker<br/>Qwen 2.5 0.5B/3B]
         Ollama[Ollama<br/>Local LLM<br/>qwen2.5:3b]
+        Gemini[Gemini<br/>Flash 1.5 / Pro]
+        OpenRouter[OpenRouter<br/>Claude / Mistral]
         OpenAI[OpenAI<br/>Cloud LLM<br/>gpt-4o-mini]
     end
 
     subgraph "Provider Priority"
         Priority1[1. Browser LLM]
         Priority2[2. Ollama]
-        Priority3[3. OpenAI]
+        Priority3[3. Gemini]
+        Priority4[4. OpenRouter]
+        Priority5[5. OpenAI]
     end
 
     LLMLib --> ProviderSelector
@@ -560,7 +579,11 @@ graph TB
     Priority1 --> Priority2
     Priority2 --> Ollama
     Priority2 --> Priority3
-    Priority3 --> OpenAI
+    Priority3 --> Gemini
+    Priority3 --> Priority4
+    Priority4 --> OpenRouter
+    Priority4 --> Priority5
+    Priority5 --> OpenAI
 ```
 
 ### LLM Request Flow
@@ -675,10 +698,18 @@ graph LR
         ElectronStore2[electron-store<br/>Secure Storage]
     end
 
+    subgraph "Logs"
+        LogStore[logStore]
+        LogsIPC[logs:add]
+        LogFile[logs.json]
+    end
+
     ChatStore --> ChatLocalStorage
     SettingsStore --> SettingsLocalStorage
     MCPLib --> MCPStorage
     SettingsStore2 --> ElectronStore2
+    LogStore --> LogsIPC
+    LogsIPC --> LogFile
 ```
 
 ---
@@ -875,6 +906,7 @@ ai-worker-app/
 │   │   │   ├── app.ts          # App info & shell
 │   │   │   ├── mcp.ts          # MCP operations
 │   │   │   ├── llm.ts          # LLM operations
+│   │   │   ├── logs.ts         # Log operations
 │   │   │   └── store.ts        # Storage operations
 │   │   └── utils/
 │   │       └── env.ts          # Environment setup
@@ -884,9 +916,19 @@ ai-worker-app/
 │       └── src/
 │           ├── App.tsx          # Root component
 │           ├── components/      # UI components
+│           │   ├── mcp/         # MCP configuration UI
+│           │   └── ...          # Modals, Panes, Bubbles
 │           ├── hooks/           # React hooks
 │           ├── lib/             # Library modules
-│           └── stores/         # Zustand stores
+│           │   ├── featureFlags.ts
+│           │   ├── flagSystem.ts
+│           │   ├── firebase.ts
+│           │   └── ...
+│           ├── stores/         # Zustand stores
+│           │   ├── chatStore.ts
+│           │   ├── logStore.ts
+│           │   └── ...
+│           └── types/           # Type definitions
 ├── out/                         # Build output
 ├── dist/                        # Distribution packages
 └── package.json                 # Dependencies
