@@ -1,8 +1,8 @@
-import React from 'react'
-import { Trash2, Bot, User } from 'lucide-react'
-import { Message } from '../stores/chatStore'
+import { Trash2, Bot, User, History, AlertCircle } from 'lucide-react'
+import { Message, useChatStore } from '../stores/chatStore'
 import { AgentPlan, parseAgentPlan } from './AgentPlan'
 import { FormattedText } from './FormattedText'
+import React from 'react';
 
 interface MessageBubbleProps {
     message: Message
@@ -64,61 +64,92 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                         <FormattedText content={message.content} />
                     )}
 
-                    {/* Tool calls display - Collapsible */}
-                    {/* Tool calls display - Action Steps View */}
+                    {/* Tool calls display - Action Steps View with Collapse Logic */}
                     {visibleToolCalls && visibleToolCalls.length > 0 && (
-                        <div className="mt-2 space-y-2">
-                             {visibleToolCalls.map((tool) => {
-                                // Infer Agent Name
-                                let agentName = 'SystemAgent';
-                                if (tool.name.startsWith('browser_') || tool.name.startsWith('playwright_')) agentName = 'NavigationAgent';
-                                else if (tool.name.startsWith('fs_') || tool.name.startsWith('file_')) agentName = 'FilesystemAgent';
-                                else if (tool.name === 'create_execution_plan') agentName = 'PlannerAgent';
+                        <div className="mt-3">
+                            {(() => {
+                                const allDone = visibleToolCalls.every(tc => !!tc.result);
+                                const hasFinalContent = message.content && message.content.length > 10;
+                                const isProcessing = useChatStore.getState().isProcessing && isLast;
+                                const shouldCollapse = allDone && hasFinalContent && !isProcessing;
 
-                                // Format Description
-                                let description = `Executing ${tool.name}`;
-                                try {
-                                    const args = typeof tool.arguments === 'string' ? JSON.parse(tool.arguments) : tool.arguments;
-                                    if (tool.name.includes('navigate') && args.url) description = `Navigating to ${args.url}`;
-                                    else if (tool.name.includes('type') && args.text) description = `Typing "${args.text}"`;
-                                    else if (tool.name.includes('click') && args.selector) description = `Clicking element ${args.selector}`;
-                                    else if (tool.name.includes('search') && args.query) description = `Searching for "${args.query}"`;
-                                    else if (tool.name.includes('screenshot')) description = `Taking a screenshot`;
-                                } catch (e) { /* ignore parse error */ }
+                                const renderContent = () => (
+                                    <div className="space-y-2">
+                                        {visibleToolCalls.map((tool) => {
+                                            // Infer Agent Name
+                                            let agentName = 'SystemAgent';
+                                            if (tool.name.startsWith('browser_') || tool.name.startsWith('playwright_')) agentName = 'NavigationAgent';
+                                            else if (tool.name.startsWith('fs_') || tool.name.startsWith('file_')) agentName = 'FilesystemAgent';
+                                            else if (tool.name.startsWith('mcp_')) agentName = 'MCPAgent';
+                                            else if (tool.name === 'create_execution_plan') agentName = 'PlannerAgent';
 
-                                return (
-                                    <div key={tool.id} className="flex items-start gap-3 p-2 rounded-lg bg-black/20 border border-white/5">
-                                        {/* Status Icon - If it has a result, it's done. If isLast and no result (or incomplete), it's active. */}
-                                        <div className="mt-0.5 flex-shrink-0">
-                                            {tool.result ? (
-                                                <div className="w-4 h-4 rounded-full bg-green-500/20 flex items-center justify-center">
-                                                    <div className="w-1.5 h-1.5 rounded-full bg-green-400"></div>
+                                            // Format Description
+                                            let description = `Executing ${tool.name}`;
+                                            try {
+                                                const args = typeof tool.arguments === 'string' ? JSON.parse(tool.arguments) : tool.arguments;
+                                                if (tool.name.includes('navigate') && args.url) description = `Navigating to ${args.url}`;
+                                                else if (tool.name.includes('type') && args.text) description = `Typing "${args.text}"`;
+                                                else if (tool.name.includes('click') && args.selector) description = `Clicking element ${args.selector}`;
+                                                else if (tool.name.includes('search') && args.query) description = `Searching for "${args.query}"`;
+                                                else if (tool.name.includes('screenshot')) description = `Taking a screenshot`;
+                                                else if (tool.name.includes('delegate')) description = `Delegating to sub-task`;
+                                            } catch (e) { /* ignore parse error */ }
+
+                                            const isError = tool.result?.toLowerCase().includes('error');
+
+                                            return (
+                                                <div key={tool.id} className="flex items-start gap-3 p-2 rounded-lg bg-black/30 border border-white/5 shadow-sm">
+                                                    {/* Status Icon */}
+                                                    <div className="mt-0.5 flex-shrink-0">
+                                                        {tool.result ? (
+                                                            isError ? (
+                                                                <div className="w-4 h-4 rounded-full bg-orange-500/20 flex items-center justify-center">
+                                                                    <div className="w-1.5 h-1.5 rounded-full bg-orange-400"></div>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="w-4 h-4 rounded-full bg-green-500/20 flex items-center justify-center">
+                                                                    <div className="w-1.5 h-1.5 rounded-full bg-green-400"></div>
+                                                                </div>
+                                                            )
+                                                        ) : (
+                                                            <div className="w-4 h-4 rounded-full bg-[#4fd1c5]/20 flex items-center justify-center animate-pulse">
+                                                                <div className="w-1.5 h-1.5 rounded-full bg-[#4fd1c5]"></div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="text-[13px] text-white/90 font-medium leading-tight">
+                                                            {description}
+                                                        </div>
+                                                        <div className="flex items-center gap-2 mt-1">
+                                                            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-[#4fd1c5]/10 border-[#4fd1c5]/30 text-[#4fd1c5]">
+                                                                {agentName}
+                                                            </span>
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                            ) : (
-                                                <div className="w-4 h-4 rounded-full bg-[#4fd1c5]/20 flex items-center justify-center animate-pulse">
-                                                    <div className="w-1.5 h-1.5 rounded-full bg-[#4fd1c5]"></div>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        <div className="flex-1 min-w-0">
-                                            <div className="text-sm text-white/90 font-medium">
-                                                {description}
-                                            </div>
-                                            <div className="flex items-center gap-2 mt-1.5">
-                                                <span className="text-[10px] px-1.5 py-0.5 rounded border bg-[#4fd1c5]/10 border-[#4fd1c5]/30 text-[#4fd1c5]">
-                                                    {agentName}
-                                                </span>
-                                                <span className="text-[10px] text-white/30 font-mono">
-                                                    {tool.name}
-                                                </span>
-                                            </div>
-                                            
-                                            {/* Optional: Show Result in a tiny collapsed detail if needed, or keep hidden for cleanliness */}
-                                        </div>
+                                            );
+                                        })}
                                     </div>
                                 );
-                             })}
+
+                                if (shouldCollapse) {
+                                    return (
+                                        <details className="group">
+                                            <summary className="text-[10px] text-white/30 cursor-pointer hover:text-white/60 transition-colors list-none flex items-center gap-1.5 py-1">
+                                                <History size={11} className="group-open:rotate-180 transition-transform" />
+                                                <span>{visibleToolCalls.length} Action Steps completed</span>
+                                            </summary>
+                                            <div className="mt-2 pl-2 border-l border-white/5">
+                                                {renderContent()}
+                                            </div>
+                                        </details>
+                                    );
+                                }
+
+                                return renderContent();
+                            })()}
                         </div>
                     )}
 

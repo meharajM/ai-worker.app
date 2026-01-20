@@ -223,8 +223,7 @@ function App() {
       if (!content.trim()) return;
 
       setProcessing(true);
-
-      // Create a reference to the runtime to allow aborting
+      addMessage({ role: 'user', content });
       const abortController = new AbortController();
       // We need to use a mutable ref or store for the controller if we want to support external aborts
       // effectively (like the stop button). 
@@ -252,7 +251,8 @@ function App() {
         };
 
         // Convert store messages to LLMMessage format
-        const initialHistory: LLMMessage[] = messages.map((m) => {
+        const freshMessages = useChatStore.getState().getActiveSession()?.messages || [];
+        const initialHistory: LLMMessage[] = freshMessages.map((m) => {
           const msg: LLMMessage = {
             role: m.role as "user" | "assistant" | "system",
             content: m.content,
@@ -354,58 +354,66 @@ function App() {
 
         const { AgentRuntime } = await import("./lib/agent-runtime");
         
+        let activeAssistantMessageId: string | null = null;
+
         const runtime = new AgentRuntime({
           activeSessionId: activeSessionId || "default",
           settings: settingsForLLM,
           signal: useChatStore.getState().getAbortSignal() || undefined,
           onMessage: (msg) => {
              // Map back to store
-             // We only want to add 'user' and 'assistant' messages to the UI/Store
-             // 'tool' outcomes are not fully supported by the simplistic store 'role' enum
-             // UNLESS we want to hack them in.
-             // But for now, let's just add user/assistant.
+             // We group all assistant and tool messages of a single turn into ONE store message
              
-             // Wait, if we don't save tool outputs, DCP won't work across app restarts.
-             // But it will work within the session since `runtime` would hold the history if we kept the instance?
-             // But we recreate `runtime` every `handleSubmit`.
-             // So we rely on `messages` from store.
-             
-             // If store doesn't have tool outputs, we lose context.
-             // I should probably Upgrade the Store to support 'tool' role or valid ToolCall results.
-             // But that's a bigger refactor.
-             // For now, I will stick to the plan: Implement DCP/Sub-agents.
-             // If history persistence is lossy, that's a separate issue (maybe pre-existing).
-             // But I will verify if I can at least pass `tool` messages to `onMessage` to see what happens.
-             
-             if (msg.role === 'user' || msg.role === 'assistant') {
-                // Check if we need to merge tool calls
-                const toolCalls = msg.tool_calls ? msg.tool_calls.map(tc => ({
+             if (msg.role === 'assistant') {
+                const newToolCalls = msg.tool_calls ? msg.tool_calls.map(tc => ({
                    id: tc.id,
                    name: tc.function.name,
-                   arguments: typeof tc.function.arguments === 'string' 
-                     ? JSON.parse(tc.function.arguments) 
-                     : tc.function.arguments,
-                   // We don't have results here yet usually?
-                   // AgentRuntime adds 'assistant' msg with calls, THEN 'tool' msgs with results.
-                })) : undefined;
+                   arguments: safeParseJSON(tc.function.arguments),
+                })) : [];
+
+                if (activeAssistantMessageId) {
+                   const { updateMessage, getActiveSession } = useChatStore.getState();
+                   const session = getActiveSession();
+                   const existingMsg = session?.messages.find(m => m.id === activeAssistantMessageId);
+                   if (existingMsg) {
+                      // Update existing message
+                      const mergedToolCalls = [...(existingMsg.toolCalls || []), ...newToolCalls];
+                      
+                      // For content: overwrite if new content exists (often content in tool turns is intermediate)
+                      let finalContent = existingMsg.content;
+                      if (msg.content && msg.content !== existingMsg.content) {
+                          finalContent = msg.content;
+                      }
+
+                      updateMessage(activeAssistantMessageId, {
+                         content: finalContent,
+                         toolCalls: mergedToolCalls.length > 0 ? mergedToolCalls : undefined
+                      });
+                      return;
+                   }
+                }
                 
-                addMessage({
-                  role: msg.role as any,
+                // Create new message and track its ID
+                const added = addMessage({
+                  role: 'assistant',
                   content: msg.content || "",
-                  toolCalls: toolCalls
+                  toolCalls: newToolCalls.length > 0 ? newToolCalls : undefined
                 });
-             } else if (msg.role === 'tool') {
-                // It's a tool result.
-                // We currently can't easily save this to the store as a separate message
-                // without changing ShortStore schema.
-                // WE CAN however, try to find the previous assistant message and update it with the result?
-                // `updateMessage` exists in store.
-                // We'd need to find the message with the matching tool_call_id.
-                // This is complex to do robustly without a proper DB.
-                
-                // For now, just logging it (AgentRuntime logs it).
-                // DCP will work for the *current* turn loop inside AgentRuntime.
-                // Across turns, it might be limited if we reload from store.
+                activeAssistantMessageId = added.id;
+
+             } else if (msg.role === 'tool' && activeAssistantMessageId) {
+                // Update the result of the specific tool call in the active assistant message
+                const { updateMessage, getActiveSession } = useChatStore.getState();
+                const session = getActiveSession();
+                const existingMsg = session?.messages.find(m => m.id === activeAssistantMessageId);
+                if (existingMsg && existingMsg.toolCalls) {
+                   const updatedToolCalls = existingMsg.toolCalls.map(tc => 
+                      tc.id === msg.tool_call_id ? { ...tc, result: msg.content } : tc
+                   );
+                   updateMessage(activeAssistantMessageId, {
+                      toolCalls: updatedToolCalls
+                   });
+                }
              }
           }
         }, initialHistory); // Pass initialized history
