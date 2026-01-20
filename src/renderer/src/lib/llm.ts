@@ -154,14 +154,35 @@ export async function checkOllama(
     return { available: false, error: "Ollama disabled" };
   }
 
-  const { baseUrl } = getOllamaSettings(settings);
+  const { baseUrl, model: preferredModel } = getOllamaSettings(settings);
 
   try {
+    // Use IPC to fetch models from main process (bypasses potential CORS issues)
+    const electron = (window as any).electron;
+    if (electron?.llm?.fetchOllamaModels) {
+      const result = await electron.llm.fetchOllamaModels(baseUrl);
+
+      if (result.success && result.models && result.models.length > 0) {
+        const defaultModel =
+          result.models.find((m: string) => m.startsWith(preferredModel)) ||
+          result.models[0] ||
+          preferredModel;
+        return {
+          available: true,
+          model: defaultModel,
+          models: result.models,
+        };
+      } else if (result.error) {
+        return { available: false, error: result.error };
+      }
+      return { available: false, error: "No models found" };
+    }
+
+    // Fallback to direct fetch if IPC not available (for development/testing)
     const response = await fetch(`${baseUrl}/api/tags`);
     if (response.ok) {
       const data = await response.json();
       const models = (data.models || []).map((m: { name: string }) => m.name);
-      const { model: preferredModel } = getOllamaSettings(settings);
       const defaultModel =
         models.find((m: string) => m.startsWith(preferredModel)) ||
         models[0] ||
@@ -332,12 +353,17 @@ export async function checkOpenAI(
       }
     } else {
       // Fallback to direct fetch if IPC not available (for development/testing)
+      console.log(`[LLM Check] Checking OpenAI models at: ${baseUrl}/models`);
       const response = await fetch(`${baseUrl}/models`, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${apiKey}`,
         },
       });
+
+      if (!response) {
+        throw new Error("Fetch returned undefined response");
+      }
 
       if (response.ok) {
         const data = await response.json();
@@ -370,6 +396,11 @@ export async function checkOpenAI(
           modelsEndpointAvailable: true,
         };
       } else {
+        if (response.status === 404) {
+          console.error(`[LLM Check] 404 Error: Models endpoint not found at ${baseUrl}/models`);
+        } else {
+          console.error(`[LLM Check] HTTP Error ${response.status}: ${response.statusText} at ${baseUrl}/models`);
+        }
         return {
           available: true,
           model: model,
@@ -590,13 +621,16 @@ export async function getAvailableProviders(
 async function callOllama(
   messages: LLMMessage[],
   tools?: LLMTool[],
-  settings?: LLMSettings
+  settings?: LLMSettings,
+  abortSignal?: AbortSignal
 ): Promise<LLMResponse> {
   const { baseUrl, model } = getOllamaSettings(settings);
 
+  console.log(`[LLM Chat] Calling Ollama at: ${baseUrl}/api/chat`);
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal: abortSignal,
     body: JSON.stringify({
       model: model,
       messages: messages.map((m) => ({
@@ -615,9 +649,12 @@ async function callOllama(
     }),
   });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || `Ollama error: ${response.statusText}`);
+  if (!response || !response.ok) {
+    if (response?.status === 404) {
+      console.error(`[LLM Chat] 404 Error: Ollama endpoint not found at ${baseUrl}/api/chat`);
+    }
+    const error = response ? await response.json().catch(() => ({})) : { error: "Fetch failed" };
+    throw new Error(error.error || `Ollama error: ${response?.statusText || "Unknown"}`);
   }
 
   const data = await response.json();
@@ -689,7 +726,8 @@ async function callOpenAI(
   settings?: LLMSettings,
   useJsonFallback: boolean = false,
   servers?: ServerInfo[],
-  isOpenRouter: boolean = false
+  isOpenRouter: boolean = false,
+  abortSignal?: AbortSignal
 ): Promise<LLMResponse> {
   const { apiKey, baseUrl, model } = isOpenRouter
     ? await getOpenRouterSettings(settings)
@@ -731,12 +769,11 @@ async function callOpenAI(
     }
   }
 
+  console.log(`[LLM Chat] Calling OpenAI-compatible API at: ${baseUrl}/chat/completions`);
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers,
+    signal: abortSignal,
     body: JSON.stringify({
       model: model,
       messages: useJsonFallback ? requestMessages : messages,
@@ -755,10 +792,13 @@ async function callOpenAI(
     }),
   });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
+  if (!response || !response.ok) {
+    if (response?.status === 404) {
+      console.error(`[LLM Chat] 404 Error: OpenAI-compatible endpoint not found at ${baseUrl}/chat/completions`);
+    }
+    const error = response ? await response.json().catch(() => ({})) : { error: "Fetch failed" };
     const errorMessage =
-      error.error?.message || `OpenAI error: ${response.statusText}`;
+      error.error?.message || `OpenAI error: ${response?.statusText || "Unknown"}`;
 
     // Check if it's a tool calling not supported error
     if (
@@ -910,7 +950,6 @@ function buildSystemPrompt(
   if (serverCount > 0 && servers) {
     const serverList = servers
       .map((s) => {
-        console.log("server", s);
         if (s.isReasoningServer) {
           return `${s.name} (reasoning server - provides step-by-step reasoning capabilities)`;
         }
@@ -1007,7 +1046,8 @@ export async function chat(
   messages: LLMMessage[],
   tools?: LLMTool[],
   settings?: LLMSettings,
-  servers?: ServerInfo[]
+  servers?: ServerInfo[],
+  abortSignal?: AbortSignal
 ): Promise<LLMResponse> {
   const providers = await getAvailableProviders(settings);
 
@@ -1078,13 +1118,13 @@ export async function chat(
     case "browser":
       return callBrowserLLM(messagesWithSystem, tools, settings);
     case "ollama":
-      return callOllama(messagesWithSystem, tools, settings);
+      return callOllama(messagesWithSystem, tools, settings, abortSignal);
     case "openai":
-      return callOpenAI(messagesWithSystem, tools, settings, useJsonFallback, servers, false);
+      return callOpenAI(messagesWithSystem, tools, settings, useJsonFallback, servers, false, abortSignal);
     case "gemini":
-      return callGemini(messagesWithSystem, tools, settings);
+      return callGemini(messagesWithSystem, tools, settings, abortSignal);
     case "openrouter":
-      return callOpenAI(messagesWithSystem, tools, settings, useJsonFallback, servers, true);
+      return callOpenAI(messagesWithSystem, tools, settings, useJsonFallback, servers, true, abortSignal);
     default:
       throw new Error(`Provider ${provider} not implemented`);
   }
@@ -1094,7 +1134,8 @@ export async function chat(
 async function callGemini(
   messages: LLMMessage[],
   tools?: LLMTool[],
-  settings?: LLMSettings
+  settings?: LLMSettings,
+  abortSignal?: AbortSignal
 ): Promise<LLMResponse> {
   const { apiKey, model } = await getGeminiSettings(settings);
   const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
@@ -1126,7 +1167,7 @@ async function callGemini(
     if (m.role === 'tool') {
       parts.push({
         functionResponse: {
-          name: (m as any).name || (m as any).tool_call_id, // Fallback to tool_call_id if name is missing
+          name: (m as any).name,
           response: { result: m.content }
         }
       });
@@ -1159,6 +1200,7 @@ async function callGemini(
   const response = await fetch(`${baseUrl}/models/${model}:generateContent?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal: abortSignal,
     body: JSON.stringify(payload)
   });
 
@@ -1171,7 +1213,7 @@ async function callGemini(
   const candidate = data.candidates?.[0];
   const content = candidate?.content?.parts?.[0]?.text || "";
   const toolCalls = candidate?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => ({
-    id: `gemini-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    id: `gemini-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
     name: p.functionCall.name,
     arguments: p.functionCall.args
   }));

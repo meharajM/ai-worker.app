@@ -46,54 +46,71 @@ interface ElectronAPI {
         getVersion: () => Promise<string>
         getName: () => Promise<string>
     }
+
+    logs?: {
+        add: (entry: unknown) => Promise<void>
+        getPath: () => Promise<string>
+        openFolder: () => Promise<void>
+    }
+
+    secure?: {
+        isAvailable: () => Promise<boolean>
+        set: (key: string, value: string, userId?: string) => Promise<{ success: boolean; encrypted?: boolean; error?: string }>
+        get: (key: string, userId?: string) => Promise<{ success: boolean; value?: string | null; encrypted?: boolean; error?: string }>
+        delete: (key: string, userId?: string) => Promise<{ success: boolean; error?: string }>
+        listKeys: (userId?: string) => Promise<{ success: boolean; keys?: string[]; error?: string }>
+    }
 }
 
-// Web Speech API types
-interface SpeechRecognition extends EventTarget {
-    continuous: boolean
-    interimResults: boolean
-    lang: string
-    start(): void
-    stop(): void
-    abort(): void
-    onresult: ((event: SpeechRecognitionEvent) => void) | null
-    onerror: ((event: SpeechRecognitionErrorEvent) => void) | null
-    onend: (() => void) | null
+// Web Speech API types - placed inside declare global to be available everywhere
+declare global {
+    interface SpeechRecognition extends EventTarget {
+        continuous: boolean
+        interimResults: boolean
+        lang: string
+        start(): void
+        stop(): void
+        abort(): void
+        onresult: ((event: SpeechRecognitionEvent) => void) | null
+        onerror: ((event: SpeechRecognitionErrorEvent) => void) | null
+        onend: (() => void) | null
+    }
+
+    interface SpeechRecognitionEvent extends Event {
+        resultIndex: number
+        results: SpeechRecognitionResultList
+    }
+
+    interface SpeechRecognitionResultList {
+        length: number
+        [index: number]: SpeechRecognitionResult
+    }
+
+    interface SpeechRecognitionResult {
+        isFinal: boolean
+        length: number
+        [index: number]: SpeechRecognitionAlternative
+    }
+
+    interface SpeechRecognitionAlternative {
+        transcript: string
+        confidence: number
+    }
+
+    interface SpeechRecognitionErrorEvent extends Event {
+        error: string
+        message: string
+    }
+
+    const SpeechRecognition: {
+        new(): SpeechRecognition
+    }
+
+    interface Window {
+        electron?: ElectronAPI
+        SpeechRecognition?: typeof SpeechRecognition
+        webkitSpeechRecognition?: typeof SpeechRecognition
+    }
 }
 
-interface SpeechRecognitionEvent extends Event {
-    resultIndex: number
-    results: SpeechRecognitionResultList
-}
-
-interface SpeechRecognitionResultList {
-    length: number
-    [index: number]: SpeechRecognitionResult
-}
-
-interface SpeechRecognitionResult {
-    isFinal: boolean
-    length: number
-    [index: number]: SpeechRecognitionAlternative
-}
-
-interface SpeechRecognitionAlternative {
-    transcript: string
-    confidence: number
-}
-
-interface SpeechRecognitionErrorEvent extends Event {
-    error: string
-    message: string
-}
-
-declare const SpeechRecognition: {
-    new(): SpeechRecognition
-}
-
-// Extend Window interface globally
-interface Window {
-    electron?: ElectronAPI
-    SpeechRecognition?: typeof SpeechRecognition
-    webkitSpeechRecognition?: typeof SpeechRecognition
-}
+export { }

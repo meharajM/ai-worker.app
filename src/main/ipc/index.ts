@@ -3,6 +3,8 @@ import { registerMcpHandlers } from './mcp'
 import { registerLlmHandlers } from './llm'
 import { registerStoreHandlers } from './store'
 import { registerLogsHandlers } from './logs'
+import { registerSpeechHandlers } from './speech'
+import { registerSecureHandlers } from './secure'
 
 export function setupIpcHandlers(): void {
     registerAppHandlers()
@@ -10,4 +12,6 @@ export function setupIpcHandlers(): void {
     registerLlmHandlers()
     registerStoreHandlers()
     registerLogsHandlers()
+    registerSpeechHandlers()
+    registerSecureHandlers()
 }

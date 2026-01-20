@@ -1,10 +1,9 @@
-```javascript
 const readline = require('readline');
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
 // Log to stderr so it doesn't interfere with stdout JSON-RPC
-const log = (msg) => console.error(`[MockServer] ${ msg } `);
+const log = (msg) => console.error(`[MockServer] ${msg} `);
 
 log('Started');
 
@@ -50,14 +49,14 @@ rl.on('line', (line) => {
                 }
             });
         } else if (msg.method === 'tools/call') {
-            log(`Call Tool: ${ msg.params.name } `);
+            log(`Call Tool: ${msg.params.name} `);
             if (msg.params.name === 'mock_echo') {
                 const text = msg.params.arguments.message;
                 send({
                     jsonrpc: '2.0',
                     id: msg.id,
                     result: {
-                        content: [{ type: 'text', text: `EchoResult: ${ text } ` }]
+                        content: [{ type: 'text', text: `EchoResult: ${text} ` }]
                     }
                 });
             } else {
@@ -78,7 +77,7 @@ rl.on('line', (line) => {
         }
 
     } catch (e) {
-        log(`Error: ${ e } `);
+        log(`Error: ${e} `);
     }
 });
 

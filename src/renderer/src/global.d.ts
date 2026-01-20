@@ -16,6 +16,7 @@ interface ElectronAPI {
         chat: (messages: unknown[], tools?: unknown[]) => Promise<unknown>
         getProviders: () => Promise<Record<string, { available: boolean }>>
         fetchOpenAIModels: (baseUrl: string, apiKey: string) => Promise<{ success: boolean; models?: string[]; error?: string }>
+        fetchOllamaModels: (baseUrl: string) => Promise<{ success: boolean; models?: string[]; error?: string }>
     }
 
     store: {
@@ -31,6 +32,41 @@ interface ElectronAPI {
     app: {
         getVersion: () => Promise<string>
         getName: () => Promise<string>
+    }
+
+    speech: {
+        checkSupport: (modelId?: string) => Promise<{
+            supported: boolean
+            modelDownloaded: boolean
+            modelsPath: string
+            error: string | null
+        }>
+        initialize: (options?: { modelName?: string }) => Promise<{ success: boolean; error?: string }>
+        startListening: () => Promise<{ success: boolean; error?: string; message?: string }>
+        stopListening: () => Promise<{ success: boolean; error?: string; message?: string }>
+        processAudio: (audioData: ArrayBuffer) => Promise<{
+            success: boolean
+            isFinal?: boolean
+            transcript?: string
+            error?: string
+        }>
+        getFinalResult: () => Promise<{ success: boolean; transcript?: string; error?: string }>
+        downloadModel: (options: { modelId: string; url: string; modelName: string }) => Promise<{
+            success: boolean
+            error?: string
+        }>
+        getPreferredModel: () => Promise<{ id: string; name: string; url: string; lang: string }>
+        getModelPath: (modelName: string) => Promise<string | null>
+        getStatus: (modelId?: string) => Promise<{
+            isInitialized: boolean
+            isListening: boolean
+            error: string | null
+            modelsPath: string
+            modelDownloaded: boolean
+        }>
+        cleanup: () => Promise<{ success: boolean; error?: string }>
+        onResult: (callback: (result: { text: string; final: boolean }) => void) => () => void
+        onDownloadProgress: (callback: (data: { modelId: string; progress: number }) => void) => () => void
     }
 }
 
