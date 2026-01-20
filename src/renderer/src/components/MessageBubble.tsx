@@ -2,6 +2,7 @@ import React from 'react'
 import { Trash2, Bot, User } from 'lucide-react'
 import { Message } from '../stores/chatStore'
 import { AgentPlan, parseAgentPlan } from './AgentPlan'
+import { FormattedText } from './FormattedText'
 
 interface MessageBubbleProps {
     message: Message
@@ -32,7 +33,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
         return (
             <div className="flex justify-center my-2">
                 <div className="bg-white/5 text-white/40 text-xs px-3 py-1 rounded-full">
-                    {message.content}
+                    <FormattedText content={message.content} />
                 </div>
             </div>
         )
@@ -60,7 +61,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
 
                     {/* Render Message Content */}
                     {message.content && (
-                        <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                        <FormattedText content={message.content} />
                     )}
 
                     {/* Tool calls display - Collapsible */}
