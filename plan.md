@@ -385,7 +385,25 @@ ai-worker-app/
 
 ---
 
-### 🚀 Phase 14: App Launch Preparation [IN PROGRESS]
+### ✅ Phase 15: Agent Refactor & DCP [COMPLETED]
+
+**Goal:** Transition to native tool-calling planning and implement context optimization.
+
+**Implementation:**
+- [x] Implement `AgentRuntime` for robust iteration loop
+- [x] Integrate `create_execution_plan` as the primary orchestrator
+- [x] Implement **Dynamic Context Pruning (DCP)** to save tokens
+- [x] Redesign Tool UI as "Action Steps" (Agent-centric view)
+- [x] Add `safeParseJSON` for robust tool argument parsing
+
+**Validation:** ✅
+- [x] Complex tasks (Browser + File) execute autonomously
+- [x] UI displays granular steps instead of raw bubbles
+- [x] Context window bloat prevented by DCP
+
+---
+
+### 🚀 Phase 16: App Launch Preparation [IN PROGRESS]
 
 **Goal:** Finalize distribution, assets, and production stability.
 
@@ -459,4 +477,4 @@ ai-worker-app/
 
 ---
 
-**Current Status:** Phases 1-14 complete. Security hardening with `safeStorage` encryption implemented. App Launch Preparation (Phase 15) is now the primary focus.
+**Current Status:** Phases 1-15 complete. Security hardening and Agent Architecture refactor implemented. App Launch Preparation (Phase 16) is now the primary focus.

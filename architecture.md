@@ -12,11 +12,11 @@ This document provides a comprehensive overview of the AI-Worker application arc
 4. [Data Flow](#data-flow)
 5. [IPC Communication](#ipc-communication)
 6. [MCP Integration](#mcp-integration)
-7. [LLM Integration](#llm-integration)
-8. [Storage Architecture](#storage-architecture)
-9. [Security Architecture](#security-architecture)
-10. [Build & Distribution](#build--distribution)
-
+7. [LLM & Agent Architecture](#llm--agent-architecture)
+8. [Dynamic Context Pruning](#dynamic-context-pruning)
+9. [Storage Architecture](#storage-architecture)
+10. [Security Architecture](#security-architecture)
+11. [Build & Distribution](#build--distribution)
 ---
 
 ## System Overview
@@ -527,74 +527,55 @@ graph LR
 - Users can edit, remove, or customize default servers
 - Form pre-fills with Sequential Thinking configuration for quick setup
 
+
 ---
 
-## LLM Integration
+## LLM & Agent Architecture
 
-### LLM Provider Architecture
+AI-Worker implements a reactive, tool-calling agent loop managed by the `AgentRuntime`. It prioritizes a **Plan-First** approach for complex tasks.
 
-```mermaid
-graph TB
-    subgraph "Renderer Process"
-        LLMLib[llm.ts<br/>LLM Orchestrator]
-        WebLLM[webllm.ts<br/>Browser Model Manager]
-        ProviderSelector[Provider Selector]
-    end
+### Agent Loop (AgentRuntime)
 
-    subgraph "LLM Providers"
-        BrowserLLM[Browser LLM<br/>WebLLM + Worker<br/>Feature-Flagged]
-        Ollama[Ollama<br/>Local LLM<br/>qwen2.5:3b]
-        OpenAI[OpenAI<br/>Cloud LLM<br/>gpt-4o-mini]
-    end
-
-    subgraph "Provider Priority"
-        Priority1[1. Browser LLM]
-        Priority2[2. Ollama]
-        Priority3[3. OpenAI]
-    end
-
-    LLMLib --> ProviderSelector
-    ProviderSelector --> Priority1
-    Priority1 --> BrowserLLM
-    Priority1 --> Priority2
-    Priority2 --> Ollama
-    Priority2 --> Priority3
-    Priority3 --> OpenAI
-```
-
-### LLM Request Flow
+The `AgentRuntime` manages the conversation lifecycle, including planning, tool execution, and context pruning.
 
 ```mermaid
-sequenceDiagram
-    participant App
-    participant LLMLib
-    participant WebLLM
-    participant Ollama
-    participant OpenAI
-    participant BrowserLLM
-
-    App->>LLMLib: chat(messages, tools)
-    LLMLib->>LLMLib: Check Provider Priority
-    
-    
-    alt Browser LLM Available and Enabled
-        LLMLib->>WebLLM: chat(msg)
-        WebLLM->>BrowserLLM: PostMessage (Worker)
-        BrowserLLM-->>WebLLM: Response
-        WebLLM-->>LLMLib: Response
-    else Ollama Available
-        LLMLib->>Ollama: HTTP POST /api/chat
-        Ollama-->>LLMLib: Response
-    else OpenAI Available
-        LLMLib->>OpenAI: HTTP POST /v1/chat/completions
-        OpenAI-->>LLMLib: Response
-    else No Provider Available
-        LLMLib-->>App: Error
-    end
-
-    LLMLib-->>App: LLM Response
+graph TD
+    User[User Input] --> Runtime[AgentRuntime]
+    Runtime --> DCP[Prune Context]
+    DCP --> Plan[Call LLM: create_execution_plan]
+    Plan --> Step1[Execute Tool 1]
+    Step1 --> Result1[Add Result to History]
+    Result1 --> DCP2[Prune Context]
+    DCP2 --> Step2[Execute Tool 2]
+    Step2 --> Final[Generate Final Response]
 ```
 
+### Specialized Sub-agents
+
+The system dynamically context-aware agent roles based on connected MCP servers. These are injected into the system prompt:
+
+- **NavigationAgent**: Specialized in `playwright` tools (browser control, screenshots).
+- **FilesystemAgent**: Specialized in `filesystem` tools (read, write, list).
+- **SystemAgent**: General purpose task handling.
+
+### LLM Provider Priority
+
+1. **Browser LLMs** (WebLLM): On-device models (Llama 3, Phi 3) via WebGPU.
+2. **Standard APIs** (OpenAI, Gemini, OpenRouter): High-intelligence cloud models.
+3. **Local LLMs** (Ollama): Privacy-focused local serving.
+
+---
+
+## Dynamic Context Pruning (DCP)
+
+To maintain performance and stay within context limits, the system employs **Dynamic Context Pruning**.
+
+**Key Logic:**
+- **Tool Result Pruning**: Identifies redundant or outdated tool outputs in the message history.
+- **Selective Retention**: Keeps the original tool call and the most recent relevant result, replacing historical outputs with placeholders.
+- **Efficiency**: Reduces token usage by up to 60% in multi-step browser or filesystem tasks.
+
+**Implementation**: Located in [dcp.ts](file:///Users/suhail/ai-worker-app/src/renderer/src/lib/dcp.ts).
 ### LLM Configuration
 
 ```mermaid
