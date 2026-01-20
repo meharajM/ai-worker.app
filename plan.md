@@ -396,7 +396,22 @@ ai-worker-app/
 
 ---
 
-### 🏁 Phase 15: Distribution & V1 Launch
+### 🚀 Phase 15: MCP Enhancements (Bundling & Preferences) [PLANNED]
+
+**Goal:** Ship key MCP servers out-of-the-box and provide dedicated preference management.
+
+**Implementation:**
+- [ ] **Bundled Servers**: Ensure Playwright, File System, and Memory MCP servers are bundled in the installer (via `mcp-bundled` launcher).
+- [ ] **MCP Preferences Tab**: Add a dedicated tab in Settings for server-specific configurations.
+- [ ] **Playwright Integration**: Add browser selector, extension token input, and extension download link.
+- [ ] **Containerized File Access**: Implement "Shadow Writes" for read-only directories (writes to staging, sync on user confirmation).
+- [ ] **Memory Manager**: Create a management UI for viewing, editing, and deleting knowledge graph entities.
+
+**Reference:** [mcp-implementation-plan.md](file:///home/mhrj/Desktop/ai-worker/mcp-implementation-plan.md)
+
+---
+
+### 🏁 Phase 16: Distribution & V1 Launch
 
 **Goal:** Public release and update mechanism.
 
