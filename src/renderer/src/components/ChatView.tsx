@@ -62,11 +62,12 @@ export function ChatView({ onClearChat }: ChatViewProps) {
                     </div>
                 ) : (
                     // Messages list
-                    messages.map((message) => (
+                    messages.map((message, index) => (
                         <MessageBubble
                             key={message.id}
                             message={message}
                             onDelete={removeMessage}
+                            isLast={index === messages.length - 1}
                         />
                     ))
                 )}
