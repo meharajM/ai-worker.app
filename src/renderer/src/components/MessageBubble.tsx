@@ -1,5 +1,5 @@
-import { Trash2, Bot, User, History, AlertCircle } from 'lucide-react'
-import { Message, useChatStore } from '../stores/chatStore'
+import { Trash2, Bot, User, History, AlertCircle, CheckCircle2, Circle, ChevronRight } from 'lucide-react'
+import { Message, useChatStore, ToolCall } from '../stores/chatStore'
 import { AgentPlan, parseAgentPlan } from './AgentPlan'
 import { FormattedText } from './FormattedText'
 import React from 'react';
@@ -64,7 +64,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                         <FormattedText content={message.content} />
                     )}
 
-                    {/* Tool calls display - Action Steps View with Collapse Logic */}
+                    {/* Tool calls display - Grouped Action Steps (Checklist Style) */}
                     {visibleToolCalls && visibleToolCalls.length > 0 && (
                         <div className="mt-3">
                             {(() => {
@@ -73,60 +73,78 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                                 const isProcessing = useChatStore.getState().isProcessing && isLast;
                                 const shouldCollapse = allDone && hasFinalContent && !isProcessing;
 
+                                // Group tools by agent
+                                const groupedByAgent = visibleToolCalls.reduce((acc, tool) => {
+                                    let agentName = 'SystemAgent';
+                                    if (tool.name.startsWith('browser_') || tool.name.startsWith('playwright_')) agentName = 'NavigationAgent';
+                                    else if (tool.name.startsWith('fs_') || tool.name.startsWith('file_')) agentName = 'FilesystemAgent';
+                                    else if (tool.name.startsWith('mcp_')) agentName = 'MCPAgent';
+                                    else if (tool.name === 'create_execution_plan') agentName = 'PlannerAgent';
+                                    
+                                    if (!acc[agentName]) acc[agentName] = [];
+                                    acc[agentName].push(tool);
+                                    return acc;
+                                }, {} as Record<string, ToolCall[]>);
+
                                 const renderContent = () => (
-                                    <div className="space-y-2">
-                                        {visibleToolCalls.map((tool) => {
-                                            // Infer Agent Name
-                                            let agentName = 'SystemAgent';
-                                            if (tool.name.startsWith('browser_') || tool.name.startsWith('playwright_')) agentName = 'NavigationAgent';
-                                            else if (tool.name.startsWith('fs_') || tool.name.startsWith('file_')) agentName = 'FilesystemAgent';
-                                            else if (tool.name.startsWith('mcp_')) agentName = 'MCPAgent';
-                                            else if (tool.name === 'create_execution_plan') agentName = 'PlannerAgent';
-
-                                            // Format Description
-                                            let description = `Executing ${tool.name}`;
-                                            try {
-                                                const args = typeof tool.arguments === 'string' ? JSON.parse(tool.arguments) : tool.arguments;
-                                                if (tool.name.includes('navigate') && args.url) description = `Navigating to ${args.url}`;
-                                                else if (tool.name.includes('type') && args.text) description = `Typing "${args.text}"`;
-                                                else if (tool.name.includes('click') && args.selector) description = `Clicking element ${args.selector}`;
-                                                else if (tool.name.includes('search') && args.query) description = `Searching for "${args.query}"`;
-                                                else if (tool.name.includes('screenshot')) description = `Taking a screenshot`;
-                                                else if (tool.name.includes('delegate')) description = `Delegating to sub-task`;
-                                            } catch (e) { /* ignore parse error */ }
-
-                                            const isError = tool.result?.toLowerCase().includes('error');
+                                    <div className="space-y-4">
+                                        {Object.entries(groupedByAgent).map(([agentName, tools]) => {
+                                            const completedCount = tools.filter(t => !!t.result).length;
+                                            const totalCount = tools.length;
+                                            const isAgentDone = completedCount === totalCount;
 
                                             return (
-                                                <div key={tool.id} className="flex items-start gap-3 p-2 rounded-lg bg-black/30 border border-white/5 shadow-sm">
-                                                    {/* Status Icon */}
-                                                    <div className="mt-0.5 flex-shrink-0">
-                                                        {tool.result ? (
-                                                            isError ? (
-                                                                <div className="w-4 h-4 rounded-full bg-orange-500/20 flex items-center justify-center">
-                                                                    <div className="w-1.5 h-1.5 rounded-full bg-orange-400"></div>
-                                                                </div>
-                                                            ) : (
-                                                                <div className="w-4 h-4 rounded-full bg-green-500/20 flex items-center justify-center">
-                                                                    <div className="w-1.5 h-1.5 rounded-full bg-green-400"></div>
-                                                                </div>
-                                                            )
-                                                        ) : (
-                                                            <div className="w-4 h-4 rounded-full bg-[#4fd1c5]/20 flex items-center justify-center animate-pulse">
-                                                                <div className="w-1.5 h-1.5 rounded-full bg-[#4fd1c5]"></div>
-                                                            </div>
-                                                        )}
+                                                <div key={agentName} className="space-y-1.5">
+                                                    {/* Agent Header with Progress */}
+                                                    <div className="flex items-center justify-between px-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className={`w-1.5 h-1.5 rounded-full ${isAgentDone ? 'bg-green-400' : 'bg-[#4fd1c5] animate-pulse'}`} />
+                                                            <span className="text-[11px] font-bold text-white/50 uppercase tracking-wider">{agentName}</span>
+                                                        </div>
+                                                        <span className="text-[10px] text-white/30 font-medium">{completedCount}/{totalCount} Done</span>
                                                     </div>
 
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-[13px] text-white/90 font-medium leading-tight">
-                                                            {description}
-                                                        </div>
-                                                        <div className="flex items-center gap-2 mt-1">
-                                                            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-[#4fd1c5]/10 border-[#4fd1c5]/30 text-[#4fd1c5]">
-                                                                {agentName}
-                                                            </span>
-                                                        </div>
+                                                    {/* Steps Checklist */}
+                                                    <div className="space-y-1">
+                                                        {tools.map((tool) => {
+                                                            // Format Description
+                                                            let description = `Executing ${tool.name}`;
+                                                            try {
+                                                                const args = typeof tool.arguments === 'string' ? JSON.parse(tool.arguments) : tool.arguments;
+                                                                if (tool.name.includes('navigate') && args.url) description = `Navigating to ${args.url}`;
+                                                                else if (tool.name.includes('type') && args.text) description = `Typing "${args.text}"`;
+                                                                else if (tool.name.includes('click') && args.selector) description = `Clicking element ${args.selector}`;
+                                                                else if (tool.name.includes('search') && args.query) description = `Searching for "${args.query}"`;
+                                                                else if (tool.name.includes('screenshot')) description = `Taking a screenshot`;
+                                                                else if (tool.name.includes('delegate')) description = `Delegating to sub-task`;
+                                                            } catch (e) { /* ignore parse error */ }
+
+                                                            const isError = tool.result?.startsWith('Error:') || 
+                                                                           tool.result?.toLowerCase().includes('"iserror":true') ||
+                                                                           tool.result?.toLowerCase().includes('"status":"error"');
+                                                            const isDone = !!tool.result;
+
+                                                            return (
+                                                                <div key={tool.id} className="flex items-start gap-2.5 p-2 rounded-lg bg-black/20 border border-white/5 group/step transition-all hover:bg-black/30">
+                                                                    <div className="mt-0.5 flex-shrink-0">
+                                                                        {isDone ? (
+                                                                            isError ? (
+                                                                                <AlertCircle size={14} className="text-orange-400" />
+                                                                            ) : (
+                                                                                <CheckCircle2 size={14} className="text-green-400" />
+                                                                            )
+                                                                        ) : (
+                                                                            <Circle size={14} className="text-[#4fd1c5] animate-pulse" />
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <div className={`text-[12.5px] leading-tight transition-colors ${isDone ? 'text-white/40 line-through decoration-white/20' : 'text-white/90 font-medium'}`}>
+                                                                            {description}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
                                                     </div>
                                                 </div>
                                             );
@@ -139,9 +157,9 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                                         <details className="group">
                                             <summary className="text-[10px] text-white/30 cursor-pointer hover:text-white/60 transition-colors list-none flex items-center gap-1.5 py-1">
                                                 <History size={11} className="group-open:rotate-180 transition-transform" />
-                                                <span>{visibleToolCalls.length} Action Steps completed</span>
+                                                <span>{visibleToolCalls.length} Action Steps completed by {Object.keys(groupedByAgent).length} Agents</span>
                                             </summary>
-                                            <div className="mt-2 pl-2 border-l border-white/5">
+                                            <div className="mt-3 pl-2 border-l border-white/5">
                                                 {renderContent()}
                                             </div>
                                         </details>
