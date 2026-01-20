@@ -6,6 +6,22 @@ import electron from "./electron";
 // MCP Client Manager - Connects to external MCP servers
 // Uses @modelcontextprotocol/sdk to communicate with MCP servers
 
+async function getPlaywrightBrowserPreference(): Promise<string> {
+  const stored = await electron.store.get<string>("mcp.playwright.browser", "auto");
+  return stored || "auto";
+}
+
+async function getFilesystemRootsPreference(): Promise<string[]> {
+  const rules = await electron.store.get<Array<{ path: string }>>("mcp.filesystem.rules", []);
+  if (rules && Array.isArray(rules) && rules.length > 0) {
+    const roots = rules.map((r) => r.path).filter(Boolean);
+    return roots.length > 0 ? roots : ["."];
+  }
+
+  const stored = await electron.store.get<string[]>("mcp.filesystem.roots", ["."]);
+  return stored && Array.isArray(stored) && stored.length > 0 ? stored : ["."];
+}
+
 export interface MCPServer {
   id: string;
   name: string;
@@ -36,15 +52,15 @@ const DEFAULT_MCP_SERVERS: Omit<
       name: "filesystem",
       description: "File System MCP Server - Access to local files",
       type: "stdio",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      command: "mcp-bundled",
+      args: ["@modelcontextprotocol/server-filesystem", "."],
     },
     {
       name: "memory",
       description: "Memory MCP Server - persistent knowledge graph",
       type: "stdio",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-memory"],
+      command: "mcp-bundled",
+      args: ["@modelcontextprotocol/server-memory"],
     },
     {
       name: "git",
@@ -60,16 +76,11 @@ const DEFAULT_MCP_SERVERS: Omit<
       command: "npx",
       args: ["-y", "mcp-server-finance"],
     },
-    {
-      name: "brave-search",
-      description: "Brave Search - Web search capabilities (Requires API Key)",
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-brave-search"],
-    },
+
     {
       name: "fetch",
-      description: "Fetch - Web content fetching",
+      description:
+        "Fetch MCP Server - Make HTTP requests to any URL",
       type: "stdio",
       command: "uvx",
       args: ["mcp-server-fetch"],
@@ -79,8 +90,8 @@ const DEFAULT_MCP_SERVERS: Omit<
       description:
         "Playwright MCP Server - Browser automation and web interaction tools",
       type: "stdio",
-      command: "npx",
-      args: ["-y", "@playwright/mcp@latest"],
+      command: "mcp-bundled",
+      args: ["@playwright/mcp", "--browser", "auto"],
     },
     // {
     //   name: "weather"
@@ -181,13 +192,48 @@ export async function connectServer(serverId: string): Promise<void> {
   });
 
   try {
+    // Apply per-server preferences just-in-time (without mutating stored defaults)
+    const serverForConnect: MCPServer = { ...server, args: server.args ? [...server.args] : undefined };
+    if (serverForConnect.name === "playwright") {
+      const browser = await getPlaywrightBrowserPreference();
+      // Ensure args contain '--browser <value>'
+      const args = serverForConnect.args || [];
+      const browserIdx = args.indexOf("--browser");
+      if (browserIdx >= 0 && args[browserIdx + 1]) {
+        args[browserIdx + 1] = browser;
+      } else {
+        args.push("--browser", browser);
+      }
+      serverForConnect.args = args;
+    }
+    if (serverForConnect.name === "filesystem") {
+      const roots = await getFilesystemRootsPreference();
+      const args = serverForConnect.args || [];
+      // Replace any existing roots after the package name
+      if (serverForConnect.command === "mcp-bundled" && args.length >= 1) {
+        serverForConnect.args = [args[0], ...roots];
+      }
+    }
+
+    // Prepare environment variables
+    const env: Record<string, string> = {};
+
+    // Inject Brave Search API Key if available
+    if (server.name === 'brave-search') {
+      const braveKey = await electron.store.get<string>('brave_api_key');
+      if (braveKey) {
+        env['BRAVE_API_KEY'] = braveKey;
+      }
+    }
+
     // Use the electron wrapper which handles browser fallback internally
     const result = await electron.mcp.connect({
-      id: server.id,
-      type: server.type,
-      command: server.command,
-      args: server.args,
-      url: server.url,
+      id: serverForConnect.id,
+      type: serverForConnect.type,
+      command: serverForConnect.command,
+      args: serverForConnect.args,
+      url: serverForConnect.url,
+      env
     });
 
     if (result.success) {

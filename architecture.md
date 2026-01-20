@@ -619,6 +619,26 @@ sequenceDiagram
     LLMLib-->>App: LLM Response
 ```
 
+### Reliability & Fallback Strategies
+
+To ensure robust operation across diverse environments, the system implements several reliability mechanisms:
+
+1.  **Local Model Timeout & Fallback**
+    -   **Problem**: First-time model downloads or slow hardware can block inference.
+    -   **Solution**: The Orchestrator enforces a **5-second timeout** on local model loading.
+    -   **Fallback**: If loading times out, the request is immediately redirected to the efficient "Direct Cloud" path.
+
+2.  **Smart Provider Routing**
+    -   **Availability Check**: Before recommending a provider, the system checks:
+        *   **Local**: WebGPU support + Model download status
+        *   **Cloud**: API Key presence (OpenAI/Gemini/OpenRouter)
+    -   **Context Awareness**: If the recommended provider (e.g., Cloud) is unconfigured, it seamlessly downgrades to the next available option (Local) without erroring.
+
+3.  **Proactive Compatibility Checks**
+    -   **WebGPU**: Checked before attempting any model downloads to avoid wasted bandwidth.
+    -   **Tool Indexing**: Tool registry indexing is **awaited** during app initialization to ensure the RAG system is ready for the very first query.
+    -   **Gemini Resilience**: Special handling for Gemini's strict API requirements (grouped tool messages, joined text parts).
+
 ### LLM Configuration
 
 ```mermaid

@@ -25,6 +25,8 @@ interface SettingsState {
     geminiModel: string
     openrouterApiKey: string
     openrouterModel: string
+
+    braveApiKey: string
     browserModel: string
 
     // Appearance
@@ -46,6 +48,8 @@ interface SettingsState {
     setGeminiModel: (model: string) => void
     setOpenrouterApiKey: (key: string) => Promise<void>
     setOpenrouterModel: (model: string) => void
+
+    setBraveApiKey: (key: string) => Promise<void>
     setBrowserModel: (model: string) => void
     setTheme: (theme: Theme) => void
     resetToDefaults: () => void
@@ -67,6 +71,8 @@ const defaultSettings = {
     geminiModel: LLM_CONFIG.GEMINI.DEFAULT_MODEL,
     openrouterApiKey: '',
     openrouterModel: LLM_CONFIG.OPENROUTER.DEFAULT_MODEL,
+
+    braveApiKey: '',
     browserModel: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', // Default small model
     theme: 'dark' as Theme,
 }
@@ -141,6 +147,10 @@ export const useSettingsStore = create<SettingsState>()(
                 await electron.store.set('openrouter_api_key', key || '')
             },
             setOpenrouterModel: (model) => set({ openrouterModel: model }),
+            setBraveApiKey: async (key: string) => {
+                set({ braveApiKey: key })
+                await electron.store.set('brave_api_key', key || '')
+            },
             setBrowserModel: (model) => set({ browserModel: model }),
             setTheme: (theme) => set({ theme }),
             resetToDefaults: () => set(defaultSettings),

@@ -39,14 +39,14 @@ export async function executePlan(
         ];
 
         // Get available tools - prioritize those passed in context (RAG filtered)
-        const mcpTools = context.availableTools.length > 0 
-            ? context.availableTools 
+        const mcpTools = context.availableTools.length > 0
+            ? context.availableTools
             : getAllTools().map(t => ({
                 name: t.name,
                 description: t.description,
                 parameters: t.inputSchema
             }));
-            
+
         const llmTools: LLMTool[] = mcpTools.map((tool) => ({
             name: tool.name,
             description: tool.description,
@@ -79,7 +79,7 @@ export async function executePlan(
             // Otherwise use "auto" which will prioritize cloud in the chat() function.
             const userPref = settings.preferredProvider;
             const isCloudPref = userPref === 'gemini' || userPref === 'openai' || userPref === 'openrouter';
-            effectiveProvider = isCloudPref ? userPref : 'auto'; 
+            effectiveProvider = isCloudPref ? userPref : 'auto';
         }
 
         const effectiveSettings: LLMSettings = {
@@ -99,6 +99,39 @@ export async function executePlan(
                 effectiveSettings,
                 serverInfo.length > 0 ? serverInfo : undefined
             );
+
+            // If the LLM decided to use tools anyway, execute them
+            if (response.toolCalls && response.toolCalls.length > 0) {
+                console.log('[Executor] LLM returned tool calls, executing them...');
+                const toolResults = [];
+
+                for (const toolCall of response.toolCalls) {
+                    try {
+                        const result = await executeToolCall(toolCall.name, toolCall.arguments);
+                        toolResults.push(`✅ ${toolCall.name}: ${result.result}`);
+                    } catch (error) {
+                        toolResults.push(`❌ ${toolCall.name}: ${error}`);
+                    }
+                }
+
+                const finalContent = response.content || toolResults.join('\n');
+
+                executedSteps.push({
+                    stepNumber: 1,
+                    success: true,
+                    result: finalContent,
+                    duration: Date.now() - stepStart,
+                });
+
+                return {
+                    success: true,
+                    content: finalContent,
+                    executedSteps,
+                    provider: response.provider,
+                    model: response.model,
+                    totalDuration: Date.now() - startTime,
+                };
+            }
 
             executedSteps.push({
                 stepNumber: 1,
@@ -176,6 +209,13 @@ export async function executePlan(
             lastProvider = response.provider;
             lastModel = response.model;
             finalResponse = response.content;
+
+            // STICKY PROVIDER: If we successfully used a provider (especially Cloud), 
+            // lock it for the rest of the session to avoid context-switching/fallback issues.
+            // e.g., if 'auto' picked 'gemini', keep using 'gemini'.
+            if (response.provider && effectiveSettings.preferredProvider === 'auto') {
+                effectiveSettings.preferredProvider = response.provider as any;
+            }
 
             // If no tool calls, we're done
             if (!response.toolCalls || response.toolCalls.length === 0) {

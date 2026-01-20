@@ -2,6 +2,7 @@ import { FEATURE_FLAGS } from './constants';
 import { chatWithWebLLM, getWebLLMStatus, loadWebLLMModel, webLLMManager } from './webllm';
 import type { PlanningResponse, TaskComplexity } from '../types/orchestrator';
 import type { LLMTool } from './llm';
+import { hasAnyCloudProvider } from './llm';
 
 // Platform detection for better fallback behavior
 function getCurrentPlatform(): 'windows' | 'macos' | 'linux' | 'unknown' {
@@ -96,20 +97,29 @@ export async function analyzeRequest(
         await webLLMManager.initialize();
         const status = getWebLLMStatus();
         console.log('[Orchestrator] WebLLM status:', status);
-        
+
         // If WebGPU is not supported, redirect all requests to cloud
         if (!status.isSupported) {
             console.log('[Orchestrator] WebGPU not supported, redirecting to cloud LLM');
             return createDirectCloudPlan(userMessage, availableTools || []);
         }
-        
-        // If WebGPU is supported but model not loaded, try to load it
+
+        // If WebGPU is supported but model not loaded, try to load with timeout
+        // This prevents blocking the user if the model takes too long (e.g., first download)
+        const ANALYSIS_TIMEOUT_MS = 5000; // 5 seconds max wait for local model
+
         if (!status.isLoaded) {
-            console.log('[Orchestrator] Loading 0.5B model for analysis...');
+            console.log('[Orchestrator] Loading 0.5B model for analysis (5s timeout)...');
             try {
-                await loadWebLLMModel('Qwen2.5-0.5B-Instruct-q4f16_1-MLC');
+                const loadPromise = loadWebLLMModel('Qwen2.5-0.5B-Instruct-q4f16_1-MLC');
+                const timeoutPromise = new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error('Local model load timeout')), ANALYSIS_TIMEOUT_MS)
+                );
+
+                await Promise.race([loadPromise, timeoutPromise]);
             } catch (loadError) {
-                console.warn('[Orchestrator] Failed to load local model, redirecting to cloud:', loadError);
+                const isTimeout = loadError instanceof Error && loadError.message.includes('timeout');
+                console.warn(`[Orchestrator] ${isTimeout ? 'Timeout' : 'Failed'} loading local model, redirecting to cloud:`, loadError);
                 return createDirectCloudPlan(userMessage, availableTools || []);
             }
         }
@@ -169,12 +179,81 @@ export async function analyzeRequest(
                 },
             ],
             suggestedTools: (planData.suggestedTools as string[]) || [],
-            recommendedProvider: 'local', // Use local since we successfully analyzed with it
+            recommendedProvider: 'local', // Default, will be updated below based on cloud availability
             reasoning: (planData.reasoning as string) || 'Analyzed with local model',
-            requiresConfirmation: (planData.requiresConfirmation as boolean) !== false,
+            // Smart default for requiresConfirmation:
+            // - If model explicitly set it, use that value
+            // - For simple tasks without tools -> false (auto-execute)
+            // - For moderate tasks WITHOUT tools/realtime data -> false (auto-execute, usually just chat)
+            // - For complex ones OR tasks with tools -> true (show PlanCard)
+            requiresConfirmation: typeof planData.requiresConfirmation === 'boolean'
+                ? planData.requiresConfirmation
+                : (
+                    (!planData.needsTools && !planData.needsRealtimeData) &&
+                    (planData.complexity === 'simple' || planData.complexity === 'moderate')
+                )
+                    ? false
+                    : true,
             autoApproveTimeout: (planData.autoApproveTimeout as number | null) || null,
             needsTools: (planData.needsTools as boolean) || (planData.needsRealtimeData as boolean) || false
         };
+
+        // Scenario: Provider Optimization & Cloud Availability Check
+        const hasCloud = await hasAnyCloudProvider();
+
+        // If task is not simple (moderate/complex) OR specifically recommended for cloud
+        if (plan.complexity !== 'simple' || plan.recommendedProvider === 'cloud') {
+            if (hasCloud) {
+                // If we have cloud keys, ensure we use them for better reasoning on non-simple tasks
+                if (plan.recommendedProvider === 'local') {
+                    console.log('[Orchestrator] Upgrading moderate/complex task to cloud');
+                    plan.recommendedProvider = 'cloud';
+                    plan.reasoning = (plan.reasoning || '') + ' (using cloud for better reasoning)';
+                }
+            } else {
+                // If cloud recommended but no keys, fallback to local
+                if (plan.recommendedProvider === 'cloud') {
+                    console.log('[Orchestrator] Cloud recommended but no API keys, using local');
+                    plan.recommendedProvider = 'local';
+                    plan.reasoning = (plan.reasoning || '') + ' (using local AI - no cloud keys configured)';
+                }
+            }
+        }
+
+        // Scenario: User explicitly asks for a specific provider
+        // The local model (0.5B) might miss this intent or fail to output it
+        const lowerMsg = userMessage.toLowerCase();
+        const explicitCloud =
+            lowerMsg.includes('use gemini') ||
+            lowerMsg.includes('use openai') ||
+            lowerMsg.includes('use gpt') ||
+            lowerMsg.includes('use claude') ||
+            lowerMsg.includes('use openrouter') ||
+            lowerMsg.includes('use independent provider') ||
+            lowerMsg.includes('use remote') ||
+            lowerMsg.includes('use cloud');
+
+        if (explicitCloud) {
+            const hasCloud = await hasAnyCloudProvider();
+            if (hasCloud) {
+                console.log('[Orchestrator] User explicitly requested cloud provider');
+                plan.recommendedProvider = 'cloud';
+                plan.reasoning = 'User explicitly requested cloud provider';
+                // If they asked for a specific tool/provider, ensure we execute
+                plan.requiresConfirmation = false;
+            }
+        } else if (plan.needsTools) {
+            // If tools are needed, prefer cloud for reliability (since local model is 0.5B)
+            // Unless user explicitly asked for local
+            const hasCloud = await hasAnyCloudProvider();
+            const explicitLocal = lowerMsg.includes('use local') || lowerMsg.includes('use offline');
+
+            if (hasCloud && !explicitLocal && plan.recommendedProvider !== 'cloud') {
+                console.log('[Orchestrator] Tools needed, upgrading to cloud for reliability');
+                plan.recommendedProvider = 'cloud';
+                plan.reasoning += ' (using cloud for reliable tool execution)';
+            }
+        }
 
         console.log('[Orchestrator] Plan generated with local model:', plan);
         return plan;
@@ -192,7 +271,7 @@ export async function analyzeRequest(
 function createDirectCloudPlan(userMessage: string, tools: LLMTool[]): PlanningResponse {
     const platform = getCurrentPlatform();
     let reasoning = 'Using cloud AI (local model unavailable)';
-    
+
     // Add platform-specific context
     switch (platform) {
         case 'linux':
@@ -207,7 +286,7 @@ function createDirectCloudPlan(userMessage: string, tools: LLMTool[]): PlanningR
         default:
             reasoning += ' (WebGPU not available or unsupported)';
     }
-    
+
     return {
         type: 'plan',
         complexity: 'moderate',
@@ -234,7 +313,7 @@ function createDirectCloudPlan(userMessage: string, tools: LLMTool[]): PlanningR
 function createFallbackPlan(userMessage: string, _tools: LLMTool[]): PlanningResponse {
     const platform = getCurrentPlatform();
     let reasoning = 'Using cloud AI for reliability';
-    
+
     // Add platform-specific context
     switch (platform) {
         case 'linux':
@@ -249,10 +328,10 @@ function createFallbackPlan(userMessage: string, _tools: LLMTool[]): PlanningRes
         default:
             reasoning += ' (WebGPU not available or unsupported)';
     }
-    
+
     // Check if this is a simple request that doesn't need confirmation
     const isSimpleRequest = /^(hi|hello|hey|what(\s+can\s+you\s+do)|how\s+are|thanks|bye|goodbye)/i.test(userMessage.trim());
-    
+
     return {
         type: 'plan',
         complexity: 'moderate',

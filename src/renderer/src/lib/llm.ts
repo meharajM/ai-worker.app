@@ -148,6 +148,20 @@ async function getOpenRouterSettings(
   return { apiKey, baseUrl, model };
 }
 
+/**
+ * Quick check if any cloud provider has API keys configured
+ * Used to avoid recommending cloud when no keys are set
+ */
+export async function hasAnyCloudProvider(settings?: LLMSettings): Promise<boolean> {
+  const [gemini, openai, openrouter] = await Promise.all([
+    getGeminiSettings(settings),
+    getOpenAISettings(settings),
+    getOpenRouterSettings(settings),
+  ]);
+
+  return !!(gemini.apiKey || openai.apiKey || openrouter.apiKey);
+}
+
 // Check if Ollama is running and list available models
 export async function checkOllama(
   settings?: LLMSettings
@@ -219,24 +233,13 @@ export async function checkBrowserLLM(): Promise<ProviderStatus> {
 
   try {
     const status = getWebLLMStatus();
-    console.log('[WebLLM] Status:', status);
-
-    if (!status.isSupported) {
-      return {
-        available: false,
-        error: status.error || 'WebGPU not supported',
-        isWebGPUSupported: false,
-      }
-    }
-
-    // WebGPU is supported
     const models = WEBLLM_MODELS.map(m => m.id);
 
     return {
-      available: true,
+      available: status.isSupported,
       model: status.currentModel || WEBLLM_MODELS[0].id,
-      models: models,
-      isWebGPUSupported: true,
+      models,
+      isWebGPUSupported: status.isSupported,
       isLoaded: status.isLoaded,
       isLoading: status.isLoading,
       loadingProgress: status.loadingProgress,
@@ -245,7 +248,6 @@ export async function checkBrowserLLM(): Promise<ProviderStatus> {
       error: status.error || undefined,
     }
   } catch (error) {
-    console.error('[WebLLM] Check error:', error);
     return {
       available: false,
       error: error instanceof Error ? error.message : 'WebLLM check failed'
@@ -1038,7 +1040,7 @@ export async function chat(
   servers?: ServerInfo[]
 ): Promise<LLMResponse> {
   console.log('[LLM] Chat called with settings:', settings);
-  
+
   const providers = await getAvailableProviders(settings);
   console.log('[LLM] Available providers:', providers);
 
@@ -1113,18 +1115,84 @@ export async function chat(
 
   switch (provider) {
     case "browser":
+      console.log('[LLM] Calling browser LLM...');
       return callBrowserLLM(messagesWithSystem, tools, settings);
     case "ollama":
+      console.log('[LLM] Calling Ollama...');
       return callOllama(messagesWithSystem, tools, settings);
     case "openai":
-      return callOpenAI(messagesWithSystem, tools, settings, useJsonFallback, servers, false);
+      console.log('[LLM] Calling OpenAI-compatible API...');
+      try {
+        const result = await callOpenAI(messagesWithSystem, tools, settings, useJsonFallback, servers, false);
+        console.log('[LLM] OpenAI call successful:', result);
+        return result;
+      } catch (error) {
+        console.error('[LLM] OpenAI call failed:', error);
+        throw error;
+      }
     case "gemini":
-      return callGemini(messagesWithSystem, tools, settings);
+      console.log('[LLM] Calling Gemini...');
+      try {
+        const result = await callGemini(messagesWithSystem, tools, settings);
+        console.log('[LLM] Gemini call successful:', result);
+        return result;
+      } catch (error) {
+        console.error('[LLM] Gemini call failed:', error);
+        throw error;
+      }
     case "openrouter":
-      return callOpenAI(messagesWithSystem, tools, settings, useJsonFallback, servers, true);
+      console.log('[LLM] Calling OpenRouter...');
+      try {
+        const result = await callOpenAI(messagesWithSystem, tools, settings, useJsonFallback, servers, true);
+        console.log('[LLM] OpenRouter call successful:', result);
+        return result;
+      } catch (error) {
+        console.error('[LLM] OpenRouter call failed:', error);
+        // Check if it's a tool support issue
+        if (error instanceof Error && error.message.includes('tool use')) {
+          console.warn('[LLM] OpenRouter model does not support tools. Try a different model like openai/gpt-4o-mini');
+        }
+        throw error;
+      }
     default:
       throw new Error(`Provider ${provider} not implemented`);
   }
+}
+
+/**
+ * Clean JSON Schema parameters for Gemini API compatibility
+ * Removes unsupported fields like $schema and additionalProperties
+ */
+function cleanParametersForGemini(parameters: any): any {
+  if (!parameters || typeof parameters !== 'object') {
+    return parameters;
+  }
+
+  const cleaned = { ...parameters };
+
+  // Remove unsupported top-level fields
+  delete cleaned.$schema;
+  delete cleaned.additionalProperties;
+
+  // Clean properties recursively
+  if (cleaned.properties && typeof cleaned.properties === 'object') {
+    const cleanedProperties: any = {};
+    for (const [key, value] of Object.entries(cleaned.properties)) {
+      if (typeof value === 'object' && value !== null) {
+        cleanedProperties[key] = cleanParametersForGemini(value);
+      } else {
+        cleanedProperties[key] = value;
+      }
+    }
+    cleaned.properties = cleanedProperties;
+  }
+
+  // Clean array items if they exist
+  if (cleaned.items && typeof cleaned.items === 'object') {
+    cleaned.items = cleanParametersForGemini(cleaned.items);
+  }
+
+  return cleaned;
 }
 
 // Gemini specific caller
@@ -1136,11 +1204,37 @@ async function callGemini(
   const { apiKey, model } = await getGeminiSettings(settings);
   const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
 
-  // Convert messages to Gemini format, including tool history
-  const contents = messages.filter(m => m.role !== 'system').map(m => {
-    const role = m.role === 'assistant' ? 'model' : m.role === 'tool' ? 'function' : 'user';
+  // Convert messages to Gemini format, grouping consecutive tool responses
+  // Gemini requires all tool responses for a turn to be in a single message
+  const contents: any[] = [];
 
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === 'system') continue; // System handled separately
+
+    const role = m.role === 'assistant' ? 'model' : m.role === 'tool' ? 'user' : 'user';
     const parts: any[] = [];
+
+    if (m.role === 'tool') {
+      // Collect all consecutive tool messages into one turn
+      const toolParts: any[] = [];
+      let j = i;
+      while (j < messages.length && messages[j].role === 'tool') {
+        const toolMsg = messages[j];
+        toolParts.push({
+          functionResponse: {
+            name: (toolMsg as any).name || (toolMsg as any).tool_call_id || 'unknown',
+            response: { result: toolMsg.content }
+          }
+        });
+        j++;
+      }
+      // Skip the messages we just processed (minus 1 because loop will increment)
+      i = j - 1;
+      contents.push({ role: 'function', parts: toolParts });
+      continue;
+    }
+
     if (m.content) {
       parts.push({ text: m.content });
     }
@@ -1159,18 +1253,10 @@ async function callGemini(
       });
     }
 
-    // Handle tool results
-    if (m.role === 'tool') {
-      parts.push({
-        functionResponse: {
-          name: (m as any).name || (m as any).tool_call_id, // Fallback to tool_call_id if name is missing
-          response: { result: m.content }
-        }
-      });
+    if (parts.length > 0) {
+      contents.push({ role, parts });
     }
-
-    return { role, parts };
-  });
+  }
 
   const systemInstruction = messages.find(m => m.role === 'system')?.content;
 
@@ -1179,7 +1265,7 @@ async function callGemini(
     function_declarations: tools.map(t => ({
       name: t.name,
       description: t.description,
-      parameters: t.parameters
+      parameters: cleanParametersForGemini(t.parameters)
     }))
   } : undefined;
 
@@ -1192,6 +1278,8 @@ async function callGemini(
       maxOutputTokens: 2048,
     }
   };
+
+  console.log('[Gemini] Sending payload with', contents.length, 'messages');
 
   const response = await fetch(`${baseUrl}/models/${model}:generateContent?key=${apiKey}`, {
     method: 'POST',
@@ -1206,12 +1294,20 @@ async function callGemini(
 
   const data = await response.json();
   const candidate = data.candidates?.[0];
-  const content = candidate?.content?.parts?.[0]?.text || "";
+
+  // Join ALL text parts from the response (not just the first one)
+  const content = candidate?.content?.parts
+    ?.filter((p: any) => p.text)
+    .map((p: any) => p.text)
+    .join('\n') || "";
+
   const toolCalls = candidate?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => ({
     id: `gemini-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     name: p.functionCall.name,
     arguments: p.functionCall.args
   }));
+
+  console.log('[Gemini] Response content length:', content.length, 'toolCalls:', toolCalls?.length || 0);
 
   return {
     content,

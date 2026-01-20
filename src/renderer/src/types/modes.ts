@@ -26,6 +26,7 @@ export const APP_MODES: Record<AppModeId, AppModeConfig> = {
             'calculator',
             'browser_navigate' // Read-only browsing
         ],
+        includedServers: ['filesystem', 'memory', 'playwright', 'fetch']
     },
     finance: {
         id: 'finance',
@@ -39,7 +40,8 @@ export const APP_MODES: Record<AppModeId, AppModeConfig> = {
             'get_crypto_price',
             'analyze_market',
             'filesystem_read', // To read CSVs
-        ]
+        ],
+        includedServers: ['filesystem', 'memory', 'finance', 'sequential-thinking']
     },
     developer: {
         id: 'developer',
@@ -50,11 +52,12 @@ export const APP_MODES: Record<AppModeId, AppModeConfig> = {
             'get_current_time',
             'convert_time',
             'filesystem_.*',
-            'shell_.*',
+            'shell_.*', // Placeholder for potential shell tools
             'git_.*',
             'browser_.*',
             'sequential_thinking'
-        ]
+        ],
+        includedServers: ['filesystem', 'memory', 'git', 'playwright', 'sequential-thinking', 'fetch']
     },
     researcher: {
         id: 'researcher',
@@ -68,6 +71,7 @@ export const APP_MODES: Record<AppModeId, AppModeConfig> = {
             'mcp_server_paper_.*',
             'filesystem_write', // To save notes
             'sequential_thinking'
-        ]
+        ],
+        includedServers: ['filesystem', 'memory', 'playwright', 'sequential-thinking', 'fetch']
     }
 };

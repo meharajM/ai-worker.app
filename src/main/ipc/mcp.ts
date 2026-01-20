@@ -3,6 +3,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import { ChildProcess } from 'child_process'
+import { createRequire } from 'module'
+import path from 'path'
 
 // Store active MCP clients and their process info
 const activeConnections = new Map<string, Client>()
@@ -15,6 +17,23 @@ interface McpLogContext {
     toolName?: string
     operation: string
     [key: string]: unknown
+}
+
+function resolvePackageBinEntry(packageName: string): string {
+    const require = createRequire(import.meta.url)
+    const pkgJsonPath = require.resolve(`${packageName}/package.json`)
+    const pkgJson = require(pkgJsonPath) as { bin?: string | Record<string, string> }
+
+    if (!pkgJson.bin) {
+        throw new Error(`Package ${packageName} has no bin entry`)
+    }
+
+    const binRel = typeof pkgJson.bin === 'string' ? pkgJson.bin : Object.values(pkgJson.bin)[0]
+    if (!binRel) {
+        throw new Error(`Package ${packageName} has an invalid bin entry`)
+    }
+
+    return path.resolve(path.dirname(pkgJsonPath), binRel)
 }
 
 function logMcpOperation(level: 'info' | 'warn' | 'error', message: string, context: McpLogContext): void {
@@ -100,7 +119,7 @@ function sanitizeArgs(args: unknown): unknown {
 export function registerMcpHandlers(): void {
     ipcMain.handle('mcp:connect', async (_event, serverConfig) => {
         const startTime = Date.now()
-        const { id, type, command, args, url } = serverConfig
+        const { id, type, command, args, url, env } = serverConfig
 
         logMcpOperation('info', 'MCP connection requested', {
             operation: 'connect',
@@ -109,6 +128,7 @@ export function registerMcpHandlers(): void {
             command,
             args: args?.join(' '),
             url: type === 'sse' ? url : undefined,
+            envKeys: env ? Object.keys(env) : [],
         })
 
         try {
@@ -125,7 +145,24 @@ export function registerMcpHandlers(): void {
 
             if (type === 'stdio') {
                 let finalCommand = command
-                const finalEnv = { ...process.env } as Record<string, string>
+                const finalEnv = { ...process.env, ...env } as Record<string, string>
+
+                // Bundled MCP launcher: resolve npm package bin and execute via Electron internal Node
+                if (command === 'mcp-bundled') {
+                    const pkg = args?.[0]
+                    if (!pkg) {
+                        throw new Error('mcp-bundled requires args[0] to be a package name')
+                    }
+
+                    const binPath = resolvePackageBinEntry(pkg)
+                    const pkgArgs = (args || []).slice(1)
+
+                    finalCommand = process.execPath
+                    finalEnv.ELECTRON_RUN_AS_NODE = '1'
+
+                    // Replace args with resolved bin script path + package args
+                    serverConfig.args = [binPath, ...pkgArgs]
+                }
 
                 // Fallback to internal Node.js if 'node' is requested
                 if (command === 'node' || command === 'node.exe') {
@@ -148,7 +185,7 @@ export function registerMcpHandlers(): void {
                 // Create transport with better error handling
                 transport = new StdioClientTransport({
                     command: finalCommand,
-                    args: args || [],
+                    args: serverConfig.args || [],
                     env: finalEnv,
                     stderr: 'pipe' // Capture stderr to monitor for errors
                 })

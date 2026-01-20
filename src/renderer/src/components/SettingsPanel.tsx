@@ -26,6 +26,7 @@ import { useAuthStore } from '../stores/authStore'
 import { FEATURE_FLAGS, APP_INFO } from '../lib/constants'
 import { isDevelopmentMode } from '../lib/featureFlags'
 import { EnhancedFeatureFlagsPanel } from './EnhancedFeatureFlagsPanel'
+import electron from '../lib/electron'
 import {
     chat,
     getAvailableProviders,
@@ -45,7 +46,7 @@ import {
 } from '../lib/llm'
 import { ModelSelect } from './ModelSelect'
 
-type SettingsSection = 'account' | 'llm' | 'voice' | 'appearance' | 'logs' | 'flags' | 'about'
+type SettingsSection = 'account' | 'llm' | 'voice' | 'appearance' | 'preferences' | 'logs' | 'flags' | 'about'
 
 interface ProviderStatus {
     ollama: { available: boolean; model?: string; models?: string[]; error?: string; modelsEndpointAvailable?: boolean }
@@ -86,9 +87,31 @@ export function SettingsPanel() {
     const { openLogFolder, getLogPath } = useLogStore()
     const [logPath, setLogPath] = useState<string>('')
 
+    const [playwrightBrowser, setPlaywrightBrowser] = useState<string>('auto')
+    const [playwrightBridgeKey, setPlaywrightBridgeKey] = useState<string>('')
+    const [fsRules, setFsRules] = useState<Array<{ path: string; access: 'read' | 'readwrite' }>>([])
+    const [newFsPath, setNewFsPath] = useState<string>('')
+    const [newFsAccess, setNewFsAccess] = useState<'read' | 'readwrite'>('read')
+
     useEffect(() => {
         getLogPath().then(setLogPath)
     }, [getLogPath])
+
+    useEffect(() => {
+        (async () => {
+            const browser = await electron.store.get<string>('mcp.playwright.browser', 'auto')
+            setPlaywrightBrowser(browser || 'auto')
+
+            const bridgeKey = await electron.store.get<string>('mcp.playwright.bridgeKey', '')
+            setPlaywrightBridgeKey(bridgeKey || '')
+
+            const rules = await electron.store.get<Array<{ path: string; access: 'read' | 'readwrite' }>>(
+                'mcp.filesystem.rules',
+                []
+            )
+            setFsRules(Array.isArray(rules) ? rules : [])
+        })()
+    }, [])
 
     // Check model compatibility on mount
     useEffect(() => {
@@ -250,6 +273,7 @@ export function SettingsPanel() {
         { id: 'llm', label: 'LLM Provider', icon: <Cpu size={20} /> },
         { id: 'voice', label: 'Voice', icon: <Volume2 size={20} /> },
         { id: 'appearance', label: 'Appearance', icon: <Palette size={20} /> },
+        { id: 'preferences', label: 'Preferences', icon: <FolderOpen size={20} /> },
         { id: 'logs', label: 'Auditing', icon: <FileText size={20} /> },
         ...(isDevelopmentMode() ? [{ id: 'flags' as const, label: 'Feature Flags', icon: <Flag size={20} /> }] : []),
         { id: 'about', label: 'About', icon: <Info size={20} /> },
@@ -1260,38 +1284,150 @@ export function SettingsPanel() {
                     </div>
                 )}
 
-                {/* Audit Logs Section */}
-                {activeSection === 'logs' && (
+                {/* Preferences Section */}
+                {activeSection === 'preferences' && (
                     <div>
-                        <h3 className="text-xl font-bold mb-6">Audit Logs</h3>
-                        <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-6">
-                            <div className="flex items-start gap-4 mb-6">
-                                <div className="p-3 bg-blue-500/10 rounded-lg">
-                                    <FileText className="text-blue-400" size={24} />
+                        <h3 className="text-xl font-bold mb-6">Preferences</h3>
+
+                        <div className="space-y-4">
+                            <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
+                                <h4 className="font-medium mb-3">Playwright (Browser Automation)</h4>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-xs text-white/40 mb-1">Browser</label>
+                                        <select
+                                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm"
+                                            value={playwrightBrowser}
+                                            onChange={async (e) => {
+                                                const value = e.target.value
+                                                setPlaywrightBrowser(value)
+                                                await electron.store.set('mcp.playwright.browser', value)
+                                            }}
+                                        >
+                                            <option value="auto">Auto</option>
+                                            <option value="chromium">Chromium</option>
+                                            <option value="chrome">Chrome</option>
+                                            <option value="firefox">Firefox</option>
+                                            <option value="msedge">Edge</option>
+                                            <option value="webkit">WebKit</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs text-white/40 mb-1">Bridge Key (optional)</label>
+                                        <input
+                                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm"
+                                            value={playwrightBridgeKey}
+                                            onChange={(e) => setPlaywrightBridgeKey(e.target.value)}
+                                            onBlur={async () => {
+                                                await electron.store.set('mcp.playwright.bridgeKey', playwrightBridgeKey)
+                                            }}
+                                            placeholder="Paste key if using browser bridge"
+                                        />
+                                        <div className="mt-2">
+                                            <button
+                                                className="text-xs text-[#4fd1c5] hover:underline"
+                                                onClick={() => electron.openExternal('https://github.com/microsoft/playwright')}
+                                            >
+                                                Download Playwright bridge extension (supported browsers)
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div>
-                                    <h4 className="font-medium mb-1">Corporate Logging Enabled</h4>
+
+                                <p className="text-xs text-white/40 mt-3">
+                                    Changing browser preference affects the Playwright MCP server the next time it reconnects.
+                                </p>
+                            </div>
+
+                            <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
+                                <h4 className="font-medium mb-3">File System (Directory Access)</h4>
+
+                                <div className="flex flex-col md:flex-row gap-2">
+                                    <input
+                                        className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm"
+                                        value={newFsPath}
+                                        onChange={(e) => setNewFsPath(e.target.value)}
+                                        placeholder="/path/to/folder"
+                                    />
+                                    <select
+                                        className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm"
+                                        value={newFsAccess}
+                                        onChange={(e) => setNewFsAccess(e.target.value as any)}
+                                    >
+                                        <option value="read">Read only</option>
+                                        <option value="readwrite">Read + Write</option>
+                                    </select>
+                                    <button
+                                        className="px-4 py-2 bg-white/10 hover:bg-white/15 rounded-lg text-sm"
+                                        onClick={async () => {
+                                            if (!newFsPath.trim()) return
+                                            const next = [...fsRules, { path: newFsPath.trim(), access: newFsAccess }]
+                                            setFsRules(next)
+                                            setNewFsPath('')
+                                            setNewFsAccess('read')
+                                            await electron.store.set('mcp.filesystem.rules', next)
+                                        }}
+                                    >
+                                        Add
+                                    </button>
+                                </div>
+
+                                <div className="mt-3 space-y-2">
+                                    {fsRules.length === 0 ? (
+                                        <p className="text-xs text-white/40">No directories configured yet.</p>
+                                    ) : (
+                                        fsRules.map((rule, idx) => (
+                                            <div key={`${rule.path}-${idx}`} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+                                                <div className="min-w-0">
+                                                    <p className="text-sm truncate">{rule.path}</p>
+                                                    <p className="text-xs text-white/40">{rule.access === 'read' ? 'Read only' : 'Read + Write'}</p>
+                                                </div>
+                                                <button
+                                                    className="text-xs text-red-400 hover:underline"
+                                                    onClick={async () => {
+                                                        const next = fsRules.filter((_, i) => i !== idx)
+                                                        setFsRules(next)
+                                                        await electron.store.set('mcp.filesystem.rules', next)
+                                                    }}
+                                                >
+                                                    Remove
+                                                </button>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
+                                <h4 className="font-medium mb-3">Brave Search</h4>
+                                <div className="space-y-3">
                                     <p className="text-sm text-white/60">
-                                        All chat sessions, prompts, and tool executions are logged to the local file system for auditing purposes.
-                                        Logs are strictly append-only.
+                                        Required for the Brave Search MCP tool to perform web searches.
                                     </p>
+                                    <div>
+                                        <label className="block text-xs text-white/40 mb-1">API Key</label>
+                                        <input
+                                            type="password"
+                                            value={settings.braveApiKey}
+                                            onChange={(e) => settings.setBraveApiKey(e.target.value)}
+                                            placeholder="BSA..."
+                                            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:border-white/20 focus:outline-none"
+                                        />
+                                        <p className="text-xs text-white/30 mt-2">
+                                            Get a free API key from <a href="https://brave.com/search/api/" target="_blank" rel="noopener noreferrer" className="text-[#4fd1c5] hover:underline">brave.com/search/api</a>
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
 
-                            <div className="bg-black/20 rounded-lg p-4 mb-4">
-                                <label className="text-[10px] uppercase font-bold text-white/30 mb-2 block">Local Log Path</label>
-                                <code className="text-xs text-white/80 font-mono break-all block select-all">
-                                    {logPath || 'Loading...'}
-                                </code>
+                            <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
+                                <h4 className="font-medium mb-3">Memory</h4>
+                                <p className="text-sm text-white/60">
+                                    Memory management UI (list/edit/delete) will be wired to the Memory MCP tools next.
+                                </p>
                             </div>
-
-                            <button
-                                onClick={() => openLogFolder()}
-                                className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg transition-colors text-sm"
-                            >
-                                <FolderOpen size={16} />
-                                Reveal in File Explorer
-                            </button>
                         </div>
                     </div>
                 )}

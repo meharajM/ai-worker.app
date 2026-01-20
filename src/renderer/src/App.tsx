@@ -87,10 +87,14 @@ function App() {
         // Auto-connect servers with autoConnect enabled
         await autoConnectServers();
 
-        // Index tools after connections match
-        setTimeout(() => {
-          ToolRegistry.indexTools().catch(err => console.error("Failed to index tools:", err));
-        }, 2000); // Small delay to let servers connect
+        // Wait a bit for connections to establish, then index tools
+        // Using a short delay to let async connections complete
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        // Await tool indexing to ensure tools are ready before first query
+        console.log('[App] Indexing tools...');
+        await ToolRegistry.indexTools();
+        console.log('[App] Tool indexing complete');
 
       } catch (error) {
         console.error("Error initializing MCP servers:", error);
@@ -98,10 +102,25 @@ function App() {
     };
     initializeAndAutoConnect();
 
-    // OPTIMIZATION: Trigger immediate background load of local model
+    // OPTIMIZATION: Trigger background load of local model (only if WebGPU supported)
     if (FEATURE_FLAGS.BROWSER_LLM_ENABLED) {
-      const qwenModelId = 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC';
-      import('./lib/webllm').then(({ loadWebLLMModel }) => {
+      import('./lib/webllm').then(async ({ loadWebLLMModel, getWebLLMStatus, checkWebLLMModelCompatibility }) => {
+        // Check WebGPU support first
+        const status = getWebLLMStatus();
+        if (!status.isSupported) {
+          console.log('[App] WebGPU not supported, skipping auto-download');
+          return;
+        }
+
+        const qwenModelId = 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC';
+
+        // Check compatibility before download
+        const { compatible, reasons } = await checkWebLLMModelCompatibility(qwenModelId);
+        if (!compatible) {
+          console.warn('[App] Model not compatible, skipping auto-download:', reasons);
+          return;
+        }
+
         loadWebLLMModel(qwenModelId).catch(err => console.warn('[App] Background model load failed:', err));
       });
     }

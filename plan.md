@@ -407,7 +407,26 @@ ai-worker-app/
 
 ---
 
-### 🚀 Phase 16: App Launch Preparation [IN PROGRESS]
+### ✅ Phase 16: LLM Reliability & Performance [COMPLETED]
+
+**Goal:** Ensure robust handling of local/remote LLM availability, timeouts, and API specificities.
+
+**Implementation:**
+- [x] Implement "Smart Router" logic for LLM selection (complexity + availability)
+- [x] Add timeout (5s) to local model loading with cloud fallback
+- [x] Fix Gemini tool response handling (grouping & text joining)
+- [x] Await tool indexing before first query
+- [x] Implement WebGPU/Compatibility pre-checks for auto-download
+- [x] Cloud availability check to prevent recommended provider failures
+
+**Validation:** ✅
+- [x] Gemini tool execution returns valid response
+- [x] Local model timeout triggers cloud fallback
+- [x] No phantom cloud recommendations without API keys
+
+---
+
+### 🚀 Phase 17: App Launch Preparation [IN PROGRESS]
 
 **Goal:** Finalize distribution, assets, and production stability.
 
@@ -424,7 +443,7 @@ ai-worker-app/
 
 ---
 
-### 🏁 Phase 17: Distribution & V1 Launch
+### 🏁 Phase 18: Distribution & V1 Launch
 
 **Goal:** Public release and update mechanism.
 
@@ -481,4 +500,4 @@ ai-worker-app/
 
 ---
 
-**Current Status:** Phases 1-15 complete. Scalable Tool Selection (App Modes + RAG) implemented. Launch preparation (Phase 16) is next.
+**Current Status:** Phases 1-16 complete. LLM Reliability improvements implemented. Launch preparation (Phase 17) is next.
