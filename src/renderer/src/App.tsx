@@ -9,6 +9,7 @@ import { TaskConfirmationCard } from "./components/TaskConfirmationCard";
 import { Sidebar, View } from "./components/Sidebar";
 import { Header } from "./components/Header";
 import { useChatStore } from "./stores/chatStore";
+import { useMcpStore } from "./stores/mcpStore";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useLogStore } from "./stores/logStore";
 import { useAuthPersistence } from "./hooks/useAuthPersistence";
@@ -25,11 +26,7 @@ import {
 } from "./lib/llm";
 import { type TaskAnalysis } from "./lib/confirmation-message";
 import {
-  getAllTools,
-  getServers,
   executeToolCall,
-  autoConnectServers,
-  initializeMcpServers,
 } from "./lib/mcp";
 import { voskService } from "./lib/vosk";
 import { isElectron } from "./lib/electron";
@@ -53,24 +50,18 @@ function App() {
     analysis: TaskAnalysis;
     resolve: (enrichedPrompt: string | null) => void;
   } | null>(null);
-  
+
   // Initialize Auth Persistence
   useAuthPersistence();
   useSettingsSync();
 
-  // Initialize MCP servers and auto-connect on mount
+  // MCP initialization is handled by mcpStore.initialize() inside ConnectionsPanel
+  // but we should also ensure it's initialized for the Chat view.
   useEffect(() => {
-    const initializeAndAutoConnect = async () => {
-      try {
-        // Ensure servers are loaded
-        await initializeMcpServers();
-        // Auto-connect servers with autoConnect enabled
-        await autoConnectServers();
-      } catch (error) {
-        console.error("Error initializing MCP servers:", error);
-      }
-    };
-    initializeAndAutoConnect();
+    const mcp = useMcpStore.getState();
+    if (!mcp.initialized) {
+      mcp.initialize();
+    }
   }, []);
 
   // Check LLM availability on mount and when settings change (debounced)
@@ -234,10 +225,10 @@ function App() {
       // We need to use a mutable ref or store for the controller if we want to support external aborts
       // effectively (like the stop button). 
       // The current store uses its own AbortController, so we should sync them or use the store's signal.
-      
+
       // Since App.tsx sets up the store's abort controller in setProcessing(true),
       // we can grab it.
-      
+
       // However, the setProcessing(true) happens synchronously.
       // The store updates. We can get the signal from the store.
       // But `handleSubmit` is a callback closure. `useChatStore.getState()` is safer.
@@ -263,16 +254,16 @@ function App() {
             role: m.role as "user" | "assistant" | "system",
             content: m.content,
           };
-          
+
           if (m.toolCalls) {
-             msg.tool_calls = m.toolCalls.map(tc => ({
-               id: tc.id,
-               type: 'function',
-               function: {
-                 name: tc.name, // Fixed: use name
-                 arguments: tc.arguments
-               }
-             }));
+            msg.tool_calls = m.toolCalls.map(tc => ({
+              id: tc.id,
+              type: 'function',
+              function: {
+                name: tc.name, // Fixed: use name
+                arguments: tc.arguments
+              }
+            }));
           }
           // Note: Store might store tool results as 'tool' role messages too?
           // Looking at chatStore.ts, 'toolCalls' property is on the message.
@@ -282,7 +273,7 @@ function App() {
           // It doesn't seem to support 'tool' role in the typed interface `Message`.
           // Wait, `Message` interface has `role: 'user' | 'assistant' | 'system'`.
           // So 'tool' role messages were NOT being persisted in the store in the old implementation?
-          
+
           // Old App.tsx:
           // toolResults.push(...)
           // currentMessages.push({ role: "tool", ... }) -> This was local `currentMessages` array.
@@ -290,76 +281,76 @@ function App() {
           // It only called `addMessage` for the final assistant response.
           // AND it passed `allToolCalls` to the final assistant message in the store: 
           // `addMessage({ role: "assistant", content: ..., toolCalls: ... })`
-          
+
           // So the STORE representation compresses the tool calls into the assistant message?
           // "allToolCalls.push(...response.toolCalls)"
           // "addMessage({ ... toolCalls: allToolCalls ... })"
-          
+
           // BUT, for correct context reconstruction in the NEXT turn, we need the tool outputs.
           // If the store doesn't save "tool" role messages (outputs), then next turn `messages` will lack them.
           // This would break multi-turn coherency if we just reload from store.
-          
+
           // Let's re-read `chatStore.ts` to see if `role` allows `tool`.
           // "role: 'user' | 'assistant' | 'system'"
           // It strictly probably doesn't allow 'tool'.
-          
+
           // So how did the old app handle history?
           // `const llmMessages: LLMMessage[] = messages.map(...)`
           // It seems it LOST the tool outputs between sessions?
           // If so, that's a pre-existing bug/limitation.
           // OR `LLMMessage` creation in `App.tsx` handled it?
           // No, it just mapped `messages`.
-          
+
           // Verify `chatStore.ts`:
           // `export interface Message { ... role: 'user' | 'assistant' | 'system' ... }`
-          
+
           // This confirms the store does not save tool outputs as separate messages.
           // It attaches `toolCalls` to the assistant message.
           // But where do the RESULTS go?
           // `export interface ToolCall { ... result?: string }`
           // Ah! `result` is inside `ToolCall`.
-          
+
           // So we need to reconstruct `tool` role messages from the `toolCalls` array in the assistant message.
-          
+
           return msg;
         });
-        
+
         // Reconstruct tool outputs from history
         const reconstructedHistory: LLMMessage[] = [];
         for (const msg of initialHistory) {
-           reconstructedHistory.push(msg);
-           // If this message has tool calls with results, we need to append synthetic "tool" messages
-           // IF the store actually saved the results.
-           // In `App.tsx` old loop:
-           // `toolResults` had `result`.
-           // But `allToolCalls` passed to `addMessage` was `response.toolCalls` (from LLM) which DOES NOT have results.
-           // Wait. `allToolCalls.push(...response.toolCalls)`.
-           // `response.toolCalls` comes from `callOpenAI` or similar. It has `arguments`. It does NOT have `result` usually.
-           // So the store saved the tool CALLS but not the RESULTS?
-           // If so, the history was indeed broken for tool use.
-           
-           // However, looking closer at `App.tsx` old code:
-           // `addMessage({ role: "assistant", content: ..., toolCalls: allToolCalls ... })`
-           // And `message.toolCalls` in store uses `ToolCall` interface which has `result?: string`.
-           
-           // If the old code didn't populate `result` in `allToolCalls`, then we lost the results.
-           // Old code: `allToolCalls` came from `response.toolCalls`.
-           // `toolResults` contained the results.
-           // But `toolResults` was NOT saved to store.
-           
-           // This implies the old app did NOT persist tool outputs.
-           // I should fix this or at least match behavior.
-           // But `AgentRuntime` needs outputs to work (especially for DCP).
-           // If I only fix it for the current session, that's fine.
-           // `AgentRuntime` keeps `this.messages`.
-           
-           // For now, I will map the store messages as best as I can.
-           // And I should update `handleSubmit` to try to save results if possible, 
-           // OR just rely on `AgentRuntime` managing the conversation for the current turn.
+          reconstructedHistory.push(msg);
+          // If this message has tool calls with results, we need to append synthetic "tool" messages
+          // IF the store actually saved the results.
+          // In `App.tsx` old loop:
+          // `toolResults` had `result`.
+          // But `allToolCalls` passed to `addMessage` was `response.toolCalls` (from LLM) which DOES NOT have results.
+          // Wait. `allToolCalls.push(...response.toolCalls)`.
+          // `response.toolCalls` comes from `callOpenAI` or similar. It has `arguments`. It does NOT have `result` usually.
+          // So the store saved the tool CALLS but not the RESULTS?
+          // If so, the history was indeed broken for tool use.
+
+          // However, looking closer at `App.tsx` old code:
+          // `addMessage({ role: "assistant", content: ..., toolCalls: allToolCalls ... })`
+          // And `message.toolCalls` in store uses `ToolCall` interface which has `result?: string`.
+
+          // If the old code didn't populate `result` in `allToolCalls`, then we lost the results.
+          // Old code: `allToolCalls` came from `response.toolCalls`.
+          // `toolResults` contained the results.
+          // But `toolResults` was NOT saved to store.
+
+          // This implies the old app did NOT persist tool outputs.
+          // I should fix this or at least match behavior.
+          // But `AgentRuntime` needs outputs to work (especially for DCP).
+          // If I only fix it for the current session, that's fine.
+          // `AgentRuntime` keeps `this.messages`.
+
+          // For now, I will map the store messages as best as I can.
+          // And I should update `handleSubmit` to try to save results if possible, 
+          // OR just rely on `AgentRuntime` managing the conversation for the current turn.
         }
 
         const { AgentRuntime } = await import("./lib/agent-runtime");
-        
+
         let activeAssistantMessageId: string | null = null;
 
         const runtime = new AgentRuntime({
@@ -374,60 +365,67 @@ function App() {
             });
           },
           onMessage: (msg) => {
-             // Map back to store
-             // We group all assistant and tool messages of a single turn into ONE store message
-             
-             if (msg.role === 'assistant') {
-                const newToolCalls = msg.tool_calls ? msg.tool_calls.map(tc => ({
-                   id: tc.id,
-                   name: tc.function.name,
-                   arguments: safeParseJSON(tc.function.arguments),
-                })) : [];
+            // Map back to store
+            // We group all assistant and tool messages of a single turn into ONE store message
 
-                if (activeAssistantMessageId) {
-                   const { updateMessage, getActiveSession } = useChatStore.getState();
-                   const session = getActiveSession();
-                   const existingMsg = session?.messages.find(m => m.id === activeAssistantMessageId);
-                   if (existingMsg) {
-                      // Update existing message
-                      const mergedToolCalls = [...(existingMsg.toolCalls || []), ...newToolCalls];
-                      
-                      // For content: overwrite if new content exists (often content in tool turns is intermediate)
-                      let finalContent = existingMsg.content;
-                      if (msg.content && msg.content !== existingMsg.content) {
-                          finalContent = msg.content;
-                      }
+            if (msg.role === 'assistant') {
+              const newToolCalls = msg.tool_calls ? msg.tool_calls.map(tc => ({
+                id: tc.id,
+                name: tc.function.name,
+                arguments: safeParseJSON(tc.function.arguments),
+              })) : [];
 
-                      updateMessage(activeAssistantMessageId, {
-                         content: finalContent,
-                         toolCalls: mergedToolCalls.length > 0 ? mergedToolCalls : undefined
-                      });
-                      return;
-                   }
-                }
-                
-                // Create new message and track its ID
-                const added = addMessage({
-                  role: 'assistant',
-                  content: msg.content || "",
-                  toolCalls: newToolCalls.length > 0 ? newToolCalls : undefined
-                });
-                activeAssistantMessageId = added.id;
-
-             } else if (msg.role === 'tool' && activeAssistantMessageId) {
-                // Update the result of the specific tool call in the active assistant message
+              if (activeAssistantMessageId) {
                 const { updateMessage, getActiveSession } = useChatStore.getState();
                 const session = getActiveSession();
                 const existingMsg = session?.messages.find(m => m.id === activeAssistantMessageId);
-                if (existingMsg && existingMsg.toolCalls) {
-                   const updatedToolCalls = existingMsg.toolCalls.map(tc => 
-                      tc.id === msg.tool_call_id ? { ...tc, result: msg.content } : tc
-                   );
-                   updateMessage(activeAssistantMessageId, {
-                      toolCalls: updatedToolCalls
-                   });
+                if (existingMsg) {
+                  // Update existing message
+                  const mergedToolCalls = [...(existingMsg.toolCalls || []), ...newToolCalls];
+
+                  // For content: overwrite if new content exists (often content in tool turns is intermediate)
+                  let finalContent = existingMsg.content;
+                  if (msg.content && msg.content !== existingMsg.content) {
+                    finalContent = msg.content;
+                  }
+
+                  updateMessage(activeAssistantMessageId, {
+                    content: finalContent,
+                    toolCalls: mergedToolCalls.length > 0 ? mergedToolCalls : undefined
+                  });
+                  return;
                 }
-             }
+              }
+
+              // Create new message and track its ID
+              const added = addMessage({
+                role: 'assistant',
+                content: msg.content || "",
+                toolCalls: newToolCalls.length > 0 ? newToolCalls : undefined
+              });
+              activeAssistantMessageId = added.id;
+
+            } else if (msg.role === 'tool' && activeAssistantMessageId) {
+              // Update the result of the specific tool call in the active assistant message
+              const { updateMessage, getActiveSession } = useChatStore.getState();
+              const session = getActiveSession();
+              const existingMsg = session?.messages.find(m => m.id === activeAssistantMessageId);
+
+              if (existingMsg && existingMsg.toolCalls) {
+                const updatedToolCalls = existingMsg.toolCalls.map(tc => {
+                  // We try to match by tool_call_id or by name if id is missing/generic
+                  // AgentRuntime provides tool_call_id
+                  if (tc.id === msg.tool_call_id) {
+                    return { ...tc, result: msg.content };
+                  }
+                  return tc;
+                });
+
+                updateMessage(activeAssistantMessageId, {
+                  toolCalls: updatedToolCalls
+                });
+              }
+            }
           }
         }, initialHistory); // Pass initialized history
 
@@ -459,7 +457,7 @@ function App() {
               <ChatSidebar />
               <div className="flex-1 flex flex-col overflow-hidden min-w-0">
                 <ChatView />
-                
+
                 {/* Confirmation Card - Shows when task needs clarification */}
                 {pendingConfirmation && (
                   <div className="px-4 py-2 border-t border-white/5">
@@ -482,7 +480,7 @@ function App() {
                     />
                   </div>
                 )}
-                
+
                 <div className="p-4 flex-shrink-0 border-t border-white/5">
                   <VoiceInput onSubmit={handleSubmit} disabled={isProcessing || !!pendingConfirmation} onAbort={abortProcessing} />
                 </div>
