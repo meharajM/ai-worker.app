@@ -1,5 +1,6 @@
 import { STORAGE_KEYS, APP_INFO } from "./constants";
 import electron from "./electron";
+import { ensureRecord } from "./llm";
 
 /// <reference path="../env.d.ts" />
 
@@ -150,7 +151,7 @@ export async function connectServer(serverId: string): Promise<void> {
 
       // Get tools from the connected server
       const toolsResult = (await electron.mcp.listTools(serverId)) as {
-        tools: { name: string; description: string }[];
+        tools: { name: string; description: string; inputSchema?: any }[];
         error?: string;
       };
 
@@ -189,10 +190,10 @@ export async function connectServer(serverId: string): Promise<void> {
       // Handle servers that might not expose tools (like sequential-thinking)
       if (toolsResult.tools && toolsResult.tools.length > 0) {
         server.tools = toolsResult.tools.map(
-          (t: { name: string; description: string }) => ({
+          (t: { name: string; description: string; inputSchema?: any }) => ({
             name: t.name,
             description: t.description,
-            inputSchema: { type: "object", properties: {} },
+            inputSchema: t.inputSchema || { type: "object", properties: {} },
           })
         );
         logMcpRenderer("info", "MCP server tools loaded", {
@@ -274,15 +275,25 @@ export async function disconnectServer(serverId: string): Promise<void> {
   await saveServersToStorage();
 }
 
-// Get all available tools from connected servers
+// Get all available tools from connected servers (deduplicated by name, preferring detailed schemas)
 export function getAllTools(): MCPTool[] {
-  const tools: MCPTool[] = [];
+  const toolMap: Map<string, MCPTool> = new Map();
   connectedServers.forEach((server) => {
     if (server.connected) {
-      tools.push(...server.tools);
+      server.tools.forEach(tool => {
+        const existing = toolMap.get(tool.name);
+        
+        // If we don't have this tool yet, or if the new one has a richer schema, take it
+        const newScore = Object.keys(tool.inputSchema?.properties || {}).length;
+        const existingScore = existing ? Object.keys(existing.inputSchema?.properties || {}).length : -1;
+        
+        if (!existing || newScore > existingScore) {
+          toolMap.set(tool.name, tool);
+        }
+      });
     }
   });
-  return tools;
+  return Array.from(toolMap.values());
 }
 
 // Find which server a tool belongs to
@@ -353,19 +364,21 @@ function sanitizeArgsForLogging(
   return sanitized;
 }
 
-// Execute a tool call
+// Execute a tool call with retry logic for connection errors
 export async function executeToolCall(
   toolName: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown> | null | undefined
 ): Promise<{ result: unknown; error?: string }> {
   const startTime = Date.now();
-  const sanitizedArgs = sanitizeArgsForLogging(args);
+  const safeArgs = ensureRecord(args);
+  const sanitizedArgs = sanitizeArgsForLogging(safeArgs);
+  const MAX_RETRIES = 1;
 
   logMcpRenderer("info", "Tool call initiated", {
     operation: "executeToolCall",
     toolName,
     args: sanitizedArgs,
-    argsSize: JSON.stringify(args).length,
+    argsSize: JSON.stringify(safeArgs).length,
   });
 
   const server = findServerForTool(toolName);
@@ -383,58 +396,88 @@ export async function executeToolCall(
     };
   }
 
-  logMcpRenderer("info", "Tool found, executing via server", {
-    operation: "executeToolCall",
-    toolName,
-    serverId: server.id,
-    serverName: server.name,
-    serverType: server.type,
-  });
-
-  try {
-    const result = (await electron.mcp.callTool(server.id, toolName, args)) as {
-      result: unknown;
-      error?: string;
-    };
-    const duration = Date.now() - startTime;
-
-    if (result.error) {
-      // Check if connection was closed
-      const isConnectionClosed =
-        result.error.includes("-32000") ||
-        result.error.includes("Connection closed") ||
-        result.error.includes("connection closed") ||
-        result.error.includes("ECONNRESET") ||
-        result.error.includes("EPIPE");
-
-      if (isConnectionClosed) {
-        // Update server state to reflect disconnected status
-        server.connected = false;
-        server.tools = [];
-        server.error = "Connection closed unexpectedly";
-        connectedServers.set(server.id, server);
-        await saveServersToStorage();
-
-        logMcpRenderer("warn", "Tool call failed due to connection closed", {
+  let lastError: string | undefined;
+  
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const attemptStartTime = Date.now();
+    
+    try {
+      if (attempt > 0) {
+        logMcpRenderer("info", "Retrying tool call after potential reconnection", {
           operation: "executeToolCall",
           toolName,
           serverId: server.id,
-          serverName: server.name,
-          error: result.error,
-          duration,
-          connectionClosed: true,
-        });
-      } else {
-        logMcpRenderer("error", "Tool call returned error", {
-          operation: "executeToolCall",
-          toolName,
-          serverId: server.id,
-          serverName: server.name,
-          error: result.error,
-          duration,
+          attempt,
         });
       }
-    } else {
+
+      const result = (await electron.mcp.callTool(server.id, toolName, safeArgs)) as {
+        result: unknown;
+        error?: string;
+      };
+
+      if (result.error) {
+        const isConnectionClosed =
+          result.error.includes("-32000") ||
+          result.error.includes("Connection closed") ||
+          result.error.includes("connection closed") ||
+          result.error.includes("ECONNRESET") ||
+          result.error.includes("EPIPE");
+
+        if (isConnectionClosed) {
+          lastError = result.error;
+          
+          // Update server state to reflect disconnected status
+          server.connected = false;
+          server.tools = [];
+          server.error = "Connection closed unexpectedly";
+          connectedServers.set(server.id, server);
+          await saveServersToStorage();
+
+          logMcpRenderer("warn", `Tool call failed (attempt ${attempt + 1}/${MAX_RETRIES + 1})`, {
+            operation: "executeToolCall",
+            toolName,
+            serverId: server.id,
+            error: result.error,
+            connectionClosed: true,
+          });
+
+          // If we have retries left, try to reconnect before next attempt
+          if (attempt < MAX_RETRIES) {
+             try {
+               logMcpRenderer("info", "Attempting automatic reconnection for retry", {
+                 operation: "executeToolCall",
+                 serverId: server.id,
+                 serverName: server.name
+               });
+               await connectServer(server.id);
+             } catch (connErr) {
+               logMcpRenderer("error", "Automatic reconnection failed during retry", {
+                 operation: "executeToolCall",
+                 serverId: server.id,
+                 error: connErr instanceof Error ? connErr.message : String(connErr)
+               });
+               // If reconnection fails, we still continue to the next loop iteration 
+               // which will likely fail or hit the attempt limit
+             }
+             continue; // Try next attempt
+          }
+        }
+        
+        // Not a connection error or no retries left
+        const duration = Date.now() - startTime;
+        logMcpRenderer("error", "Tool call failed", {
+          operation: "executeToolCall",
+          toolName,
+          serverId: server.id,
+          error: result.error,
+          duration,
+        });
+        return result;
+      }
+
+      // Success!
+      const duration = Date.now() - startTime;
       const resultSize = JSON.stringify(result.result).length;
       const resultPreview =
         typeof result.result === "string"
@@ -447,31 +490,38 @@ export async function executeToolCall(
         serverId: server.id,
         serverName: server.name,
         duration,
+        attempts: attempt + 1,
         resultSize,
         resultPreview: resultPreview + (resultSize > 200 ? "..." : ""),
       });
+      return result;
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Tool execution failed";
+      lastError = errorMessage;
+
+      logMcpRenderer("error", `Exception during tool call (attempt ${attempt + 1})`, {
+        operation: "executeToolCall",
+        toolName,
+        serverId: server.id,
+        error: errorMessage,
+      });
+
+      if (attempt < MAX_RETRIES) {
+        // Try to reconnect before next attempt for exceptions too
+        try {
+          await connectServer(server.id);
+        } catch (e) {}
+        continue;
+      }
     }
-
-    return result;
-  } catch (error) {
-    const duration = Date.now() - startTime;
-    const errorMessage =
-      error instanceof Error ? error.message : "Tool execution failed";
-
-    logMcpRenderer("error", "Tool call threw exception", {
-      operation: "executeToolCall",
-      toolName,
-      serverId: server.id,
-      serverName: server.name,
-      error: errorMessage,
-      duration,
-    });
-
-    return {
-      result: null,
-      error: errorMessage,
-    };
   }
+
+  const totalDuration = Date.now() - startTime;
+  return {
+    result: null,
+    error: lastError || "Tool execution failed after retries",
+  };
 }
 
 // Set auto-connect preference for a server

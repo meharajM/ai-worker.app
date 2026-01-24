@@ -4,6 +4,7 @@ import { ChatView } from "./components/ChatView";
 import { ChatSidebar } from "./components/ChatSidebar";
 import { ConnectionsPanel } from "./components/ConnectionsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { TaskConfirmationCard } from "./components/TaskConfirmationCard";
 
 import { Sidebar, View } from "./components/Sidebar";
 import { Header } from "./components/Header";
@@ -22,6 +23,7 @@ import {
   ServerInfo,
   safeParseJSON,
 } from "./lib/llm";
+import { type TaskAnalysis } from "./lib/confirmation-message";
 import {
   getAllTools,
   getServers,
@@ -47,6 +49,10 @@ function App() {
     provider: null,
     available: false,
   });
+  const [pendingConfirmation, setPendingConfirmation] = useState<{
+    analysis: TaskAnalysis;
+    resolve: (enrichedPrompt: string | null) => void;
+  } | null>(null);
   
   // Initialize Auth Persistence
   useAuthPersistence();
@@ -360,6 +366,13 @@ function App() {
           activeSessionId: activeSessionId || "default",
           settings: settingsForLLM,
           signal: useChatStore.getState().getAbortSignal() || undefined,
+          requireConfirmation: true, // Enable smart confirmation
+          onConfirmationNeeded: async (analysis) => {
+            // Return a Promise that resolves when user makes a choice
+            return new Promise((resolve) => {
+              setPendingConfirmation({ analysis, resolve });
+            });
+          },
           onMessage: (msg) => {
              // Map back to store
              // We group all assistant and tool messages of a single turn into ONE store message
@@ -446,8 +459,32 @@ function App() {
               <ChatSidebar />
               <div className="flex-1 flex flex-col overflow-hidden min-w-0">
                 <ChatView />
+                
+                {/* Confirmation Card - Shows when task needs clarification */}
+                {pendingConfirmation && (
+                  <div className="px-4 py-2 border-t border-white/5">
+                    <TaskConfirmationCard
+                      analysis={pendingConfirmation.analysis}
+                      onConfirm={(enrichedPrompt) => {
+                        pendingConfirmation.resolve(enrichedPrompt);
+                        setPendingConfirmation(null);
+                      }}
+                      onCancel={() => {
+                        pendingConfirmation.resolve(null);
+                        setPendingConfirmation(null);
+                        setProcessing(false);
+                      }}
+                      onBypass={() => {
+                        // Use original prompt
+                        pendingConfirmation.resolve(pendingConfirmation.analysis.detectedIntent);
+                        setPendingConfirmation(null);
+                      }}
+                    />
+                  </div>
+                )}
+                
                 <div className="p-4 flex-shrink-0 border-t border-white/5">
-                  <VoiceInput onSubmit={handleSubmit} disabled={isProcessing} onAbort={abortProcessing} />
+                  <VoiceInput onSubmit={handleSubmit} disabled={isProcessing || !!pendingConfirmation} onAbort={abortProcessing} />
                 </div>
               </div>
             </div>

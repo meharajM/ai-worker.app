@@ -564,6 +564,109 @@ The system dynamically context-aware agent roles based on connected MCP servers.
 2. **Standard APIs** (OpenAI, Gemini, OpenRouter): High-intelligence cloud models.
 3. **Local LLMs** (Ollama): Privacy-focused local serving.
 
+### Sub-Agent Delegation Flow
+
+The system supports recursive task delegation through the `delegate_sub_task` tool. This allows the main agent to offload complex, self-contained units of work to a fresh `AgentRuntime` instance.
+
+#### How It Works
+
+1.  **Main Agent Decides**: The main agent determines a sub-task is too complex or requires isolation.
+2.  **Tool Call**: Calls `delegate_sub_task` with specific instructions and context.
+3.  **Recursive Runtime**: The system instantiates a *new* `AgentRuntime` (the "Sub-Agent").
+4.  **Isolated Execution**: The Sub-Agent runs its own loop (Plan -> Act -> Verify) with a fresh context window.
+5.  **Result Aggregation**: The Sub-Agent returns a final summary string, which becomes the tool result for the Main Agent.
+
+```mermaid
+sequenceDiagram
+    participant MainAgent as Main AgentRuntime
+    participant Tool as Tool: delegate_sub_task
+    participant SubAgent as Sub-AgentRuntime
+    participant LLM as LLM Provider
+
+    MainAgent->>Tool: Call(instruction, context)
+    Note over Tool: New AgentRuntime Created
+    Tool->>SubAgent: chat(instruction)
+    
+    loop Sub-Agent Loop
+        SubAgent->>LLM: Prompt
+        LLM-->>SubAgent: Response/Tool Calls
+        SubAgent->>SubAgent: Execute Tools
+    end
+    
+    SubAgent-->>Tool: Return Final Summary
+    Tool-->>MainAgent: Tool Result (Summary)
+    Note over MainAgent: Context Preserved
+```
+
+#### Performance Consideration
+
+> **⚠️ Critical Token Usage Note:**
+> When delegating tasks, the `delegate_sub_task` tool takes a `context` argument. If the Main Agent blindly passes its entire conversation history into this field, it causes a specific token spikes:
+>
+> 1.  **Duplicate Context**: The full history is tokenized once as part of the Main Agent's tool call argument.
+> 2.  **Sub-Agent Prompt**: The full history is tokenized *again* as the initial user message for the Sub-Agent.
+>
+> **Best Practice:** The Main Agent should always summarize or extract *only* the relevant facts needed for the sub-task, rather than dumping the raw conversation history. This is enforced via the `delegate_sub_task` tool definition.
+
+### Auto-Fork Task Decomposition
+
+The system now includes **automatic task decomposition** that intelligently spawns sub-agents based on context boundaries.
+
+#### Decision Logic
+
+| Scenario | Strategy | Implementation |
+|----------|----------|----------------|
+| **Multiple websites** | Parallel sub-agents | 1 sub-agent per website |
+| **Single website, 3+ actions** | Sub-agent | Protects main context |
+| **Single website, 1-2 actions** | Direct execution | No fork needed |
+
+#### Implementation
+
+Located in [task-decomposer.ts](file:///Users/suhail/ai-worker-app/src/renderer/src/lib/task-decomposer.ts):
+
+```typescript
+interface TaskDecomposition {
+  type: 'single_context' | 'multi_context';
+  contexts: string[];           // URLs or app names
+  estimatedActions: number;     // Estimated action count
+  shouldFork: boolean;          // Whether to spawn sub-agents
+  forkStrategy?: 'parallel' | 'sequential';
+}
+```
+
+#### Auto-Fork Flow
+
+```mermaid
+flowchart TD
+    A[User Request] --> B{Multiple websites?}
+    B -->|Yes| C[Parallel Sub-Agents]
+    B -->|No| D{3+ actions?}
+    D -->|Yes| E[Single Sub-Agent]
+    D -->|No| F[Direct Execution]
+    C --> G[Combine Results]
+    E --> G
+    F --> H[Response]
+    G --> H
+```
+
+#### Example: Multi-Website Task
+
+**User:** "Compare laptop prices on Amazon and BestBuy"
+
+```
+analyzeTaskForDecomposition() → 2 websites detected
+     │
+     ▼ Parallel Fork
+┌─────────────┐    ┌─────────────┐
+│ Sub-Agent   │    │ Sub-Agent   │
+│ AMAZON      │    │ BESTBUY     │
+└──────┬──────┘    └──────┬──────┘
+       │                  │
+       └────────┬─────────┘
+                ▼
+        Main Agent combines results
+```
+
 ---
 
 ## Dynamic Context Pruning (DCP)

@@ -24,7 +24,8 @@ import {
   ServerInfo, 
   LLMResponse, 
   LLMProvider, 
-  LLMSettings 
+  LLMSettings,
+  LLMContentPart
 } from "./types";
 import { pruneContext } from "./dcp";
 
@@ -589,6 +590,12 @@ export async function getAvailableProviders(
   };
 }
 
+// Helper to extract text from multimodal content for providers that only support text
+function extractTextForLegacyProviders(content: string | LLMContentPart[]): string {
+  if (typeof content === 'string') return content;
+  return content.map(p => p.type === 'text' ? p.text : '').join('\n');
+}
+
 // Call Ollama API
 async function callOllama(
   messages: LLMMessage[],
@@ -607,7 +614,7 @@ async function callOllama(
       model: model,
       messages: messages.map((m) => ({
         role: m.role,
-        content: m.content,
+        content: extractTextForLegacyProviders(m.content),
       })),
       stream: false,
       tools: tools?.map((t) => ({
@@ -669,7 +676,10 @@ async function callBrowserLLM(
     const response = await chatWithWebLLM(
       messages
         .filter(m => m.role !== 'tool')
-        .map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content }))
+        .map(m => ({ 
+          role: m.role as 'user' | 'assistant' | 'system', 
+          content: extractTextForLegacyProviders(m.content) 
+        }))
       // No tools passed - avoids "model doesn't support tools" error
     );
 
@@ -844,15 +854,23 @@ async function callOpenAI(
   }
 
   const data = await response.json();
+  
+  if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
+    if (data.error) {
+      throw new Error(data.error.message || JSON.stringify(data.error));
+    }
+    throw new Error(`Unexpected API response format: ${JSON.stringify(data)}`);
+  }
+
   const choice = data.choices[0];
   const content = choice.message?.content || "";
 
   // If using JSON fallback, try to parse tool calls from content
   let toolCalls = choice.message?.tool_calls?.map(
-    (tc: { id: string; function: { name: string; arguments: string } }) => ({
+    (tc: { id: string; function: { name: string; arguments: any } }) => ({
       id: tc.id,
       name: tc.function.name,
-      arguments: safeParseJSON(tc.function.arguments),
+      arguments: ensureRecord(safeParseJSON(tc.function.arguments)),
     })
   );
 
@@ -911,7 +929,7 @@ function parseToolCallsFromJson(
           ) => ({
             id: `json_call_${Date.now()}_${idx}`,
             name: tc.name,
-            arguments: tc.arguments || {},
+            arguments: ensureRecord(tc.arguments),
           })
         );
       }
@@ -922,7 +940,7 @@ function parseToolCallsFromJson(
         return [{
           id: `json_call_${Date.now()}`,
           name: parsed.tool,
-          arguments: params
+          arguments: ensureRecord(params)
         }];
       }
     }
@@ -1036,6 +1054,9 @@ Example: "search for nike shoes on Google" requires:
 - Step 2: browser_type or browser_fill to enter "nike shoes" in the search box
 - Step 3: browser_click the search button OR browser_press_key Enter
 - Step 4: Verify the search completed (check results)
+- Step 5: Continue until the final goal (e.g., finding the item and clicking "Add to Cart") is reached!
+
+**E-COMMERCE & SHOPPING**: You are fully capable of shopping. "Add to Cart" is just a button click (\`browser_click\`). "Selecting size 6" is just clicking a radio button or dropdown (\`browser_click\` or \`browser_select\`). You have the tools for the ENTIRE journey. Do NOT claim e-commerce is unsupported.
 
 DO NOT stop after just navigating - complete the entire workflow!`;
   }
@@ -1062,8 +1083,27 @@ ${servers && servers.length > 0
     }
 - **System**: General reasoning and coordination.
 
+# SUB-AGENT DECOMPOSITION (AUTO-FORK)
+The system automatically handles complex tasks by spawning sub-agents:
+
+**Automatic Rules (handled by runtime):**
+- Multiple websites mentioned → Parallel sub-agents (1 per site)
+- Single website with 3+ actions → Sub-agent to protect context
+
+**Your Role:**
+- For multi-website tasks: The system will auto-fork. Focus on combining results.
+- For complex single-site tasks: Use \`delegate_sub_task\` if you have 3+ sequential actions.
+- For simple tasks: Execute directly.
+
+# INTERACTIVE CLARIFICATION
+Before starting a task, you MUST analyze the user's prompt.
+1. **Research & Verify First**: If a prompt lacks detail (e.g., "open router account"), DO NOT ask the user immediately. First, use \`browser_navigate\` to search Google (e.g., "open router account creation") to find the correct URL or service.
+2. **Ask ONLY if Necessary**: Only ask for clarification if research fails or the intent is truly ambiguous (e.g., "email John" with no context).
+3. **Suggest Alternatives**: If you identify a better way to achieve the goal, suggest it.
+
 # CRITICAL RULES
-1. **PLAN FIRST**: If the task is complex, your FIRST action MUST be to call 'create_execution_plan'. Do not textually describe the plan, use the tool.
+1. **RESEARCH FIRST**: If you are unsure about a URL, specific product, or service, SEARCH FOR IT. Do not ask the user for URLs if you can find them.
+2. **PLAN SECOND**: If the task is complex and clear, your NEXT action MUST be to call 'create_execution_plan'. Do not textually describe the plan, use the tool.
 
 2. **USE TOOLS, DON'T EXPLAIN**: When a user asks you to DO something, use the appropriate tool.
 
@@ -1077,9 +1117,15 @@ ${servers && servers.length > 0
    - Use result for next tool
    - Repeat
 
+6. **E-COMMERCE & SHOPPING**: You can perform full shopping workflows. You have the tools to click 'Add to Cart', select sizes/options, and proceed to checkout. Do NOT claim these actions are unsupported; they are standard web interactions that your browser tools can handle perfectly.
+
 6. **CONFIRM WITH RESULTS**: Confirm actions with specific details.
 
-7. **HANDLE ERRORS**: Explain errors clearly.
+7. **HANDLE ERRORS - RECOVER SMARTLY**: If a tool fails:
+   - Do NOT blindly retry the same action.
+   - Take a screenshot to re-assess the page state.
+   - Try a different selector or approach (e.g., use Enter key instead of clicking).
+   - If 2 retries fail, explain the issue and ask the user for guidance.
 
 8. **VOICE-OPTIMIZED**: Keep responses concise and natural.
 
@@ -1206,7 +1252,26 @@ async function callGemini(
 
     const parts: any[] = [];
     if (m.content) {
-      parts.push({ text: m.content });
+      if (typeof m.content === 'string') {
+        parts.push({ text: m.content });
+      } else {
+        m.content.forEach(part => {
+          if (part.type === 'text') {
+            parts.push({ text: part.text });
+          } else if (part.type === 'image_url') {
+            // Extracts base64 from data URI: data:image/jpeg;base64,...
+            const matches = part.image_url.url.match(/^data:([^;]+);base64,(.+)$/);
+            if (matches) {
+              parts.push({
+                inline_data: {
+                  mime_type: matches[1],
+                  data: matches[2]
+                }
+              });
+            }
+          }
+        });
+      }
     }
 
     // Handle assistant tool calls
@@ -1223,10 +1288,12 @@ async function callGemini(
 
     // Handle tool results
     if (m.role === 'tool') {
+      // Gemini expects simple text response for functionResponse
+      const resultText = typeof m.content === 'string' ? m.content : extractTextForLegacyProviders(m.content);
       parts.push({
         functionResponse: {
           name: (m as any).name,
-          response: { result: m.content }
+          response: { result: resultText }
         }
       });
     }
@@ -1234,7 +1301,8 @@ async function callGemini(
     return { role, parts };
   });
 
-  const systemInstruction = messages.find(m => m.role === 'system')?.content;
+  const systemMessage = messages.find(m => m.role === 'system');
+  const systemInstructionText = systemMessage ? extractTextForLegacyProviders(systemMessage.content) : undefined;
 
   // Build tool definitions
   const toolConfig = tools && tools.length > 0 ? {
@@ -1247,7 +1315,7 @@ async function callGemini(
 
   const payload = {
     contents,
-    system_instruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
+    system_instruction: systemInstructionText ? { parts: [{ text: systemInstructionText }] } : undefined,
     tools: toolConfig ? [{ function_declarations: toolConfig.function_declarations }] : undefined,
     generationConfig: {
       temperature: 0.7,
@@ -1273,7 +1341,7 @@ async function callGemini(
   const toolCalls = candidate?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => ({
     id: `gemini-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
     name: p.functionCall.name,
-    arguments: p.functionCall.args
+    arguments: ensureRecord(p.functionCall.args)
   }));
 
   return {
@@ -1326,39 +1394,67 @@ export async function downloadBrowserModel(
 
 
 
+// Helper to ensure arguments are always a Record (object)
+export function ensureRecord(input: any): Record<string, unknown> {
+  if (input === null || input === undefined) return {};
+  if (typeof input === 'object' && !Array.isArray(input)) return input as Record<string, unknown>;
+  
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+        return { input: parsed };
+      } catch (e) {
+        // Fall through to default wrapping
+      }
+    }
+    return { input: trimmed };
+  }
+  
+  return { value: input };
+}
+
 // Helper to safely parse JSON that might contain surrounding text or trailing garbage
 export function safeParseJSON(input: string | any): any {
+  if (input === null || input === undefined) return {};
   if (typeof input !== 'string') return input;
   if (!input || input.trim() === '') return {};
   
   try {
-    return JSON.parse(input.trim());
-  } catch (e) {
-    try {
-      // Find the first occurrence of { or [ and the last occurrence of } or ]
-      const startObj = input.indexOf('{');
-      const startArr = input.indexOf('[');
-      
-      let start = -1;
-      let end = -1;
-      
-      if (startObj !== -1 && (startArr === -1 || startObj < startArr)) {
-        start = startObj;
-        end = input.lastIndexOf('}');
-      } else if (startArr !== -1) {
-        start = startArr;
-        end = input.lastIndexOf(']');
-      }
-      
-      if (start !== -1 && end !== -1 && end > start) {
-        const potentialJson = input.substring(start, end + 1);
-        return JSON.parse(potentialJson);
-      }
-    } catch (innerE) {
-      console.warn('[safeParseJSON] Extraction failed:', innerE);
+    const trimmed = input.trim();
+    // Quick path for pure JSON
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+            return JSON.parse(trimmed);
+        } catch (e) { /* fall through to extraction */ }
     }
     
-    // If all else fails, return as-is or empty object if it was supposed to be args
+    // Find the first occurrence of { or [ and the last occurrence of } or ]
+    const startObj = input.indexOf('{');
+    const startArr = input.indexOf('[');
+    
+    let start = -1;
+    let end = -1;
+    
+    if (startObj !== -1 && (startArr === -1 || startObj < startArr)) {
+      start = startObj;
+      end = input.lastIndexOf('}');
+    } else if (startArr !== -1) {
+      start = startArr;
+      end = input.lastIndexOf(']');
+    }
+    
+    if (start !== -1 && end !== -1 && end > start) {
+      const potentialJson = input.substring(start, end + 1);
+      return JSON.parse(potentialJson);
+    }
+    
+    // If all else fails, return as-is
+    return input;
+  } catch (error) {
+    console.warn('[safeParseJSON] Extraction failed:', error);
     return input;
   }
 }

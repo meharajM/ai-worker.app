@@ -1,6 +1,10 @@
+export type LLMContentPart = 
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface LLMMessage {
   role: "user" | "assistant" | "system" | "tool";
-  content: string;
+  content: string | LLMContentPart[];
   tool_calls?: any[];
   tool_call_id?: string;
   name?: string; // For Gemini/OpenAI tool names

@@ -403,6 +403,36 @@ ai-worker-app/
 
 ---
 
+### ✅ Phase 17: RPI Workflow + Sub-Agent Integration [COMPLETED]
+
+**Goal:** Implement intelligent task decomposition and automatic sub-agent spawning.
+
+**Implementation:**
+- [x] Create `task-decomposer.ts` module for task analysis
+- [x] Implement URL/website detection logic
+- [x] Implement action keyword counting
+- [x] Add auto-fork logic to `AgentRuntime.chat()`
+- [x] Implement `executeParallelSubAgents()` for multi-website tasks
+- [x] Update system prompt with sub-agent decomposition rules
+- [x] Create browser comparison document (`proposal/browser.md`)
+
+**Key Features:**
+- **Multi-website detection** → Parallel sub-agents (1 per site)
+- **Single-site, 3+ actions** → Sub-agent to protect context
+- **Simple tasks** → Direct execution (no fork overhead)
+
+**Files Changed:**
+- `src/renderer/src/lib/task-decomposer.ts` (NEW)
+- `src/renderer/src/lib/agent-runtime.ts` (+90 lines)
+- `src/renderer/src/lib/llm.ts` (+12 lines)
+
+**Validation:** ✅
+- [x] TypeScript compilation passes for new files
+- [x] Build verified in user terminal
+- [x] Documentation updated
+
+---
+
 ### 🚀 Phase 16: App Launch Preparation [IN PROGRESS]
 
 **Goal:** Finalize distribution, assets, and production stability.
@@ -477,4 +507,4 @@ ai-worker-app/
 
 ---
 
-**Current Status:** Phases 1-15 complete. Security hardening and Agent Architecture refactor implemented. App Launch Preparation (Phase 16) is now the primary focus.
+**Current Status:** Phases 1-17 complete. RPI Workflow + Sub-Agent Auto-Fork system implemented. App Launch Preparation (Phase 16) is now the primary focus.
