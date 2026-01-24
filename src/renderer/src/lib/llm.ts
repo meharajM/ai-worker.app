@@ -727,7 +727,8 @@ async function callOpenAI(
   useJsonFallback: boolean = false,
   servers?: ServerInfo[],
   isOpenRouter: boolean = false,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  onStream?: (chunk: string) => void
 ): Promise<LLMResponse> {
   const { apiKey, baseUrl, model } = isOpenRouter
     ? await getOpenRouterSettings(settings)
@@ -777,6 +778,7 @@ async function callOpenAI(
     body: JSON.stringify({
       model: model,
       messages: useJsonFallback ? requestMessages : messages,
+      stream: !!onStream,
       ...(useJsonFallback
         ? {}
         : {
@@ -831,6 +833,94 @@ async function callOpenAI(
     }
 
     throw new Error(errorMessage);
+  }
+
+  // Handle Streaming Response
+  if (onStream && response.body) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let accumulatedContent = "";
+    let accumulatedToolCalls: Record<number, any> = {};
+    let finalToolCalls: any[] = [];
+    let buffer = ""; // Buffer for incomplete chunks
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
+        const lines = buffer.split("\n");
+        // Keep the last possibly incomplete line in buffer
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed === "data: [DONE]") continue;
+          if (trimmed.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(trimmed.slice(6));
+              const delta = data.choices?.[0]?.delta;
+
+              if (delta?.content) {
+                accumulatedContent += delta.content;
+                onStream(delta.content);
+              }
+
+              if (delta?.tool_calls) {
+                for (const tc of delta.tool_calls) {
+                  if (!accumulatedToolCalls[tc.index]) {
+                    accumulatedToolCalls[tc.index] = {
+                      id: tc.id || "",
+                      type: tc.type || "function",
+                      function: { name: "", arguments: "" }
+                    };
+                  }
+
+                  if (tc.id) accumulatedToolCalls[tc.index].id = tc.id;
+                  if (tc.function?.name) accumulatedToolCalls[tc.index].function.name += tc.function.name;
+                  if (tc.function?.arguments) accumulatedToolCalls[tc.index].function.arguments += tc.function.arguments;
+                }
+              }
+            } catch (e) {
+              console.warn("Error parsing stream chunk:", e);
+            }
+          }
+        }
+      }
+
+      // Process remaining buffer if any
+      if (buffer.trim() && buffer.trim() !== "data: [DONE]" && buffer.startsWith("data: ")) {
+        try {
+          const data = JSON.parse(buffer.trim().slice(6));
+          if (data.choices?.[0]?.delta?.content) {
+            accumulatedContent += data.choices[0].delta.content;
+            onStream(data.choices[0].delta.content);
+          }
+        } catch (e) { }
+      }
+
+    } catch (error) {
+      console.error("Streaming error:", error);
+      throw error;
+    } finally {
+      reader.releaseLock();
+    }
+
+    // Convert accumulated tool calls to final format
+    finalToolCalls = Object.values(accumulatedToolCalls).map((tc: any) => ({
+      id: tc.id,
+      name: tc.function.name,
+      arguments: JSON.parse(tc.function.arguments || "{}")
+    }));
+
+    return {
+      content: accumulatedContent,
+      toolCalls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+      provider: isOpenRouter ? "openrouter" : "openai",
+      model: model,
+    };
   }
 
   const data = await response.json();
@@ -1056,7 +1146,8 @@ export async function chat(
   tools?: LLMTool[],
   settings?: LLMSettings,
   servers?: ServerInfo[],
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  onStream?: (chunk: string) => void
 ): Promise<LLMResponse> {
   const providers = await getAvailableProviders(settings);
 

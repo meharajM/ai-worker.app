@@ -31,6 +31,11 @@ interface ChatState {
     abortController: AbortController | null
     offlineSpeech: boolean
 
+    // Streaming state
+    streamingContent: string
+    thinkingStatus: string | null  // Shows "Thinking...", "Calling tool: navigate", etc.
+    currentToolName: string | null
+
     // Session Actions
     createSession: () => string
     deleteSession: (id: string) => void
@@ -47,6 +52,13 @@ interface ChatState {
     abortProcessing: () => void
     getAbortSignal: () => AbortSignal | null
 
+    // Streaming Actions
+    setStreamingContent: (content: string) => void
+    appendStreamingContent: (chunk: string) => void
+    setThinkingStatus: (status: string | null) => void
+    setCurrentToolName: (name: string | null) => void
+    clearStreaming: () => void
+
     // Helpers
     getActiveSession: () => ChatSession | undefined
 }
@@ -58,6 +70,11 @@ export const useChatStore = create<ChatState>()(
             activeSessionId: null,
             isProcessing: false,
             abortController: null,
+
+            // Streaming state initialization
+            streamingContent: '',
+            thinkingStatus: null,
+            currentToolName: null,
 
             getActiveSession: () => {
                 const { sessions, activeSessionId } = get()
@@ -232,6 +249,19 @@ export const useChatStore = create<ChatState>()(
 
             offlineSpeech: false, // Default to online (Google)
             setOfflineSpeech: (enabled) => set({ offlineSpeech: enabled }),
+
+            // Streaming Actions
+            setStreamingContent: (content) => set({ streamingContent: content }),
+            appendStreamingContent: (chunk) => set((state) => ({
+                streamingContent: state.streamingContent + chunk
+            })),
+            setThinkingStatus: (status) => set({ thinkingStatus: status }),
+            setCurrentToolName: (name) => set({ currentToolName: name }),
+            clearStreaming: () => set({
+                streamingContent: '',
+                thinkingStatus: null,
+                currentToolName: null
+            }),
         }),
         {
             name: 'ai-worker-chat-v2', // Versioned storage to avoid conflicts

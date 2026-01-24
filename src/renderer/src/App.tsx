@@ -46,7 +46,7 @@ function App() {
     provider: null,
     available: false,
   });
-  
+
   // Initialize Auth Persistence
   useAuthPersistence();
   useSettingsSync();
@@ -347,8 +347,12 @@ function App() {
             },
           });
 
-          let response: Awaited<ReturnType<typeof chat>>;
+          let response: any = null;
           try {
+            // Set thinking status before LLM call
+            useChatStore.getState().setThinkingStatus('Analyzing your request...');
+            useChatStore.getState().setCurrentToolName(null);
+
             // Add timeout to prevent infinite hanging
             const signal = useChatStore.getState().getAbortSignal();
             const chatPromise = chat(
@@ -356,7 +360,8 @@ function App() {
               llmTools.length > 0 ? llmTools : undefined,
               settingsForLLM,
               serverInfo.length > 0 ? serverInfo : undefined,
-              signal || undefined
+              signal || undefined,
+              (chunk) => useChatStore.getState().appendStreamingContent(chunk)
             );
 
             const timeoutPromise = new Promise<never>((_, reject) => {
@@ -409,8 +414,13 @@ function App() {
               provider: "error",
               model: "unknown",
             };
+
+            useChatStore.getState().clearStreaming();
             break;
           }
+
+          // Clear streaming state now that we have the full response
+          useChatStore.getState().clearStreaming();
 
           addLog({
             eventType: 'LLM_RESPONSE',
@@ -484,6 +494,10 @@ function App() {
           for (let i = 0; i < response.toolCalls.length; i++) {
             const toolCall = response.toolCalls[i];
             const toolCallStartTime = Date.now();
+
+            // Update thinking status to show which tool is being executed
+            useChatStore.getState().setCurrentToolName(toolCall.name);
+            useChatStore.getState().setThinkingStatus(`Executing ${toolCall.name}...`);
 
             console.log(
               `[MCP App] Executing tool call ${i + 1}/${response.toolCalls.length

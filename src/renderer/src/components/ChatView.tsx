@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react'
-import { Trash2, Bot } from 'lucide-react'
+import { Trash2, Bot, Loader2, Wrench } from 'lucide-react'
 import { useChatStore } from '../stores/chatStore'
 import { MessageBubble } from './MessageBubble'
 
@@ -8,16 +8,25 @@ interface ChatViewProps {
 }
 
 export function ChatView({ onClearChat }: ChatViewProps) {
-    const { sessions, activeSessionId, isProcessing, removeMessage, clearMessages } = useChatStore()
+    const {
+        sessions,
+        activeSessionId,
+        isProcessing,
+        removeMessage,
+        clearMessages,
+        streamingContent,
+        thinkingStatus,
+        currentToolName
+    } = useChatStore()
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
     const activeSession = sessions.find(s => s.id === activeSessionId)
     const messages = activeSession?.messages || []
 
-    // Auto-scroll to bottom when new messages arrive
+    // Auto-scroll to bottom when new messages arrive or streaming updates
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }, [messages, isProcessing])
+    }, [messages, isProcessing, streamingContent])
 
     const handleClear = () => {
         if (window.confirm('Clear all messages? This cannot be undone.')) {
@@ -71,18 +80,45 @@ export function ChatView({ onClearChat }: ChatViewProps) {
                     ))
                 )}
 
-                {/* Processing indicator */}
+                {/* Live Thinking / Processing Indicator */}
                 {isProcessing && (
                     <div className="flex gap-3 justify-start">
                         <div className="w-8 h-8 rounded-lg bg-[#00a896] flex items-center justify-center flex-shrink-0">
                             <Bot size={18} className="text-white" />
                         </div>
-                        <div className="bg-[#1a1d23] border border-white/10 rounded-2xl px-4 py-3">
-                            <div className="flex gap-1.5">
-                                <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                                <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                                <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                        <div className="bg-[#1a1d23] border border-white/10 rounded-2xl px-4 py-3 max-w-[80%]">
+                            {/* Thinking Status */}
+                            <div className="flex items-center gap-2 mb-2">
+                                {currentToolName ? (
+                                    <>
+                                        <Wrench size={14} className="text-[#00a896] animate-pulse" />
+                                        <span className="text-xs text-[#00a896] font-medium">
+                                            Using: {currentToolName}
+                                        </span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Loader2 size={14} className="text-white/60 animate-spin" />
+                                        <span className="text-xs text-white/60">
+                                            {thinkingStatus || 'Thinking...'}
+                                        </span>
+                                    </>
+                                )}
                             </div>
+
+                            {/* Streaming Content Preview */}
+                            {streamingContent ? (
+                                <div className="text-white/80 text-sm whitespace-pre-wrap">
+                                    {streamingContent}
+                                    <span className="inline-block w-2 h-4 bg-white/60 ml-0.5 animate-pulse" />
+                                </div>
+                            ) : (
+                                <div className="flex gap-1.5">
+                                    <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                                    <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                                    <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}
