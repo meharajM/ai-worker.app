@@ -107,7 +107,7 @@ async function getOpenAISettings(
 
   const apiKey =
     settings?.openaiApiKey ||
-    (await electron.store.get<string>("openai_api_key")) ||
+    (await electron.secure.get("openai_api_key")).value ||
     "";
   const baseUrl =
     settings?.openaiBaseUrl ||
@@ -125,7 +125,7 @@ async function getGeminiSettings(
   const electron = (await import("./electron")).default;
   const apiKey =
     settings?.geminiApiKey ||
-    (await electron.store.get<string>("gemini_api_key")) ||
+    (await electron.secure.get("gemini_api_key")).value ||
     "";
   const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
   const model = settings?.geminiModel || LLM_CONFIG.GEMINI.DEFAULT_MODEL;
@@ -139,7 +139,7 @@ async function getOpenRouterSettings(
   const electron = (await import("./electron")).default;
   const apiKey =
     settings?.openrouterApiKey ||
-    (await electron.store.get<string>("openrouter_api_key")) ||
+    (await electron.secure.get("openrouter_api_key")).value ||
     "";
   const baseUrl = LLM_CONFIG.OPENROUTER.BASE_URL;
   const model = settings?.openrouterModel || LLM_CONFIG.OPENROUTER.DEFAULT_MODEL;
@@ -839,11 +839,20 @@ async function callOpenAI(
 
   // If using JSON fallback, try to parse tool calls from content
   let toolCalls = choice.message?.tool_calls?.map(
-    (tc: { id: string; function: { name: string; arguments: string } }) => ({
-      id: tc.id,
-      name: tc.function.name,
-      arguments: JSON.parse(tc.function.arguments),
-    })
+    (tc: { id: string; function: { name: string; arguments: string } }) => {
+      let args = {};
+      try {
+        args = JSON.parse(tc.function.arguments);
+      } catch (e) {
+        console.warn(`Failed to parse tool arguments for ${tc.function.name}:`, tc.function.arguments);
+        args = { _parse_error: "Invalid JSON arguments from LLM" };
+      }
+      return {
+        id: tc.id,
+        name: tc.function.name,
+        arguments: args,
+      };
+    }
   );
 
   // If no native tool calls but we're using fallback, try to parse JSON from content
@@ -1156,7 +1165,14 @@ async function callGemini(
           functionCall: {
             name: tc.function.name,
             args: typeof tc.function.arguments === 'string'
-              ? JSON.parse(tc.function.arguments)
+              ? (() => {
+                try {
+                  return JSON.parse(tc.function.arguments);
+                } catch (e) {
+                  console.warn(`Failed to parse Gemini tool arguments for ${tc.function.name}:`, tc.function.arguments);
+                  return { _parse_error: "Invalid JSON arguments" };
+                }
+              })()
               : tc.function.arguments
           }
         });

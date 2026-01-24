@@ -16,7 +16,7 @@ import {
     Download,
     HardDrive,
     Trash2,
-
+    Globe,
     FolderOpen,
     FileText,
     Mic
@@ -47,7 +47,7 @@ import {
 } from '../lib/llm'
 import { ModelSelect } from './ModelSelect'
 
-type SettingsSection = 'account' | 'llm' | 'voice' | 'appearance' | 'logs' | 'flags' | 'about'
+type SettingsSection = 'account' | 'llm' | 'voice' | 'browser' | 'appearance' | 'logs' | 'flags' | 'about'
 
 interface ProviderStatus {
     ollama: { available: boolean; model?: string; models?: string[]; error?: string; modelsEndpointAvailable?: boolean }
@@ -251,6 +251,7 @@ export function SettingsPanel() {
         ...(FEATURE_FLAGS.AUTH_ENABLED ? [{ id: 'account' as const, label: 'Account', icon: <User size={20} /> }] : []),
         { id: 'llm', label: 'LLM Provider', icon: <Cpu size={20} /> },
         { id: 'voice', label: 'Speech Recognition', icon: <Mic size={20} /> },
+        { id: 'browser', label: 'Browser Automation', icon: <Globe size={20} /> },
         { id: 'appearance', label: 'Appearance', icon: <Palette size={20} /> },
         { id: 'logs', label: 'Auditing', icon: <FileText size={20} /> },
         ...(isDevelopmentMode() ? [{ id: 'flags' as const, label: 'Feature Flags', icon: <Flag size={20} /> }] : []),
@@ -1168,6 +1169,72 @@ export function SettingsPanel() {
                             <p className="text-xs text-white/30">
                                 Runs locally using Vosk engine. Changing the model will trigger a new download (~50MB) on next use.
                             </p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Browser Automation Section */}
+                {activeSection === 'browser' && (
+                    <div>
+                        <h3 className="text-xl font-bold mb-6">Browser Automation</h3>
+                        <p className="text-white/60 text-sm mb-6">
+                            Configure the browser used by the AI agent for web automation tasks.
+                        </p>
+
+                        {/* Browser Selection */}
+                        <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4 mb-4">
+                            <label className="block text-sm text-white/60 mb-3">Browser Engine</label>
+                            <select
+                                value={settings.playwrightBrowser || 'auto'}
+                                onChange={(e) => settings.setPlaywrightBrowser(e.target.value as any)}
+                                className="w-full bg-[#0f1115] border border-white/10 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#4fd1c5]"
+                            >
+                                <option value="auto">Auto (OS Default)</option>
+                                <option value="chrome">Google Chrome</option>
+                                <option value="msedge">Microsoft Edge</option>
+                                <option value="firefox">Mozilla Firefox</option>
+                                <option value="webkit">Safari (WebKit)</option>
+                                <option value="chromium">Chromium (Bundled)</option>
+                            </select>
+                            <p className="text-xs text-white/40 mt-2">
+                                Auto selects the best browser for your OS: Windows uses Edge, macOS/Linux use Chrome.
+                            </p>
+                        </div>
+
+                        {/* Headless Mode */}
+                        <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4 mb-4">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <label className="block text-sm text-white mb-1">Show Browser Window</label>
+                                    <p className="text-xs text-white/40">
+                                        When enabled, you can see what the AI is doing in the browser.
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => settings.setPlaywrightHeadless(!settings.playwrightHeadless)}
+                                    className={`relative w-12 h-6 rounded-full transition-colors ${!settings.playwrightHeadless ? 'bg-[#4fd1c5]' : 'bg-white/20'
+                                        }`}
+                                >
+                                    <span
+                                        className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${!settings.playwrightHeadless ? 'translate-x-7' : 'translate-x-1'
+                                            }`}
+                                    />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Info Box */}
+                        <div className="bg-[#4fd1c5]/10 border border-[#4fd1c5]/30 rounded-xl p-4">
+                            <div className="flex items-start gap-3">
+                                <Info size={20} className="text-[#4fd1c5] flex-shrink-0 mt-0.5" />
+                                <div className="text-sm text-white/70">
+                                    <p className="font-medium text-white mb-1">Session Persistence</p>
+                                    <p>
+                                        The browser maintains a dedicated profile for the AI agent.
+                                        Login sessions and cookies are preserved between automation runs.
+                                    </p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 )}
