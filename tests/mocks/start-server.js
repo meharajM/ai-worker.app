@@ -1,11 +1,18 @@
 const readline = require('readline');
+const fs = require('fs');
+const path = require('path');
+const LOG_FILE = path.join(__dirname, 'mock-server.log');
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
-// Log to stderr so it doesn't interfere with stdout JSON-RPC
-const log = (msg) => console.error(`[MockServer] ${msg} `);
+// Log to stderr and file
+const log = (msg) => {
+    const entry = `[${new Date().toISOString()}] [MockServer] ${msg}\n`;
+    console.error(entry.trim());
+    fs.appendFileSync(LOG_FILE, entry);
+};
 
-log('Started');
+log('Started with PID ' + process.pid);
 
 rl.on('line', (line) => {
     if (!line.trim()) return;

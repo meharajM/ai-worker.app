@@ -16,6 +16,7 @@
         "typecheck": "tsc --noEmit",
         "test:e2e": "node tests/integration_test.cjs && node tests/e2e_mocked.cjs && node tests/speech_e2e.cjs",
         "test:mock": "node tests/e2e_mocked.cjs",
+        "test:playwright": "node tests/playwright_tools_test.cjs",
         "test:speech": "node tests/speech_e2e.cjs",
         "clean": "rm -rf out dist",
         "check:wine": "command -v wine >/dev/null 2>&1 || { echo >&2 'Error: Wine is required for Windows builds on Linux. Please run ./install_build_deps.sh to install it.'; exit 1; }",
