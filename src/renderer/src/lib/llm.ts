@@ -18,12 +18,12 @@ import {
 } from "./webllm";
 import { CREATE_PLAN_TOOL } from "./plan_manager";
 import { EXECUTION_PLAN_SCHEMA } from "./agent-protocol";
-import { 
-  LLMMessage, 
-  LLMTool, 
-  ServerInfo, 
-  LLMResponse, 
-  LLMProvider, 
+import {
+  LLMMessage,
+  LLMTool,
+  ServerInfo,
+  LLMResponse,
+  LLMProvider,
   LLMSettings,
   LLMContentPart
 } from "./types";
@@ -80,7 +80,7 @@ async function getOpenAISettings(
 
   const apiKey =
     settings?.openaiApiKey ||
-    (await electron.store.get<string>("openai_api_key")) ||
+    (await electron.secure.get("openai_api_key")).value ||
     "";
   const baseUrl =
     settings?.openaiBaseUrl ||
@@ -98,7 +98,7 @@ async function getGeminiSettings(
   const electron = (await import("./electron")).default;
   const apiKey =
     settings?.geminiApiKey ||
-    (await electron.store.get<string>("gemini_api_key")) ||
+    (await electron.secure.get("gemini_api_key")).value ||
     "";
   const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
   const model = settings?.geminiModel || LLM_CONFIG.GEMINI.DEFAULT_MODEL;
@@ -112,7 +112,7 @@ async function getOpenRouterSettings(
   const electron = (await import("./electron")).default;
   const apiKey =
     settings?.openrouterApiKey ||
-    (await electron.store.get<string>("openrouter_api_key")) ||
+    (await electron.secure.get("openrouter_api_key")).value ||
     "";
   const baseUrl = LLM_CONFIG.OPENROUTER.BASE_URL;
   const model = settings?.openrouterModel || LLM_CONFIG.OPENROUTER.DEFAULT_MODEL;
@@ -676,9 +676,9 @@ async function callBrowserLLM(
     const response = await chatWithWebLLM(
       messages
         .filter(m => m.role !== 'tool')
-        .map(m => ({ 
-          role: m.role as 'user' | 'assistant' | 'system', 
-          content: extractTextForLegacyProviders(m.content) 
+        .map(m => ({
+          role: m.role as 'user' | 'assistant' | 'system',
+          content: extractTextForLegacyProviders(m.content)
         }))
       // No tools passed - avoids "model doesn't support tools" error
     );
@@ -718,8 +718,8 @@ function formatMessagesForOpenAI(messages: LLMMessage[]): any[] {
         type: 'function',
         function: {
           name: tc.function.name,
-          arguments: typeof tc.function.arguments === 'object' 
-            ? JSON.stringify(tc.function.arguments) 
+          arguments: typeof tc.function.arguments === 'object'
+            ? JSON.stringify(tc.function.arguments)
             : tc.function.arguments
         }
       }));
@@ -854,7 +854,7 @@ async function callOpenAI(
   }
 
   const data = await response.json();
-  
+
   if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
     if (data.error) {
       throw new Error(data.error.message || JSON.stringify(data.error));
@@ -867,20 +867,29 @@ async function callOpenAI(
 
   // If using JSON fallback, try to parse tool calls from content
   let toolCalls = choice.message?.tool_calls?.map(
-    (tc: { id: string; function: { name: string; arguments: any } }) => ({
-      id: tc.id,
-      name: tc.function.name,
-      arguments: ensureRecord(safeParseJSON(tc.function.arguments)),
-    })
+    (tc: { id: string; function: { name: string; arguments: string } }) => {
+      let args = {};
+      try {
+        args = JSON.parse(tc.function.arguments);
+      } catch (e) {
+        console.warn(`Failed to parse tool arguments for ${tc.function.name}:`, tc.function.arguments);
+        args = { _parse_error: "Invalid JSON arguments from LLM" };
+      }
+      return {
+        id: tc.id,
+        name: tc.function.name,
+        arguments: args,
+      };
+    }
   );
 
   // If no native tool calls, try to parse from content (Self-Healing)
   if (!toolCalls || toolCalls.length === 0) {
     if (useJsonFallback && content) {
-       // Legacy JSON fallback
-       toolCalls = parseToolCallsFromJson(content);
-    } 
-    
+      // Legacy JSON fallback
+      toolCalls = parseToolCallsFromJson(content);
+    }
+
     // Check for XML Plan (Legacy/Model Hallucination Fallback)
     else if (content.includes('<agent_plan>')) {
       // ... existing XML logic ...
@@ -919,7 +928,7 @@ function parseToolCallsFromJson(
     const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
-      
+
       // Standard Format: { "tool_calls": [...] }
       if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
         return parsed.tool_calls.map(
@@ -933,7 +942,7 @@ function parseToolCallsFromJson(
           })
         );
       }
-      
+
       // Alternate Format (Common in some models): { "tool": "name", "params": {...} }
       if (parsed.tool && typeof parsed.tool === 'string') {
         const params = parsed.params || parsed.parameters || parsed.arguments || {};
@@ -990,7 +999,7 @@ function buildSystemPrompt(
           })`
           : "";
 
-        const server = servers?.find(s => s.toolCount > 0 && tools?.some(t => t.name.startsWith(tool.name.split('_')[0]))); 
+        const server = servers?.find(s => s.toolCount > 0 && tools?.some(t => t.name.startsWith(tool.name.split('_')[0])));
         // Heuristic: check if we can query mcp.ts directly or pass server mapping. 
         // Since we don't have direct mapping here, we can rely on grouping by server context below or just hint.
         // Better: The 'servers' list passed to this function usually contains aggregate info. 
@@ -1199,10 +1208,10 @@ export async function chat(
   const systemMsgIndex = messagesWithSystem.findIndex(
     (m) => m.role === "system"
   );
-  
+
   // MERGE default tools with the new CREATE_PLAN_TOOL
   const allTools = [CREATE_PLAN_TOOL, ...(tools || [])];
-  
+
   // Re-build system prompt with current tools and correct fallback setting
   const systemPrompt = buildSystemPrompt(allTools, servers, useJsonFallback);
 
@@ -1280,7 +1289,16 @@ async function callGemini(
         parts.push({
           functionCall: {
             name: tc.function.name,
-            args: safeParseJSON(tc.function.arguments)
+            args: typeof tc.function.arguments === 'string'
+              ? (() => {
+                try {
+                  return JSON.parse(tc.function.arguments);
+                } catch (e) {
+                  console.warn(`Failed to parse Gemini tool arguments for ${tc.function.name}:`, tc.function.arguments);
+                  return { _parse_error: "Invalid JSON arguments" };
+                }
+              })()
+              : tc.function.arguments
           }
         });
       });
@@ -1398,7 +1416,7 @@ export async function downloadBrowserModel(
 export function ensureRecord(input: any): Record<string, unknown> {
   if (input === null || input === undefined) return {};
   if (typeof input === 'object' && !Array.isArray(input)) return input as Record<string, unknown>;
-  
+
   if (typeof input === 'string') {
     const trimmed = input.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -1412,7 +1430,7 @@ export function ensureRecord(input: any): Record<string, unknown> {
     }
     return { input: trimmed };
   }
-  
+
   return { value: input };
 }
 
@@ -1421,23 +1439,23 @@ export function safeParseJSON(input: string | any): any {
   if (input === null || input === undefined) return {};
   if (typeof input !== 'string') return input;
   if (!input || input.trim() === '') return {};
-  
+
   try {
     const trimmed = input.trim();
     // Quick path for pure JSON
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-        try {
-            return JSON.parse(trimmed);
-        } catch (e) { /* fall through to extraction */ }
+      try {
+        return JSON.parse(trimmed);
+      } catch (e) { /* fall through to extraction */ }
     }
-    
+
     // Find the first occurrence of { or [ and the last occurrence of } or ]
     const startObj = input.indexOf('{');
     const startArr = input.indexOf('[');
-    
+
     let start = -1;
     let end = -1;
-    
+
     if (startObj !== -1 && (startArr === -1 || startObj < startArr)) {
       start = startObj;
       end = input.lastIndexOf('}');
@@ -1445,12 +1463,12 @@ export function safeParseJSON(input: string | any): any {
       start = startArr;
       end = input.lastIndexOf(']');
     }
-    
+
     if (start !== -1 && end !== -1 && end > start) {
       const potentialJson = input.substring(start, end + 1);
       return JSON.parse(potentialJson);
     }
-    
+
     // If all else fails, return as-is
     return input;
   } catch (error) {

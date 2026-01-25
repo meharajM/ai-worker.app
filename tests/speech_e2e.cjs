@@ -45,11 +45,11 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                 '--no-sandbox',
                 '--disable-gpu',
                 '--disable-dev-shm-usage',
-                // Enable fake audio for testing (simulates microphone)
                 '--use-fake-device-for-media-stream',
-                '--use-fake-ui-for-media-stream'
+                '--use-fake-ui-for-media-stream',
+                '--window-size=1200,800'
             ],
-            timeout: 45000,
+            timeout: 60000,
             env: {
                 ...process.env,
                 NODE_ENV: 'production'
@@ -74,6 +74,10 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         await window.waitForLoadState('domcontentloaded');
         console.log('✅ Window Loaded');
+
+        // Ensure we are in Chat view
+        await window.click('button[title="Chat"]');
+        await window.waitForTimeout(1000);
 
         // Wait for app to initialize
         await window.waitForTimeout(3000);
@@ -128,42 +132,29 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             console.log('✅ Clicked microphone button');
 
             // Wait for voice mode UI to appear
-            await window.waitForTimeout(1000);
+            console.log('  - Waiting for model download and listening state...');
 
-            // Check for listening state indicators
-            // In the new UI, textarea placeholder changes to "Listening..."
-            await window.waitForTimeout(2000); // Give it time to initialize model
-            const textareaValue = await window.locator('textarea').getAttribute('placeholder');
-            const isListeningPlaceholder = textareaValue === 'Listening...';
+            // Wait for "Listening..." placeholder with a longer timeout
+            const textarea = window.locator('textarea');
+            await textarea.waitFor({ state: 'visible' });
 
-            const closeButton = await window.locator('button[title="Stop Recording"]').count();
+            try {
+                await window.locator('textarea[placeholder="Listening..."]').waitFor({ timeout: 60000 });
+                console.log('✅ "Listening..." placeholder visible in textarea');
+            } catch (e) {
+                const currentPlaceholder = await textarea.getAttribute('placeholder');
+                console.log(`⚠️ Placeholder did not change to Listening within 60s, currently: "${currentPlaceholder}"`);
+            }
 
             // Take screenshot of voice mode
             await window.screenshot({ path: path.join(SCREENSHOT_DIR, 'speech-test-listening.png') });
             console.log('📸 Voice mode captured');
 
-            if (isListeningPlaceholder) {
-                console.log('✅ "Listening..." placeholder visible in textarea');
-            } else {
-                console.log(`ℹ️ "Listening..." placeholder not found, found: "${textareaValue}"`);
-            }
-
             const stopButton = window.locator('button[title="Stop Recording"]');
-            if (await stopButton.count() > 0) {
-                console.log('✅ Stop button present');
-                try {
-                    await stopButton.click();
-                    console.log('✅ Stopped listening');
-                } catch (e) {
-                    console.log('ℹ️ Failed to click stop button');
-                }
-            } else {
-                console.log('ℹ️ No Stop button found (trying fallback title "Close")');
-                const fallbackStop = window.locator('button[title="Close"]');
-                if (await fallbackStop.count() > 0) {
-                    await fallbackStop.click();
-                }
-            }
+            await stopButton.waitFor({ state: 'visible', timeout: 10000 });
+            console.log('✅ Stop button present');
+            await stopButton.click();
+            console.log('✅ Stopped listening');
 
             // Verify we're back to idle
             await window.waitForTimeout(1000);

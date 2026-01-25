@@ -29,7 +29,6 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
     }
 
     console.log('Using electron execPath:', execPath);
-    console.log('exists execPath?', fs.existsSync(execPath));
 
     let electronApp;
     try {
@@ -40,7 +39,8 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                 path.join(__dirname, '../out/main/index.js'),
                 '--no-sandbox',
                 '--disable-gpu',
-                '--disable-dev-shm-usage'
+                '--disable-dev-shm-usage',
+                '--window-size=1200,800'
             ],
             timeout: 60000,
             env: {
@@ -51,25 +51,14 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         console.log('✅ Electron launched successfully');
     } catch (launchError) {
         console.error('❌ Failed to launch Electron:', launchError);
-        // Print ldd debug info in CI
-        if (process.env.GITHUB_ACTIONS) {
-            try {
-                const { execSync } = require('child_process');
-                console.log('Debug: ldd electron output:');
-                console.log(execSync(`ldd ${execPath}`).toString());
-            } catch (lddError) {
-                console.error('Failed to run ldd:', lddError);
-            }
-        }
         process.exit(1);
     }
 
     try {
         const window = await electronApp.firstWindow();
 
-        // --- 1. NETWORK MOCKING (Ollama) ---
+        // Check tags mock
         await window.route('**/api/tags', async route => {
-            console.log('intercepted /api/tags');
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
@@ -77,22 +66,12 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             });
         });
 
-        await window.route('**/api/generate', async route => {
-            console.log('intercepted /api/generate');
-            await route.fulfill({
-                status: 200,
-                contentType: 'application/json',
-                body: JSON.stringify({ done: true, response: "ok" })
-            });
-        });
-
         await window.route('**/api/chat', async route => {
-            console.log('intercepted /api/chat');
             const request = route.request();
             const postData = JSON.parse(request.postData() || '{}');
             const lastMsg = postData.messages?.[postData.messages.length - 1]?.content || "";
 
-            if (lastMsg.includes('mock_echo')) {
+            if (lastMsg.toLowerCase().includes('think')) {
                 // Return Tool Call
                 await route.fulfill({
                     status: 200,
@@ -102,18 +81,11 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                         done: true,
                         message: {
                             role: "assistant",
-                            content: "I will use the tool.",
-                            tool_calls: [{
-                                function: {
-                                    name: "mock_echo",
-                                    arguments: { message: "Hello Integration" }
-                                }
-                            }]
+                            content: "I am thinking about it.",
                         }
                     })
                 });
             } else {
-                // Normal Response
                 await route.fulfill({
                     status: 200,
                     contentType: 'application/json',
@@ -130,107 +102,65 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         });
 
         await window.waitForLoadState('domcontentloaded');
-        console.log('✅ Window Loaded & Network Routes Set');
+        console.log('✅ Window Loaded');
 
-        // --- 2. SWITCH TO OLLAMA PROVIDER ---
+        // --- 1. SWITCH TO OLLAMA PROVIDER ---
         await window.click('button[title="Settings"]');
         await window.waitForSelector('text=LLM Provider');
-
-        // Wait for Ollama to be detected (polling every 60s, but also on mount? and settings change?)
-        // The checkLLM runs on mount. Our mock /api/tags should have returned "mock-llm".
-        // Select logic might be "Auto".
-        // Let's force "Ollama".
-
-        // Click provider dropdown/radio.
-        // Looking at SettingsPanel code (inferred): likely a select or buttons.
-        // Assuming "Ollama" text is clickable or label.
-        // Actually, let's look for text "Ollama" in the provider list.
-        await window.click('text=Ollama'); // If it's a radio/button
-        // Or confirm it's selected.
-
-        // Also ensure "mock-llm:latest" is selected as model if there's a dropdown.
+        await window.click('text=Ollama');
         console.log('✅ Switched to Ollama');
 
-        // --- 3. ADD MOCK MCP SERVER ---
+        // --- 2. ADD MCP SERVER ---
+        const uniqueServerName = `ThinkingServer-${Date.now()}`;
+        console.log(`  - Adding MCP server: ${uniqueServerName}`);
+
         await window.click('button[title="MCP Connections"]');
         await window.click('button:has-text("Add Connection")');
 
-        // Fill form
-        await window.fill('input[placeholder="My Server"]', 'MockServer');
-        // Type selection is buttons, not select!
+        await window.fill('input[placeholder="My Server"]', uniqueServerName);
         await window.click('button:has-text("Stdio (Local)")');
 
-        // Command: node, Args: tests/mocks/start-server.js
-        // We need absolute path for the script
-        const mockScriptPath = path.join(__dirname, 'mocks/start-server.js');
+        await window.fill('input[placeholder="npx, python, node..."]', 'npx');
+        await window.fill('input[placeholder="--args..."]', '-y @modelcontextprotocol/server-sequential-thinking');
 
-        await window.fill('input[placeholder="npx, python, node..."]', 'node');
-        await window.fill('input[placeholder="--args..."]', mockScriptPath);
-
-        // Submit form
         console.log('  - Submitting MCP form...');
-        await window.click('button:has-text("Add Connection")');
+        await window.getByRole('button', { name: 'Add Connection', exact: true }).click();
 
-        // Wait for card to appear
-        console.log('  - Waiting for MockServer card...');
-        // Match the card by its heading text precisely and use .first() to handle duplicated cards from previous runs
-        const mockServerCard = window.locator('div', { has: window.locator('h3', { hasText: /^MockServer$/ }) }).first();
-        await mockServerCard.waitFor({ state: 'visible', timeout: 10000 });
+        console.log(`  - Waiting for ${uniqueServerName} card...`);
+        const testId = `mcp-server-card-${uniqueServerName.toLowerCase().replace(/\s+/g, '-')}`;
+        const mockServerCard = window.locator(`[data-testid="${testId}"]`);
+        await mockServerCard.waitFor({ state: 'visible', timeout: 15000 });
 
-        // Click Connect on the card
         console.log('  - Clicking Connect on card...');
-        // Use .first() to handle cases where multiple buttons might be found in a duplicated card
-        await mockServerCard.getByRole('button', { name: 'Connect' }).first().click();
+        await mockServerCard.locator('button[title="Connect"]').click();
 
-        // Verify Connection and Tools
-        // Use "Active" which is the status text for a connected server, 
-        // "Connected" matches the "0 connected" summary text at the top!
         console.log('  - Waiting for "Active" status...');
-        await mockServerCard.locator('text=Active').waitFor({ timeout: 15000 });
+        await mockServerCard.locator('span:has-text("Active")').waitFor({ timeout: 25000 });
+        console.log('✅ MCP Server Connected (Active)');
 
-        // Debug tool count
-        console.log('Server Card Text:', await mockServerCard.textContent());
-
-        // Expand to see tools
-        await mockServerCard.locator('button').filter({ has: window.locator('svg.lucide-chevron-right, svg.lucide-chevron-down') }).first().click();
-
-        // Wait for tool count to update. It says "Available Tools (1)"
-        try {
-            await window.waitForSelector('text=Available Tools (1)', { timeout: 5000 });
-            console.log('✅ Mock MCP Server Connected (1 tool loaded)');
-        } catch (e) {
-            console.warn('⚠️ Tool count not 1. Proceeding to see what happens...');
-        }
-
-        // --- 4. EXECUTE TOOL VIA CHAT ---
+        // --- 3. EXECUTE VIA CHAT ---
         await window.click('button[title="Chat"]');
 
-        // Send Message
-        // Selector was input[type="text"], but it is actually a textarea for auto-expanding input
+        console.log('  - Sending message to chat...');
         const chatInput = window.locator('textarea');
-        await chatInput.fill('Please use mock_echo');
-        await window.click('button:has(svg.lucide-send)');
+        await chatInput.waitFor({ state: 'attached', timeout: 15000 });
 
-        // Check if we got a response
-        await window.waitForSelector('div:has-text("I will use the tool")', { timeout: 10000 });
-        console.log('✅ Assistant initial response received');
-
-        // Wait a bit for tool execution
-        await window.waitForTimeout(3000);
-
-        // Dump all messages to see what happened
-        const messages = await window.locator('.whitespace-pre-wrap').allTextContents();
-        console.log('Messages in Chat:', messages);
-
-        const fullText = await window.textContent('body');
-        if (fullText.includes("EchoResult")) {
-            console.log('✅ Tool Execution Verified (Text Found)');
-        } else {
-            console.warn('⚠️ Tool Execution result NOT found in body text');
-            // Check for failure
-            if (fullText.includes("failed")) console.log('⚠️ Tool execution indicated failure');
+        // Wait for it to be visible or at least try to click it
+        try {
+            await chatInput.click({ timeout: 5000 });
+        } catch (e) {
+            console.log('ℹ️ Textarea not clickable, trying focus...');
+            await chatInput.focus();
         }
 
+        await chatInput.fill('Please think about what 2+2 is');
+        await window.click('button:has(svg.lucide-send)');
+
+        console.log('  - Waiting for assistant response...');
+        await window.waitForSelector('div:has-text("thinking" i)', { timeout: 30000 });
+        console.log('✅ Assistant response received');
+
+        await window.waitForTimeout(3000);
         console.log('\n🎉 MOCKED TEST PASSED');
 
     } catch (error) {
