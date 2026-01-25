@@ -1233,6 +1233,8 @@ ai-worker-app/
 - Implemented automatic server initialization on first run
 - Added form pre-filling with Sequential Thinking defaults
 - Enhanced server management with automatic default restoration
+- **Prompt Engineering**: Updated System Prompt with "Global Friendly" communication style and screenshot rules.
+- **Task Analysis**: Enhanced confirmation logic for high-risk and ambiguous tasks (shopping, payments).
 
 ---
 

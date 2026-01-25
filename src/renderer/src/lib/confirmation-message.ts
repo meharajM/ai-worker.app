@@ -36,12 +36,16 @@ Analyze for:
 2. Potential typos or "fat finger" mistakes (e.g., "goggle" instead of "google").
 3. Single-word or extremely vague prompts (e.g., "yes", "shoes", "ok").
 4. Follow-up confirmations without clear context (e.g., "yes" after being asked a question).
+5. Missing critical user preferences that should not be guessed (preferred website/platform, size/color/variant, delivery/pincode, budget, account/email).
+6. Any task that could lead to payment, OTP entry, real form submission, login with credentials, irreversible actions, or sensitive personal data handling.
 
 RULES for shouldConfirm:
 - Set shouldConfirm: TRUE if the prompt is a single word, extremely vague, or could mean many different things.
 - Set shouldConfirm: TRUE if the prompt is a confirmation like "yes", "ok", "proceed" but it's unclear what action is being confirmed.
 - Set shouldConfirm: FALSE if the prompt has a clear action and target (e.g., "open google and search for adidas 7 shoes").
 - Set shouldConfirm: FALSE if missing details (like URLs) can be found via search AND the intent is clear.
+- Set shouldConfirm: TRUE for shopping, booking, form-filling, filtering, login, payment-related, or account tasks when platform, account, delivery details, or other preferences are not clearly stated.
+- Set shouldConfirm: TRUE whenever payment submission, OTP entry, real account changes, form submission, or other irreversible/high-risk actions appear possible — even if not explicitly mentioned by the user.
 
 Generate 2-3 suggestions if shouldConfirm is true.
 
@@ -57,7 +61,8 @@ Respond with a JSON object:
       "label": "Short description",
       "enrichedPrompt": "Full detailed prompt",
       "confidence": 0.9
-    }
+    },
+    { "id": "ask_platform", "label": "Ask which website", "enrichedPrompt": "Ask the user: Which website should I use? (e.g. Nike, Amazon, etc.)" }
   ],
   "shouldConfirm": true/false
 }`;

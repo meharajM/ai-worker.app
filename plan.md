@@ -433,6 +433,23 @@ ai-worker-app/
 
 ---
 
+### ✅ Phase 18: Prompt Engineering & Usability [COMPLETED]
+
+**Goal:** Enhance AI communication style and task safety.
+
+**Implementation:**
+- [x] Update System Prompt for simple, friendly, global-first language
+- [x] Add critical rule for taking screenshots on visual states
+- [x] Enhance `confirmation-message.ts` with checks for missing preferences and high-risk tasks
+- [x] Add "Suggestions" support for task clarification
+
+**Validation:** ✅
+- [x] AI uses natural language without jargon
+- [x] Shopping/Booking tasks trigger confirmation if details missing
+- [x] High-risk tasks (payment/OTP) flagged for confirmation
+
+---
+
 ### 🚀 Phase 16: App Launch Preparation [IN PROGRESS]
 
 **Goal:** Finalize distribution, assets, and production stability.
