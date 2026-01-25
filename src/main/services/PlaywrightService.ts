@@ -139,6 +139,14 @@ export class PlaywrightService {
 
                         console.log(`[PlaywrightService] Trying to launch: ${tryBrowser}...`)
                         this.context = await tryLauncher.launchPersistentContext(userDataDir, tryOptions)
+
+                        // Handle unexpected closure
+                        this.context.on('close', () => {
+                            console.log('[PlaywrightService] Browser context closed')
+                            this.context = null
+                            this.page = null
+                        })
+
                         console.log(`[PlaywrightService] Successfully launched: ${tryBrowser}`)
                         break // Success!
                     } catch (error) {
@@ -203,18 +211,69 @@ export class PlaywrightService {
     }
 
     async ensurePage(): Promise<Page> {
+        // 1. Ensure browser context exists
         if (!this.context) {
             await this.ensureBrowser()
         }
-        if (!this.page || this.page.isClosed()) {
-            if (!this.context) throw new Error('Context initialization failed')
-            this.page = await this.context.newPage()
 
-            const settings = ((this.store as any).get?.('mcpPlaywright') || {}) as PlaywrightSettings
-            if (settings.blockAds !== false) {
-                await this.enableResourceBlocking(this.page)
+        // 2. Ensure page exists and is not closed
+        if (!this.page || this.page.isClosed()) {
+            try {
+                // Double check context is alive
+                if (!this.context) throw new Error('Context initialization failed')
+
+                // Reuse existing page if any (e.g. from manual user interaction)
+                const pages = this.context.pages()
+                const validPage = pages.find(p => !p.isClosed())
+
+                if (validPage) {
+                    this.page = validPage
+                } else {
+                    this.page = await this.context.newPage()
+                }
+
+                // Re-apply settings
+                const settings = ((this.store as any).get?.('mcpPlaywright') || {}) as PlaywrightSettings
+                if (settings.blockAds !== false) {
+                    await this.enableResourceBlocking(this.page)
+                }
+            } catch (error) {
+                // Detect "Target page, context or browser has been closed"
+                const msg = error instanceof Error ? error.message : String(error)
+                console.warn('[PlaywrightService] Error in ensurePage:', msg)
+
+                if (msg.includes('closed') || msg.includes('Session closed')) {
+                    console.log('[PlaywrightService] Context appears dead. Restarting browser...')
+                    this.context = null
+                    this.page = null
+
+                    // Retry initialization
+                    await this.ensureBrowser()
+
+                    // After ensureBrowser, verify context state
+                    if (!this.context) {
+                        throw new Error('Failed to restart browser context')
+                    }
+
+                    // Check if we need to create a new page
+                    // We check this.page manually to avoid TS errors about 'never' type due to previous null assignment
+                    const currentPage = this.page
+                    if (!currentPage || currentPage.isClosed()) {
+                        const newPage = await this.context.newPage()
+                        this.page = newPage
+
+                        // Re-apply settings
+                        const settings = ((this.store as any).get?.('mcpPlaywright') || {}) as PlaywrightSettings
+                        if (settings.blockAds !== false) {
+                            await this.enableResourceBlocking(newPage)
+                        }
+                    }
+                } else {
+                    throw error
+                }
             }
         }
+
         return this.page!
     }
 
@@ -1111,9 +1170,22 @@ export class PlaywrightService {
             }
         } catch (error) {
             console.error(`[PlaywrightService] Error calling tool ${name}:`, error)
+            let errorMessage = error instanceof Error ? error.message : String(error)
+
+            // Clean up common Playwright timeout errors
+            if (errorMessage.includes('Timeout') && errorMessage.includes('exceeded')) {
+                const selectorMatch = errorMessage.match(/waiting for locator\(['"]([^'"]+)['"]\)/);
+                const selector = selectorMatch ? selectorMatch[1] : 'element';
+                errorMessage = `Timeout: The element '${selector}' was not found within the time limit.\n` +
+                    `Suggestion: The selector might be incorrect or the page structure changed.\n` +
+                    `1. Try using 'get_interactive_elements' to see what IS on the page.\n` +
+                    `2. Try a different selector (e.g. text content or aria-label).\n` +
+                    `3. Be aware that Google Search and other modern sites change IDs effectively randomly. Avoid using IDs like '#lst-ib' or '#tsf'.`;
+            }
+
             return {
                 result: null,
-                error: error instanceof Error ? error.message : String(error)
+                error: errorMessage
             }
         }
     }

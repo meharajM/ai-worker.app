@@ -8,6 +8,15 @@ export interface TaskAnalysis {
   detectedIntent: string;
   potentialMistakes: string[];
   shouldConfirm: boolean; // Smart detection result
+  complexity?: TaskComplexity;
+}
+
+export interface TaskComplexity {
+  level: 'simple' | 'moderate' | 'complex';
+  needsExternalModel: boolean;
+  reason: string;
+  userFriendlyMessage: string;
+  estimatedTime: string;
 }
 
 export interface TaskSuggestion {
@@ -26,45 +35,65 @@ export async function analyzeTask(
   llmSettings: any
 ): Promise<TaskAnalysis> {
   const { chat } = await import('./llm');
-  
-  const analysisPrompt = `You are a task analysis expert. Analyze the following user prompt and determine if it needs clarification.
+
+  const analysisPrompt = `You are a Friendly Intent Decoder. Your job is to translate what non-technical users say into what they actually need.
 
 USER PROMPT: "${userPrompt}"
 
-Analyze for:
-1. Missing critical details that CANNOT be inferred (e.g., "email John" - which John?).
-2. Potential typos or "fat finger" mistakes (e.g., "goggle" instead of "google").
-3. Single-word or extremely vague prompts (e.g., "yes", "shoes", "ok").
-4. Follow-up confirmations without clear context (e.g., "yes" after being asked a question).
-5. Missing critical user preferences that should not be guessed (preferred website/platform, size/color/variant, delivery/pincode, budget, account/email).
-6. Any task that could lead to payment, OTP entry, real form submission, login with credentials, irreversible actions, or sensitive personal data handling.
+# ANALYSIS CHECKLIST:
+1. **Missing but Critical:**
+   - Which website/platform? (e.g. Amazon, Nike, etc. - NEVER guess unless obvious)
+   - Conditions? (New, used, price range)
+   - User Preferences? (Size "UK 8" vs "US 9", Color, Model)
+2. **Potential Confusions:**
+   - "UK 8" = US 9? = EUR 42? (Flags potential confusion)
+   - "Shoes" = running? casual? formal?
+   - "Open" = just show options or ready to buy?
+3. **Safety & Security:**
+   - Personal data? Logins? Payments? -> Set shouldConfirm: TRUE
+   - Irreversible actions? -> Set shouldConfirm: TRUE
 
-RULES for shouldConfirm:
-- Set shouldConfirm: TRUE if the prompt is a single word, extremely vague, or could mean many different things.
-- Set shouldConfirm: TRUE if the prompt is a confirmation like "yes", "ok", "proceed" but it's unclear what action is being confirmed.
+# COMPLEXITY ANALYSIS:
+1. **Simple** (local LLM): "What's the weather?", "Open Gmail"
+2. **Moderate** (cloud LLM): "Price check", "Find item"
+3. **Complex** (planning needed): "Find X, compare with Y, buy Z"
+
+# PREFERENCE & MEMORY CHECK:
+If the user's prompt implies shopping or personal tasks but no preferences are detected:
+- Treat this as a "First-Time" or "New Context" request.
+- Suggest asking: "To get the best results, I'll ask which stores you prefer and your sizes. Should I remember these for next time?"
+
+# RULES for shouldConfirm:
+- Set shouldConfirm: TRUE if missing critical platform, size, color, or preference.
+- Set shouldConfirm: TRUE for tasks involving personal/sensitive data without explicit confirmation.
+- Set shouldConfirm: TRUE if the prompt is valid but ambiguous ("shoes", "yes").
 - Set shouldConfirm: FALSE if the prompt has a clear action and target (e.g., "open google and search for adidas 7 shoes").
-- Set shouldConfirm: FALSE if missing details (like URLs) can be found via search AND the intent is clear.
-- Set shouldConfirm: TRUE for shopping, booking, form-filling, filtering, login, payment-related, or account tasks when platform, account, delivery details, or other preferences are not clearly stated.
-- Set shouldConfirm: TRUE whenever payment submission, OTP entry, real account changes, form submission, or other irreversible/high-risk actions appear possible — even if not explicitly mentioned by the user.
+- If typos detected (e.g., "goolge"), auto-correct in suggestions.
 
-Generate 2-3 suggestions if shouldConfirm is true.
-
+# RESPONSE FORMAT (warm, helpful):
 Respond with a JSON object:
 {
   "isAmbiguous": true/false,
   "missingDetails": ["detail 1", "detail 2"],
-  "detectedIntent": "what you think the user wants",
+  "detectedIntent": "User wants to finding Nike shoes in size UK 8",
   "potentialMistakes": ["mistake 1"],
   "suggestions": [
     {
       "id": "1",
-      "label": "Short description",
-      "enrichedPrompt": "Full detailed prompt",
+      "label": "Corrected: Open Google search for shoes",
+      "enrichedPrompt": "Open browser, go to google.com, search for shoes",
       "confidence": 0.9
     },
     { "id": "ask_platform", "label": "Ask which website", "enrichedPrompt": "Ask the user: Which website should I use? (e.g. Nike, Amazon, etc.)" }
   ],
-  "shouldConfirm": true/false
+  "shouldConfirm": true/false,
+  "complexity": {
+    "level": "moderate",
+    "needsExternalModel": true,
+    "reason": "Shopping tasks need current prices",
+    "userFriendlyMessage": "I'll search across websites. This might take a minute!",
+    "estimatedTime": "2-3 minutes"
+  }
 }`;
 
   try {
@@ -84,7 +113,7 @@ Respond with a JSON object:
     }
 
     const analysis: TaskAnalysis = JSON.parse(jsonMatch[0]);
-    
+
     // Validate and ensure proper structure
     return {
       isAmbiguous: analysis.isAmbiguous || false,
@@ -92,7 +121,8 @@ Respond with a JSON object:
       suggestions: analysis.suggestions || [],
       detectedIntent: analysis.detectedIntent || userPrompt,
       potentialMistakes: analysis.potentialMistakes || [],
-      shouldConfirm: analysis.shouldConfirm || false
+      shouldConfirm: analysis.shouldConfirm || false,
+      complexity: analysis.complexity
     };
   } catch (error) {
     console.error('[TaskAnalysis] Error analyzing task:', error);
@@ -112,6 +142,13 @@ function createDefaultAnalysis(prompt: string): TaskAnalysis {
     }],
     detectedIntent: prompt,
     potentialMistakes: [],
-    shouldConfirm: false
+    shouldConfirm: false,
+    complexity: {
+      level: 'simple',
+      needsExternalModel: false,
+      reason: 'Direct navigation',
+      userFriendlyMessage: 'Opening now...',
+      estimatedTime: 'Instant'
+    }
   };
 }

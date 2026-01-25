@@ -140,10 +140,12 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         // --- 3. EXECUTE VIA CHAT ---
         await window.click('button[title="Chat"]');
+        await window.waitForTimeout(1000); // Wait for transition
 
         console.log('  - Sending message to chat...');
-        const chatInput = window.locator('textarea');
-        await chatInput.waitFor({ state: 'attached', timeout: 15000 });
+        // Use a more specific selector to avoid matching hidden textareas from other views
+        const chatInput = window.locator('textarea[placeholder*="Message"]');
+        await chatInput.waitFor({ state: 'visible', timeout: 15000 });
 
         // Wait for it to be visible or at least try to click it
         try {

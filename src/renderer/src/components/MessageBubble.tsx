@@ -24,7 +24,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
     // Check for agent plan in tool calls (New Method)
     const planToolCall = message.toolCalls?.find(tc => tc.name === 'create_execution_plan');
     const toolPlanData = planToolCall ? parseAgentPlan(planToolCall.arguments) : null;
-    
+
     const agentPlan = toolPlanData;
 
     const visibleToolCalls = message.toolCalls?.filter(tc => tc.name !== 'create_execution_plan');
@@ -80,7 +80,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                                     else if (tool.name.startsWith('fs_') || tool.name.startsWith('file_')) agentName = 'FilesystemAgent';
                                     else if (tool.name.startsWith('mcp_')) agentName = 'MCPAgent';
                                     else if (tool.name === 'create_execution_plan') agentName = 'PlannerAgent';
-                                    
+
                                     if (!acc[agentName]) acc[agentName] = [];
                                     acc[agentName].push(tool);
                                     return acc;
@@ -108,20 +108,21 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                                                     <div className="space-y-1">
                                                         {tools.map((tool) => {
                                                             // Format Description
-                                                            let description = `Executing ${tool.name}`;
+                                                            let description = `Using ${tool.name}`;
                                                             try {
                                                                 const args = typeof tool.arguments === 'string' ? JSON.parse(tool.arguments) : tool.arguments;
-                                                                if (tool.name.includes('navigate') && args.url) description = `Navigating to ${args.url}`;
+                                                                if (tool.name.includes('navigate') && args.url) description = `Visiting ${new URL(args.url).hostname}`;
                                                                 else if (tool.name.includes('type') && args.text) description = `Typing "${args.text}"`;
-                                                                else if (tool.name.includes('click') && args.selector) description = `Clicking element ${args.selector}`;
+                                                                else if (tool.name.includes('click')) description = `Clicking item`;
                                                                 else if (tool.name.includes('search') && args.query) description = `Searching for "${args.query}"`;
-                                                                else if (tool.name.includes('screenshot')) description = `Taking a screenshot`;
-                                                                else if (tool.name.includes('delegate')) description = `Delegating to sub-task`;
+                                                                else if (tool.name.includes('screenshot')) description = `Capturing page view`;
+                                                                else if (tool.name.includes('delegate')) description = `Asking specialist agent`;
+                                                                else if (tool.name.includes('plan')) description = `Creating work plan`;
                                                             } catch (e) { /* ignore parse error */ }
 
-                                                            const isError = tool.result?.startsWith('Error:') || 
-                                                                           tool.result?.toLowerCase().includes('"iserror":true') ||
-                                                                           tool.result?.toLowerCase().includes('"status":"error"');
+                                                            const isError = tool.result?.startsWith('Error:') ||
+                                                                tool.result?.toLowerCase().includes('"iserror":true') ||
+                                                                tool.result?.toLowerCase().includes('"status":"error"');
                                                             const isDone = !!tool.result;
 
                                                             return (

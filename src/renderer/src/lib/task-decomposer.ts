@@ -85,7 +85,7 @@ const MULTI_STEP_INDICATORS = [
  */
 function extractWebsites(text: string): string[] {
   const websites = new Set<string>();
-  
+
   // Check for known website patterns
   for (const pattern of WEBSITE_PATTERNS) {
     const match = text.match(pattern);
@@ -93,7 +93,7 @@ function extractWebsites(text: string): string[] {
       websites.add(match[0].toLowerCase().replace('www.', ''));
     }
   }
-  
+
   // Also check for generic URLs
   const urlMatches = text.match(URL_PATTERN);
   if (urlMatches) {
@@ -102,7 +102,7 @@ function extractWebsites(text: string): string[] {
       websites.add(domain.toLowerCase());
     }
   }
-  
+
   // Check for website mentions without full URLs (e.g., "on Amazon", "at BestBuy")
   const textLower = text.toLowerCase();
   const siteKeywords = [
@@ -112,14 +112,14 @@ function extractWebsites(text: string): string[] {
     'airbnb', 'expedia', 'kayak', 'tripadvisor', 'yelp', 'zillow',
     'craigslist', 'indeed', 'glassdoor'
   ];
-  
+
   for (const site of siteKeywords) {
     if (textLower.includes(site)) {
       // Normalize "best buy" to "bestbuy"
       websites.add(site.replace(' ', ''));
     }
   }
-  
+
   return Array.from(websites);
 }
 
@@ -129,7 +129,7 @@ function extractWebsites(text: string): string[] {
 function countActions(text: string): number {
   const textLower = text.toLowerCase();
   let actionCount = 0;
-  
+
   for (const keyword of ACTION_KEYWORDS) {
     // Count occurrences (but not duplicates in same phrase)
     const regex = new RegExp(`\\b${keyword}\\b`, 'gi');
@@ -138,14 +138,14 @@ function countActions(text: string): number {
       actionCount += matches.length;
     }
   }
-  
+
   // Check for multi-step indicators
   for (const indicator of MULTI_STEP_INDICATORS) {
     if (textLower.includes(indicator)) {
       actionCount += 1; // Add bonus for multi-step language
     }
   }
-  
+
   // Minimum of 1 action if any website is mentioned
   return Math.max(actionCount, 1);
 }
@@ -159,7 +159,7 @@ export function analyzeTaskForDecomposition(
 ): TaskDecomposition {
   const websites = extractWebsites(userRequest);
   const estimatedActions = countActions(userRequest);
-  
+
   // Add current URL context if provided and not already in list
   if (currentUrl) {
     const currentDomain = currentUrl.replace(/https?:\/\//i, '').replace('www.', '').split('/')[0];
@@ -167,7 +167,7 @@ export function analyzeTaskForDecomposition(
       // Don't add - we only care about mentioned websites
     }
   }
-  
+
   // Decision logic
   if (websites.length > 1) {
     // Multiple websites = parallel sub-agents
@@ -180,7 +180,7 @@ export function analyzeTaskForDecomposition(
       forkStrategy: 'parallel'
     };
   }
-  
+
   if (websites.length === 1 && estimatedActions >= 3) {
     // Single website but many actions = sub-agent to save context
     return {
@@ -192,7 +192,7 @@ export function analyzeTaskForDecomposition(
       forkStrategy: 'sequential'
     };
   }
-  
+
   // Simple task - direct execution
   return {
     type: 'single_context',
@@ -212,30 +212,44 @@ export function generateSubAgentInstruction(
   allContexts: string[]
 ): string {
   const isComparison = allContexts.length > 1;
-  
+
+  const shoppingHeuristics = `
+# SHOPPING & EXECUTION KNOWLEDGE:
+- **Filters**: Look for 'Size', 'Color', 'Price' in sidebars/menus.
+- **Sizes**: If 'UK 8' not found, check if site uses US/EUR sizes.
+- **Search**: If navigation fails, use the search bar for the specific item + variant (e.g. "Nike Air Max UK 8").`;
+
   if (isComparison) {
-    return `You are a sub-agent focused ONLY on ${targetContext}.
+    return `You are the Shopping Specialist for ${targetContext}.
 
 TASK: ${originalRequest}
 
 YOUR FOCUS: Complete the task specifically on ${targetContext}. 
 Other sub-agents are handling: ${allContexts.filter(c => c !== targetContext).join(', ')}
 
+${shoppingHeuristics}
+
 RULES:
 1. Only interact with ${targetContext}
-2. Extract relevant data/complete the action
-3. Return a concise summary of findings
-4. Max 5 tool calls
-5. Do NOT navigate to other websites`;
+2. Extract relevant data (price, rating, availability)
+3. Return a concise, friendly summary of findings
+4. Limit tool calls to what's necessary; if more needed, summarize progress and request extension.
+5. When done, include a sync point: "Ready for merge with other sub-agents."
+6. Do NOT navigate to other websites
+7. **Resilience**: If a filter is missing, try searching explicitly.`;
   }
-  
-  return `You are a sub-agent handling a complex task.
+
+  return `You are a Sub-Agent handling a complex task.
 
 TASK: ${originalRequest}
 
+${shoppingHeuristics}
+
 RULES:
 1. Complete the task step by step
-2. Return concise results
-3. Max 5 tool calls
-4. Stop when the goal is achieved`;
+2. Return concise, friendly results
+3. Limit tool calls to what's necessary; if more needed, summarize progress and request extension.
+4. When done, include a sync point: "Ready for sync with main agent."
+5. Stop when the goal is achieved
+6. **Resilience**: If one path fails (e.g. button not found), try an alternative (e.g. search bar).`;
 }
