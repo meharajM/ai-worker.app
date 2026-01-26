@@ -878,7 +878,7 @@ async function callOpenAI(
       return {
         id: tc.id,
         name: tc.function.name,
-        arguments: args,
+        arguments: ensureRecord(safeParseJSON(tc.function.arguments)),
       };
     }
   );
@@ -1278,7 +1278,7 @@ async function callGemini(
             args: typeof tc.function.arguments === 'string'
               ? (() => {
                 try {
-                  return JSON.parse(tc.function.arguments);
+                  return safeParseJSON(tc.function.arguments);
                 } catch (e) {
                   console.warn(`Failed to parse Gemini tool arguments for ${tc.function.name}:`, tc.function.arguments);
                   return { _parse_error: "Invalid JSON arguments" };
