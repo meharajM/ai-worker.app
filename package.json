@@ -45,6 +45,7 @@
         "@electron-toolkit/utils": "^3.0.0",
         "@mlc-ai/web-llm": "^0.2.80",
         "@modelcontextprotocol/sdk": "^1.0.1",
+        "@modelcontextprotocol/server-memory": "^2025.11.25",
         "@playwright/mcp": "^0.0.53",
         "better-sqlite3": "^12.6.2",
         "electron-store": "^11.0.2",

@@ -1116,37 +1116,432 @@ export class AutoMemoryService {
 
 ### 6.11 Recommended Next Steps
 
-**Week 1:**
+**UPDATED STRATEGY: Start Simple, Scale Smart** ✅
+
+Based on analysis of leak risks and scaling requirements, we recommend a **flexible architecture** that starts with `@modelcontextprotocol/server-memory` and allows **seamless migration** to `memento-mcp` when needed.
+
+---
+
+### Strategy: Design for Optionality
+
+**Phase 1: Start with server-memory (Week 1-4)**
 ```bash
-# Install MCP Memory
-npm install @modelcontextprotocol/memory
+# Install official server
+npm install @modelcontextprotocol/server-memory
 
-# Create adapter layer
-touch src/main/services/MCPMemoryAdapter.ts
-
-# Migrate existing data
-npm run migrate-to-mcp
+# Perfect for:
+✅ MVP launch (0-10K entities)
+✅ Fast development
+✅ Zero user setup
+✅ Local-first privacy
+✅ Easy debugging
 ```
 
-**Week 2:**
+**Phase 2: Add Abstraction Layer (Week 5-6)**
 ```typescript
-// Build custom layer
-class AutoMemoryService extends MCPMemoryAdapter {
-  // Add PII detection
-  // Add user approval
-  // Add encryption
+// Design the interface that BOTH backends implement
+interface UnifiedMemoryBackend {
+  createEntity(entity: Entity): Promise<Entity>
+  search(query: string, limit: number): Promise<Entity[]>
+  createRelation(from: string, to: string, type: string): Promise<Relation>
+  // ... other common methods
+}
+
+// Adapter for server-memory
+class ServerMemoryAdapter implements UnifiedMemoryBackend {
+  private client: ServerMemory
+  
+  async createEntity(entity: Entity) {
+    return this.client.create_entities({ entities: [entity] })
+  }
+}
+
+// Adapter for memento-mcp (implemented when needed)
+class MementoMCPAdapter implements UnifiedMemoryBackend {
+  private client: MementoMCP
+  
+  async createEntity(entity: Entity) {
+    return this.client.createEntity(entity)
+  }
+}
+
+// Factory: Choose backend via config
+class MemoryServiceFactory {
+  static create(): UnifiedMemoryBackend {
+    const config = this.loadConfig()
+    
+    if (config.backend === 'memento-mcp') {
+      return new MementoMCPAdapter(config.memento)
+    } else {
+      return new ServerMemoryAdapter(config.serverMemory)
+    }
+  }
 }
 ```
 
-**Week 3-4:**
+**Phase 3: Auto-Detect When to Migrate (Built-in)**
 ```typescript
-// Polish & test
-- UI for memory approval
-- Privacy dashboard
-- Automatic extraction
+class MemoryService {
+  private backend: UnifiedMemoryBackend
+  private metrics: MetricsCollector
+  
+  async createEntity(entity: Entity) {
+    const result = await this.backend.createEntity(entity)
+    
+    // Track metrics
+    this.metrics.increment('entityCount')
+    
+    // Suggest migration if threshold reached
+    if (await this.shouldSuggestMigration()) {
+      this.notifyUser({
+        title: 'Consider Upgrading Memory Backend',
+        message: 'You have >10,000 memories. Upgrade to Memento-MCP for better performance?',
+        actions: ['Upgrade', 'Remind Later', 'Dismiss']
+      })
+    }
+    
+    return result
+  }
+  
+  async shouldSuggestMigration(): Promise<boolean> {
+    const stats = await this.metrics.getStats()
+    return (
+      stats.entityCount > 10000 ||
+      stats.searchLatency > 100 ||
+      stats.fileSize > 50 * 1024 * 1024  // 50MB
+    )
+  }
+}
 ```
 
-**Result**: Ship in **4 weeks** instead of **7 weeks**.
+**Phase 4: One-Click Migration (When User Approves)**
+```typescript
+class MigrationService {
+  async migrateToMemento() {
+    // 1. Export from server-memory
+    const oldBackend = new ServerMemoryAdapter()
+    const entities = await oldBackend.exportAll()
+    
+    // 2. Install memento-mcp (optional: automatic)
+    await this.installMementoDependencies()
+    
+    // 3. Import to memento-mcp
+    const newBackend = new MementoMCPAdapter()
+    await newBackend.importAll(entities)
+    
+    // 4. Update config
+    await this.updateConfig({ backend: 'memento-mcp' })
+    
+    // 5. Restart service
+    await this.restartMemoryService()
+    
+    console.log('Migration complete! ✅')
+  }
+  
+  private async installMementoDependencies() {
+    // Check if Neo4j is available
+    const hasNeo4j = await this.checkNeo4j()
+    
+    if (!hasNeo4j) {
+      // Offer to install via Docker
+      await this.showInstallDialog({
+        title: 'Install Neo4j',
+        message: 'Memento-MCP requires Neo4j. Install via Docker?',
+        command: 'docker run -p 7687:7687 neo4j'
+      })
+    }
+  }
+}
+```
+
+---
+
+### Decision Tree
+
+```
+┌─────────────────────────────────────────┐
+│    Start: @modelcontextprotocol/       │
+│           server-memory                 │
+│    • Fast to ship (Week 1)              │
+│    • Zero setup                         │
+│    • Perfect for <10K entities          │
+└─────────────┬───────────────────────────┘
+              │
+              │ Time passes...
+              │ Monitor metrics
+              │
+              ▼
+      ┌───────────────┐
+      │ >10K entities?│
+      │ Slow searches?│
+      └───┬───────┬───┘
+          │       │
+      NO  │       │ YES
+          │       │
+          ▼       ▼
+   ┌──────────┐ ┌────────────────────────┐
+   │  Stay on │ │ Suggest Migration:     │
+   │  server- │ │ "Upgrade to Memento-   │
+   │  memory  │ │  MCP for better        │
+   │    ✅    │ │  performance?"         │
+   └──────────┘ └───────┬────────────────┘
+                        │
+                        │ User clicks "Upgrade"
+                        │
+                        ▼
+              ┌──────────────────────┐
+              │  Auto-Migration      │
+              │  1. Export data      │
+              │  2. Install memento  │
+              │  3. Import data      │
+              │  4. Update config    │
+              │  5. Restart ✅       │
+              └──────────────────────┘
+                        │
+                        ▼
+              ┌──────────────────────┐
+              │   Now using:         │
+              │   memento-mcp        │
+              │   • Semantic search  │
+              │   • Millions scale   │
+              │   • Production-ready │
+              └──────────────────────┘
+```
+
+---
+
+### Benefits of This Approach
+
+| Benefit | Explanation |
+|---------|-------------|
+| **Fast Launch** | Ship in 2 weeks with server-memory |
+| **Zero Risk** | Can always migrate later |
+| **User Choice** | Auto-suggest, user approves |
+| **No Rewrites** | Same API for both backends |
+| **Pay When Scale** | Only use Neo4j when needed |
+| **Best of Both** | Simple start + powerful future |
+
+---
+
+### Code Structure
+
+```
+src/main/services/
+├── memory/
+│   ├── MemoryService.ts           # Main service (uses factory)
+│   ├── MemoryServiceFactory.ts    # Creates backend based on config
+│   ├── UnifiedMemoryBackend.ts    # Interface both implement
+│   ├── adapters/
+│   │   ├── ServerMemoryAdapter.ts  # Wraps @modelcontextprotocol/server-memory
+│   │   └── MementoMCPAdapter.ts    # Wraps memento-mcp (lazy-loaded)
+│   ├── MigrationService.ts        # Auto-migration logic
+│   └── MetricsCollector.ts        # Track usage stats
+
+config/
+└── memory.json
+    {
+      "backend": "server-memory",   // or "memento-mcp"
+      "serverMemory": {
+        "storagePath": "~/.mcp/memory"
+      },
+      "memento": {
+        "neo4jUri": "bolt://localhost:7687",
+        "username": "neo4j",
+        "password": "..."
+      },
+      "autoMigration": {
+        "enabled": true,
+        "thresholds": {
+          "entityCount": 10000,
+          "searchLatency": 100,
+          "fileSize": 52428800  // 50MB
+        }
+      }
+    }
+```
+
+---
+
+### Implementation Timeline
+
+**Week 1-2: Core + server-memory**
+```bash
+✅ Install @modelcontextprotocol/server-memory
+✅ Create UnifiedMemoryBackend interface
+✅ Implement ServerMemoryAdapter
+✅ Add privacy layer (PII, encryption)
+✅ Ship MVP
+```
+
+**Week 3-4: Polish + Monitoring**
+```bash
+✅ Add MetricsCollector
+✅ Implement auto-pruning
+✅ Create migration detection logic
+✅ Test with 5,000 entities
+```
+
+**Week 5-6: Future-Proof**
+```bash
+✅ Implement MemoryServiceFactory
+✅ Create MigrationService skeleton
+✅ Document migration process
+✅ Load test with 10,000 entities
+```
+
+**Future (When Needed): Memento Migration**
+```bash
+⏳ Implement MementoMCPAdapter
+⏳ Test migration with real data
+⏳ One-click upgrade UI
+⏳ Deploy to production
+```
+
+**Total Time to MVP: 2-4 weeks**
+**Migration Time (later): 1 week**
+
+---
+
+### Example: How It Works for Users
+
+**Scenario 1: New User (Day 1)**
+```
+User installs AI-Worker
+  ↓
+Memory uses server-memory (automatic)
+  ↓
+User creates 1,000 memories
+  ↓
+Everything works perfectly ✅
+```
+
+**Scenario 2: Power User (Month 6)**
+```
+User has 8,000 memories
+  ↓
+Searches still fast (<50ms)
+  ↓
+No migration needed yet ✅
+```
+
+**Scenario 3: Heavy User (Month 12)**
+```
+User has 12,000 memories
+  ↓
+App detects threshold exceeded
+  ↓
+Shows notification:
+  "📊 Your memory has grown! 
+   Upgrade to Memento-MCP for better performance?
+   [Upgrade] [Remind Later] [Dismiss]"
+  ↓
+User clicks [Upgrade]
+  ↓
+Auto-migration runs (5 minutes)
+  ↓
+Now using Memento-MCP ✅
+  ↓
+Searches even faster, supports millions
+```
+
+**Scenario 4: Enterprise User (Year 2)**
+```
+User has 100,000+ memories
+  ↓
+Already on Memento-MCP
+  ↓
+Uses semantic search, temporal queries
+  ↓
+Production-grade performance ✅
+```
+
+---
+
+### Risk Mitigation
+
+**What if memento-mcp changes API?**
+- Our adapter abstracts it → update adapter only, not app code
+
+**What if migration fails?**
+- We keep server-memory data → can rollback
+- Migration is non-destructive
+
+**What if user doesn't want to upgrade?**
+- They can stay on server-memory forever
+- We just suggest, never force
+
+**What if Neo4j is too complex?**
+- We can add a third option: SQLite backend (middle ground)
+- Same abstraction layer supports it
+
+---
+
+### Comparison: Our Approach vs Alternatives
+
+| Approach | Server-Memory Only | Memento Only | **Our Hybrid** |
+|----------|-------------------|--------------|----------------|
+| **Time to Ship** | 2 weeks | 6 weeks | **2 weeks** ⭐ |
+| **User Setup** | Zero | Neo4j required | **Zero initially** ⭐ |
+| **Scalability** | <10K entities | Millions | **Both!** ⭐ |
+| **Migration Cost** | High (rewrite) | N/A | **Low (config)** ⭐ |
+| **Risk** | Might outgrow | Overkill | **Balanced** ⭐ |
+
+**Score: 5/5 ⭐⭐⭐⭐⭐**
+
+---
+
+## Updated Recommendation
+
+### ✅ APPROVED STRATEGY
+
+**Phase 1 (Now):**
+- Use `@modelcontextprotocol/server-memory`
+- Build abstraction layer from day 1
+- Add privacy safeguards
+
+**Phase 2 (When Needed):**
+- Auto-detect when to migrate
+- One-click migration to `memento-mcp`
+- User approves, we handle it
+
+**Result:**
+- ✅ Ship fast (2 weeks)
+- ✅ Scale forever (future-proof)
+- ✅ User-friendly (auto-suggest)
+- ✅ Low risk (can always migrate)
+
+---
+
+### Next Steps
+
+**This Week:**
+```bash
+# 1. Install server-memory (done ✅)
+npm install @modelcontextprotocol/server-memory
+
+# 2. Create abstraction layer
+touch src/main/services/memory/UnifiedMemoryBackend.ts
+touch src/main/services/memory/MemoryServiceFactory.ts
+touch src/main/services/memory/adapters/ServerMemoryAdapter.ts
+
+# 3. Implement with flexibility
+# (Code both backends' adapter signatures, implement one)
+```
+
+**Next Week:**
+```bash
+# 4. Add metrics
+touch src/main/services/memory/MetricsCollector.ts
+
+# 5. Add migration detection
+touch src/main/services/memory/MigrationService.ts
+
+# 6. Test migration path (dry-run)
+```
+
+---
+
+**This approach gives us the best of both worlds: ship fast today, scale infinitely tomorrow.** 🚀
 
 ---
 
