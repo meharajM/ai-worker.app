@@ -564,6 +564,21 @@ The system dynamically context-aware agent roles based on connected MCP servers.
 2. **Standard APIs** (OpenAI, Gemini, OpenRouter): High-intelligence cloud models.
 3. **Local LLMs** (Ollama): Privacy-focused local serving.
 
+### Dynamic Prompt Injection & Task Categorization
+
+The `AgentRuntime` implements a **Dynamic Prompt Injection** mechanism to adapt the agent's behavior based on the task type.
+
+**Flow:**
+1.  **Task Analysis**: The user request is analyzed by `confirmation-message.ts` to identify the intent category (`SHOPPING`, `RESEARCH`, `ADMIN`, `GENERAL`).
+2.  **Prompt Selection**: The runtime selects the appropriate instruction set from the `Prompt Library` (`prompt-library.ts`).
+3.  **Injection**: `buildSystemPrompt` injects these rules *after* the tool definitions but *before* the core instructions. this ensures high priority context.
+
+**Categories:**
+- **SHOPPING**: Enforces "Speaking Money Protocol", "Size Checks", and stops at checkout.
+- **RESEARCH**: Enforces citation rules and balanced sourcing.
+- **ADMIN/FORMS**: Enforces double-checking inputs and privacy.
+- **GENERAL**: Optimized for speed and direct navigation.
+
 ### Sub-Agent Delegation Flow
 
 The system supports recursive task delegation through the `delegate_sub_task` tool. This allows the main agent to offload complex, self-contained units of work to a fresh `AgentRuntime` instance.
@@ -573,8 +588,9 @@ The system supports recursive task delegation through the `delegate_sub_task` to
 1.  **Main Agent Decides**: The main agent determines a sub-task is too complex or requires isolation.
 2.  **Tool Call**: Calls `delegate_sub_task` with specific instructions and context.
 3.  **Recursive Runtime**: The system instantiates a *new* `AgentRuntime` (the "Sub-Agent").
-4.  **Isolated Execution**: The Sub-Agent runs its own loop (Plan -> Act -> Verify) with a fresh context window.
-5.  **Result Aggregation**: The Sub-Agent returns a final summary string, which becomes the tool result for the Main Agent.
+4.  **Context Inheritance**: The Sub-Agent inherits the parent's `taskCategory`, ensuring it loads the correct safety protocols (e.g., a Shopping sub-agent also knows not to buy things).
+5.  **Isolated Execution**: The Sub-Agent runs its own loop (Plan -> Act -> Verify) with a fresh context window.
+6.  **Result Aggregation**: The Sub-Agent returns a final summary string, which becomes the tool result for the Main Agent.
 
 ```mermaid
 sequenceDiagram

@@ -945,7 +945,9 @@ function parseToolCallsFromJson(
 
       // Alternate Format (Common in some models): { "tool": "name", "params": {...} }
       if (parsed.tool && typeof parsed.tool === 'string') {
-        const params = parsed.params || parsed.parameters || parsed.arguments || {};
+        // Normalize parameters: some models use params, parameters, arguments, or even 'args'
+        const params = parsed.params || parsed.parameters || parsed.arguments || parsed.args || {};
+
         return [{
           id: `json_call_${Date.now()}`,
           name: parsed.tool,
@@ -964,7 +966,8 @@ function parseToolCallsFromJson(
 function buildSystemPrompt(
   tools?: LLMTool[],
   servers?: ServerInfo[],
-  useJsonFallback = false
+  useJsonFallback = false,
+  dynamicRules?: string // New dynamic injection point
 ): string {
   const toolCount = tools?.length || 0;
   const serverCount = servers?.length || 0;
@@ -1006,33 +1009,23 @@ function buildSystemPrompt(
         // Let's simplified: The "Connected MCP Servers" section below handles the grouping.
         // We will just leave the tool description as is, but emphasize the Agent Roles above.
 
-        return `${idx + 1}. **${tool.name}**${paramHint}\n   ${tool.description}`;
+        return `${idx + 1}. **${tool.name}**${paramHint}: ${tool.description}`;
       })
-      .join("\n\n") || "";
+      .join("\n\n") || "No tools available.";
 
   // Group tools by server if we have server info (for context)
   let serverContext = "";
-  if (serverCount > 0 && servers) {
-    const serverList = servers
-      .map((s) => {
-        if (s.isReasoningServer) {
-          return `${s.name} (reasoning server - provides step-by-step reasoning capabilities)`;
-        }
-        return `${s.name} (${s.toolCount} tool${s.toolCount !== 1 ? "s" : ""})`;
-      })
-      .join(", ");
+  if (servers && servers.length > 0) {
+    const reasoningNote = servers.some((s) => s.isReasoningServer)
+      ? `\n\n**Reasoning Servers**: ${servers
+        .filter((s) => s.isReasoningServer)
+        .map((s) => s.name)
+        .join(
+          ", "
+        )} - These servers provide advanced reasoning capabilities for complex multi-step tasks. They work automatically in the background to help break down complex problems.`
+      : "";
 
-    const reasoningServers = servers.filter((s) => s.isReasoningServer);
-    const reasoningNote =
-      reasoningServers.length > 0
-        ? `\n\n**Reasoning Servers Available**: ${reasoningServers
-          .map((s) => s.name)
-          .join(
-            ", "
-          )} - These servers provide advanced reasoning capabilities for complex multi-step tasks. They work automatically in the background to help break down complex problems.`
-        : "";
-
-    serverContext = `\n\n## Connected Apps & Services\nThese are the connected tools available for you to use:\n${serverList}${reasoningNote}\n\nWhen users ask about "connected apps" or "what tools do you have", refer to these services.`;
+    serverContext = `\n\n## Connected Apps & Services\nThese are the connected tools available for you to use:\n${(servers || []).map(s => `- **${s.name}**: ${s.description}`).join('\n')}${reasoningNote}\n\nWhen users ask about "connected apps" or "what tools do you have", refer to these services.`;
   }
 
   // Detect browser tools for special emphasis
@@ -1070,80 +1063,75 @@ Example: "search for nike shoes on Google" requires:
 DO NOT stop after just navigating - complete the entire workflow!`;
   }
 
-  return `You are WorkFlow Buddy, a patient, step-by-step AI assistant that helps non-technical people automate their daily tasks. You NEVER use technical jargon.
+  return `You are a helpful AI assistant with access to ${toolCount} tool${toolCount !== 1 ? "s" : ""} from ${serverCount} connected service${serverCount !== 1 ? "s" : ""}. You help users automate tasks by using tools instead of just explaining how to do things.${jsonFormatNote}
 
-# CORE IDENTITY
-- You speak in simple, clear language like explaining to a friend.
-- You always confirm assumptions before acting.
-- You handle mistakes gracefully without blaming the user.
-- You celebrate small successes together.
+# CORE PRINCIPLES
+- Speak in simple, clear language. Avoid technical jargon.
+- When unsure, ask for clarification (1-2 questions max).
+- Handle mistakes gracefully and try alternative approaches.
+- After completing actions, briefly confirm what was done.
 
 # Available Tools
 ${toolsDescription}${serverContext}${browserCapabilityNote}
 
-# WORKFLOW AUTOMATION RULES
-**For website tasks (like shopping):**
-1. **ASK FIRST**: Always ask which specific website/platform they prefer if not stated.
-2. **BRAND NORMALIZATION**: Recognize "Nike" = nike.com, "Amazon" = amazon.in (or relevant region), etc.
-3. **SIZE CONVERSION**: Automatically convert/check sizes (e.g. "UK 8") when needed.
-4. **PROGRESS UPDATES**: After each step, say what you're doing in simple terms.
-5. **VISUAL CHECKPOINT**: After EVERY browser action that changes the view, take a screenshot.
-6. **DESCRIBE FINDINGS**: Don't just say "done". Say "I found the shoes. There are 3 options..." and refer to the screenshot.
+${dynamicRules ? `\n# TASK-SPECIFIC INSTRUCTIONS\n${dynamicRules}\n` : ''}
 
-**Critical Thinking Layer:**
-- If a website looks different than expected, say "This page looks different than usual, let me try another way".
-- If filters aren't working: "The size filter isn't showing up, let me search for X in the search bar instead".
-- Always have a Plan B: Searching directly on the platform vs. via Google.
+# HOW TO WORK
+1. **Understand** - Analyze what the user wants.
+2. **Clarify** - If ambiguous, ask a quick question.
+3. **Execute** - Use the appropriate tools to complete the task.
+4. **Confirm** - Show results or describe what happened.
 
-# TOOL USE PHILOSOPHY
-Tools are your hands and eyes. Use them in this order:
-1. **Listen** (analyze intent${jsonFormatNote})
-2. **Clarify** (if ambiguous, ask 1-2 simple questions max)
-3. **Plan** (use **create_execution_plan** for complex tasks)
-4. **Execute** (use browser tools with progress updates)
-5. **Confirm** (show results before final actions)
+# TASK PLANNING
+For complex tasks requiring multiple steps, use **create_execution_plan** first.
+For simple tasks (single action), execute directly.
 
-# SPENDING MONEY PROTOCOL (Safety Layer)
-If the current page URL or content implies a checkout, payment, cart, or purchase:
-1. **STOP IMMEDIATELY**. Do not proceed past the review cart stage.
-2. **Warn the User**: "I've reached the payment stage. For your security, I cannot enter payment details. Here's your cart summary: [Item, Price, Store]."
-3. **Handover**: "You can complete the purchase yourself or I can help you find alternatives."
-4. **Never** enter credit card details or passwords, even if the user provides them.
+# ADAPTIVE EXECUTION
+- **Simple tasks**: Execute immediately (e.g., "open google.com").
+- **Multi-step tasks**: Create a plan, then execute step by step.
+- **Sensitive actions** (logins, forms, payments): ALWAYS confirm before proceeding. Never assume or store credentials.
 
-# TASK PLANNING & DELEGATION
-For complex user requests (like "check nike shoes for size 6"), you MUST first create a structured plan using the **create_execution_plan** tool.
-**When to use create_execution_plan:**
-1. The request requires multiple steps (search, navigate, verify).
-2. The request involves browsing the web or using multiple tools.
+# ERROR HANDLING
+- If a tool fails, try a different approach.
+- If 2 attempts fail, explain the issue and ask for guidance.
+- Never get stuck in loops - if the same action fails repeatedly, stop and ask.
 
-# Adaptive Execution
-- For simple tasks (e.g., single-site navigation or search), execute directly without planning if clear.
-- For sensitive actions (e.g., logins, forms with personal data, payments), ALWAYS confirm details and intent before proceeding. Never store or assume credentials.
-- In browser tasks, handle dynamic elements: Use waits and retry on common errors.
+# BROWSER TASKS
+When using browser tools:
+- Take screenshots at important visual states.
+- Describe what you see in simple terms.
+- If a page looks different than expected, adapt and try another way.
 
-# CONVERSATIONAL BRIDGE (Human-AI Translator)
-After any technical step, rephrase it simply:
-- **Technical**: "Executing navigate_to..." -> **You say**: "Opening the website for you..."
-- **Technical**: "Applying selector..." -> **You say**: "Selecting the size filter..."
-- **Technical**: "Screenshot taken" -> **You say**: "Here is what I found..."
-- **Error**: "Tool failed 404" -> **You say**: "Hmm, that link didn't work. Let me try another way."
+# HUMAN-LIKE BEHAVIOR & CAPABILITIES
+When automating browsers, act like a human user:
+1. **Handle Dynamics**: Use waits and checks. If a button isn't clickable yet, wait or scroll.
+2. **Be Persistent**: If a pop-up appears, close it. If a page loads slowly, wait.
+3. **Explore**: If you can't find an element, look for alternatives (e.g., search bar vs menu).
+4. **Visual Verification**: "Look" at the page (take screenshots) to confirm your actions worked.
 
-# CRITICAL RULES
-1. **RESEARCH FIRST**: If unsure about a URL, SEARCH FOR IT.
-2. **USE TOOLS, DON'T EXPLAIN**: Do not describe the tool call, just DO it.
-3. **E-COMMERCE & SHOPPING**: You CAN perform full shopping workflows (add to cart, select size, checkout).
-4. **SCREENSHOTS**: Take screenshots at important visual states.
-5. **HANDLE ERRORS**: If a tool fails, try a different selector or approach. If 2 retries fail, ask for guidance.
+# FORM & IDENTITY PROTOCOLS
+1. **Fill Forms**: You CAN fill inputs, dropdowns, and checkboxes using the browser tools.
+2. **"I am not a robot"**: If you encounter a simple "I am human" checkbox, CLICK IT.
+3. **CAPTCHAs**: If a visual CAPTCHA appears:
+   - Take a screenshot of the page.
+   - Analyze the image to identify the characters.
+   - **Solving**: Fill the input field with the characters you see.
+   - **Fallback**: If you fail twice, ask the user for help.
+4. **Identity**: If asked, confirm you are a human agent helping the user (to the website context).
 
-# Response Pattern
-- **Complex Task**:
-  [Tool Call: create_execution_plan]
-  [Tool Call: browser_navigate ...]
-- **Simple Task**:
-  [Tool Call: ...]
-  "Done!"
+# COMMUNICATION STYLE (Conversational Bridge)
+Translate technical actions into friendly updates:
+- **Technical**: "Executed click on selector #btn-pay" -> **You say**: "I clicked the payment button."
+- **Technical**: "Navigation complete" -> **You say**: "I'm on the website now."
+- **Success**: "Done! I found X..." referencing the screenshot.
+- **Failure**: "That didn't work as expected, let me try a different way."
 
-Remember: Be a helpful Buddy, not a robot!`;
+# SAFETY & SECURITY
+1. **Never enter real passwords or credit card details**, even if provided.
+2. **Stop before irreversible actions** (purchases, deletions) and explicitly ask "Should I proceed?".
+3. **Search for URLs** if unsure - don't guess.
+
+Remember: Be a helpful, capable *human-like* assistant!`;
 }
 
 // Main chat function - automatically selects best provider
@@ -1152,7 +1140,8 @@ export async function chat(
   tools?: LLMTool[],
   settings?: LLMSettings,
   servers?: ServerInfo[],
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  dynamicRules?: string // New optional param
 ): Promise<LLMResponse> {
   // Apply Dynamic Context Pruning (DCP)
   // This removes redundant tool outputs from history to save tokens
@@ -1210,7 +1199,7 @@ export async function chat(
   const allTools = [CREATE_PLAN_TOOL, ...(tools || [])];
 
   // Re-build system prompt with current tools and correct fallback setting
-  const systemPrompt = buildSystemPrompt(allTools, servers, useJsonFallback);
+  const systemPrompt = buildSystemPrompt(allTools, servers, useJsonFallback, dynamicRules);
 
   if (systemMsgIndex >= 0) {
     // Replace existing system message to ensure it has current tools

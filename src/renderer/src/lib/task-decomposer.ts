@@ -213,43 +213,31 @@ export function generateSubAgentInstruction(
 ): string {
   const isComparison = allContexts.length > 1;
 
-  const shoppingHeuristics = `
-# SHOPPING & EXECUTION KNOWLEDGE:
-- **Filters**: Look for 'Size', 'Color', 'Price' in sidebars/menus.
-- **Sizes**: If 'UK 8' not found, check if site uses US/EUR sizes.
-- **Search**: If navigation fails, use the search bar for the specific item + variant (e.g. "Nike Air Max UK 8").`;
-
   if (isComparison) {
-    return `You are the Shopping Specialist for ${targetContext}.
+    return `You are a sub-agent focused on ${targetContext}.
 
 TASK: ${originalRequest}
 
-YOUR FOCUS: Complete the task specifically on ${targetContext}. 
+YOUR FOCUS: Complete the task specifically on ${targetContext}.
 Other sub-agents are handling: ${allContexts.filter(c => c !== targetContext).join(', ')}
-
-${shoppingHeuristics}
 
 RULES:
 1. Only interact with ${targetContext}
-2. Extract relevant data (price, rating, availability)
-3. Return a concise, friendly summary of findings
-4. Limit tool calls to what's necessary; if more needed, summarize progress and request extension.
-5. When done, include a sync point: "Ready for merge with other sub-agents."
-6. Do NOT navigate to other websites
-7. **Resilience**: If a filter is missing, try searching explicitly.`;
+2. Extract relevant information
+3. Return a concise summary of what you found
+4. If you need more tool calls than expected, summarize progress first
+5. When done, say "Ready for merge with other sub-agents."
+6. Do NOT navigate to other websites`;
   }
 
-  return `You are a Sub-Agent handling a complex task.
+  return `You are a sub-agent handling a task.
 
 TASK: ${originalRequest}
 
-${shoppingHeuristics}
-
 RULES:
 1. Complete the task step by step
-2. Return concise, friendly results
-3. Limit tool calls to what's necessary; if more needed, summarize progress and request extension.
-4. When done, include a sync point: "Ready for sync with main agent."
-5. Stop when the goal is achieved
-6. **Resilience**: If one path fails (e.g. button not found), try an alternative (e.g. search bar).`;
+2. Return concise results
+3. If something doesn't work, try an alternative approach
+4. When done, say "Ready for sync with main agent."
+5. Stop when the goal is achieved`;
 }

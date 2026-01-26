@@ -9,6 +9,7 @@ export interface TaskAnalysis {
   potentialMistakes: string[];
   shouldConfirm: boolean; // Smart detection result
   complexity?: TaskComplexity;
+  category?: 'shopping' | 'research' | 'admin' | 'general';
 }
 
 export interface TaskComplexity {
@@ -36,63 +37,53 @@ export async function analyzeTask(
 ): Promise<TaskAnalysis> {
   const { chat } = await import('./llm');
 
-  const analysisPrompt = `You are a Friendly Intent Decoder. Your job is to translate what non-technical users say into what they actually need.
+  const analysisPrompt = `Analyze this user prompt and determine if clarification is needed.
 
 USER PROMPT: "${userPrompt}"
 
-# ANALYSIS CHECKLIST:
-1. **Missing but Critical:**
-   - Which website/platform? (e.g. Amazon, Nike, etc. - NEVER guess unless obvious)
-   - Conditions? (New, used, price range)
-   - User Preferences? (Size "UK 8" vs "US 9", Color, Model)
-2. **Potential Confusions:**
-   - "UK 8" = US 9? = EUR 42? (Flags potential confusion)
-   - "Shoes" = running? casual? formal?
-   - "Open" = just show options or ready to buy?
-3. **Safety & Security:**
-   - Personal data? Logins? Payments? -> Set shouldConfirm: TRUE
-   - Irreversible actions? -> Set shouldConfirm: TRUE
+# ANALYSIS:
+1. **Is the intent clear?** Can you understand exactly what the user wants?
+2. **Missing details?** Are there critical pieces of information needed to complete the task?
+3. **Potential typos?** Common misspellings (e.g., "goolge" = "google")
+4. **Safety concerns?** Does this involve sensitive data, payments, or irreversible actions?
 
-# COMPLEXITY ANALYSIS:
-1. **Simple** (local LLM): "What's the weather?", "Open Gmail"
-2. **Moderate** (cloud LLM): "Price check", "Find item"
-3. **Complex** (planning needed): "Find X, compare with Y, buy Z"
-
-# PREFERENCE & MEMORY CHECK:
-If the user's prompt implies shopping or personal tasks but no preferences are detected:
-- Treat this as a "First-Time" or "New Context" request.
-- Suggest asking: "To get the best results, I'll ask which stores you prefer and your sizes. Should I remember these for next time?"
+# COMPLEXITY:
+- **Simple**: Single action, clear target (e.g., "open google.com")
+- **Moderate**: Multiple steps but clear goal (e.g., "search for X on Y")
+- **Complex**: Multi-step with decisions needed (e.g., "compare X and Y, then...")
 
 # RULES for shouldConfirm:
-- Set shouldConfirm: TRUE if missing critical platform, size, color, or preference.
-- Set shouldConfirm: TRUE for tasks involving personal/sensitive data without explicit confirmation.
-- Set shouldConfirm: TRUE if the prompt is valid but ambiguous ("shoes", "yes").
-- Set shouldConfirm: FALSE if the prompt has a clear action and target (e.g., "open google and search for adidas 7 shoes").
-- If typos detected (e.g., "goolge"), auto-correct in suggestions.
+- TRUE if the prompt is a single word or very vague
+- TRUE if critical information is missing (which website, what action)
+- TRUE for sensitive actions (logins, payments, deletions)
+- FALSE if the prompt has a clear action and target
+- If typos detected, auto-correct in suggestions
 
-# RESPONSE FORMAT (warm, helpful):
-Respond with a JSON object:
+Respond with JSON:
+# CATEGORY CLASSIFICATION:
+Classify the task into one of these categories:
+- **shopping**: Buying, finding products, prices, e-commerce.
+- **research**: Finding information, summaries, comparison, news.
+- **admin**: Filling forms, scheduling, email, account management.
+- **general**: Simple navigation, opening sites, weather, etc.
+
+Respond with JSON:
 {
   "isAmbiguous": true/false,
-  "missingDetails": ["detail 1", "detail 2"],
-  "detectedIntent": "User wants to finding Nike shoes in size UK 8",
-  "potentialMistakes": ["mistake 1"],
+  "missingDetails": ["what's missing"],
+  "detectedIntent": "What you think the user wants",
+  "category": "shopping|research|admin|general",
+  "potentialMistakes": ["typos found"],
   "suggestions": [
-    {
-      "id": "1",
-      "label": "Corrected: Open Google search for shoes",
-      "enrichedPrompt": "Open browser, go to google.com, search for shoes",
-      "confidence": 0.9
-    },
-    { "id": "ask_platform", "label": "Ask which website", "enrichedPrompt": "Ask the user: Which website should I use? (e.g. Nike, Amazon, etc.)" }
+    {"id": "1", "label": "Suggested interpretation", "enrichedPrompt": "Clear version of the request", "confidence": 0.9}
   ],
   "shouldConfirm": true/false,
   "complexity": {
-    "level": "moderate",
-    "needsExternalModel": true,
-    "reason": "Shopping tasks need current prices",
-    "userFriendlyMessage": "I'll search across websites. This might take a minute!",
-    "estimatedTime": "2-3 minutes"
+    "level": "simple|moderate|complex",
+    "needsExternalModel": true/false,
+    "reason": "Why this complexity",
+    "userFriendlyMessage": "Brief message for user",
+    "estimatedTime": "How long it might take"
   }
 }`;
 
@@ -122,7 +113,8 @@ Respond with a JSON object:
       detectedIntent: analysis.detectedIntent || userPrompt,
       potentialMistakes: analysis.potentialMistakes || [],
       shouldConfirm: analysis.shouldConfirm || false,
-      complexity: analysis.complexity
+      complexity: analysis.complexity,
+      category: analysis.category as any
     };
   } catch (error) {
     console.error('[TaskAnalysis] Error analyzing task:', error);
@@ -149,6 +141,7 @@ function createDefaultAnalysis(prompt: string): TaskAnalysis {
       reason: 'Direct navigation',
       userFriendlyMessage: 'Opening now...',
       estimatedTime: 'Instant'
-    }
+    },
+    category: 'general'
   };
 }

@@ -20,6 +20,7 @@ interface AgentRuntimeOptions {
   requireConfirmation?: boolean;
   onConfirmationNeeded?: (analysis: TaskAnalysis) => Promise<string | null>; // Returns enriched prompt or null to cancel
   isSubAgent?: boolean; // Flag to identify sub-agents
+  taskCategory?: string; // Optional: Force a specific task category (e.g. for sub-agents)
 }
 
 export class AgentRuntime {
@@ -28,12 +29,18 @@ export class AgentRuntime {
   private maxIterations: number;
   private maxConsecutiveErrors = 3; // Bailout after 3 consecutive tool failures
   private executionPlan: { goal: string; steps: Array<{ id: number; description: string; status: string; result?: string }> } | null = null;
+  private taskCategory?: string; // Store identified task category
 
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
     this.options = options;
     this.messages = [...initialHistory];
     // Sub-agents get 5 iterations, main agents get 20
     this.maxIterations = options.isSubAgent ? 5 : 20;
+
+    // Inherit category if passed
+    if (options.taskCategory) {
+      this.taskCategory = options.taskCategory;
+    }
   }
 
   /**
@@ -47,6 +54,12 @@ export class AgentRuntime {
       try {
         console.log('[AgentRuntime] Analyzing task for ambiguity...');
         const analysis = await analyzeTask(userContent, this.options.settings);
+
+        // Capture category from analysis
+        if (analysis.category) {
+          this.taskCategory = analysis.category;
+          console.log(`[AgentRuntime] Identified task category: ${this.taskCategory}`);
+        }
 
         if (analysis.shouldConfirm) {
           console.log('[AgentRuntime] Task needs confirmation. Asking user...');
@@ -167,13 +180,33 @@ export class AgentRuntime {
       }
 
       let response: LLMResponse;
+
+      // Get task-specific rules if category is available from analysis
+      let dynamicRules = undefined;
+      // Check if we have a pending confirmation analysis in logic flow (not directly accessible here easily without passing state)
+      // Alternatively, check execution plan metadata or just classify on the fly?
+      // Since analyzeTask is run at START of chat(), we can store the result.
+
+      // Wait, analyzeTask results are local to chat()'s start block.
+      // We should store the category in class state or pass it.
+
+      // Simplest approach: Classification is done at start. Store it.
+      if (this.taskCategory) {
+        // Import helper dynamically to avoid circular deps if needed, or just use imported
+        const { getPromptForCategory } = await import('./prompt-library');
+        // Pass isSubAgent flag to get refined prompts
+        dynamicRules = getPromptForCategory(this.taskCategory, this.options.isSubAgent);
+        // console.log(`[AgentRuntime] Injecting dynamic rules for: ${this.taskCategory}`);
+      }
+
       try {
         response = await chat(
           contextMessages,
           allTools.length > 0 ? allTools : undefined,
           this.options.settings,
           serverInfo.length > 0 ? serverInfo : undefined,
-          this.options.signal
+          this.options.signal,
+          dynamicRules
         );
       } catch (error) {
         console.error("[AgentRuntime] LLM Error:", error);
@@ -487,8 +520,9 @@ RULES:
       const subAgent = new AgentRuntime({
         ...this.options,
         isSubAgent: true,
+        taskCategory: this.taskCategory, // Inherit category from parent
         requireConfirmation: false,
-        onMessage: (msg) => {
+        onMessage: (msg: LLMMessage) => {
           const contentStr = typeof msg.content === 'string'
             ? msg.content
             : msg.content.map(c => c.type === 'text' ? c.text : '[Image]').join(' ');
