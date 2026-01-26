@@ -447,6 +447,18 @@ ai-worker-app/
 - [x] AI uses natural language without jargon
 - [x] Shopping/Booking tasks trigger confirmation if details missing
 - [x] High-risk tasks (payment/OTP) flagged for confirmation
+### ✅ Phase 15: Internal Automation (Playwright) [COMPLETED]
+
+**Goal:** Implement internal zero-latency browser automation via Playwright.
+
+**Implementation:**
+- [x] Implement **Internal Playwright Service** (`src/main/services/PlaywrightService.ts`) regarding the zero-latency automation
+- [x] Add E2E tests for all Playwright tools (`tests/playwright_tools_test.cjs`)
+- [x] Expose 30+ automation tools (navigate, click, fill, screenshot, etc.) directly via main process
+
+**Validation:** ✅
+- [x] Playwright tools execute successfully in E2E tests
+- [x] Zero-latency automation verified
 
 ---
 
@@ -467,7 +479,22 @@ ai-worker-app/
 
 ---
 
-### 🏁 Phase 15: Distribution & V1 Launch
+### 🚀 Phase 17: MCP Enhancements (Bundling & Preferences) [PLANNED]
+
+**Goal:** Ship key MCP servers out-of-the-box and provide dedicated preference management.
+
+**Implementation:**
+- [ ] **Bundled Servers**: Ensure Playwright, File System, and Memory MCP servers are bundled in the installer (via `mcp-bundled` launcher).
+- [ ] **MCP Preferences Tab**: Add a dedicated tab in Settings for server-specific configurations.
+- [ ] **Playwright Integration**: Add browser selector, extension token input, and extension download link.
+- [ ] **Containerized File Access**: Implement "Shadow Writes" for read-only directories (writes to staging, sync on user confirmation).
+- [ ] **Memory Manager**: Create a management UI for viewing, editing, and deleting knowledge graph entities.
+
+**Reference:** [mcp-implementation-plan.md](file:///home/mhrj/Desktop/ai-worker/mcp-implementation-plan.md)
+
+---
+
+### 🏁 Phase 18: Distribution & V1 Launch
 
 **Goal:** Public release and update mechanism.
 
@@ -524,4 +551,5 @@ ai-worker-app/
 
 ---
 
-**Current Status:** Phases 1-17 complete. RPI Workflow + Sub-Agent Auto-Fork system implemented. App Launch Preparation (Phase 16) is now the primary focus.
+**Current Status:** Phases 1-18 complete. RPI Workflow + Sub-Agent Auto-Fork system implemented. App Launch Preparation (Phase 16) is now the primary focus.
+

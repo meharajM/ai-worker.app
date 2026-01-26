@@ -6,6 +6,7 @@ import { saveUserSettings, getUserProfile } from '../lib/firebase'
 
 export type Theme = 'dark' | 'light' | 'system'
 export type LLMProviderType = 'auto' | 'ollama' | 'openai' | 'gemini' | 'openrouter' | 'browser'
+export type PlaywrightBrowserType = 'auto' | 'chrome' | 'msedge' | 'firefox' | 'webkit' | 'chromium'
 
 interface SettingsState {
     // Voice settings
@@ -33,6 +34,10 @@ interface SettingsState {
     // Appearance
     theme: Theme
 
+    // MCP Playwright Browser settings
+    playwrightBrowser: PlaywrightBrowserType
+    playwrightHeadless: boolean
+
     // Sync State
     activeUserId: string | null
     isSyncing: boolean
@@ -58,8 +63,10 @@ interface SettingsState {
     setOpenrouterModel: (model: string) => void
     setBrowserModel: (model: string) => void
     setTheme: (theme: Theme) => void
+    setPlaywrightBrowser: (browser: PlaywrightBrowserType) => void
+    setPlaywrightHeadless: (headless: boolean) => void
     resetToDefaults: () => void
-    
+
     // Sync Actions
     setActiveUserId: (uid: string | null) => void
     loadRemoteSettings: (uid: string) => Promise<void>
@@ -91,6 +98,8 @@ const defaultSettings = {
     openrouterModel: LLM_CONFIG.OPENROUTER.DEFAULT_MODEL,
     browserModel: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', // Default small model
     theme: 'dark' as Theme,
+    playwrightBrowser: 'auto' as PlaywrightBrowserType, // Auto-detect based on OS
+    playwrightHeadless: false, // Default to headed for user visibility
     activeUserId: null,
     isSyncing: false,
     lastSyncTime: 0,
@@ -170,6 +179,18 @@ export const useSettingsStore = create<SettingsState>()(
             setOpenrouterModel: (model) => set({ openrouterModel: model }),
             setBrowserModel: (model) => set({ browserModel: model }),
             setTheme: (theme) => set({ theme }),
+            setPlaywrightBrowser: async (browser) => {
+                set({ playwrightBrowser: browser })
+                // Also save to main process store for PlaywrightService to read
+                const browserValue = browser === 'auto' ? undefined : browser
+                await electron.store.set('mcpPlaywright', { browser: browserValue })
+            },
+            setPlaywrightHeadless: async (headless) => {
+                set({ playwrightHeadless: headless })
+                // Also save to main process store for PlaywrightService to read
+                const current = await electron.store.get<any>('mcpPlaywright') || {}
+                await electron.store.set('mcpPlaywright', { ...current, headless })
+            },
             resetToDefaults: () => set(defaultSettings),
 
             setActiveUserId: (uid) => set({ activeUserId: uid }),
@@ -202,11 +223,11 @@ export const useSettingsStore = create<SettingsState>()(
             },
 
             clearUserSecrets: () => {
-                set({ 
+                set({
                     activeUserId: null,
-                    openaiApiKey: '', 
-                    geminiApiKey: '', 
-                    openrouterApiKey: '' 
+                    openaiApiKey: '',
+                    geminiApiKey: '',
+                    openrouterApiKey: ''
                     // We might typically clear Base URL too, or leave it as default?
                     // Let's clear it to be safe/reset to default
                 })
@@ -224,7 +245,7 @@ export const useSettingsStore = create<SettingsState>()(
                         // We filter out API keys from remote sync if we decided not to store them
                         // But for now, we just merge what we get, excluding potentially sensitive defaults if needed.
                         // Assuming remote settings structure matches store partially.
-                        
+
                         // Extract only syncable fields
                         const {
                             theme,

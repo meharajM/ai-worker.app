@@ -65,6 +65,7 @@ graph LR
         App[app.ts<br/>Application Lifecycle]
         IPC[IPC Handlers<br/>Modular Handlers]
         MCP[MCP Client Manager<br/>@modelcontextprotocol/sdk]
+        Playwright[Playwright Service<br/>Internal Browser Automation]
         Speech[Speech Services<br/>ModelManager & ModelServer]
         Env[Environment Utils<br/>fix-path, ESM shims]
     end
@@ -84,6 +85,7 @@ graph LR
     IPC --> StoreHandlers
     IPC --> SpeechHandlers
     MCPHandlers --> MCP
+    MCPHandlers --> Playwright
     SpeechHandlers --> Speech
     App --> Env
 ```
@@ -399,11 +401,9 @@ AI-Worker comes with two pre-configured MCP servers that are automatically initi
 1. **Playwright Server** (`playwright`)
 
    - Purpose: Browser automation and web interaction
-   - Configuration:
-     - Type: `stdio`
-     - Command: `npx`
-     - Args: `-y @modelcontextprotocol/server-playwright`
-   - Tools: Browser navigation, screenshot, DOM interaction
+   - Mode: **Internal Service** (Zero-latency, in-process)
+   - Configuration: `command: 'internal'` (Automatically routed by `mcp.ts`)
+   - Tools: 30+ tools including navigate, click, fill, screenshot, get_state, evaluate
 
 2. **Sequential Thinking Server** (`sequential-thinking`)
    - Purpose: Step-by-step reasoning for complex tasks

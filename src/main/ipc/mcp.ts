@@ -3,10 +3,27 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import { ChildProcess } from 'child_process'
+import { PlaywrightService } from '../services/PlaywrightService'
 
 // Store active MCP clients and their process info
 const activeConnections = new Map<string, Client>()
 const activeProcesses = new Map<string, ChildProcess>()
+
+// Track in-process Playwright connections (not using external MCP client)
+const inProcessPlaywrightConnections = new Set<string>()
+
+// Helper to detect if a server config is for Playwright
+function isPlaywrightServer(serverConfig: { id?: string; name?: string; command?: string; args?: string[] }): boolean {
+    const { id, name, command, args } = serverConfig
+    const idOrName = (id || name || '').toLowerCase()
+    const argsStr = (args || []).join(' ').toLowerCase()
+
+    // Match by:
+    // 1. ID/name containing 'playwright', OR
+    // 2. Args containing '@playwright/mcp' (legacy external), OR
+    // 3. Command is 'internal' (new internal service marker)
+    return idOrName.includes('playwright') || argsStr.includes('@playwright/mcp') || command === 'internal'
+}
 
 // Logging utility for MCP operations
 interface McpLogContext {
@@ -120,6 +137,41 @@ export function registerMcpHandlers(): void {
                     duration: Date.now() - startTime,
                 })
                 return { success: true, serverId: id }
+            }
+
+            // === PLAYWRIGHT IN-PROCESS INTERCEPTION ===
+            // Route Playwright connections to the in-process service for zero-latency automation
+            if (isPlaywrightServer(serverConfig)) {
+                logMcpOperation('info', '🚀 Using in-process Playwright service (zero latency)', {
+                    operation: 'connect',
+                    serverId: id,
+                    inProcess: true,
+                })
+
+                try {
+                    const playwrightService = PlaywrightService.getInstance()
+                    await playwrightService.initialize()
+
+                    // Track this as an in-process connection
+                    inProcessPlaywrightConnections.add(id)
+
+                    logMcpOperation('info', 'In-process Playwright connected successfully', {
+                        operation: 'connect',
+                        serverId: id,
+                        duration: Date.now() - startTime,
+                        inProcess: true,
+                    })
+
+                    return { success: true, serverId: id, inProcess: true }
+                } catch (playwrightError) {
+                    const errorMsg = playwrightError instanceof Error ? playwrightError.message : String(playwrightError)
+                    logMcpOperation('warn', 'In-process Playwright failed, falling back to external process', {
+                        operation: 'connect',
+                        serverId: id,
+                        error: errorMsg,
+                    })
+                    // Fall through to standard MCP connection as backup
+                }
             }
 
             let transport: StdioClientTransport | SSEClientTransport
@@ -267,6 +319,20 @@ export function registerMcpHandlers(): void {
             serverId,
         })
 
+        // Handle in-process Playwright disconnections
+        if (inProcessPlaywrightConnections.has(serverId)) {
+            inProcessPlaywrightConnections.delete(serverId)
+            // Note: We don't close the PlaywrightService here - it's a singleton that persists
+            // across connections for performance. It will be closed on app shutdown.
+            logMcpOperation('info', 'In-process Playwright disconnected', {
+                operation: 'disconnect',
+                serverId,
+                duration: Date.now() - startTime,
+                inProcess: true,
+            })
+            return { success: true }
+        }
+
         const client = activeConnections.get(serverId)
         if (client) {
             try {
@@ -315,6 +381,19 @@ export function registerMcpHandlers(): void {
             operation: 'list-tools',
             serverId,
         })
+
+        // Handle in-process Playwright connections
+        if (inProcessPlaywrightConnections.has(serverId)) {
+            const playwrightService = PlaywrightService.getInstance()
+            const result = playwrightService.listTools()
+            logMcpOperation('info', 'In-process Playwright tools listed', {
+                operation: 'list-tools',
+                serverId,
+                toolCount: result.tools.length,
+                inProcess: true,
+            })
+            return { tools: result.tools }
+        }
 
         const client = activeConnections.get(serverId)
         if (!client) {
@@ -391,6 +470,33 @@ export function registerMcpHandlers(): void {
             args: sanitizedArgs,
             argsSize: JSON.stringify(args).length,
         })
+
+        // Handle in-process Playwright connections
+        if (inProcessPlaywrightConnections.has(serverId)) {
+            const playwrightService = PlaywrightService.getInstance()
+            const result = await playwrightService.callTool(toolName, args)
+            const duration = Date.now() - startTime
+
+            logMcpOperation('info', 'In-process Playwright tool call completed', {
+                operation: 'call-tool',
+                serverId,
+                toolName,
+                duration,
+                hasError: !!result.error,
+                inProcess: true,
+            })
+
+            if (result.error) {
+                return { result: null, error: result.error }
+            }
+
+            // Format result to match MCP response structure
+            return {
+                result: {
+                    content: [{ type: 'text', text: typeof result.result === 'string' ? result.result : JSON.stringify(result.result) }]
+                }
+            }
+        }
 
         const client = activeConnections.get(serverId)
         if (!client) {

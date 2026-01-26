@@ -157,7 +157,7 @@ Can you help me troubleshoot this?`;
         </div>
       ) : (
         <div className="space-y-4">
-          {servers.map((server) => (
+          {servers.filter(s => s.name !== 'playwright').map((server) => (
             <McpServerCard
               key={server.id}
               server={server}

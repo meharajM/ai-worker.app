@@ -36,18 +36,10 @@ const DEFAULT_MCP_SERVERS: Omit<
     {
       name: "playwright",
       description:
-        "Playwright MCP Server - Browser automation and web interaction tools",
+        "Native Playwright Service - Browser automation (Internal)",
       type: "stdio",
-      command: "npx",
-      args: ["-y", "@playwright/mcp"],
-    },
-    {
-      name: "sequential-thinking",
-      description:
-        "Sequential Thinking MCP Server - Enables step-by-step reasoning for complex tasks",
-      type: "stdio",
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      command: "internal", // Signal this is an internal service
+      args: [],
     },
   ];
 
@@ -627,19 +619,26 @@ async function loadServersFromStorage(): Promise<void> {
     if (stored && Array.isArray(stored) && stored.length > 0) {
       // Restore servers, resetting runtime state
       connectedServers = new Map(
-        stored.map((s) => [
-          s.id,
-          {
-            ...s,
-            connected: false, // Runtime state - always false on load
-            tools: [], // Runtime state - always empty on load
-            error: undefined, // Runtime state - always undefined on load
-            autoConnect: s.autoConnect ?? true, // Default to true if missing (opt-out behavior)
-          },
-        ])
+        stored.map((s) => {
+          // Force enable playwright, disable others (temporary user request)
+          const isPlaywright = s.name === 'playwright';
+
+          return [
+            s.id,
+            {
+              ...s,
+              connected: false, // Runtime state - always false on load
+              tools: [], // Runtime state - always empty on load
+              error: undefined, // Runtime state - always undefined on load
+              autoConnect: isPlaywright, // Only auto-connect Playwright
+            },
+          ];
+        })
       );
       // Ensure default servers exist (add missing ones)
       await ensureDefaultServers();
+      // Apply migration for Playwright config
+      await migratePlaywrightToInternal();
     } else {
       // Empty array or null - initialize with default servers
       await initializeDefaultServers();
@@ -697,6 +696,29 @@ async function migrateFromLocalStorage(): Promise<void> {
       console.error("Migration failed:", error);
       // Continue with default servers
     }
+  }
+}
+
+// Migration: Update existing Playwright server to use internal command
+async function migratePlaywrightToInternal(): Promise<void> {
+  let hasChanges = false;
+
+  for (const server of connectedServers.values()) {
+    // Check if this is the legacy playwright configuration
+    if (server.name === 'playwright' && server.command === 'npx') {
+      console.log('Migrating Playwright server to internal configuration...');
+      connectedServers.set(server.id, {
+        ...server,
+        command: 'internal',
+        args: [],
+        description: "Native Playwright Service - Browser automation (Internal)"
+      });
+      hasChanges = true;
+    }
+  }
+
+  if (hasChanges) {
+    await saveServersToStorage();
   }
 }
 
