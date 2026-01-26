@@ -88,6 +88,12 @@ const electronAPI = {
         listKeys: (userId?: string) => 
             ipcRenderer.invoke('secure:list-keys', userId),
     },
+    // Filesystem Safe Mode operations
+    fs: {
+        getPendingChanges: () => ipcRenderer.invoke('fs:get-pending-changes'),
+        approveChange: (changeId: string) => ipcRenderer.invoke('fs:approve-change', changeId),
+        rejectChange: (changeId: string) => ipcRenderer.invoke('fs:reject-change', changeId),
+    },
 }
 
 // Expose APIs to renderer

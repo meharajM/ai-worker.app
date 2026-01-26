@@ -4,6 +4,8 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import { ChildProcess } from 'child_process'
 import { PlaywrightService } from '../services/PlaywrightService'
+import { MemoryService } from '../services/MemoryService'
+import { FileSystemService } from '../services/FileSystemService'
 
 // Store active MCP clients and their process info
 const activeConnections = new Map<string, Client>()
@@ -11,6 +13,8 @@ const activeProcesses = new Map<string, ChildProcess>()
 
 // Track in-process Playwright connections (not using external MCP client)
 const inProcessPlaywrightConnections = new Set<string>()
+const inProcessMemoryConnections = new Set<string>()
+const inProcessFilesystemConnections = new Set<string>()
 
 // Helper to detect if a server config is for Playwright
 function isPlaywrightServer(serverConfig: { id?: string; name?: string; command?: string; args?: string[] }): boolean {
@@ -174,6 +178,58 @@ export function registerMcpHandlers(): void {
                 }
             }
 
+            // === MEMORY IN-PROCESS INTERCEPTION ===
+            if (command === 'internal-memory' || (args && args.includes('memory-service'))) {
+                 logMcpOperation('info', '🧠 Using in-process Memory service', {
+                    operation: 'connect',
+                    serverId: id,
+                    inProcess: true,
+                })
+
+                try {
+                    const memoryService = MemoryService.getInstance()
+                    memoryService.initialize()
+
+                    inProcessMemoryConnections.add(id)
+
+                    logMcpOperation('info', 'In-process Memory connected successfully', {
+                        operation: 'connect',
+                        serverId: id,
+                        duration: Date.now() - startTime,
+                        inProcess: true,
+                    })
+
+                    return { success: true, serverId: id, inProcess: true }
+                } catch (error) {
+                     logMcpOperation('error', 'In-process Memory failed to initialize', {
+                        operation: 'connect',
+                        serverId: id,
+                        error: error instanceof Error ? error.message : String(error),
+                    })
+                    return { success: false, error: 'Failed to initialize Memory Service' }
+                }
+            }
+
+            // === FILESYSTEM IN-PROCESS INTERCEPTION ===
+            if (command === 'internal-filesystem' || (args && args.includes('filesystem-service'))) {
+                 logMcpOperation('info', '📁 Using in-process Filesystem service', {
+                    operation: 'connect',
+                    serverId: id,
+                    inProcess: true,
+                })
+
+                inProcessFilesystemConnections.add(id)
+
+                logMcpOperation('info', 'In-process Filesystem connected successfully', {
+                    operation: 'connect',
+                    serverId: id,
+                    duration: Date.now() - startTime,
+                    inProcess: true,
+                })
+
+                return { success: true, serverId: id, inProcess: true }
+            }
+
             let transport: StdioClientTransport | SSEClientTransport
 
             if (type === 'stdio') {
@@ -333,6 +389,30 @@ export function registerMcpHandlers(): void {
             return { success: true }
         }
 
+        // Handle in-process Memory disconnections
+        if (inProcessMemoryConnections.has(serverId)) {
+            inProcessMemoryConnections.delete(serverId)
+            logMcpOperation('info', 'In-process Memory disconnected', {
+                operation: 'disconnect',
+                serverId,
+                duration: Date.now() - startTime,
+                inProcess: true,
+            })
+            return { success: true }
+        }
+
+        // Handle in-process Filesystem disconnections
+        if (inProcessFilesystemConnections.has(serverId)) {
+            inProcessFilesystemConnections.delete(serverId)
+            logMcpOperation('info', 'In-process Filesystem disconnected', {
+                operation: 'disconnect',
+                serverId,
+                duration: Date.now() - startTime,
+                inProcess: true,
+            })
+            return { success: true }
+        }
+
         const client = activeConnections.get(serverId)
         if (client) {
             try {
@@ -387,6 +467,32 @@ export function registerMcpHandlers(): void {
             const playwrightService = PlaywrightService.getInstance()
             const result = playwrightService.listTools()
             logMcpOperation('info', 'In-process Playwright tools listed', {
+                operation: 'list-tools',
+                serverId,
+                toolCount: result.tools.length,
+                inProcess: true,
+            })
+            return { tools: result.tools }
+        }
+
+        // Handle in-process Memory connections
+        if (inProcessMemoryConnections.has(serverId)) {
+            const memoryService = MemoryService.getInstance()
+            const result = memoryService.listTools()
+            logMcpOperation('info', 'In-process Memory tools listed', {
+                operation: 'list-tools',
+                serverId,
+                toolCount: result.tools.length,
+                inProcess: true,
+            })
+            return { tools: result.tools }
+        }
+
+        // Handle in-process Filesystem connections
+        if (inProcessFilesystemConnections.has(serverId)) {
+            const fsService = FileSystemService.getInstance()
+            const result = fsService.listTools()
+            logMcpOperation('info', 'In-process Filesystem tools listed', {
                 operation: 'list-tools',
                 serverId,
                 toolCount: result.tools.length,
@@ -491,6 +597,58 @@ export function registerMcpHandlers(): void {
             }
 
             // Format result to match MCP response structure
+            return {
+                result: {
+                    content: [{ type: 'text', text: typeof result.result === 'string' ? result.result : JSON.stringify(result.result) }]
+                }
+            }
+        }
+
+        // Handle in-process Memory connections
+        if (inProcessMemoryConnections.has(serverId)) {
+             const memoryService = MemoryService.getInstance()
+             const result = await memoryService.callTool(toolName, args)
+             const duration = Date.now() - startTime
+
+            logMcpOperation('info', 'In-process Memory tool call completed', {
+                operation: 'call-tool',
+                serverId,
+                toolName,
+                duration,
+                hasError: !!result.error,
+                inProcess: true,
+            })
+
+            if (result.error) {
+                return { result: null, error: result.error }
+            }
+
+            return {
+                result: {
+                    content: [{ type: 'text', text: typeof result.result === 'string' ? result.result : JSON.stringify(result.result) }]
+                }
+            }
+        }
+
+        // Handle in-process Filesystem connections
+        if (inProcessFilesystemConnections.has(serverId)) {
+             const fsService = FileSystemService.getInstance()
+             const result = await fsService.callTool(toolName, args)
+             const duration = Date.now() - startTime
+
+            logMcpOperation('info', 'In-process Filesystem tool call completed', {
+                operation: 'call-tool',
+                serverId,
+                toolName,
+                duration,
+                hasError: !!result.error,
+                inProcess: true,
+            })
+
+            if (result.error) {
+                return { result: null, error: result.error }
+            }
+
             return {
                 result: {
                     content: [{ type: 'text', text: typeof result.result === 'string' ? result.result : JSON.stringify(result.result) }]

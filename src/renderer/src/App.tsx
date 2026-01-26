@@ -5,6 +5,7 @@ import { ChatSidebar } from "./components/ChatSidebar";
 import { ConnectionsPanel } from "./components/ConnectionsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { TaskConfirmationCard } from "./components/TaskConfirmationCard";
+import { FileChangeReview } from "./components/FileChangeReview";
 
 import { Sidebar, View } from "./components/Sidebar";
 import { Header } from "./components/Header";
@@ -395,7 +396,11 @@ function App() {
                       // For content: overwrite if new content exists (often content in tool turns is intermediate)
                       let finalContent = existingMsg.content;
                       if (msg.content && msg.content !== existingMsg.content) {
-                          finalContent = msg.content;
+                          // Ensure content is string if needed, or handle array
+                          const newContent = typeof msg.content === 'string' 
+                            ? msg.content 
+                            : JSON.stringify(msg.content);
+                          finalContent = newContent;
                       }
 
                       updateMessage(activeAssistantMessageId, {
@@ -409,7 +414,7 @@ function App() {
                 // Create new message and track its ID
                 const added = addMessage({
                   role: 'assistant',
-                  content: msg.content || "",
+                  content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || ""),
                   toolCalls: newToolCalls.length > 0 ? newToolCalls : undefined
                 });
                 activeAssistantMessageId = added.id;
@@ -421,7 +426,10 @@ function App() {
                 const existingMsg = session?.messages.find(m => m.id === activeAssistantMessageId);
                 if (existingMsg && existingMsg.toolCalls) {
                    const updatedToolCalls = existingMsg.toolCalls.map(tc => 
-                      tc.id === msg.tool_call_id ? { ...tc, result: msg.content } : tc
+                      tc.id === msg.tool_call_id ? { 
+                          ...tc, 
+                          result: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) 
+                      } : tc
                    );
                    updateMessage(activeAssistantMessageId, {
                       toolCalls: updatedToolCalls
@@ -495,6 +503,7 @@ function App() {
 
         </main>
       </div>
+      <FileChangeReview />
     </div>
   );
 }

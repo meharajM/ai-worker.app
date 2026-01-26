@@ -38,6 +38,9 @@ interface SettingsState {
     playwrightBrowser: PlaywrightBrowserType
     playwrightHeadless: boolean
 
+    // MCP FileSystem settings
+    fileSystemSafeMode: boolean
+
     // Sync State
     activeUserId: string | null
     isSyncing: boolean
@@ -65,6 +68,7 @@ interface SettingsState {
     setTheme: (theme: Theme) => void
     setPlaywrightBrowser: (browser: PlaywrightBrowserType) => void
     setPlaywrightHeadless: (headless: boolean) => void
+    setFileSystemSafeMode: (enabled: boolean) => void
     resetToDefaults: () => void
 
     // Sync Actions
@@ -100,6 +104,7 @@ const defaultSettings = {
     theme: 'dark' as Theme,
     playwrightBrowser: 'auto' as PlaywrightBrowserType, // Auto-detect based on OS
     playwrightHeadless: false, // Default to headed for user visibility
+    fileSystemSafeMode: true, // Default to safe mode (shadow writes)
     activeUserId: null,
     isSyncing: false,
     lastSyncTime: 0,
@@ -190,6 +195,12 @@ export const useSettingsStore = create<SettingsState>()(
                 // Also save to main process store for PlaywrightService to read
                 const current = await electron.store.get<any>('mcpPlaywright') || {}
                 await electron.store.set('mcpPlaywright', { ...current, headless })
+            },
+            setFileSystemSafeMode: async (enabled) => {
+                set({ fileSystemSafeMode: enabled })
+                // Save to main process store for FileSystemService to read
+                const current = await electron.store.get<any>('mcpFileSystem') || {}
+                await electron.store.set('mcpFileSystem', { ...current, safeMode: enabled })
             },
             resetToDefaults: () => set(defaultSettings),
 

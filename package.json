@@ -46,6 +46,7 @@
         "@mlc-ai/web-llm": "^0.2.80",
         "@modelcontextprotocol/sdk": "^1.0.1",
         "@playwright/mcp": "^0.0.53",
+        "better-sqlite3": "^12.6.2",
         "electron-store": "^11.0.2",
         "firebase": "^12.8.0",
         "fix-path": "^5.0.0",
