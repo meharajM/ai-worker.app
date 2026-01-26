@@ -510,9 +510,14 @@ export function registerMcpHandlers(): void {
         }
 
         try {
+            // Final defensive check to ensure arguments are a record
+            const finalArgs = (args && typeof args === 'object' && !Array.isArray(args)) 
+                ? (args as Record<string, unknown>) 
+                : (typeof args === 'string' ? { input: args } : { value: args });
+
             const result = await client.callTool({
                 name: toolName,
-                arguments: args as Record<string, unknown>
+                arguments: finalArgs || {}
             })
 
             const duration = Date.now() - startTime

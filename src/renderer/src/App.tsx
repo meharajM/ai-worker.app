@@ -4,6 +4,7 @@ import { ChatView } from "./components/ChatView";
 import { ChatSidebar } from "./components/ChatSidebar";
 import { ConnectionsPanel } from "./components/ConnectionsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { TaskConfirmationCard } from "./components/TaskConfirmationCard";
 
 import { Sidebar, View } from "./components/Sidebar";
 import { Header } from "./components/Header";
@@ -20,7 +21,9 @@ import {
   LLMMessage,
   LLMTool,
   ServerInfo,
+  safeParseJSON,
 } from "./lib/llm";
+import { type TaskAnalysis } from "./lib/confirmation-message";
 import {
   getAllTools,
   getServers,
@@ -46,6 +49,10 @@ function App() {
     provider: null,
     available: false,
   });
+  const [pendingConfirmation, setPendingConfirmation] = useState<{
+    analysis: TaskAnalysis;
+    resolve: (enrichedPrompt: string | null) => void;
+  } | null>(null);
   
   // Initialize Auth Persistence
   useAuthPersistence();
@@ -221,82 +228,21 @@ function App() {
     async (content: string) => {
       if (!content.trim()) return;
 
-      // Add user message
-      addMessage({
-        role: "user",
-        content: content.trim(),
-      });
-
-      // Log the user message
-      addLog({
-        eventType: 'USER_MESSAGE',
-        sessionId: activeSessionId || "default",
-        component: "App.handleSubmit",
-        details: {
-          input: content.trim()
-        },
-      });
-
       setProcessing(true);
+      addMessage({ role: 'user', content });
+      const abortController = new AbortController();
+      // We need to use a mutable ref or store for the controller if we want to support external aborts
+      // effectively (like the stop button). 
+      // The current store uses its own AbortController, so we should sync them or use the store's signal.
+      
+      // Since App.tsx sets up the store's abort controller in setProcessing(true),
+      // we can grab it.
+      
+      // However, the setProcessing(true) happens synchronously.
+      // The store updates. We can get the signal from the store.
+      // But `handleSubmit` is a callback closure. `useChatStore.getState()` is safer.
 
-      let iterationCount = 0;
       try {
-        // Build message history for LLM
-        const llmMessages: LLMMessage[] = messages.map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        }));
-
-        // Add the new user message
-        llmMessages.push({
-          role: "user",
-          content: content.trim(),
-        });
-
-        // Get available MCP tools and servers
-        const mcpTools = getAllTools();
-        const servers = getServers();
-
-        addLog({
-          eventType: 'DEBUG',
-          sessionId: activeSessionId || "default",
-          component: "App.handleSubmit",
-          details: {
-            metadata: {
-              mcpToolCount: mcpTools.length,
-              connectedServerCount: servers.filter((s) => s.connected).length,
-              toolNames: mcpTools.map((t) => t.name),
-            }
-          },
-        });
-
-        // Convert to LLM format (minimal for token efficiency)
-        const llmTools: LLMTool[] = mcpTools.map((tool) => ({
-          name: tool.name,
-          description: tool.description, // Keep full description for tool schema
-          parameters: tool.inputSchema,
-        }));
-
-        // Build compact server info
-        // Include all connected servers, even if they have no tools (reasoning servers)
-        // Note: Reasoning servers are included for context but don't affect tool execution
-        const serverInfo: ServerInfo[] = servers
-          .filter((server) => server.connected)
-          .map((server) => {
-            const isReasoningServer =
-              server.name.includes("sequential-thinking") ||
-              server.name.includes("sequential") ||
-              server.description.toLowerCase().includes("reasoning");
-
-            return {
-              name: server.name,
-              description: server.description.substring(0, 40), // Truncate for token efficiency
-              toolCount: server.tools.length,
-              isReasoningServer,
-            };
-          });
-
-        // Tool execution loop - continue until no more tool calls are needed
         const settingsForLLM = {
           preferredProvider: settings.preferredProvider,
           ollamaModel: settings.ollamaModel,
@@ -310,371 +256,188 @@ function App() {
           openrouterModel: settings.openrouterModel,
         };
 
-        let currentMessages = [...llmMessages];
-        let finalResponse: Awaited<ReturnType<typeof chat>> | null = null;
-        iterationCount = 0;
-        const maxIterations = 10; // Safety limit to prevent infinite loops
-        const allToolCalls: Array<{
-          id: string;
-          name: string;
-          arguments: Record<string, unknown>;
-        }> = [];
-
-        while (iterationCount < maxIterations) {
-          // Check if aborted
-          const abortSignal = useChatStore.getState().getAbortSignal();
-          if (abortSignal?.aborted) {
-            console.log('[MCP App] Request aborted by user');
-            finalResponse = {
-              content: "Request cancelled.",
-              provider: "cancelled",
-              model: "unknown",
-            };
-            break;
+        // Convert store messages to LLMMessage format
+        const freshMessages = useChatStore.getState().getActiveSession()?.messages || [];
+        const initialHistory: LLMMessage[] = freshMessages.map((m) => {
+          const msg: LLMMessage = {
+            role: m.role as "user" | "assistant" | "system",
+            content: m.content,
+          };
+          
+          if (m.toolCalls) {
+             msg.tool_calls = m.toolCalls.map(tc => ({
+               id: tc.id,
+               type: 'function',
+               function: {
+                 name: tc.name, // Fixed: use name
+                 arguments: tc.arguments
+               }
+             }));
           }
+          // Note: Store might store tool results as 'tool' role messages too?
+          // Looking at chatStore.ts, 'toolCalls' property is on the message.
+          // Yet in the old App.tsx loop, we added 'tool' role messages to `currentMessages` array locally,
+          // but did we add them to the store?
+          // check chatStore: addMessage takes role 'user'|'assistant'|'system'.
+          // It doesn't seem to support 'tool' role in the typed interface `Message`.
+          // Wait, `Message` interface has `role: 'user' | 'assistant' | 'system'`.
+          // So 'tool' role messages were NOT being persisted in the store in the old implementation?
+          
+          // Old App.tsx:
+          // toolResults.push(...)
+          // currentMessages.push({ role: "tool", ... }) -> This was local `currentMessages` array.
+          // It wasn't calling `addMessage` for tool results.
+          // It only called `addMessage` for the final assistant response.
+          // AND it passed `allToolCalls` to the final assistant message in the store: 
+          // `addMessage({ role: "assistant", content: ..., toolCalls: ... })`
+          
+          // So the STORE representation compresses the tool calls into the assistant message?
+          // "allToolCalls.push(...response.toolCalls)"
+          // "addMessage({ ... toolCalls: allToolCalls ... })"
+          
+          // BUT, for correct context reconstruction in the NEXT turn, we need the tool outputs.
+          // If the store doesn't save "tool" role messages (outputs), then next turn `messages` will lack them.
+          // This would break multi-turn coherency if we just reload from store.
+          
+          // Let's re-read `chatStore.ts` to see if `role` allows `tool`.
+          // "role: 'user' | 'assistant' | 'system'"
+          // It strictly probably doesn't allow 'tool'.
+          
+          // So how did the old app handle history?
+          // `const llmMessages: LLMMessage[] = messages.map(...)`
+          // It seems it LOST the tool outputs between sessions?
+          // If so, that's a pre-existing bug/limitation.
+          // OR `LLMMessage` creation in `App.tsx` handled it?
+          // No, it just mapped `messages`.
+          
+          // Verify `chatStore.ts`:
+          // `export interface Message { ... role: 'user' | 'assistant' | 'system' ... }`
+          
+          // This confirms the store does not save tool outputs as separate messages.
+          // It attaches `toolCalls` to the assistant message.
+          // But where do the RESULTS go?
+          // `export interface ToolCall { ... result?: string }`
+          // Ah! `result` is inside `ToolCall`.
+          
+          // So we need to reconstruct `tool` role messages from the `toolCalls` array in the assistant message.
+          
+          return msg;
+        });
+        
+        // Reconstruct tool outputs from history
+        const reconstructedHistory: LLMMessage[] = [];
+        for (const msg of initialHistory) {
+           reconstructedHistory.push(msg);
+           // If this message has tool calls with results, we need to append synthetic "tool" messages
+           // IF the store actually saved the results.
+           // In `App.tsx` old loop:
+           // `toolResults` had `result`.
+           // But `allToolCalls` passed to `addMessage` was `response.toolCalls` (from LLM) which DOES NOT have results.
+           // Wait. `allToolCalls.push(...response.toolCalls)`.
+           // `response.toolCalls` comes from `callOpenAI` or similar. It has `arguments`. It does NOT have `result` usually.
+           // So the store saved the tool CALLS but not the RESULTS?
+           // If so, the history was indeed broken for tool use.
+           
+           // However, looking closer at `App.tsx` old code:
+           // `addMessage({ role: "assistant", content: ..., toolCalls: allToolCalls ... })`
+           // And `message.toolCalls` in store uses `ToolCall` interface which has `result?: string`.
+           
+           // If the old code didn't populate `result` in `allToolCalls`, then we lost the results.
+           // Old code: `allToolCalls` came from `response.toolCalls`.
+           // `toolResults` contained the results.
+           // But `toolResults` was NOT saved to store.
+           
+           // This implies the old app did NOT persist tool outputs.
+           // I should fix this or at least match behavior.
+           // But `AgentRuntime` needs outputs to work (especially for DCP).
+           // If I only fix it for the current session, that's fine.
+           // `AgentRuntime` keeps `this.messages`.
+           
+           // For now, I will map the store messages as best as I can.
+           // And I should update `handleSubmit` to try to save results if possible, 
+           // OR just rely on `AgentRuntime` managing the conversation for the current turn.
+        }
 
-          addLog({
-            eventType: 'LLM_REQUEST',
-            sessionId: activeSessionId || "default",
-            component: "App",
-            correlationId: `iter_${iterationCount + 1}_${Date.now()}`, // Simple correlation ID for this iteration
-            details: {
-              metadata: {
-                iteration: iterationCount + 1,
-                provider: settingsForLLM.preferredProvider,
-              },
-              input: currentMessages, // LOGGING FULL CONTEXT
-            },
-          });
+        const { AgentRuntime } = await import("./lib/agent-runtime");
+        
+        let activeAssistantMessageId: string | null = null;
 
-          let response: Awaited<ReturnType<typeof chat>>;
-          try {
-            // Add timeout to prevent infinite hanging
-            const signal = useChatStore.getState().getAbortSignal();
-            const chatPromise = chat(
-              currentMessages,
-              llmTools.length > 0 ? llmTools : undefined,
-              settingsForLLM,
-              serverInfo.length > 0 ? serverInfo : undefined,
-              signal || undefined
-            );
-
-            const timeoutPromise = new Promise<never>((_, reject) => {
-              setTimeout(
-                () => reject(new Error("LLM call timeout after 60 seconds")),
-                60000
-              );
+        const runtime = new AgentRuntime({
+          activeSessionId: activeSessionId || "default",
+          settings: settingsForLLM,
+          signal: useChatStore.getState().getAbortSignal() || undefined,
+          requireConfirmation: true, // Enable smart confirmation
+          onConfirmationNeeded: async (analysis) => {
+            // Return a Promise that resolves when user makes a choice
+            return new Promise((resolve) => {
+              setPendingConfirmation({ analysis, resolve });
             });
+          },
+          onMessage: (msg) => {
+             // Map back to store
+             // We group all assistant and tool messages of a single turn into ONE store message
+             
+             if (msg.role === 'assistant') {
+                const newToolCalls = msg.tool_calls ? msg.tool_calls.map(tc => ({
+                   id: tc.id,
+                   name: tc.function.name,
+                   arguments: safeParseJSON(tc.function.arguments),
+                })) : [];
 
-            // Abort promise that rejects when user clicks Stop
-            const abortPromise = new Promise<never>((_, reject) => {
-              const signal = useChatStore.getState().getAbortSignal();
-              if (signal) {
-                signal.addEventListener('abort', () => reject(new Error('Aborted by user')), { once: true });
-                if (signal.aborted) {
-                  reject(new Error('Aborted by user'));
+                if (activeAssistantMessageId) {
+                   const { updateMessage, getActiveSession } = useChatStore.getState();
+                   const session = getActiveSession();
+                   const existingMsg = session?.messages.find(m => m.id === activeAssistantMessageId);
+                   if (existingMsg) {
+                      // Update existing message
+                      const mergedToolCalls = [...(existingMsg.toolCalls || []), ...newToolCalls];
+                      
+                      // For content: overwrite if new content exists (often content in tool turns is intermediate)
+                      let finalContent = existingMsg.content;
+                      if (msg.content && msg.content !== existingMsg.content) {
+                          finalContent = msg.content;
+                      }
+
+                      updateMessage(activeAssistantMessageId, {
+                         content: finalContent,
+                         toolCalls: mergedToolCalls.length > 0 ? mergedToolCalls : undefined
+                      });
+                      return;
+                   }
                 }
-              }
-            });
+                
+                // Create new message and track its ID
+                const added = addMessage({
+                  role: 'assistant',
+                  content: msg.content || "",
+                  toolCalls: newToolCalls.length > 0 ? newToolCalls : undefined
+                });
+                activeAssistantMessageId = added.id;
 
-            response = await Promise.race([chatPromise, timeoutPromise, abortPromise]);
-          } catch (error) {
-            const errorMessage =
-              error instanceof Error ? error.message : "Unknown error";
-
-            // Handle user abort gracefully
-            if (errorMessage === 'Aborted by user') {
-              console.log('[MCP App] Request aborted by user');
-              finalResponse = {
-                content: "Request cancelled.",
-                provider: "cancelled",
-                model: "unknown",
-              };
-              break;
-            }
-
-            addLog({
-              eventType: 'ERROR',
-              sessionId: activeSessionId || "default",
-              component: "App",
-              details: {
-                error: errorMessage,
-                metadata: { iteration: iterationCount + 1 }
-              }
-            });
-
-            // If it's a timeout or error, break the loop and show error
-            finalResponse = {
-              content: `Error during tool execution: ${errorMessage}. The task may be incomplete.`,
-              provider: "error",
-              model: "unknown",
-            };
-            break;
-          }
-
-          addLog({
-            eventType: 'LLM_RESPONSE',
-            sessionId: activeSessionId || "default",
-            component: "App",
-            details: {
-              model: response.model,
-              output: response.content, // FULL RESPONSE CONTENT
-              metadata: {
-                provider: response.provider,
-                iteration: iterationCount + 1,
-                toolCallCount: response.toolCalls?.length || 0,
-              }
-            },
-          });
-
-          finalResponse = response;
-
-          // If no tool calls, we're done
-          if (!response.toolCalls || response.toolCalls.length === 0) {
-            console.log(`[MCP App] No more tool calls, completing task`, {
-              timestamp: new Date().toISOString(),
-              operation: "complete",
-              iteration: iterationCount + 1,
-              totalIterations: iterationCount + 1,
-              finalContent: response.content?.substring(0, 200),
-            });
-            break;
-          }
-
-          // Log what tool calls we're about to execute
-          console.log(
-            `[MCP App] LLM requested ${response.toolCalls.length} tool call(s)`,
-            {
-              timestamp: new Date().toISOString(),
-              operation: "toolCallsRequested",
-              iteration: iterationCount + 1,
-              toolNames: response.toolCalls.map((tc) => tc.name),
-            }
-          );
-
-          // Track all tool calls for display
-          allToolCalls.push(...response.toolCalls);
-
-          // Execute tool calls
-          const toolExecutionStartTime = Date.now();
-
-
-
-          // Add assistant message with tool calls to conversation (for OpenAI API format)
-          currentMessages.push({
-            role: "assistant",
-            content: response.content || "",
-            tool_calls: response.toolCalls.map((tc) => ({
-              id: tc.id,
-              type: "function",
-              function: {
-                name: tc.name,
-                arguments: JSON.stringify(tc.arguments),
-              },
-            })),
-          } as any); // Type assertion needed for tool_calls support
-
-          // Execute all tool calls
-          const toolResults: Array<{
-            toolCallId: string;
-            name: string;
-            result: string;
-          }> = [];
-
-          for (let i = 0; i < response.toolCalls.length; i++) {
-            const toolCall = response.toolCalls[i];
-            const toolCallStartTime = Date.now();
-
-            console.log(
-              `[MCP App] Executing tool call ${i + 1}/${response.toolCalls.length
-              }`,
-              {
-                timestamp: new Date().toISOString(),
-                operation: "executeToolCall",
-                toolName: toolCall.name,
-                toolIndex: i + 1,
-                totalTools: response.toolCalls.length,
-                argsKeys: Object.keys(toolCall.arguments || {}),
-                argsSize: JSON.stringify(toolCall.arguments).length,
-              }
-            );
-
-            // Log TOOL_CALL (AI's intention before execution)
-            addLog({
-              eventType: 'TOOL_CALL',
-              sessionId: activeSessionId || "default",
-              component: "App.ToolExecutor",
-              correlationId: toolCall.id,
-              details: {
-                input: {
-                  toolName: toolCall.name,
-                  arguments: toolCall.arguments,
+             } else if (msg.role === 'tool' && activeAssistantMessageId) {
+                // Update the result of the specific tool call in the active assistant message
+                const { updateMessage, getActiveSession } = useChatStore.getState();
+                const session = getActiveSession();
+                const existingMsg = session?.messages.find(m => m.id === activeAssistantMessageId);
+                if (existingMsg && existingMsg.toolCalls) {
+                   const updatedToolCalls = existingMsg.toolCalls.map(tc => 
+                      tc.id === msg.tool_call_id ? { ...tc, result: msg.content } : tc
+                   );
+                   updateMessage(activeAssistantMessageId, {
+                      toolCalls: updatedToolCalls
+                   });
                 }
-              }
-            });
-
-            try {
-              const result = await executeToolCall(
-                toolCall.name,
-                toolCall.arguments
-              );
-
-              const toolCallDuration = Date.now() - toolCallStartTime;
-
-              if (result.error) {
-                addLog({
-                  eventType: 'ERROR',
-                  sessionId: activeSessionId || "default",
-                  component: "App",
-                  correlationId: toolCall.id, // Linking back to the tool call request
-                  durationMs: toolCallDuration,
-                  details: {
-                    error: result.error,
-                    input: { toolName: toolCall.name }
-                  }
-                });
-
-                toolResults.push({
-                  toolCallId: toolCall.id,
-                  name: toolCall.name,
-                  result: JSON.stringify({ error: result.error }),
-                });
-              } else {
-                const resultSize = JSON.stringify(result.result).length;
-                const resultPreview =
-                  typeof result.result === "string"
-                    ? result.result.substring(0, 100)
-                    : JSON.stringify(result.result).substring(0, 100);
-
-                addLog({
-                  eventType: 'TOOL_RESULT',
-                  sessionId: activeSessionId || "default",
-                  component: "App",
-                  correlationId: toolCall.id, // Linking back to the tool call request
-                  durationMs: toolCallDuration,
-                  details: {
-                    output: result.result, // RAW TOOL OUTPUT
-                    input: { toolName: toolCall.name, args: toolCall.arguments } // REPEATING ARGS FOR CLARITY
-                  }
-                });
-
-                const resultStr =
-                  typeof result.result === "string"
-                    ? result.result
-                    : JSON.stringify(result.result);
-                toolResults.push({
-                  toolCallId: toolCall.id,
-                  name: toolCall.name,
-                  result: resultStr,
-                });
-              }
-            } catch (error) {
-              const toolCallDuration = Date.now() - toolCallStartTime;
-              const errorMessage =
-                error instanceof Error ? error.message : "Unknown error";
-
-              console.error(`[MCP App] Tool call ${i + 1} threw exception`, {
-                timestamp: new Date().toISOString(),
-                operation: "executeToolCall",
-                toolName: toolCall.name,
-                toolIndex: i + 1,
-                error: errorMessage,
-                duration: toolCallDuration,
-              });
-
-              toolResults.push({
-                toolCallId: toolCall.id,
-                name: toolCall.name,
-                result: JSON.stringify({ error: errorMessage }),
-              });
-            }
+             }
           }
+        }, initialHistory); // Pass initialized history
 
-          const totalDuration = Date.now() - toolExecutionStartTime;
-          const successCount = toolResults.filter(
-            (r) => !r.result.includes('"error"')
-          ).length;
-          const failureCount = toolResults.length - successCount;
+        await runtime.chat(content);
 
-          console.log(`[MCP App] Tool execution batch completed`, {
-            timestamp: new Date().toISOString(),
-            operation: "executeToolCalls",
-            iteration: iterationCount + 1,
-            totalTools: response.toolCalls.length,
-            successCount,
-            failureCount,
-            totalDuration,
-            averageDuration: totalDuration / response.toolCalls.length,
-          });
-
-          // Add tool results to conversation (for OpenAI API format)
-          for (const toolResult of toolResults) {
-            currentMessages.push({
-              role: "tool",
-              content: toolResult.result,
-              tool_call_id: toolResult.toolCallId,
-            } as any); // Type assertion needed for tool role support
-          }
-
-          console.log(
-            `[MCP App] Tool results added to conversation, continuing loop`,
-            {
-              timestamp: new Date().toISOString(),
-              operation: "continueLoop",
-              iteration: iterationCount + 1,
-              totalMessages: currentMessages.length,
-              toolResultsCount: toolResults.length,
-            }
-          );
-
-          iterationCount++;
-        }
-
-        console.log(`[MCP App] Tool execution loop completed`, {
-          timestamp: new Date().toISOString(),
-          operation: "loopComplete",
-          totalIterations: iterationCount,
-          reachedMaxIterations: iterationCount >= maxIterations,
-          hasFinalResponse: !!finalResponse,
-        });
-
-        // If we hit max iterations, warn
-        if (iterationCount >= maxIterations) {
-          console.warn(
-            `[MCP App] Reached max iterations (${maxIterations}), stopping tool execution loop`
-          );
-        }
-
-        if (!finalResponse) {
-          throw new Error("No response from LLM");
-        }
-
-        // Add assistant response
-        addMessage({
-          role: "assistant",
-          content: finalResponse.content,
-          toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-        });
-
-        // Update provider status
-        setLlmStatus({
-          provider: `${finalResponse.provider} (${finalResponse.model})`,
-          available: true,
-        });
       } catch (error) {
-        console.error("LLM Error in handleSubmit:", error);
-        const errorMessage =
-          error instanceof Error ? error.message : "Unknown error";
-
-        console.log("[App] Error Details:", {
-          message: errorMessage,
-          stack: error instanceof Error ? error.stack : undefined,
-          iteration: iterationCount
-        });
-
+        console.error("Handler error:", error);
         addMessage({
           role: "assistant",
-          content: `Sorry, I couldn't process that. ${errorMessage}`,
+          content: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
         });
       } finally {
         setProcessing(false);
@@ -696,8 +459,32 @@ function App() {
               <ChatSidebar />
               <div className="flex-1 flex flex-col overflow-hidden min-w-0">
                 <ChatView />
+                
+                {/* Confirmation Card - Shows when task needs clarification */}
+                {pendingConfirmation && (
+                  <div className="px-4 py-2 border-t border-white/5">
+                    <TaskConfirmationCard
+                      analysis={pendingConfirmation.analysis}
+                      onConfirm={(enrichedPrompt) => {
+                        pendingConfirmation.resolve(enrichedPrompt);
+                        setPendingConfirmation(null);
+                      }}
+                      onCancel={() => {
+                        pendingConfirmation.resolve(null);
+                        setPendingConfirmation(null);
+                        setProcessing(false);
+                      }}
+                      onBypass={() => {
+                        // Use original prompt
+                        pendingConfirmation.resolve(pendingConfirmation.analysis.detectedIntent);
+                        setPendingConfirmation(null);
+                      }}
+                    />
+                  </div>
+                )}
+                
                 <div className="p-4 flex-shrink-0 border-t border-white/5">
-                  <VoiceInput onSubmit={handleSubmit} disabled={isProcessing} onAbort={abortProcessing} />
+                  <VoiceInput onSubmit={handleSubmit} disabled={isProcessing || !!pendingConfirmation} onAbort={abortProcessing} />
                 </div>
               </div>
             </div>

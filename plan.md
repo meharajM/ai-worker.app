@@ -385,6 +385,68 @@ ai-worker-app/
 
 ---
 
+### ✅ Phase 15: Agent Refactor & DCP [COMPLETED]
+
+**Goal:** Transition to native tool-calling planning and implement context optimization.
+
+**Implementation:**
+- [x] Implement `AgentRuntime` for robust iteration loop
+- [x] Integrate `create_execution_plan` as the primary orchestrator
+- [x] Implement **Dynamic Context Pruning (DCP)** to save tokens
+- [x] Redesign Tool UI as "Action Steps" (Agent-centric view)
+- [x] Add `safeParseJSON` for robust tool argument parsing
+
+**Validation:** ✅
+- [x] Complex tasks (Browser + File) execute autonomously
+- [x] UI displays granular steps instead of raw bubbles
+- [x] Context window bloat prevented by DCP
+
+---
+
+### ✅ Phase 17: RPI Workflow + Sub-Agent Integration [COMPLETED]
+
+**Goal:** Implement intelligent task decomposition and automatic sub-agent spawning.
+
+**Implementation:**
+- [x] Create `task-decomposer.ts` module for task analysis
+- [x] Implement URL/website detection logic
+- [x] Implement action keyword counting
+- [x] Add auto-fork logic to `AgentRuntime.chat()`
+- [x] Implement `executeParallelSubAgents()` for multi-website tasks
+- [x] Update system prompt with sub-agent decomposition rules
+- [x] Create browser comparison document (`proposal/browser.md`)
+
+**Key Features:**
+- **Multi-website detection** → Parallel sub-agents (1 per site)
+- **Single-site, 3+ actions** → Sub-agent to protect context
+- **Simple tasks** → Direct execution (no fork overhead)
+
+**Files Changed:**
+- `src/renderer/src/lib/task-decomposer.ts` (NEW)
+- `src/renderer/src/lib/agent-runtime.ts` (+90 lines)
+- `src/renderer/src/lib/llm.ts` (+12 lines)
+
+**Validation:** ✅
+- [x] TypeScript compilation passes for new files
+- [x] Build verified in user terminal
+- [x] Documentation updated
+
+---
+
+### ✅ Phase 18: Prompt Engineering & Usability [COMPLETED]
+
+**Goal:** Enhance AI communication style and task safety.
+
+**Implementation:**
+- [x] Update System Prompt for simple, friendly, global-first language
+- [x] Add critical rule for taking screenshots on visual states
+- [x] Enhance `confirmation-message.ts` with checks for missing preferences and high-risk tasks
+- [x] Add "Suggestions" support for task clarification
+
+**Validation:** ✅
+- [x] AI uses natural language without jargon
+- [x] Shopping/Booking tasks trigger confirmation if details missing
+- [x] High-risk tasks (payment/OTP) flagged for confirmation
 ### ✅ Phase 15: Internal Automation (Playwright) [COMPLETED]
 
 **Goal:** Implement internal zero-latency browser automation via Playwright.
@@ -489,4 +551,5 @@ ai-worker-app/
 
 ---
 
-**Current Status:** Phases 1-15 complete. Internal Playwright Automation implemented and verified. App Launch Preparation (Phase 16) is in progress.
+**Current Status:** Phases 1-18 complete. RPI Workflow + Sub-Agent Auto-Fork system implemented. App Launch Preparation (Phase 16) is now the primary focus.
+
