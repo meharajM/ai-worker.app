@@ -647,7 +647,508 @@ class SafeMemoryService extends MemoryService {
 
 ## 6. Recommended Solution
 
-### 6.1 Hybrid Approach: "OpenAI-Inspired, Privacy-First"
+### 6.1 Architecture Decision: Build vs. Leverage
+
+**Critical Question**: Should we use existing MCP memory servers or build from scratch?
+
+#### Option A: Pure Custom (Current Approach)
+```typescript
+// We built MemoryService from scratch
+class MemoryService {
+  // Custom SQLite implementation
+  // Custom tools
+  // Custom everything
+}
+```
+
+**Pros:**
+- ✅ Full control over implementation
+- ✅ Optimized for our use case
+- ✅ No external dependencies
+
+**Cons:**
+- ❌ **High development time** (4-6 weeks)
+- ❌ Reinventing the wheel
+- ❌ Need to maintain all code
+- ❌ Missing battle-tested features
+
+**Time Investment**: ~6 weeks
+
+---
+
+#### Option B: Leverage + Enhance (RECOMMENDED) ⭐
+
+```typescript
+// Use existing MCP server as foundation
+import { MemoryClient } from '@modelcontextprotocol/memory'  // or memento-mcp
+
+// Add our custom layer on top
+class AutoMemoryService extends MemoryClient {
+  // Only implement custom features:
+  // - Automatic extraction
+  // - Privacy safeguards
+  // - Local encryption
+  // - User approval UI
+}
+```
+
+**Pros:**
+- ✅ **80% done already** (basic memory operations)
+- ✅ Battle-tested code
+- ✅ **2-3 week development** (vs 6 weeks)
+- ✅ Focus on unique value (privacy + auto-extraction)
+- ✅ Community support & updates
+
+**Cons:**
+- ⚠️ Dependency on external library
+- ⚠️ Need to adapt to their API
+
+**Time Investment**: ~2 weeks
+
+**Time Saved**: 4 weeks = **67% faster**
+
+---
+
+### 6.2 Hybrid Architecture: Layer Approach
+
+```
+┌─────────────────────────────────────────────────────┐
+│           AI-Worker Custom Layer (Our Code)         │
+│  ┌───────────────────────────────────────────────┐  │
+│  │ • Automatic Fact Extraction (Local LLM)      │  │
+│  │ • User Approval UI                           │  │
+│  │ • PII Detection & Redaction                  │  │
+│  │ • Privacy Safeguards                         │  │
+│  │ • Context-Aware Injection                    │  │
+│  │ • Encryption (Electron SafeStorage)          │  │
+│  └───────────────┬───────────────────────────────┘  │
+└──────────────────┼──────────────────────────────────┘
+                   │ (Adapter Layer)
+┌──────────────────▼──────────────────────────────────┐
+│      Existing MCP Memory Server (Foundation)        │
+│  ┌───────────────────────────────────────────────┐  │
+│  │ • Entity CRUD                                │  │
+│  │ • Relation Management                        │  │
+│  │ • Knowledge Graph Storage                    │  │
+│  │ • Search/Query                               │  │
+│  │ • Session Management                         │  │
+│  └───────────────────────────────────────────────┘  │
+│         (Choose one: Memory / Memento-MCP)          │
+└──────────────────┬──────────────────────────────────┘
+                   │
+┌──────────────────▼──────────────────────────────────┐
+│             Storage Backend                         │
+│    SQLite (Memory) or Neo4j (Memento-MCP)          │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
+### 6.3 Recommended Base: Which MCP Server?
+
+#### Comparison Matrix
+
+| Server | Setup Time | Complexity | Features | Best For |
+|--------|-----------|------------|----------|----------|
+| **@modelcontextprotocol/memory** | 1 hour | Low | Basic graph | **Quick start** ⭐ |
+| **memento-mcp** | 1 day | Medium | Advanced graph | **Production scale** |
+| **RAG Memory** | 4 hours | Medium | Hybrid search | Document-heavy |
+
+#### Recommendation: **Start with @modelcontextprotocol/memory**
+
+**Why:**
+1. ✅ **Official implementation** by Anthropic
+2. ✅ **JSON storage** (easy to inspect/debug)
+3. ✅ **Minimal setup** (npm install)
+4. ✅ **Well-documented**
+5. ✅ **Easy to migrate** to Memento-MCP later
+
+**Migration Path:**
+```
+Phase 1: Use @modelcontextprotocol/memory (Week 1-4)
+Phase 2: Add our custom layer (Week 5-6)
+Phase 3: Optional: Switch to Memento-MCP if scaling (Later)
+```
+
+---
+
+### 6.4 Implementation: Custom Layer on Top of MCP Memory
+
+```typescript
+/**
+ * Installation
+ */
+// Terminal
+npm install @modelcontextprotocol/memory
+
+/**
+ * Base MCP Memory Client
+ */
+import { MemoryClient } from '@modelcontextprotocol/memory'
+
+class BaseMCP {
+  private client: MemoryClient
+  
+  async initialize() {
+    this.client = new MemoryClient({
+      storage: 'local',  // Uses JSON files
+      path: app.getPath('userData') + '/memory'
+    })
+    await this.client.connect()
+  }
+  
+  // Basic operations (provided by MCP)
+  async createEntity(data: any) {
+    return this.client.createEntity(data)
+  }
+  
+  async search(query: string) {
+    return this.client.search(query)
+  }
+}
+
+/**
+ * Our Custom Enhancement Layer
+ */
+class AutoMemoryService extends BaseMCP {
+  private piiDetector: PIIDetector
+  private factExtractor: LocalLLM
+  private encryptionService: EncryptionService
+  
+  /**
+   * CUSTOM: Automatic fact extraction
+   */
+  async analyzeConversation(messages: Message[]): Promise<PendingFact[]> {
+    // Use local LLM to extract facts
+    const rawFacts = await this.factExtractor.extract(messages)
+    
+    // Filter out sensitive data (OUR CODE)
+    const safeFacts = rawFacts.filter(f => 
+      !this.piiDetector.detect(f.content) &&
+      !this.containsSecrets(f.content)
+    )
+    
+    return safeFacts
+  }
+  
+  /**
+   * CUSTOM: User approval before storing
+   */
+  async createEntityWithApproval(data: any): Promise<Entity> {
+    // Show approval UI (OUR CODE)
+    const approved = await this.requestUserApproval(data)
+    
+    if (!approved) {
+      throw new Error('User rejected memory creation')
+    }
+    
+    // Use base MCP client to actually store (THEIR CODE)
+    return await super.createEntity(data)
+  }
+  
+  /**
+   * CUSTOM: Encrypted storage
+   */
+  async createSensitiveEntity(data: any): Promise<Entity> {
+    // Encrypt content before storing (OUR CODE)
+    const encrypted = await this.encryptionService.encrypt(data.description)
+    
+    // Store encrypted version (THEIR CODE + OUR WRAPPER)
+    return await super.createEntity({
+      ...data,
+      description: encrypted,
+      metadata: {
+        ...data.metadata,
+        encrypted: true
+      }
+    })
+  }
+  
+  /**
+   * CUSTOM: Context-aware retrieval
+   */
+  async getContextualMemories(query: string, context: Context): Promise<Entity[]> {
+    // Use base search (THEIR CODE)
+    const results = await super.search(query)
+    
+    // Apply context filtering (OUR CODE)
+    return results.filter(entity => 
+      this.isRelevantToContext(entity, context)
+    )
+  }
+}
+```
+
+---
+
+### 6.5 Code Reuse Analysis
+
+**What MCP Memory Provides (We Don't Build):**
+```typescript
+// ✅ Already implemented
+- Entity creation/deletion/update
+- Relation management
+- Knowledge graph storage
+- Basic search
+- Session handling
+- JSON serialization
+- MCP protocol compliance
+- Tool schemas
+```
+
+**What We Build (Custom Layer):**
+```typescript
+// 🎨 Our unique value
+- Automatic fact extraction
+- PII detection
+- Secret redaction
+- User approval UI
+- Encryption layer
+- Context-aware filtering
+- Privacy dashboard
+- Auto-pruning
+```
+
+**Code Split:**
+- **MCP Memory**: ~70% of functionality
+- **Our Custom Layer**: ~30% of code, 100% of unique value
+
+---
+
+### 6.6 Adapter Pattern Implementation
+
+```typescript
+/**
+ * MCPMemoryAdapter
+ * Bridges our interface with MCP Memory's interface
+ */
+class MCPMemoryAdapter {
+  private mcpClient: MemoryClient
+  
+  /**
+   * Convert our Entity format to MCP format
+   */
+  toMCPEntity(entity: OurEntity): MCPEntity {
+    return {
+      name: entity.name,
+      entityType: entity.type,
+      observations: [
+        {
+          content: entity.description,
+          metadata: entity.metadata
+        }
+      ]
+    }
+  }
+  
+  /**
+   * Convert MCP format back to our Entity
+   */
+  fromMCPEntity(mcpEntity: MCPEntity): OurEntity {
+    return {
+      id: mcpEntity.id,
+      name: mcpEntity.name,
+      type: mcpEntity.entityType,
+      description: mcpEntity.observations[0]?.content || '',
+      metadata: mcpEntity.observations[0]?.metadata || {},
+      created_at: mcpEntity.createdAt,
+      updated_at: mcpEntity.updatedAt
+    }
+  }
+  
+  /**
+   * Seamless interface that works with both
+   */
+  async createEntity(entity: OurEntity): Promise<OurEntity> {
+    const mcpFormat = this.toMCPEntity(entity)
+    const result = await this.mcpClient.createEntity(mcpFormat)
+    return this.fromMCPEntity(result)
+  }
+}
+```
+
+---
+
+### 6.7 Migration Strategy from Our Current Code
+
+```typescript
+/**
+ * Step 1: Install MCP Memory
+ */
+// package.json
+{
+  "dependencies": {
+    "@modelcontextprotocol/memory": "^1.0.0"
+  }
+}
+
+/**
+ * Step 2: Create Adapter (Week 1)
+ */
+class MemoryMigration {
+  async migrateFromSQLite() {
+    // Export our current SQLite data
+    const entities = await this.currentService.getAllEntities()
+    
+    // Import into MCP Memory
+    for (const entity of entities) {
+      await this.mcpAdapter.createEntity(entity)
+    }
+  }
+}
+
+/**
+ * Step 3: Switch Implementation (Week 2)
+ */
+// Before (our code):
+const memory = MemoryService.getInstance()
+
+// After (MCP + our layer):
+const memory = AutoMemoryService.getInstance()  // Uses MCP internally
+
+/**
+ * Step 4: Add Custom Features (Week 3-4)
+ */
+// Now focus on our unique features instead of basic CRUD
+await memory.enableAutoExtraction()
+await memory.enablePrivacySafeguards()
+await memory.enableEncryption()
+```
+
+---
+
+### 6.8 Time & Cost Savings
+
+**Development Time Comparison:**
+
+| Task | Pure Custom | MCP + Custom | Savings |
+|------|-------------|--------------|---------|
+| Entity CRUD | 1 week | **0 days** | 100% |
+| Relation Management | 1 week | **0 days** | 100% |
+| Search | 1 week | **0 days** | 100% |
+| Storage Backend | 1 week | **0 days** | 100% |
+| MCP Protocol | 1 week | **0 days** | 100% |
+| **Subtotal (Basic)** | **5 weeks** | **0 weeks** | **5 weeks** |
+|  |  |  |  |
+| Auto-Extraction | 1 week | 1 week | 0% |
+| Privacy Layer | 1 week | 1 week | 0% |
+| **Subtotal (Custom)** | **2 weeks** | **2 weeks** | **0 weeks** |
+|  |  |  |  |
+| **TOTAL** | **7 weeks** | **2 weeks** | **5 weeks (71%)** |
+
+**Maintenance Burden:**
+
+| Aspect | Pure Custom | MCP + Custom |
+|--------|-------------|--------------|
+| Bug fixes | 100% our responsibility | 30% our code |
+| Security updates | 100% us | MCP team handles base |
+| Feature additions | All manual | Can leverage MCP updates |
+| Community support | None | MCP community |
+
+---
+
+## 6. Recommended Solution (UPDATED)
+
+### 6.9 Final Architecture: Layered Hybrid
+
+**Foundation**: `@modelcontextprotocol/memory`  
+**Enhancement**: Our custom AutoMemory layer  
+**Storage**: JSON (start) → SQLite (migrate later)
+
+```typescript
+// Final implementation
+import { MemoryClient } from '@modelcontextprotocol/memory'
+import { PIIDetector } from './privacy/pii-detector'
+import { LocalLLM } from './extractors/local-llm'
+import { EncryptionService } from './security/encryption'
+
+/**
+ * AI-Worker AutoMemory
+ * = MCP Memory (70% functionality)
+ * + Our Custom Layer (30% code, 100% unique value)
+ */
+export class AutoMemoryService {
+  private mcp: MemoryClient              // Base functionality
+  private pii: PIIDetector               // Our privacy layer
+  private llm: LocalLLM                  // Our extraction
+  private crypto: EncryptionService      // Our security
+  
+  /**
+   * Workflow: Automatic + Private + Local
+   */
+  async rememberFromConversation(messages: Message[]) {
+    // 1. Extract facts (Our LLM)
+    const facts = await this.llm.extractFacts(messages)
+    
+    // 2. Filter sensitive (Our PII detector)
+    const safe = facts.filter(f => !this.pii.detect(f))
+    
+    // 3. Request approval (Our UI)
+    const approved = await this.requestApproval(safe)
+    
+    // 4. Store (MCP Memory)
+    for (const fact of approved) {
+      await this.mcp.createEntity(fact)
+    }
+    
+    // 5. Encrypt if sensitive (Our crypto)
+    // 6. Log for transparency (Our audit)
+  }
+}
+```
+
+---
+
+### 6.10 Why This Approach Wins
+
+| Criteria | Pure Custom | MCP + Custom | Winner |
+|----------|-------------|--------------|--------|
+| **Speed to Market** | 7 weeks | 2 weeks | MCP + Custom ⭐ |
+| **Code Quality** | Unproven | Battle-tested base | MCP + Custom ⭐ |
+| **Maintenance** | High burden | Share with community | MCP + Custom ⭐ |
+| **Flexibility** | Full control | Adapter needed | Pure Custom ⭐ |
+| **Privacy** | Can be perfect | Can be perfect | Tie ⭐⭐ |
+| **Unique Value** | Everything | Focus on 30% | MCP + Custom ⭐ |
+
+**Score: MCP + Custom (5/6) vs Pure Custom (1/6)**
+
+---
+
+### 6.11 Recommended Next Steps
+
+**Week 1:**
+```bash
+# Install MCP Memory
+npm install @modelcontextprotocol/memory
+
+# Create adapter layer
+touch src/main/services/MCPMemoryAdapter.ts
+
+# Migrate existing data
+npm run migrate-to-mcp
+```
+
+**Week 2:**
+```typescript
+// Build custom layer
+class AutoMemoryService extends MCPMemoryAdapter {
+  // Add PII detection
+  // Add user approval
+  // Add encryption
+}
+```
+
+**Week 3-4:**
+```typescript
+// Polish & test
+- UI for memory approval
+- Privacy dashboard
+- Automatic extraction
+```
+
+**Result**: Ship in **4 weeks** instead of **7 weeks**.
+
+---
 
 **Core Concept**: Combine ChatGPT's **automatic convenience** with **local-first privacy**.
 
