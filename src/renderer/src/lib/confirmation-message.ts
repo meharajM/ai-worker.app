@@ -53,10 +53,19 @@ USER PROMPT: "${userPrompt}"
 - **Complex**: Multi-step with decisions needed (e.g., "compare X and Y, then...")
 
 # RULES for shouldConfirm:
-- TRUE if the prompt is a single word or very vague
-- TRUE if critical information is missing (which website, what action)
-- TRUE for sensitive actions (logins, payments, deletions)
-- FALSE if the prompt has a clear action and target
+- FALSE (DO NOT confirm) for:
+  • Greetings, pleasantries, or casual conversation (e.g., "hi", "hello", "thanks", "how are you?")
+  • Clear, specific tasks (e.g., "open google.com", "search amazon for shoes")
+  • Tasks with clear context or simple defaults
+  • Questions about the agent generally (e.g., "what can you do?")
+  • Single-word replies that fit a conversation flow (e.g., "yes", "no", "continue", "stop", "back", "next")
+
+- TRUE (CONFIRM) for:
+  • Vague TASK requests starting a NEW topic (e.g., "buy shoes" - site/size missing?)
+  • Single words that imply a complex action without target (e.g., "research", "booking", "deploy")
+  • Sensitive actions (logins, payments, deletions)
+  • Ambiguous pronouns without context
+
 - If typos detected, auto-correct in suggestions
 
 Respond with JSON:

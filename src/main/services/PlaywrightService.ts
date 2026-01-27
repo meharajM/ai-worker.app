@@ -255,18 +255,25 @@ export class PlaywrightService {
                         throw new Error('Failed to restart browser context')
                     }
 
-                    // Check if we need to create a new page
-                    // We check this.page manually to avoid TS errors about 'never' type due to previous null assignment
-                    const currentPage = this.page
-                    if (!currentPage || currentPage.isClosed()) {
-                        const newPage = await this.context.newPage()
-                        this.page = newPage
+                    // Capture verified context in local variable
+                    // TypeScript can't track that ensureBrowser() reassigns this.context
+                    const context = this.context as BrowserContext
 
-                        // Re-apply settings
-                        const settings = ((this.store as any).get?.('mcpPlaywright') || {}) as PlaywrightSettings
-                        if (settings.blockAds !== false) {
-                            await this.enableResourceBlocking(newPage)
-                        }
+                    // Re-create page if needed (after browser restart)
+                    // Get existing pages from the fresh context
+                    const existingPages = context.pages()
+                    const validPage = existingPages.find(p => !p.isClosed())
+
+                    if (validPage) {
+                        this.page = validPage
+                    } else {
+                        this.page = await context.newPage()
+                    }
+
+                    // Re-apply settings to the page
+                    const settings = ((this.store as any).get?.('mcpPlaywright') || {}) as PlaywrightSettings
+                    if (settings.blockAds !== false && this.page) {
+                        await this.enableResourceBlocking(this.page)
                     }
                 } else {
                     throw error
