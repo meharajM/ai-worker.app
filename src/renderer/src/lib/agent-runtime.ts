@@ -444,7 +444,19 @@ RULES:
           try {
             const result = await executeToolCall(call.name, call.arguments as Record<string, unknown>);
             if (result.error) {
-              resultStr = JSON.stringify({ error: result.error });
+              // Enrich error message with recovery hints
+              const errorMsg = result.error;
+              let recoveryHint = '';
+
+              if (errorMsg.includes('not found') || errorMsg.includes('Timeout')) {
+                recoveryHint = '\n\n💡 **Recovery Tip**: The element was not found. Try:\n1. Take a screenshot to see the current page state.\n2. Use `get_state` to list available elements.\n3. Use a different, more general selector (e.g., text-based like `text="Submit"`).\n4. The page might have changed—verify the URL is correct.';
+              } else if (errorMsg.includes('not visible') || errorMsg.includes('hidden')) {
+                recoveryHint = '\n\n💡 **Recovery Tip**: The element exists but is hidden. Try:\n1. Scroll the page first (`scroll`).\n2. Wait for animations to complete (`wait`).\n3. Check if a modal or popup is blocking.';
+              } else if (errorMsg.includes('Missing required parameter')) {
+                recoveryHint = `\n\n💡 **Recovery Tip**: A required parameter was missing. Check the tool definition and ensure all required fields are provided.`;
+              }
+
+              resultStr = JSON.stringify({ error: errorMsg + recoveryHint });
               consecutiveErrors++;
             } else {
               resultStr = typeof result.result === 'string'

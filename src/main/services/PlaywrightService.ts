@@ -436,7 +436,7 @@ export class PlaywrightService {
                 },
                 {
                     name: 'select_option',
-                    description: 'INPUT: Choose an option from a <select> dropdown menu. Use for country selectors, date pickers, category filters. Provide either the option value or visible text.',
+                    description: 'INPUT: Choose an option from a <select> dropdown menu. REQUIRED: You MUST provide "selector" AND "value". Value should be the option value attribute or visible text.',
                     inputSchema: {
                         type: 'object',
                         properties: {
@@ -502,13 +502,13 @@ export class PlaywrightService {
                 },
                 {
                     name: 'extract_data',
-                    description: 'EXTRACTION: Pull structured data from page. Use type="table" for HTML tables (returns 2D array), type="list" for ul/ol lists, type="custom" with field selectors for complex layouts.',
+                    description: 'EXTRACTION: Pull structured data from page. REQUIRED: "type" is mandatory. If type="custom", "fields" is also required.',
                     inputSchema: {
                         type: 'object',
                         properties: {
                             type: { type: 'string', enum: ['table', 'list', 'custom'], description: 'table=HTML table, list=ul/ol items, custom=define your own fields' },
                             selector: { type: 'string', description: 'CSS selector of container (optional for table/list)' },
-                            fields: { type: 'object', description: 'For custom: {"fieldName": "selector", ...}' }
+                            fields: { type: 'object', description: 'For custom type: {"fieldName": "CSS selector", ...}' }
                         },
                         required: ['type']
                     }
@@ -629,6 +629,13 @@ export class PlaywrightService {
     }
 
     async callTool(name: string, args: any): Promise<{ result: any; error?: string }> {
+        // Detailed logging for bridge debugging
+        console.log(`[PlaywrightService] Request: ${name}`, {
+            args: JSON.stringify(args),
+            argKeys: Object.keys(args || {}),
+            timestamp: new Date().toISOString()
+        })
+
         try {
             // Allow empty objects {} but reject null/undefined - default to empty object
             const safeArgs = args ?? {}
@@ -931,6 +938,11 @@ export class PlaywrightService {
                     return { result: `Typed "${safeArgs.text}" into ${safeArgs.selector}` }
 
                 case 'select_option':
+                    const selectSelectorError = requireParam('selector')
+                    if (selectSelectorError) return { result: null, error: selectSelectorError }
+                    const selectValueError = requireParam('value')
+                    if (selectValueError) return { result: null, error: selectValueError }
+
                     await page.selectOption(safeArgs.selector, safeArgs.value)
                     return { result: `Selected "${safeArgs.value}" in ${safeArgs.selector}` }
 
@@ -984,7 +996,9 @@ export class PlaywrightService {
                     return { result: { tabs: tabList } }
 
                 case 'click_text':
-                    // Click by visible text - more intuitive for LLMs
+                    const textFindError = requireParam('text')
+                    if (textFindError) return { result: null, error: textFindError }
+
                     const textToFind = safeArgs.text
                     const exactMatch = safeArgs.exact || false
                     const tagFilter = safeArgs.tag ? safeArgs.tag.toLowerCase() : null
@@ -997,6 +1011,9 @@ export class PlaywrightService {
                     return { result: `Clicked element with text "${textToFind}"` }
 
                 case 'extract_data':
+                    const extractTypeError = requireParam('type')
+                    if (extractTypeError) return { result: null, error: extractTypeError }
+
                     const extractType = safeArgs.type || 'table'
                     const extractSelector = safeArgs.selector
 
@@ -1043,6 +1060,11 @@ export class PlaywrightService {
                     return { result: null, error: 'Invalid extract_data type' }
 
                 case 'upload_file':
+                    const upSelectError = requireParam('selector')
+                    if (upSelectError) return { result: null, error: upSelectError }
+                    const upPathError = requireParam('filePath')
+                    if (upPathError) return { result: null, error: upPathError }
+
                     await page.setInputFiles(safeArgs.selector, safeArgs.filePath)
                     return { result: `Uploaded file to ${safeArgs.selector}` }
 
@@ -1052,6 +1074,11 @@ export class PlaywrightService {
                     return { result: { cookies } }
 
                 case 'set_cookie':
+                    const cNameErr = requireParam('name')
+                    if (cNameErr) return { result: null, error: cNameErr }
+                    const cValErr = requireParam('value')
+                    if (cValErr) return { result: null, error: cValErr }
+
                     if (!this.context) throw new Error('No browser context')
                     const url = page.url()
                     const domain = safeArgs.domain || new URL(url).hostname
@@ -1064,6 +1091,9 @@ export class PlaywrightService {
                     return { result: `Set cookie ${safeArgs.name}` }
 
                 case 'handle_dialog':
+                    const diagActionErr = requireParam('action')
+                    if (diagActionErr) return { result: null, error: diagActionErr }
+
                     // Set up dialog handler for next dialog
                     page.once('dialog', async dialog => {
                         if (safeArgs.action === 'accept') {
@@ -1090,6 +1120,9 @@ export class PlaywrightService {
                     return { result: `Switched to frame ${safeArgs.selector}` }
 
                 case 'find_by_xpath':
+                    const xpErr = requireParam('xpath')
+                    if (xpErr) return { result: null, error: xpErr }
+
                     const xpathAction = safeArgs.action || 'info'
                     const xpathElements = await page.$$(`xpath=${safeArgs.xpath}`)
 
@@ -1117,10 +1150,18 @@ export class PlaywrightService {
                     }
 
                 case 'drag_drop':
+                    const ddsErr = requireParam('sourceSelector')
+                    if (ddsErr) return { result: null, error: ddsErr }
+                    const ddtErr = requireParam('targetSelector')
+                    if (ddtErr) return { result: null, error: ddtErr }
+
                     await page.dragAndDrop(safeArgs.sourceSelector, safeArgs.targetSelector)
                     return { result: `Dragged ${safeArgs.sourceSelector} to ${safeArgs.targetSelector}` }
 
                 case 'check_element':
+                    const chkSelErr = requireParam('selector')
+                    if (chkSelErr) return { result: null, error: chkSelErr }
+
                     const checkSelector = safeArgs.selector
                     const property = safeArgs.property || 'exists'
                     const element = await page.$(checkSelector)

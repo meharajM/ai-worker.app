@@ -64,7 +64,7 @@ Respond with JSON:
 Classify the task into one of these categories:
 - **shopping**: Buying, finding products, prices, e-commerce.
 - **research**: Finding information, summaries, comparison, news.
-- **admin**: Filling forms, scheduling, email, account management.
+- **admin**: Filling forms, scheduling, email, account management, official websites.
 - **general**: Simple navigation, opening sites, weather, etc.
 
 Respond with JSON:

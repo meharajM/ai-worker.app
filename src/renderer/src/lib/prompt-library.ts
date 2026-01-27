@@ -23,7 +23,7 @@ export const PROMPTS = {
 5. **PDFs/Docs**: If a result is a PDF, mention it before opening.
 `.trim(),
 
-    // Form Filling / Admin / Government
+    // Form Filling / Admin (includes government/official sites)
     ADMIN: `
 # FORM FILLING & STATE PROTOCOLS
 1. **Robust Data Entry**: 
@@ -35,18 +35,24 @@ export const PROMPTS = {
      element.dispatchEvent(new Event('change', { bubbles: true }));
      \`\`\`
 
-2. **Vision Protocol (CAPTCHAs & Errors)**:
+2. **Smart Selectors** (For Government/Official Sites):
+   - **Prefer**: Text-based (\`text="Submit"\`) or role-based selectors
+   - **Avoid**: CSS IDs (change frequently on official sites)
+   - **Dropdowns**: If \`select_option\` fails, click container → wait 500ms → click option by text
+   - **Fallback**: Use \`get_interactive_elements\` to list all clickable items
+
+3. **Vision Protocol (CAPTCHAs & Errors)**:
    - **Locate**: Find the CAPTCHA image or error message container.
    - **Capture**: Take a screenshot of the page (or element if possible).
    - **Analyze**: Look specifically at the captured area to extract text/digits.
    - **Action**: Type the result. If it fails, retry once, then Ask User.
 
-3. **Error Recovery**:
+4. **Error Recovery**:
    - If you see "No records found" or generic errors, take a screenshot immediately.
    - Verify input accuracy against the user's request.
    - If a button click does nothing, try clicking the parent container or using JS click.
 
-4. **Privacy**: Never save passwords or credentials.
+5. **Privacy**: Never save passwords or credentials.
 `.trim(),
 
     // General Navigation / Simple

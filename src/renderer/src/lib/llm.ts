@@ -868,17 +868,33 @@ async function callOpenAI(
   // If using JSON fallback, try to parse tool calls from content
   let toolCalls = choice.message?.tool_calls?.map(
     (tc: { id: string; function: { name: string; arguments: string } }) => {
-      let args = {};
-      try {
-        args = JSON.parse(tc.function.arguments);
-      } catch (e) {
-        console.warn(`Failed to parse tool arguments for ${tc.function.name}:`, tc.function.arguments);
-        args = { _parse_error: "Invalid JSON arguments from LLM" };
+      let args: any = {};
+
+      // Handle null, undefined, or empty string arguments
+      if (!tc.function.arguments || tc.function.arguments === 'null' || tc.function.arguments === 'undefined') {
+        console.warn(`[LLM] Tool call "${tc.function.name}" has null/empty arguments. Using empty object.`);
+        args = {};
+      } else {
+        try {
+          const parsed = JSON.parse(tc.function.arguments);
+          // JSON.parse(null) returns null, so we need to check the result
+          args = parsed !== null && typeof parsed === 'object' ? parsed : {};
+        } catch (e) {
+          console.warn(`[LLM] Failed to parse tool arguments for "${tc.function.name}":`, tc.function.arguments);
+          args = { _parse_error: "Invalid JSON arguments from LLM" };
+        }
       }
+
+      console.log(`[LLM] Native Tool Call Identified: ${tc.function.name}`, {
+        tool: tc.function.name,
+        arguments: args,
+        raw: tc.function.arguments
+      });
+
       return {
         id: tc.id,
         name: tc.function.name,
-        arguments: ensureRecord(safeParseJSON(tc.function.arguments)),
+        arguments: ensureRecord(args), // Use parsed args
       };
     }
   );
@@ -886,8 +902,11 @@ async function callOpenAI(
   // If no native tool calls, try to parse from content (Self-Healing)
   if (!toolCalls || toolCalls.length === 0) {
     if (useJsonFallback && content) {
-      // Legacy JSON fallback
+      console.log('[LLM] No native tool calls found. Attempting to parse JSON from content...');
       toolCalls = parseToolCallsFromJson(content);
+      if (toolCalls && toolCalls.length > 0) {
+        console.log(`[LLM] Successfully recovered ${toolCalls.length} tool calls from content body.`);
+      }
     }
 
     // Check for XML Plan (Legacy/Model Hallucination Fallback)
@@ -931,22 +950,28 @@ function parseToolCallsFromJson(
 
       // Standard Format: { "tool_calls": [...] }
       if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
+        console.log('[LLM] Identified Standard JSON Tool Call Format');
         return parsed.tool_calls.map(
           (
             tc: { name: string; arguments: Record<string, unknown> },
             idx: number
-          ) => ({
-            id: `json_call_${Date.now()}_${idx}`,
-            name: tc.name,
-            arguments: ensureRecord(tc.arguments),
-          })
+          ) => {
+            console.log(`[LLM] JSON Recovered Call: ${tc.name}`, tc.arguments);
+            return {
+              id: `json_call_${Date.now()}_${idx}`,
+              name: tc.name,
+              arguments: ensureRecord(tc.arguments),
+            };
+          }
         );
       }
 
       // Alternate Format (Common in some models): { "tool": "name", "params": {...} }
       if (parsed.tool && typeof parsed.tool === 'string') {
+        console.log('[LLM] Identified Alternate JSON Tool Call Format:', parsed.tool);
         // Normalize parameters: some models use params, parameters, arguments, or even 'args'
         const params = parsed.params || parsed.parameters || parsed.arguments || parsed.args || {};
+        console.log(`[LLM] Normalized parameters for "${parsed.tool}":`, params);
 
         return [{
           id: `json_call_${Date.now()}`,
@@ -1071,6 +1096,14 @@ DO NOT stop after just navigating - complete the entire workflow!`;
 - Handle mistakes gracefully and try alternative approaches.
 - After completing actions, briefly confirm what was done.
 
+# ⚠️ CRITICAL: TOOL CALLING FORMAT
+**NEVER call a tool with null, undefined, or missing required parameters!**
+1. **Check the tool description** for required parameters BEFORE calling
+2. **If you lack a required value**, ASK the user instead of calling the tool
+3. **Example - WRONG**: \`click({})\` or \`click({selector: null})\` ❌
+4. **Example - RIGHT**: Ask "Which button should I click?" or use \`get_state\` to find selectors ✅
+5. **If a parameter is missing**, it means you need more information - STOP and ask!
+
 # Available Tools
 ${toolsDescription}${serverContext}${browserCapabilityNote}
 
@@ -1095,6 +1128,14 @@ For simple tasks (single action), execute directly.
 - If a tool fails, try a different approach.
 - If 2 attempts fail, explain the issue and ask for guidance.
 - Never get stuck in loops - if the same action fails repeatedly, stop and ask.
+
+# TOOL ERROR RECOVERY (Critical)
+When a tool call fails, DO NOT repeat the same call. Instead:
+1. **Timeout/Not Found**: The element doesn't exist. Use \`get_state\` or \`screenshot\` to see what's on the page.
+2. **Hidden Element**: Scroll the page or close popups first.
+3. **Wrong Selector**: Try text-based selectors like \`text="Submit"\` instead of CSS IDs.
+4. **Missing Parameter**: Re-read your tool call—you may have forgotten a required field.
+5. **After 2 Failures**: Describe the issue to the user and ask for guidance.
 
 # BROWSER TASKS
 When using browser tools:

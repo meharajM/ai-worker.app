@@ -6,38 +6,6 @@ import electron from "./electron";
 
 export { type MCPServer, type MCPTool };
 
-// Redundant state removed - we now use useMcpStore
-
-export interface MCPTool {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-}
-
-// Default MCP server configurations
-// These are automatically added on first run if no servers exist
-const DEFAULT_MCP_SERVERS: Omit<
-  MCPServer,
-  "id" | "connected" | "tools" | "autoConnect"
->[] = [
-    {
-      name: "playwright",
-      description:
-        "Native Playwright Service - Browser automation (Internal)",
-      type: "stdio",
-      command: "internal", // Signal this is an internal service
-      args: [],
-    },
-  ];
-
-// Store for connected servers
-let connectedServers: Map<string, MCPServer> = new Map();
-
-// Generate unique ID
-function generateId(): string {
-  return `mcp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-}
-
 // Add a custom server
 export async function addCustomServer(
   config: Omit<MCPServer, "id" | "connected" | "tools" | "autoConnect">
@@ -73,8 +41,6 @@ export async function disconnectServer(serverId: string): Promise<void> {
   return useMcpStore.getState().disconnectServer(serverId);
 }
 
-// Redundant state removed - we now use useMcpStore
-
 // Get all available tools - FROM STORE
 export function getAllTools(): MCPTool[] {
   return useMcpStore.getState().getAllTools();
@@ -92,13 +58,6 @@ function logMcpRenderer(
   context: Record<string, unknown>
 ): void {
   const timestamp = new Date().toISOString();
-  const logEntry = {
-    timestamp,
-    level,
-    message,
-    process: "renderer",
-    ...context,
-  };
 
   const logMessage = `[MCP Renderer ${level.toUpperCase()}] ${timestamp} - ${message}`;
 
@@ -153,12 +112,14 @@ export async function executeToolCall(
   const sanitizedArgs = sanitizeArgsForLogging(safeArgs);
   const MAX_RETRIES = 1;
 
-  logMcpRenderer("info", "Tool call initiated", {
+  logMcpRenderer("info", `Tool call initiated: ${toolName}`, {
     operation: "executeToolCall",
     toolName,
     args: sanitizedArgs,
     argsSize: JSON.stringify(safeArgs).length,
   });
+
+  console.log(`[MCP Renderer] Invoking Tool: ${toolName}`, sanitizedArgs);
 
   const server = findServerForTool(toolName);
   if (!server) {
@@ -178,18 +139,7 @@ export async function executeToolCall(
   let lastError: string | undefined;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const attemptStartTime = Date.now();
-
     try {
-      if (attempt > 0) {
-        logMcpRenderer("info", "Retrying tool call after potential reconnection", {
-          operation: "executeToolCall",
-          toolName,
-          serverId: server.id,
-          attempt,
-        });
-      }
-
       const result = (await electron.mcp.callTool(server.id, toolName, safeArgs)) as {
         result: unknown;
         error?: string;
@@ -205,45 +155,20 @@ export async function executeToolCall(
 
         if (isConnectionClosed) {
           lastError = result.error;
-
-          // Update server state to reflect disconnected status via store
           useMcpStore.getState().updateServerState(server.id, {
             connected: false,
             tools: [],
             error: "Connection closed unexpectedly"
           });
 
-          logMcpRenderer("warn", `Tool call failed (attempt ${attempt + 1}/${MAX_RETRIES + 1})`, {
-            operation: "executeToolCall",
-            toolName,
-            serverId: server.id,
-            error: result.error,
-            connectionClosed: true,
-          });
-
-          // If we have retries left, try to reconnect before next attempt
           if (attempt < MAX_RETRIES) {
             try {
-              logMcpRenderer("info", "Attempting automatic reconnection for retry", {
-                operation: "executeToolCall",
-                serverId: server.id,
-                serverName: server.name
-              });
               await connectServer(server.id);
-            } catch (connErr) {
-              logMcpRenderer("error", "Automatic reconnection failed during retry", {
-                operation: "executeToolCall",
-                serverId: server.id,
-                error: connErr instanceof Error ? connErr.message : String(connErr)
-              });
-              // If reconnection fails, we still continue to the next loop iteration 
-              // which will likely fail or hit the attempt limit
-            }
-            continue; // Try next attempt
+            } catch (e) { }
+            continue; // Retry
           }
         }
 
-        // Not a connection error or no retries left
         const duration = Date.now() - startTime;
         logMcpRenderer("error", "Tool call failed", {
           operation: "executeToolCall",
@@ -258,20 +183,14 @@ export async function executeToolCall(
       // Success!
       const duration = Date.now() - startTime;
       const resultSize = JSON.stringify(result.result).length;
-      const resultPreview =
-        typeof result.result === "string"
-          ? result.result.substring(0, 200)
-          : JSON.stringify(result.result).substring(0, 200);
 
       logMcpRenderer("info", "Tool call completed successfully", {
         operation: "executeToolCall",
         toolName,
         serverId: server.id,
-        serverName: server.name,
         duration,
         attempts: attempt + 1,
         resultSize,
-        resultPreview: resultPreview + (resultSize > 200 ? "..." : ""),
       });
       return result;
 
@@ -279,15 +198,7 @@ export async function executeToolCall(
       const errorMessage = error instanceof Error ? error.message : "Tool execution failed";
       lastError = errorMessage;
 
-      logMcpRenderer("error", `Exception during tool call (attempt ${attempt + 1})`, {
-        operation: "executeToolCall",
-        toolName,
-        serverId: server.id,
-        error: errorMessage,
-      });
-
       if (attempt < MAX_RETRIES) {
-        // Try to reconnect before next attempt for exceptions too
         try {
           await connectServer(server.id);
         } catch (e) { }
@@ -296,14 +207,12 @@ export async function executeToolCall(
     }
   }
 
-  const totalDuration = Date.now() - startTime;
   return {
     result: null,
     error: lastError || "Tool execution failed after retries",
   };
 }
 
-// Redundant state management removed - we now use useMcpStore
 export async function autoConnectServers(): Promise<void> {
   // Already handled by mcpStore.initialize()
 }
@@ -311,167 +220,6 @@ export async function autoConnectServers(): Promise<void> {
 export async function setAutoConnect(serverId: string, enabled: boolean): Promise<void> {
   return useMcpStore.getState().setAutoConnect(serverId, enabled);
 }
-
-async function loadServersFromStorage(): Promise<void> {
-  try {
-    // First, try to migrate from localStorage if electron-store is empty
-    await migrateFromLocalStorage();
-
-    // Load from electron-store
-    const stored = await electron.store.get<MCPServer[]>(
-      STORAGE_KEYS.MCP_SERVERS
-    );
-
-    if (stored && Array.isArray(stored) && stored.length > 0) {
-      // Restore servers, resetting runtime state
-      connectedServers = new Map(
-        stored.map((s) => {
-          // Force enable playwright, disable others (temporary user request)
-          const isPlaywright = s.name === 'playwright';
-
-          return [
-            s.id,
-            {
-              ...s,
-              connected: false, // Runtime state - always false on load
-              tools: [], // Runtime state - always empty on load
-              error: undefined, // Runtime state - always undefined on load
-              autoConnect: isPlaywright, // Only auto-connect Playwright
-            },
-          ];
-        })
-      );
-      // Ensure default servers exist (add missing ones)
-      await ensureDefaultServers();
-      // Apply migration for Playwright config
-      await migratePlaywrightToInternal();
-    } else {
-      // Empty array or null - initialize with default servers
-      await initializeDefaultServers();
-    }
-  } catch (error) {
-    console.error("Error loading MCP servers:", error);
-    // If there's an error, try to initialize with defaults
-    try {
-      await initializeDefaultServers();
-    } catch (initError) {
-      console.error("Failed to initialize default servers:", initError);
-    }
-  }
-}
-
-// Migrate data from localStorage to electron-store
-async function migrateFromLocalStorage(): Promise<void> {
-  // Check if electron-store has data
-  const storeData = await electron.store.get<MCPServer[]>(
-    STORAGE_KEYS.MCP_SERVERS
-  );
-
-  if (storeData && Array.isArray(storeData) && storeData.length > 0) {
-    // Already migrated or fresh install
-    return;
-  }
-
-  // Check localStorage
-  const localData = localStorage.getItem(STORAGE_KEYS.MCP_SERVERS);
-
-  if (localData) {
-    try {
-      const servers: MCPServer[] = JSON.parse(localData);
-      // Reset connection state and add autoConnect field if missing
-      const migratedServers = servers.map((s: MCPServer) => ({
-        id: s.id,
-        name: s.name,
-        description: s.description,
-        type: s.type,
-        command: s.command,
-        args: s.args,
-        url: s.url,
-        autoConnect: s.autoConnect ?? false, // Default to false if not present
-        // Don't migrate runtime state
-      }));
-
-      // Save to electron-store
-      await electron.store.set(STORAGE_KEYS.MCP_SERVERS, migratedServers);
-
-      // Clear localStorage after successful migration
-      localStorage.removeItem(STORAGE_KEYS.MCP_SERVERS);
-
-      console.log("Migrated MCP servers from localStorage to electron-store");
-    } catch (error) {
-      console.error("Migration failed:", error);
-      // Continue with default servers
-    }
-  }
-}
-
-// Migration: Update existing Playwright server to use internal command
-async function migratePlaywrightToInternal(): Promise<void> {
-  let hasChanges = false;
-
-  for (const server of connectedServers.values()) {
-    // Check if this is the legacy playwright configuration
-    if (server.name === 'playwright' && server.command === 'npx') {
-      console.log('Migrating Playwright server to internal configuration...');
-      connectedServers.set(server.id, {
-        ...server,
-        command: 'internal',
-        args: [],
-        description: "Native Playwright Service - Browser automation (Internal)"
-      });
-      hasChanges = true;
-    }
-  }
-
-  if (hasChanges) {
-    await saveServersToStorage();
-  }
-}
-
-// Initialize default servers on first run
-async function initializeDefaultServers(): Promise<void> {
-  DEFAULT_MCP_SERVERS.forEach((serverConfig) => {
-    const server: MCPServer = {
-      ...serverConfig,
-      id: generateId(),
-      connected: false,
-      tools: [],
-      autoConnect: true, // Default servers auto-connect by default
-    };
-    connectedServers.set(server.id, server);
-  });
-  await saveServersToStorage();
-}
-
-// Ensure default servers exist (add any missing ones)
-async function ensureDefaultServers(): Promise<void> {
-  let hasChanges = false;
-  const existingServerNames = new Set(
-    Array.from(connectedServers.values()).map((s) => s.name)
-  );
-
-  DEFAULT_MCP_SERVERS.forEach((serverConfig) => {
-    // Only add if this default server doesn't exist by name
-    if (!existingServerNames.has(serverConfig.name)) {
-      const server: MCPServer = {
-        ...serverConfig,
-        id: generateId(),
-        connected: false,
-        tools: [],
-        autoConnect: true, // Default servers auto-connect by default
-      };
-      connectedServers.set(server.id, server);
-      hasChanges = true;
-    }
-  });
-
-  if (hasChanges) {
-    await saveServersToStorage();
-  }
-}
-
-// Initialize on load (async)
-let initializationPromise: Promise<void> | null = null;
 
 export async function initializeMcpServers(): Promise<void> {
   return useMcpStore.getState().initialize();
