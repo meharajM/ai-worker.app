@@ -94,6 +94,12 @@ const electronAPI = {
         approveChange: (changeId: string) => ipcRenderer.invoke('fs:approve-change', changeId),
         rejectChange: (changeId: string) => ipcRenderer.invoke('fs:reject-change', changeId),
     },
+    // Memory operations
+    memory: {
+        runTests: () => ipcRenderer.invoke('memory:run-tests'),
+        getStats: () => ipcRenderer.invoke('memory:get-stats'),
+        exportAll: () => ipcRenderer.invoke('memory:export-all'),
+    },
 }
 
 // Expose APIs to renderer

@@ -86,12 +86,9 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
     // We'll populate cache lazily as entities are accessed
     // For now, we can try to search with empty query to get some entities
     try {
-      const results = await this.callTool('search_nodes', { query: '' })
-      if (results.result?.nodes) {
-        for (const node of results.result.nodes) {
-          const entity = this.mapNodeToEntity(node)
-          this.entityCache.set(entity.id, entity)
-        }
+      const entities = await this.search('', { limit: 1000 })
+      for (const entity of entities) {
+        this.entityCache.set(entity.id, entity)
       }
     } catch (error) {
       // If search fails, we'll just start with empty cache
@@ -119,7 +116,28 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
       throw new Error(`Failed to create entity: ${result.error}`)
     }
 
-    const entityData = result.result?.entities?.[0]
+    // Parse MCP content
+    // result.result is CallToolResult.content (Array<TextContent | ImageContent>)
+    const content = result.result
+    if (!content || !Array.isArray(content) || content.length === 0) {
+         // It might be that server-memory returns empty list if secret redaction happened internally? 
+         // But here we are just parsing the output.
+         throw new Error('No content returned from create_entities')
+    }
+
+    const textContent = content[0].text
+    if (!textContent) {
+        throw new Error('No text content in create_entities response')
+    }
+
+    let createdEntities: any[]
+    try {
+        createdEntities = JSON.parse(textContent)
+    } catch (e) {
+        throw new Error(`Failed to parse create_entities response: ${textContent}`)
+    }
+
+    const entityData = createdEntities?.[0]
     if (!entityData) {
       throw new Error('No entity data returned from create_entities')
     }
@@ -222,7 +240,40 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
       throw new Error(`Search failed: ${result.error}`)
     }
 
-    let entities = (result.result?.nodes || []).map((node: any) =>
+    // Parse MCP content
+    const content = result.result
+    if (!content || !Array.isArray(content) || content.length === 0) {
+         // Return empty if no content
+         return []
+    }
+
+    const textContent = content[0].text // Assuming first content block is the result text
+    if (!textContent) {
+        return []
+    }
+
+    let nodes: any[] = []
+    try {
+        const parsed = JSON.parse(textContent)
+        // Handle both direct array and { nodes: [...] } object
+        if (Array.isArray(parsed)) {
+            nodes = parsed
+        } else if (parsed && typeof parsed === 'object') {
+            if (Array.isArray(parsed.nodes)) {
+                nodes = parsed.nodes
+            } else if (Array.isArray(parsed.entities)) {
+                nodes = parsed.entities
+            } else {
+                console.warn(`[ServerMemoryAdapter] Unexpected search response structure:`, parsed)
+            }
+        }
+    } catch (e) {
+        // If content isn't JSON, it might be an issue or just empty
+        console.warn(`[ServerMemoryAdapter] Failed to parse search response: ${textContent}`)
+        return []
+    }
+
+    let entities = nodes.map((node: any) =>
       this.mapNodeToEntity(node)
     )
 
@@ -414,17 +465,10 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
     this.ensureInitialized()
 
     try {
-      const result = await this.client!.request(
-        {
-          method: 'tools/call',
-          params: {
-            name,
-            arguments: args
-          }
-        },
-        // @ts-ignore - Result type
-        any
-      )
+      const result = await this.client!.callTool({
+        name,
+        arguments: args
+      })
 
       return { result: result.content }
     } catch (error: any) {

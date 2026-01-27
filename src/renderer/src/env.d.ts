@@ -73,6 +73,18 @@ interface ElectronAPI {
         approveChange: (changeId: string) => Promise<{ success: boolean; error?: string }>
         rejectChange: (changeId: string) => Promise<{ success: boolean; error?: string }>
     }
+
+    memory: {
+        runTests: () => Promise<{ results: string[]; passed: boolean }>
+        getStats: () => Promise<{
+            entityCount: number
+            relationCount: number
+            storageSize: number
+            avgSearchLatency: number
+            backend: string
+        }>
+        exportAll: () => Promise<{ entities: any[]; relations: any[] }>
+    }
 }
 
 // Web Speech API types - placed inside declare global to be available everywhere
