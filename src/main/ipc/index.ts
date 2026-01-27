@@ -6,10 +6,12 @@ import { registerLogsHandlers } from './logs'
 import { registerSpeechHandlers } from './speech'
 import { registerSecureHandlers } from './secure'
 import { registerFsHandlers } from './fs'
+import { registerMemoryHandlers } from './memory'
 
 export function setupIpcHandlers(): void {
     registerAppHandlers()
     registerMcpHandlers()
+    registerMemoryHandlers()
     registerLlmHandlers()
     registerStoreHandlers()
     registerLogsHandlers()

@@ -702,6 +702,318 @@ graph LR
 
 ---
 
+## Memory Architecture
+
+AI-Worker implements a **privacy-first, swappable-backend memory system** that allows users to build a knowledge graph of their work while maintaining strict privacy controls and enabling seamless scaling.
+
+### Memory System Overview
+
+```mermaid
+graph TB
+    subgraph "Application Layer"
+        MemoryService[MemoryService\u003cbr/\u003eSingleton Instance]
+    end
+    
+    subgraph "Privacy Layer"
+        PIIDetector[PIIDetector\u003cbr/\u003eEmail, Phone, SSN]
+        SecretRedactor[SecretRedactor\u003cbr/\u003eAPI Keys, Tokens]
+    end
+    
+    subgraph "Metrics & Migration"
+        MetricsCollector[MetricsCollector\u003cbr/\u003eUsage Tracking]
+        MigrationService[MigrationService\u003cbr/\u003eAuto-Migration Logic]
+    end
+    
+    subgraph "Backend Abstraction"
+        UnifiedBackend[UnifiedMemoryBackend\u003cbr/\u003eInterface]
+        Factory[MemoryServiceFactory\u003cbr/\u003eBackend Selection]
+    end
+    
+    subgraph "Storage Backends"
+        ServerMemory[ServerMemoryAdapter\u003cbr/\u003eJSON Storage MVP]
+        MementoMCP[MementoMCPAdapter\u003cbr/\u003eNeo4j for Scale]
+    end
+    
+    MemoryService --> PIIDetector
+    MemoryService --> SecretRedactor
+    MemoryService --> MetricsCollector
+    MemoryService --> MigrationService
+    MemoryService --> Factory
+    Factory --> UnifiedBackend
+    UnifiedBackend -.-> ServerMemory
+    UnifiedBackend -.-> MementoMCP
+```
+
+### Backend Architecture (Swappable Storage)
+
+The memory system uses an **abstract backend interface** that allows swapping storage engines without changing application code:
+
+```typescript
+// UnifiedMemoryBackend.ts - Interface all backends implement
+export interface UnifiedMemoryBackend {
+  // Lifecycle
+  initialize(): Promise<void>
+  
+  // Entity CRUD
+  createEntity(input: CreateEntityInput): Promise<Entity>
+  getEntity(id: string): Promise<Entity | null>
+  updateEntity(id: string, updates: Partial<Entity>): Promise<Entity>
+  deleteEntity(id: string): Promise<void>
+  
+  // Search & Relations
+  search(query: string, options?: SearchOptions): Promise<Entity[]>
+  createRelation(input: CreateRelationInput): Promise<Relation>
+  
+  // Export/Import for migration
+  exportAll(): Promise<ExportData>
+  importAll(data: ExportData): Promise<void>
+  getStats(): Promise<MemoryStats>
+}
+```
+
+**Current Backends:**
+
+1. **ServerMemoryAdapter** (Current MVP)
+   - Wraps `@modelcontextprotocol/server-memory`
+   - JSON file storage (~10K entities max)
+   - Fast startup, simple deployment
+   - Path: `src/main/services/memory/adapters/ServerMemoryAdapter.ts`
+
+2. **MementoMCPAdapter** (Future Scale)
+   - Neo4j-based graph database
+   - Handles 100K+ entities with advanced queries
+   - Temporal queries, semantic search
+   - Path: `src/main/services/memory/adapters/MementoMCPAdapter.ts` (skeleton)
+
+### Privacy-First Architecture
+
+**Goal**: Prevent storage of sensitive data (PII, secrets) that could leak if memory files are accessed.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant MemoryService
+    participant PIIDetector
+    participant SecretRedactor
+    participant Backend
+    
+    User->>MemoryService: createEntity("John", "Email: john@co.com")
+    MemoryService->>PIIDetector: detect(description)
+    PIIDetector-->>MemoryService: {found: true, types: ['email']}
+    MemoryService-->>User: Error: PII detected
+    
+    Note over User: User removes PII
+    User->>MemoryService: createEntity("John", "Software Engineer")
+    MemoryService->>SecretRedactor: check(description)
+    SecretRedactor-->>MemoryService: No secrets found
+    MemoryService->>Backend: createEntity()
+    Backend-->>MemoryService: Entity created
+    MemoryService-->>User: Success
+```
+
+**Privacy Components:**
+
+- **PIIDetector** (`privacy/PIIDetector.ts`)
+  - Detects: emails, phone numbers, SSNs, credit cards
+  - Returns redacted text + PII types found
+  - Throws error to block storage
+
+- **SecretRedactor** (`privacy/SecretRedactor.ts`)
+  - Detects: API keys, JWT tokens, private keys, DB credentials
+  - Throws error immediately (secrets never stored)
+  - Patterns: `sk_*`, `eyJ*`, `ghp_*`, `-----BEGIN PRIVATE KEY-----`
+
+### Metrics & Auto-Migration
+
+The system tracks usage metrics to suggest migration when scaling thresholds are exceeded:
+
+```typescript
+// MetricsCollector.ts - Tracks usage
+interface MemoryMetrics {
+  entityCount: number          // Current: 0-10K (server-memory)
+  avgSearchLatency: number     // Target: <100ms
+  storageSizeMB: number        // Target: <50MB
+}
+
+// Migration thresholds (from memory-risks-and-scaling.md)
+const THRESHOLDS = {
+  entityCount: 10000,          // Migrate if >10K entities
+  searchLatencyMs: 100,        // Migrate if searches >100ms
+  storageSizeMB: 50            // Migrate if JSON >50MB
+}
+```
+
+**Migration Flow:**
+
+```mermaid
+stateDiagram-v2
+    [*] --> ServerMemory: MVP (0-10K entities)
+    ServerMemory --> CheckMetrics: After each operation
+    CheckMetrics --> ServerMemory: Below thresholds
+    CheckMetrics --> SuggestMigration: Threshold exceeded
+    SuggestMigration --> MementoMCP: User approves
+    MementoMCP --> [*]: Scaled to 100K+ entities
+```
+
+**MigrationService** (`MigrationService.ts`):
+- Monitors metrics automatically
+- Suggests migration when needed
+- Handles export from current backend
+- Imports to new backend
+- Updates configuration
+
+### Legacy SQLite Migration
+
+On first initialization, the system automatically migrates existing SQLite data:
+
+```typescript
+// MemoryService.ts - migrateLegacyDataIfNeeded()
+async initialize() {
+  // 1. Create backend (server-memory or memento-mcp)
+  this.backend = MemoryServiceFactory.create()
+  
+  // 2. Check for legacy SQLite database
+  if (exists('memory.db') && backend.isEmpty()) {
+    // 3. Export from SQLite
+    const legacyData = await exportLegacySQLiteData()
+    
+    // 4. Import to new backend
+    await this.backend.importAll(legacyData)
+    
+    // 5. Archive old database
+    rename('memory.db', 'memory.db.backup')
+  }
+}
+```
+
+### MCP Tool Integration
+
+Memory is exposed as MCP tools for AI agent access:
+
+**Available Tools:**
+- `memory_create_entity` - Store facts about people, projects, preferences
+- `memory_create_relation` - Link entities with relationships
+- `memory_search` - Semantic search across knowledge graph
+
+**In-Process Integration:**
+
+```mermaid
+graph LR
+    subgraph "Renderer"
+        Agent[AI Agent]
+    end
+    
+    subgraph "Main Process"
+        MCPHandler[MCP IPC Handler]
+        MemorySvc[MemoryService]
+        Backend[UnifiedMemoryBackend]
+    end
+    
+    Agent -->|Tool Call| MCPHandler
+    MCPHandler -->|In-Process| MemorySvc
+    MemorySvc --> Backend
+    Backend -->|Result| MemorySvc
+    MemorySvc -->|Response| Agent
+```
+
+All memory operations go through in-process handlers (no external MCP server needed for memory).
+
+### Data Model
+
+```typescript
+// Entity - A fact or concept
+interface Entity {
+  id: string                    // UUID
+  name: string                  // e.g., "TypeScript Project"
+  type: string                  // e.g., "project", "person", "preference"
+  description: string           // Human-readable description
+  observations: string[]        // Facts about this entity
+  metadata: Record<string, any> // Extensible (future: workspace, project)
+  createdAt: Date
+  updatedAt: Date
+}
+
+// Relation - Connection between entities
+interface Relation {
+  id: string
+  fromEntityId: string
+  toEntityId: string
+  relationType: string          // e.g., "works_on", "prefers", "uses"
+  description?: string
+  weight?: number               // Strength of relation
+}
+```
+
+### Configuration
+
+```typescript
+// MemoryServiceFactory.ts - Configuration
+interface MemoryConfig {
+  backend: 'server-memory' | 'memento-mcp'
+  
+  serverMemory?: {
+    storagePath: string  // JSON storage location
+  }
+  
+  memento?: {
+    neo4jUri: string
+    username: string
+    password: string
+  }
+  
+  autoMigration?: {
+    enabled: boolean
+    thresholds: {
+      entityCount: number
+      searchLatencyMs: number
+      storageSizeMB: number
+    }
+  }
+}
+```
+
+Configuration is stored in `electron-store` and can be changed to switch backends:
+
+```typescript
+// Switch from server-memory to memento-mcp
+await MemoryServiceFactory.switchBackend('memento-mcp')
+```
+
+### IPC Handlers
+
+Memory-specific IPC handlers for stats and export:
+
+| IPC Channel | Handler | Purpose |
+|-------------|---------|---------|
+| `memory:get-stats` | `memory.ts` | Get entity count, storage size, latency |
+| `memory:export-all` | `memory.ts` | Export all data (backup/migration) |
+
+Memory tool calls (`memory_create_entity`, etc.) go through the standard `mcp:call-tool` channel with in-process routing.
+
+### Files
+
+**Core Architecture:**
+- [`UnifiedMemoryBackend.ts`](file:///Users/suhail/ai-worker-app/src/main/services/memory/UnifiedMemoryBackend.ts) - Backend interface
+- [`MemoryServiceFactory.ts`](file:///Users/suhail/ai-worker-app/src/main/services/memory/MemoryServiceFactory.ts) - Backend factory
+- [`MemoryService.ts`](file:///Users/suhail/ai-worker-app/src/main/services/MemoryService.ts) - Main service (refactored)
+
+**Adapters:**
+- [`ServerMemoryAdapter.ts`](file:///Users/suhail/ai-worker-app/src/main/services/memory/adapters/ServerMemoryAdapter.ts) - server-memory wrapper
+- [`MementoMCPAdapter.ts`](file:///Users/suhail/ai-worker-app/src/main/services/memory/adapters/MementoMCPAdapter.ts) - memento-mcp (skeleton)
+
+**Privacy:**
+- [`PIIDetector.ts`](file:///Users/suhail/ai-worker-app/src/main/services/memory/privacy/PIIDetector.ts) - PII detection
+- [`SecretRedactor.ts`](file:///Users/suhail/ai-worker-app/src/main/services/memory/privacy/SecretRedactor.ts) - Secret detection
+
+**Metrics & Migration:**
+- [`MetricsCollector.ts`](file:///Users/suhail/ai-worker-app/src/main/services/memory/MetricsCollector.ts) - Usage tracking
+- [`MigrationService.ts`](file:///Users/suhail/ai-worker-app/src/main/services/memory/MigrationService.ts) - Migration logic
+
+**IPC:**
+- [`memory.ts`](file:///Users/suhail/ai-worker-app/src/main/ipc/memory.ts) - Memory IPC handlers
+
+---
+
 ## Storage Architecture
 
 ### Storage Layers
