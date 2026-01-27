@@ -47,6 +47,7 @@ import {
 } from '../lib/llm'
 import { MemoryPreferencesPanel } from './settings/MemoryPreferencesPanel'
 import { ModelSelect } from './ModelSelect'
+import { ErrorBoundary } from './ErrorBoundary'
 
 type SettingsSection = 'account' | 'llm' | 'voice' | 'memory' | 'browser' | 'appearance' | 'logs' | 'flags' | 'about'
 
@@ -291,7 +292,9 @@ export function SettingsPanel() {
 
                 {/* Memory Section */}
                 {activeSection === 'memory' && (
-                    <MemoryPreferencesPanel />
+                    <ErrorBoundary>
+                        <MemoryPreferencesPanel />
+                    </ErrorBoundary>
                 )}
 
                 {/* LLM Provider Section */}

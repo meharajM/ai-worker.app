@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react'
-import { HardDrive, Server, RefreshCw, AlertTriangle, Check, ArrowRight } from 'lucide-react'
+import { HardDrive, Server, RefreshCw, AlertCircle, Check, ArrowRight } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 
 interface MemoryStats {
@@ -21,8 +21,12 @@ export function MemoryPreferencesPanel() {
         if (!window.electron?.memory) return
         setLoading(true)
         try {
-            const currentStats = await window.electron.memory.getStats()
-            setStats(currentStats)
+            const response = await window.electron.memory.getStats()
+            if (response.success && response.stats) {
+                setStats(response.stats)
+            } else {
+                console.error('Failed to load memory stats:', response.error)
+            }
         } catch (error) {
             console.error('Failed to load memory stats:', error)
         } finally {
@@ -147,7 +151,7 @@ export function MemoryPreferencesPanel() {
             {stats && stats.entityCount > 10000 && settings.memoryBackend === 'server-memory' && (
                 <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4 flex items-start gap-4">
                     <div className="p-2 bg-yellow-500/20 rounded-lg">
-                        <AlertTriangle className="w-6 h-6 text-yellow-400" />
+                        <AlertCircle className="w-6 h-6 text-yellow-400" />
                     </div>
                     <div className="flex-1">
                         <h4 className="font-bold text-yellow-400 mb-1">Scalability Warning</h4>
