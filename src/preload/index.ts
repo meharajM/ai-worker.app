@@ -99,6 +99,10 @@ const electronAPI = {
         runTests: () => ipcRenderer.invoke('memory:run-tests'),
         getStats: () => ipcRenderer.invoke('memory:get-stats'),
         exportAll: () => ipcRenderer.invoke('memory:export-all'),
+        callTool: (name: string, args: any) => ipcRenderer.invoke('memory:call-tool', { name, args }),
+        migrate: () => ipcRenderer.invoke('memory:migrate'),
+        checkMigration: () => ipcRenderer.invoke('memory:check-migration'),
+        openFileLocation: () => ipcRenderer.invoke('memory:open-file-location'),
     },
 }
 

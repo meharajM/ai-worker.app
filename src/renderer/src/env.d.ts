@@ -75,15 +75,23 @@ interface ElectronAPI {
     }
 
     memory: {
-        runTests: () => Promise<{ results: string[]; passed: boolean }>
+        runTests: () => Promise<{ success: boolean; result?: { results: string[]; passed: boolean }; error?: string }>
         getStats: () => Promise<{
-            entityCount: number
-            relationCount: number
-            storageSize: number
-            avgSearchLatency: number
-            backend: string
+            success: boolean
+            stats?: {
+                entityCount: number
+                relationCount: number
+                storageSize: number
+                avgSearchLatency: number
+                backend: string
+            }
+            error?: string
         }>
-        exportAll: () => Promise<{ entities: any[]; relations: any[] }>
+        exportAll: () => Promise<{ success: boolean; data?: { entities: any[]; relations: any[] }; error?: string }>
+        callTool: (name: string, args: any) => Promise<{ success: boolean; result?: any; error?: string }>
+        migrate: () => Promise<{ success: boolean; result?: any; error?: string }>
+        checkMigration: () => Promise<{ success: boolean; shouldMigrate?: boolean; error?: string }>
+        openFileLocation: () => Promise<{ success: boolean; error?: string }>
     }
 }
 

@@ -336,13 +336,16 @@ export class MemoryService {
     async createEntity(
         name: string,
         type: string,
-        description: string,
+        description: string = '',
         metadata: Record<string, any> = {}
     ): Promise<Entity> {
         if (!this.backend) await this.initialize()
 
+        // Ensure string inputs
+        const safeDesc = description || ''
+
         // Privacy Check 1: Detect PII
-        const piiCheck = this.piiDetector.detect(description)
+        const piiCheck = this.piiDetector.detect(safeDesc)
         if (piiCheck.found) {
             throw new Error(
                 `PII detected in description: ${piiCheck.types.join(', ')}. ` +
@@ -351,14 +354,14 @@ export class MemoryService {
         }
 
         // Privacy Check 2: Detect Secrets
-        this.secretRedactor.check(description)
+        this.secretRedactor.check(safeDesc)
 
         // Create entity via backend
         const input: CreateEntityInput = {
             name,
             type,
-            description,
-            observations: [description],
+            description: safeDesc,
+            observations: [safeDesc],
             metadata
         }
 
@@ -521,6 +524,14 @@ export class MemoryService {
     async migrateToMemento() {
         if (!this.backend) await this.initialize()
         return await this.migrationService.migrateToMemento(this.backend!)
+    }
+
+    /**
+     * Check if migration is suggested based on current metrics
+     */
+    async shouldSuggestMigration(): Promise<boolean> {
+        if (!this.backend) await this.initialize()
+        return await this.metricsCollector.shouldSuggestMigration()
     }
 
     // ========================================================================

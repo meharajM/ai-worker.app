@@ -243,8 +243,7 @@ function App() {
       // The store updates. We can get the signal from the store.
       // But `handleSubmit` is a callback closure. `useChatStore.getState()` is safer.
 
-      try {
-        const settingsForLLM = {
+      const settingsForLLM = {
           preferredProvider: settings.preferredProvider,
           ollamaModel: settings.ollamaModel,
           ollamaBaseUrl: settings.ollamaBaseUrl,
@@ -255,7 +254,9 @@ function App() {
           geminiModel: settings.geminiModel,
           openrouterApiKey: settings.openrouterApiKey,
           openrouterModel: settings.openrouterModel,
-        };
+      };
+
+      try {
 
         // Convert store messages to LLMMessage format
         const freshMessages = useChatStore.getState().getActiveSession()?.messages || [];
@@ -438,6 +439,21 @@ function App() {
              }
           }
         }, initialHistory); // Pass initialized history
+
+        // Background Memory Reflection (Fire-and-forget)
+        // We run this CONCURRENTLY with the main agent to ensure we capture user intent 
+        // even if the main agent gets stuck in a confirmation loop or fails.
+        import("./lib/memory-reflector").then(({ MemoryReflector }) => {
+            const currentMessages = useChatStore.getState().getActiveSession()?.messages || [];
+           
+            // Convert to LLMMessage format for the reflector
+            const historyForReflector: LLMMessage[] = currentMessages.map(m => ({
+                role: m.role as "user" | "assistant" | "system",
+                content: m.content
+            }));
+            
+            MemoryReflector.getInstance().analyze(historyForReflector, settingsForLLM);
+        });
 
         await runtime.chat(content);
 

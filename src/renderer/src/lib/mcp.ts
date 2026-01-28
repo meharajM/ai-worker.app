@@ -41,6 +41,13 @@ const DEFAULT_MCP_SERVERS: Omit<
       command: "internal", // Signal this is an internal service
       args: [],
     },
+    {
+        name: "memory",
+        description: "Core Memory Service - Knowledge Graph (Internal)",
+        type: "stdio",
+        command: "internal-memory",
+        args: []
+    }
   ];
 
 // Store for connected servers

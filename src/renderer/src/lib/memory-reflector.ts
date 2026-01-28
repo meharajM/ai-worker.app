@@ -1,0 +1,88 @@
+import { AgentRuntime } from "./agent-runtime";
+import { LLMMessage } from "./types";
+
+/**
+ * MemoryReflector
+ * 
+ * A specialized, lightweight agent that consumes conversation history
+ * in the background and extracts entities/facts to save to long-term memory.
+ * 
+ * It runs silently and does not block the main UI.
+ */
+export class MemoryReflector {
+    private static instance: MemoryReflector;
+    private isAnalyzing = false;
+
+    private constructor() { }
+
+    static getInstance(): MemoryReflector {
+        if (!MemoryReflector.instance) {
+            MemoryReflector.instance = new MemoryReflector();
+        }
+        return MemoryReflector.instance;
+    }
+
+    /**
+     * Fire-and-forget analysis of recent conversation history.
+     */
+    async analyze(recentHistory: LLMMessage[], settings: any) {
+        if (this.isAnalyzing) {
+            console.log('[MemoryReflector] Skipping analysis - already busy');
+            return;
+        }
+
+        // Only analyze if there's substantial new content
+        if (recentHistory.length < 2) return;
+
+        this.isAnalyzing = true;
+        console.log('[MemoryReflector] Starting background analysis...');
+
+        try {
+            // Take the last 4 messages to keep context small but relevant
+            const contextWindow = recentHistory.slice(-4);
+
+            const reflectorAgent = new AgentRuntime({
+                settings,
+                isSubAgent: true,
+                requireConfirmation: false,
+                // We don't listen to messages, just results
+                onMessage: (msg: LLMMessage) => {
+                    // console.log('[MemoryReflector] Internal thought:', msg.content);
+                }
+            });
+
+            // Specific prompt for the reflector
+            const prompt = `
+SYSTEM_TASK: BACKGROUND_MEMORY_EXTRACTION
+
+You are the "Memory Reflector". Your ONLY job is to analyze the conversation below and save ANY permanent user preferences, project facts, or **implicit** working patterns using the \`memory_create_entity\` tool.
+
+CONVERSATION:
+${contextWindow.map(m => `${m.role.toUpperCase()}: ${typeof m.content === 'string' ? m.content : '[Multimedia]'}`).join('\n')}
+
+INSTRUCTIONS:
+1. **Explicit Preferences**: Look for statements like "I like dark mode", "Use Python".
+2. **Implicit Intent**: decode the user's intent from their requests.
+   - Example: "Create a Next.js app" -> Save entity "Next.js" with type "technology_preference".
+   - Example: "Use 2 spaces for indentation" -> Save entity "Indentation" with description "Use 2 spaces".
+3. **Project Facts**: Extract facts about the current project (e.g. framework, language, deadline).
+
+ANTI-BLOAT RULES (CRITICAL):
+- **DO NOT** save ephemeral context (e.g., "User asked to fix a typo", "User said hello").
+- **DO NOT** save one-off instructions as permanent preferences unless clearly stated.
+- **DO NOT** save the same fact multiple times.
+- Only save **high-value, permanent** information that would be useful in a *future* session.
+
+GOAL: Extract High-Value Implicit & Explicit Memories. Avoid Bloat. Then Stop.
+            `;
+
+            await reflectorAgent.chat(prompt);
+            console.log('[MemoryReflector] Analysis complete.');
+
+        } catch (error) {
+            console.warn('[MemoryReflector] Background analysis failed (non-fatal):', error);
+        } finally {
+            this.isAnalyzing = false;
+        }
+    }
+}

@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react'
 import { HardDrive, Server, RefreshCw, AlertCircle, Check, ArrowRight } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { MemoryInspector } from './memory/MemoryInspector'
 
 interface MemoryStats {
     entityCount: number
@@ -148,23 +149,101 @@ export function MemoryPreferencesPanel() {
             </div>
 
             {/* Migration Suggestion (Conditional) */}
-            {stats && stats.entityCount > 10000 && settings.memoryBackend === 'server-memory' && (
-                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-4 flex items-start gap-4">
-                    <div className="p-2 bg-yellow-500/20 rounded-lg">
-                        <AlertCircle className="w-6 h-6 text-yellow-400" />
+            {(migrationStatus === 'success' || (stats && stats.entityCount > 10000 && settings.memoryBackend === 'server-memory')) && (
+                <div className={`border rounded-xl p-4 flex items-start gap-4 ${
+                    migrationStatus === 'success' 
+                        ? 'bg-green-500/10 border-green-500/20' 
+                        : 'bg-yellow-500/10 border-yellow-500/20'
+                }`}>
+                    <div className={`p-2 rounded-lg ${
+                        migrationStatus === 'success' ? 'bg-green-500/20' : 'bg-yellow-500/20'
+                    }`}>
+                        {migrationStatus === 'success' ? (
+                            <Check className="w-6 h-6 text-green-400" />
+                        ) : (
+                            <AlertCircle className="w-6 h-6 text-yellow-400" />
+                        )}
                     </div>
                     <div className="flex-1">
-                        <h4 className="font-bold text-yellow-400 mb-1">Scalability Warning</h4>
-                        <p className="text-sm text-yellow-200/80 mb-3">
-                            You have over 10,000 entities. Server Memory may start to slow down. 
-                            We recommend migrating to Memento MCP (Neo4j) for better performance.
+                        <h4 className={`font-bold mb-1 ${
+                            migrationStatus === 'success' ? 'text-green-400' : 'text-yellow-400'
+                        }`}>
+                            {migrationStatus === 'success' ? 'Migration Complete' : 'Scalability Warning'}
+                        </h4>
+                        <p className={`text-sm mb-3 ${
+                            migrationStatus === 'success' ? 'text-green-200/80' : 'text-yellow-200/80'
+                        }`}>
+                            {migrationStatus === 'success' 
+                                ? 'Your memory has been successfully migrated to Memento MCP.' 
+                                : 'You have over 10,000 entities. Server Memory may start to slow down. We recommend migrating to Memento MCP (Neo4j) for better performance.'}
                         </p>
-                        <button className="px-4 py-2 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
-                            Start Migration <ArrowRight size={16} />
-                        </button>
+                        
+                        {migrationStatus !== 'success' && (
+                            <button 
+                                onClick={async () => {
+                                    if (!window.electron?.memory) return
+                                    setMigrationStatus('migrating')
+                                    try {
+                                        const result = await window.electron.memory.migrate()
+                                        if (result.success) {
+                                            setMigrationStatus('success')
+                                            loadStats() // Refresh stats
+                                        } else {
+                                            setMigrationStatus('error')
+                                            console.error(result.error)
+                                        }
+                                    } catch (e) {
+                                        setMigrationStatus('error')
+                                        console.error(e)
+                                    }
+                                }}
+                                disabled={migrationStatus === 'migrating'}
+                                className="px-4 py-2 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                            >
+                                {migrationStatus === 'migrating' ? (
+                                    <>
+                                        <RefreshCw className="animate-spin w-4 h-4" /> 
+                                        Migrating...
+                                    </>
+                                ) : (
+                                    <>
+                                        Start Migration <ArrowRight size={16} />
+                                    </>
+                                )}
+                            </button>
+                        )}
                     </div>
                 </div>
             )}
+
+            {/* Memory Inspector */}
+            {/* Debug Test Button */}
+            <div className="flex justify-end">
+                <button
+                    onClick={async () => {
+                        console.log('Testing memory write...');
+                        try {
+                            const result = await window.electron.memory.callTool('memory_create_entity', {
+                                name: 'Manual Test Entity',
+                                type: 'test_data',
+                                description: 'This is a safe test description.',
+                                observations: ['This is a safe test description.']
+                            });
+                            console.log('Memory write result:', result);
+                            alert(result.success ? 'Write Success!' : 'Write Failed: ' + result.error);
+                            loadStats(); // Refresh stats
+                        } catch (e: any) {
+                            console.error('Memory write exception:', e);
+                            alert('Write Exception: ' + e.message);
+                        }
+                    }}
+                    className="text-xs text-white/30 hover:text-white/80 underline"
+                >
+                    Test Write
+                </button>
+            </div>
+
+            <MemoryInspector />
         </div>
     )
 }
