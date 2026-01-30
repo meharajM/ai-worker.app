@@ -38,11 +38,18 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
    */
   async initialize(): Promise<void> {
     try {
+      // Ensure storage directory exists before starting MCP server
+      const fs = await import('fs')
+      if (!fs.existsSync(this.storagePath)) {
+        fs.mkdirSync(this.storagePath, { recursive: true })
+      }
+
       // Create MCP client to communicate with server-memory
       const transport = new StdioClientTransport({
         command: 'npx',
         args: ['-y', '@modelcontextprotocol/server-memory'],
         env: {
+          ...process.env,
           MEMORY_DATA_PATH: this.storagePath
         }
       })
@@ -58,13 +65,17 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
       )
 
       await this.client.connect(transport)
+
+      console.log(`[ServerMemoryAdapter] Connected to server-memory, storage: ${this.storagePath}`)
       
       // Load existing entities into cache for fast access
       await this.loadCache()
     } catch (error) {
+      console.error('[ServerMemoryAdapter] Failed to initialize:', error)
       throw new Error(`Failed to initialize ServerMemoryAdapter: ${error}`)
     }
   }
+
 
   /**
    * Shutdown the client connection

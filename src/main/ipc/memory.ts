@@ -82,16 +82,22 @@ export function registerMemoryHandlers(): void {
       try {
           const { shell, app } = require('electron')
           const path = require('path')
-          // Construct default path (matching MemoryServiceFactory default)
-          // Ideally we fetch this from config, but for now default is reliable enough for this dev utility
-          const memoryPath = path.join(app.getPath('userData'), 'memory', 'memory.json')
-          
-          // Check if file exists, if not open folder
           const fs = require('fs')
+
+          // Construct default path (matching MemoryServiceFactory default)
+          const memoryDir = path.join(app.getPath('userData'), 'memory')
+          const memoryPath = path.join(memoryDir, 'memory.json')
+          
+          // Ensure directory exists
+          if (!fs.existsSync(memoryDir)) {
+              fs.mkdirSync(memoryDir, { recursive: true })
+          }
+
+          // Check if file exists, if not open folder
           if (fs.existsSync(memoryPath)) {
               shell.showItemInFolder(memoryPath)
           } else {
-              shell.openPath(path.dirname(memoryPath))
+              shell.openPath(memoryDir)
           }
           return { success: true }
       } catch (error) {

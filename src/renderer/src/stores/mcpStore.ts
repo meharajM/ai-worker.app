@@ -67,6 +67,22 @@ const DEFAULT_MCP_SERVERS = [
         command: 'npx',
         args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
         autoConnect: true
+    },
+    {
+        name: 'playwright',
+        description: 'Native Playwright Service - Browser automation (Internal)',
+        type: 'stdio',
+        command: 'internal',
+        args: [],
+        autoConnect: true
+    },
+    {
+        name: 'memory',
+        description: 'Core Memory Service - Knowledge Graph (Internal)',
+        type: 'stdio',
+        command: 'internal-memory',
+        args: [],
+        autoConnect: true
     }
 ]
 
@@ -92,13 +108,18 @@ export const useMcpStore = create<McpState>()((set, get) => ({
             let initialServers: MCPServer[] = []
             
             if (stored && Array.isArray(stored)) {
-                initialServers = stored.map(s => ({
-                    ...s,
-                    // Reset runtime state
-                    connected: false,
-                    tools: [],
-                    error: undefined
-                }))
+                initialServers = stored.map(s => {
+                    const isInternal = s.name === 'playwright' || s.name === 'memory';
+                    return {
+                        ...s,
+                        // Reset runtime state
+                        connected: false,
+                        tools: [],
+                        error: undefined,
+                        // Force autoConnect for internal services
+                        autoConnect: isInternal ? true : s.autoConnect
+                    }
+                })
             } else {
                 // Defaults (only for anonymous or empty user profile? Maybe always safe to default?)
                 // If user has NO servers, maybe we should give them defaults?

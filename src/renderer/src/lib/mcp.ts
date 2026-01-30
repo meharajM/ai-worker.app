@@ -382,6 +382,17 @@ export async function executeToolCall(
 
   const server = findServerForTool(toolName);
   if (!server) {
+    // FALLBACK: Check if it's an internal memory tool
+    if (toolName.startsWith('memory_')) {
+        logMcpRenderer("info", "Executing memory tool via direct IPC fallback", { tool: toolName });
+        try {
+            const result = await electron.memory.callTool(toolName, safeArgs) as { result: any; error?: string };
+            return result;
+        } catch (err: any) {
+            return { result: null, error: `Direct memory tool call failed: ${err.message}` };
+        }
+    }
+
     const duration = Date.now() - startTime;
     logMcpRenderer("error", "Tool not found in any connected server", {
       operation: "executeToolCall",
@@ -627,8 +638,8 @@ async function loadServersFromStorage(): Promise<void> {
       // Restore servers, resetting runtime state
       connectedServers = new Map(
         stored.map((s) => {
-          // Force enable playwright, disable others (temporary user request)
-          const isPlaywright = s.name === 'playwright';
+          // Force enable playwright and memory, disable others
+          const isInternal = s.name === 'playwright' || s.name === 'memory';
 
           return [
             s.id,
@@ -637,7 +648,7 @@ async function loadServersFromStorage(): Promise<void> {
               connected: false, // Runtime state - always false on load
               tools: [], // Runtime state - always empty on load
               error: undefined, // Runtime state - always undefined on load
-              autoConnect: isPlaywright, // Only auto-connect Playwright
+              autoConnect: isInternal, // Auto-connect internal services
             },
           ];
         })
@@ -737,7 +748,7 @@ async function initializeDefaultServers(): Promise<void> {
       id: generateId(),
       connected: false,
       tools: [],
-      autoConnect: true, // Default servers auto-connect by default
+      autoConnect: serverConfig.name === 'playwright' || serverConfig.name === 'memory', 
     };
     connectedServers.set(server.id, server);
   });

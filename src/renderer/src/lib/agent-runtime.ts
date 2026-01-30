@@ -125,6 +125,15 @@ export class AgentRuntime {
 
       const allTools = [...llmTools, ...clientLlmTools];
       
+      // Deduplicate tools by name (MCP servers may provide same tools as CLIENT_TOOLS)
+      const uniqueTools = allTools.reduce((acc, tool) => {
+        if (!acc.find(t => t.name === tool.name)) {
+          acc.push(tool);
+        }
+        return acc;
+      }, [] as LLMTool[]);
+      
+      
       const servers = getServers();
       const serverInfo: ServerInfo[] = servers
         .filter((server) => server.connected)
@@ -166,7 +175,7 @@ export class AgentRuntime {
       try {
         response = await chat(
             contextMessages,
-            allTools.length > 0 ? allTools : undefined,
+            uniqueTools.length > 0 ? uniqueTools : undefined,
             this.options.settings,
             serverInfo.length > 0 ? serverInfo : undefined,
             this.options.signal
