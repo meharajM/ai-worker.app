@@ -34,8 +34,8 @@ export class AgentRuntime {
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
     this.options = options;
     this.messages = [...initialHistory];
-    // Sub-agents get 5 iterations, main agents get 20
-    this.maxIterations = options.isSubAgent ? 5 : 20;
+    // Sub-agents get 10 iterations (enough for most tasks), main agents get 20
+    this.maxIterations = options.isSubAgent ? 10 : 20;
 
     // Inherit category if passed
     if (options.taskCategory) {
@@ -52,31 +52,42 @@ export class AgentRuntime {
 
     if (this.options.requireConfirmation && this.options.onConfirmationNeeded) {
       try {
-        console.log('[AgentRuntime] Analyzing task for ambiguity...');
-        const analysis = await analyzeTask(userContent, this.options.settings);
+        // Check if this is a simple reply to a previous agent question
+        const isSimpleReply = /^(yes|no|ok|okay|sure|nope|continue|stop|proceed|go ahead|skip|next|back)$/i.test(userContent.trim());
+        const lastMessage = this.messages[this.messages.length - 1];
+        const lastContent = typeof lastMessage?.content === 'string' ? lastMessage.content : '';
+        const isReplyToQuestion = lastMessage?.role === 'assistant' && lastContent.includes('?');
 
-        // Capture category from analysis
-        if (analysis.category) {
-          this.taskCategory = analysis.category;
-          console.log(`[AgentRuntime] Identified task category: ${this.taskCategory}`);
-        }
+        // Skip confirmation if user is just replying to the agent's question
+        if (isSimpleReply && isReplyToQuestion) {
+          console.log('[AgentRuntime] Simple reply to agent question. Skipping confirmation.');
+        } else {
+          console.log('[AgentRuntime] Analyzing task for ambiguity...');
+          const analysis = await analyzeTask(userContent, this.options.settings);
 
-        if (analysis.shouldConfirm) {
-          console.log('[AgentRuntime] Task needs confirmation. Asking user...');
-          const enrichedPrompt = await this.options.onConfirmationNeeded(analysis);
-
-          if (enrichedPrompt === null) {
-            // User cancelled
-            return {
-              role: 'assistant',
-              content: 'Task cancelled. Let me know when you want to try again!'
-            };
+          // Capture category from analysis
+          if (analysis.category) {
+            this.taskCategory = analysis.category;
+            console.log(`[AgentRuntime] Identified task category: ${this.taskCategory}`);
           }
 
-          finalPrompt = enrichedPrompt;
-          console.log('[AgentRuntime] Using enriched prompt:', finalPrompt);
-        } else {
-          console.log('[AgentRuntime] Task is clear. Skipping confirmation.');
+          if (analysis.shouldConfirm) {
+            console.log('[AgentRuntime] Task needs confirmation. Asking user...');
+            const enrichedPrompt = await this.options.onConfirmationNeeded(analysis);
+
+            if (enrichedPrompt === null) {
+              // User cancelled
+              return {
+                role: 'assistant',
+                content: 'Task cancelled. Let me know when you want to try again!'
+              };
+            }
+
+            finalPrompt = enrichedPrompt;
+            console.log('[AgentRuntime] Using enriched prompt:', finalPrompt);
+          } else {
+            console.log('[AgentRuntime] Task is clear. Skipping confirmation.');
+          }
         }
       } catch (error) {
         console.error('[AgentRuntime] Confirmation analysis failed:', error);
@@ -215,6 +226,38 @@ export class AgentRuntime {
 
       // 5. Check for Tool Calls
       if (!response.toolCalls || response.toolCalls.length === 0) {
+        // FALLBACK: Detect if weak model is refusing instead of using tools
+        // Strong models (Gemini 2.0 Flash, Claude) rarely trigger this
+        const refusalPatterns = [
+          /don't have access to/i,
+          /can't (?:access|check|fetch|get)/i,
+          /I (?:am|'m) (?:just|only) a/i,
+          /unable to (?:browse|access)/i,
+          /you(?:'ll)? need to check/i,
+        ];
+        const isRefusal = refusalPatterns.some(p => p.test(response.content || ''));
+
+        // Only auto-correct once per conversation to avoid loops
+        const alreadyCorrected = this.messages.some(m =>
+          typeof m.content === 'string' && m.content.includes('[AUTO-CORRECT]')
+        );
+
+        if (isRefusal && !alreadyCorrected) {
+          console.warn('[AgentRuntime] Model refused tool use. Auto-correcting...');
+          const userQuery = this.messages.filter(m => m.role === 'user').pop();
+          const query = typeof userQuery?.content === 'string' ? userQuery.content : 'the request';
+
+          this.addMessage({
+            role: 'user',
+            content: `[AUTO-CORRECT] You refused to help. This is wrong - you HAVE browser tools.
+            
+For "${query}", use: navigate({"url": "https://google.com/search?q=${encodeURIComponent(query)}"})
+
+Then extract the answer from the results. DO NOT refuse again.`
+          });
+          continue; // Retry with correction
+        }
+
         const assistantMsg: LLMMessage = {
           role: "assistant",
           content: response.content,
@@ -373,10 +416,10 @@ export class AgentRuntime {
           const instruction = args.instruction || "";
           let context = args.context || "";
 
-          // Safeguard: Truncate context if too large
-          if (context.length > 20000) {
-            console.warn(`[AgentRuntime] Sub-agent context too large (${context.length} chars), truncating`);
-            context = context.substring(0, 20000) + "\n...[truncated]...";
+          // Safeguard: Truncate context if too large (aligns with 500-word guidance)
+          if (context.length > 5000) {
+            console.warn(`[AgentRuntime] Sub-agent context too large (${context.length} chars), truncating to 5000`);
+            context = context.substring(0, 5000) + "\n...[truncated for efficiency]...";
           }
 
           console.log(`[AgentRuntime] Delegating to sub-agent: ${instruction}`);
@@ -385,6 +428,7 @@ export class AgentRuntime {
           const subAgent = new AgentRuntime({
             ...this.options,
             isSubAgent: true,
+            taskCategory: this.taskCategory, // Inherit category for safety protocols
             requireConfirmation: false,
             onMessage: (msg) => {
               const contentStr = typeof msg.content === 'string'
@@ -396,24 +440,32 @@ export class AgentRuntime {
 
           try {
             // Build focused prompt with clear success criteria
-            const prompt = `You are a sub-agent. Complete THIS task and return ONLY the result:
+            const prompt = `You are a sub-agent optimized for token efficiency. Complete this task and return ONLY a concise summary.
 
 TASK: ${instruction}
-${context ? `\nDATA: ${context}` : ''}
+${context ? `\nCONTEXT DATA: ${context}` : ''}
 
-RULES:
-- Complete only this specific task
-- Return just the result
-- Limit tool calls to what's necessary; if more needed, summarize progress and request extension.
-- When done, include a sync point: "Ready for sync with main agent."
-- Stop when done`;
+CRITICAL RULES:
+- Execute the task using available tools
+- **Return ONLY the key findings** - no explanations, no process description
+- **Maximum 200 words** in your final response
+- Use <think> tags for reasoning (hidden from main agent)
+- Format: Short bullet points or 2-3 sentences MAX
+- When complete, end with: "✓ Complete"
+
+Example Good Response:
+"Found 3 laptops on Amazon: Dell XPS ($1200), HP Spectre ($1400), Lenovo ($999). XPS has best reviews. ✓ Complete"
+
+Example BAD Response (too verbose):
+"I searched Amazon and found several laptops. First I navigated to... then I clicked... The results show that..."`;
 
             const finalRes = await subAgent.chat(prompt);
             const finalContent = typeof finalRes.content === 'string'
               ? finalRes.content
               : finalRes.content.map(c => c.type === 'text' ? c.text : '').join('');
 
-            resultStr = `Sub-agent completed task.\n\nFinal Result:\n${finalContent}`;
+            // Return raw content without wrapper (save tokens)
+            resultStr = finalContent.trim();
 
             // Update execution plan if we have one
             if (this.executionPlan) {

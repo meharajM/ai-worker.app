@@ -214,30 +214,29 @@ export function generateSubAgentInstruction(
   const isComparison = allContexts.length > 1;
 
   if (isComparison) {
-    return `You are a sub-agent focused on ${targetContext}.
+    return `SUB-AGENT TASK: ${targetContext}
 
-TASK: ${originalRequest}
+OBJECTIVE: ${originalRequest}
 
-YOUR FOCUS: Complete the task specifically on ${targetContext}.
-Other sub-agents are handling: ${allContexts.filter(c => c !== targetContext).join(', ')}
+YOUR SCOPE: Focus ONLY on ${targetContext}. Other agents handle: ${allContexts.filter(c => c !== targetContext).join(', ')}
 
-RULES:
-1. Only interact with ${targetContext}
-2. Extract relevant information
-3. Return a concise summary of what you found
-4. If you need more tool calls than expected, summarize progress first
-5. When done, say "Ready for merge with other sub-agents."
-6. Do NOT navigate to other websites`;
+OUTPUT REQUIREMENTS:
+- **Concise bullet points** (max 150 words)
+- Key findings only (prices, features, availability)
+- NO navigation steps, NO process description
+- End with: "✓ ${targetContext} complete"
+
+Example: "Amazon.com - Found Dell XPS 13: $1299, 16GB RAM, ships in 2 days. 4.5★ rating. ✓ Amazon complete"`;
   }
 
-  return `You are a sub-agent handling a task.
+  return `SUB-AGENT TASK
 
-TASK: ${originalRequest}
+OBJECTIVE: ${originalRequest}
 
-RULES:
-1. Complete the task step by step
-2. Return concise results
-3. If something doesn't work, try an alternative approach
-4. When done, say "Ready for sync with main agent."
-5. Stop when the goal is achieved`;
+OUTPUT REQUIREMENTS:
+- Execute task step-by-step
+- Return **concise summary** (max 200 words)
+- Use <think> tags for internal reasoning
+- Focus on results, not process
+- End with: "✓ Complete"`;
 }

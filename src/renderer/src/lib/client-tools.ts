@@ -2,17 +2,17 @@ import { MCPTool } from "./mcp";
 
 export const SUB_AGENT_TOOL: MCPTool = {
   name: "delegate_sub_task",
-  description: "Delegate a complex sub-task to a specialized sub-agent. The sub-agent has its own fresh context window. IMPORTANT: Do NOT include your entire conversation history in the 'context' field. Only provide the specific data or summary needed for this sub-task.",
+  description: "Delegate a complex sub-task to a specialized sub-agent with a fresh context window. The sub-agent will execute the task and return ONLY a concise summary. **CRITICAL: In the 'context' field, provide only essential data (e.g., 'Product: Nike shoes, Size: 10') - NEVER dump conversation history or verbose text. Keep context under 500 words.**",
   inputSchema: {
     type: "object",
     properties: {
       instruction: {
         type: "string",
-        description: "The specific task instructions for the sub-agent."
+        description: "Clear, specific task for the sub-agent. Example: 'Search Amazon for Nike shoes size 10 and return top 3 results with prices'"
       },
       context: {
         type: "string",
-        description: "Specific data needed (e.g., search results, file contents). Do NOT dump full conversation history here."
+        description: "MINIMAL essential data only (e.g., 'User wants running shoes, budget $150'). Do NOT include full conversation history. Max 500 words."
       }
     },
     required: ["instruction"]

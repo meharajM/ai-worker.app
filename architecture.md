@@ -579,6 +579,28 @@ The `AgentRuntime` implements a **Dynamic Prompt Injection** mechanism to adapt 
 - **ADMIN/FORMS**: Enforces double-checking inputs and privacy.
 - **GENERAL**: Optimized for speed and direct navigation.
 
+### Refusal Detection & Safety Layer
+
+To ensure robustness across different LLM capabilities, the `AgentRuntime` implements a deterministic safety layer that intercepts and corrects agent behavior:
+
+1.  **Refusal Interceptor**: Regular expressions scan every model response for refusal patterns (e.g., "I don't have access", "I am a text model").
+2.  **Auto-Correction**: If a refusal is detected when tools are available, the system injects a high-priority `[SYSTEM CORRECTION]` message.
+3.  **Mandate**: The correction forces the model to use the specific tool required (e.g., `navigate("google.com")`) instead of apologizing.
+
+### Structured Response Protocol
+
+The system enforces a strict dual-layer response format to separate internal reasoning from user interaction:
+
+1.  **Internal Layer (`<think>`)**:
+    - Wrapped in XML-like tags.
+    - Used for planning, analysis, and self-correction.
+    - **Hidden** from the standard chat view (expandable for debugging).
+
+2.  **Presentation Layer**:
+    - Plain text outside tags.
+    - Direct, natural language responses.
+    - **Filtered** by the UI (`MessageBubble.tsx`) to strip any leaked meta-commentary (e.g., "The user asked for X, so I will...").
+
 ### Sub-Agent Delegation Flow
 
 The system supports recursive task delegation through the `delegate_sub_task` tool. This allows the main agent to offload complex, self-contained units of work to a fresh `AgentRuntime` instance.

@@ -54,11 +54,13 @@ USER PROMPT: "${userPrompt}"
 
 # RULES for shouldConfirm:
 - FALSE (DO NOT confirm) for:
-  • Greetings, pleasantries, or casual conversation (e.g., "hi", "hello", "thanks", "how are you?")
+  • Greetings, casual conversation, or pleasantries (e.g., "hi", "hello", "thanks")
   • Clear, specific tasks (e.g., "open google.com", "search amazon for shoes")
-  • Tasks with clear context or simple defaults
-  • Questions about the agent generally (e.g., "what can you do?")
-  • Single-word replies that fit a conversation flow (e.g., "yes", "no", "continue", "stop", "back", "next")
+  • Tasks with reasonable defaults (e.g., "buy shoes" → assume popular site like Amazon)
+  • Questions about the agent (e.g., "what can you do?")
+  • Single-word context replies (e.g., "yes", "no", "continue", "stop")
+  • **Coding/debugging tasks** (agent should explore autonomously)
+  • **Research tasks with clear topics** (agent can start broad, then narrow)
 
 - TRUE (CONFIRM) for:
   • Vague TASK requests starting a NEW topic (e.g., "buy shoes" - site/size missing?)
