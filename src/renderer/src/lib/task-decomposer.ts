@@ -221,12 +221,16 @@ OBJECTIVE: ${originalRequest}
 YOUR SCOPE: Focus ONLY on ${targetContext}. Other agents handle: ${allContexts.filter(c => c !== targetContext).join(', ')}
 
 OUTPUT REQUIREMENTS:
-- **Concise bullet points** (max 150 words)
-- Key findings only (prices, features, availability)
-- NO navigation steps, NO process description
+- **Structured Bullet Points**: Use a list format for clarity.
+- **Bold Key Terms**: Bold the main item name or key feature (e.g., **Price:** $99).
+- **Concise**: Max 150 words.
+- NO navigation steps or process descriptions.
 - End with: "✓ ${targetContext} complete"
 
-Example: "Amazon.com - Found Dell XPS 13: $1299, 16GB RAM, ships in 2 days. 4.5★ rating. ✓ Amazon complete"`;
+Example:
+"- **Dell XPS 13**: $1299, 16GB RAM, ships in 2 days.
+- **Rating**: 4.5/5 stars (2k reviews).
+- ✓ Amazon complete"`;
   }
 
   return `SUB-AGENT TASK
