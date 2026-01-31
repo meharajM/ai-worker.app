@@ -138,6 +138,32 @@ const MEMORY_TOOLS: ToolSchema[] = [
             },
             required: ['query']
         }
+    },
+    {
+        name: 'memory_update_entity',
+        description: 'Update an existing entity. Use this to correct facts or add new observations to existing entities.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                id: { 
+                    type: 'string', 
+                    description: 'The UUID of the entity to update (from search results)' 
+                },
+                description: { 
+                    type: 'string', 
+                    description: 'New or updated description' 
+                },
+                observation: {
+                    type: 'string',
+                    description: 'A new observation to append to the list'
+                },
+                metadata: { 
+                    type: 'object', 
+                    description: 'Merged metadata updates' 
+                }
+            },
+            required: ['id']
+        }
     }
 ]
 
