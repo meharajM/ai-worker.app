@@ -162,6 +162,7 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
                     <textarea
                         ref={textareaRef}
                         value={textInput}
+                        data-testid="chat-textarea"
                         onChange={handleInputChange}
                         onKeyDown={handleKeyDown}
                         disabled={disabled && !onAbort}
@@ -186,7 +187,11 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
                         <Square size={18} className="fill-current" />
                     </button>
                 ) : (
-                    <button onClick={handleTextSubmit} disabled={disabled || !textInput.trim()} className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${textInput.trim() && !disabled ? 'bg-white text-black hover:bg-gray-200' : 'bg-transparent text-white/20 cursor-not-allowed'}`}>
+                    <button
+                        onClick={handleTextSubmit}
+                        disabled={disabled || !textInput.trim()}
+                        data-testid="send-button"
+                        className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${textInput.trim() && !disabled ? 'bg-white text-black hover:bg-gray-200' : 'bg-transparent text-white/20 cursor-not-allowed'}`}>
                         <Send size={18} />
                     </button>
                 )}

@@ -12,10 +12,6 @@ export function ConnectionsPanel() {
   const [expandedServer, setExpandedServer] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
 
-  // Initialize store on mount
-  useEffect(() => {
-    mcp.initialize();
-  }, [mcp.initialize]);
 
   // Refresh servers (handled automatically by Zustand reactivity)
   const servers = mcp.servers;

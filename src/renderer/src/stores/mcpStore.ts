@@ -29,7 +29,7 @@ interface McpState {
     servers: MCPServer[]
     initialized: boolean
     activeUserId: string | null
-    
+
     // Actions
     initialize: (uid?: string | null) => Promise<void>
     addServer: (config: Omit<MCPServer, 'id' | 'connected' | 'tools' | 'autoConnect'>) => Promise<void>
@@ -39,7 +39,10 @@ interface McpState {
     disconnectServer: (id: string) => Promise<void>
     setAutoConnect: (id: string, enabled: boolean) => Promise<void>
     syncServers: (remoteServers: Partial<MCPServer>[]) => Promise<void>
-    
+
+    // Runtime State Actions
+    updateServerState: (id: string, state: Partial<Pick<MCPServer, 'connected' | 'tools' | 'error'>>) => void
+
     // Auth Actions
     loadUserServers: (uid: string) => Promise<void>
     clearUserServers: () => Promise<void>
@@ -67,6 +70,14 @@ const DEFAULT_MCP_SERVERS = [
         command: 'npx',
         args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
         autoConnect: true
+    },
+    {
+        name: 'playwright',
+        description: 'Playwright MCP Server - Browser automation and web interaction tools',
+        type: 'stdio',
+        command: 'npx',
+        args: ['-y', '@playwright/mcp'],
+        autoConnect: true
     }
 ]
 
@@ -85,20 +96,53 @@ export const useMcpStore = create<McpState>()((set, get) => ({
 
         try {
             console.log(`[mcpStore] Initializing for user: ${uid || 'anonymous'} (Key: ${storageKey})`)
-            
+
             // Load from electron-store
             const stored = await electron.store.get<MCPServer[]>(storageKey)
-            
+
             let initialServers: MCPServer[] = []
-            
+
             if (stored && Array.isArray(stored)) {
-                initialServers = stored.map(s => ({
-                    ...s,
-                    // Reset runtime state
-                    connected: false,
-                    tools: [],
-                    error: undefined
-                }))
+                initialServers = stored.map(s => {
+                    let updated = { ...s };
+
+                    // Migration: Fix servers that have "internal" command placeholder
+                    if (updated.command === 'internal') {
+                        const defaultMatch = DEFAULT_MCP_SERVERS.find(d => d.name === updated.name);
+                        if (defaultMatch) {
+                            updated.command = defaultMatch.command;
+                            updated.args = defaultMatch.args;
+                            console.log(`[mcpStore] Migrated server "${updated.name}" from internal to ${updated.command}`);
+                        }
+                    }
+
+                    return {
+                        ...updated,
+                        // Reset runtime state
+                        connected: false,
+                        tools: [],
+                        error: undefined
+                    } as MCPServer;
+                });
+
+                // Also ensure all current defaults exist if they are missing
+                let hasNewDefaults = false;
+                DEFAULT_MCP_SERVERS.forEach(def => {
+                    if (!initialServers.some(s => s.name === def.name)) {
+                        initialServers.push({
+                            ...def,
+                            id: generateId(),
+                            connected: false,
+                            tools: [],
+                            type: def.type as any,
+                        });
+                        hasNewDefaults = true;
+                    }
+                });
+
+                if (hasNewDefaults || initialServers.some((s, i) => JSON.stringify(s) !== JSON.stringify(stored[i]))) {
+                    await electron.store.set(storageKey, initialServers);
+                }
             } else {
                 // Defaults (only for anonymous or empty user profile? Maybe always safe to default?)
                 // If user has NO servers, maybe we should give them defaults?
@@ -162,7 +206,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
         const newServers = [...get().servers, server]
         set({ servers: newServers })
         await electron.store.set(storageKey, newServers)
-        
+
         // Auto-connect new server
         get().connectServer(server.id)
     },
@@ -170,7 +214,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
     updateServer: async (id, config) => {
         const uid = get().activeUserId
         const storageKey = getPersistenceKey(uid)
-        
+
         const servers = get().servers
         const index = servers.findIndex(s => s.id === id)
         if (index === -1) return
@@ -186,10 +230,10 @@ export const useMcpStore = create<McpState>()((set, get) => ({
 
         const newServers = [...servers]
         newServers[index] = updatedServer
-        
+
         set({ servers: newServers })
         await electron.store.set(storageKey, newServers)
-        
+
         // Reconnect if it was connected or auto-connect is on
         if (updatedServer.autoConnect) {
             get().connectServer(id)
@@ -202,7 +246,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
 
         const currentServers = get().servers
         const server = currentServers.find(s => s.id === id)
-        
+
         if (server?.connected) {
             await get().disconnectServer(id)
         }
@@ -219,7 +263,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
         try {
             // Optimistic update
             set(state => ({
-                servers: state.servers.map(s => 
+                servers: state.servers.map(s =>
                     s.id === id ? { ...s, error: undefined } : s
                 )
             }))
@@ -235,18 +279,18 @@ export const useMcpStore = create<McpState>()((set, get) => ({
 
             if (result.success) {
                 const toolsResult = await electron.mcp.listTools(id) as { tools: any[], error?: string }
-                
+
                 set(state => ({
-                    servers: state.servers.map(s => 
-                        s.id === id ? { 
-                            ...s, 
-                            connected: true, 
+                    servers: state.servers.map(s =>
+                        s.id === id ? {
+                            ...s,
+                            connected: true,
                             tools: toolsResult.tools?.map(t => ({
                                 name: t.name,
                                 description: t.description,
                                 inputSchema: t.inputSchema || {}
                             })) || [],
-                            error: toolsResult.error 
+                            error: toolsResult.error
                         } : s
                     )
                 }))
@@ -255,11 +299,11 @@ export const useMcpStore = create<McpState>()((set, get) => ({
             }
         } catch (error) {
             set(state => ({
-                servers: state.servers.map(s => 
-                    s.id === id ? { 
-                        ...s, 
-                        connected: false, 
-                        error: error instanceof Error ? error.message : String(error) 
+                servers: state.servers.map(s =>
+                    s.id === id ? {
+                        ...s,
+                        connected: false,
+                        error: error instanceof Error ? error.message : String(error)
                     } : s
                 )
             }))
@@ -272,7 +316,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
         try {
             await electron.mcp.disconnect(id)
             set(state => ({
-                servers: state.servers.map(s => 
+                servers: state.servers.map(s =>
                     s.id === id ? { ...s, connected: false, tools: [] } : s
                 )
             }))
@@ -285,7 +329,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
         const uid = get().activeUserId
         const storageKey = getPersistenceKey(uid)
 
-        const newServers = get().servers.map(s => 
+        const newServers = get().servers.map(s =>
             s.id === id ? { ...s, autoConnect: enabled } : s
         )
         set({ servers: newServers })
@@ -299,23 +343,23 @@ export const useMcpStore = create<McpState>()((set, get) => ({
 
         const currentServers = get().servers
         let hasChanges = false
-        
+
         // Merge strategy:
         // 1. Map remote servers by Name (since IDs might differ or we want to dedup)
         // 2. If exists locally, update config BUT KEEP LOCAL SECRETS (env)
         // 3. If new, add it
-        
+
         const newServerList = [...currentServers]
-        
+
         for (const remote of remoteServers) {
             if (!remote.name) continue
-            
+
             const existingIndex = newServerList.findIndex(s => s.name === remote.name)
-            
+
             if (existingIndex !== -1) {
                 // Update existing
                 const existing = newServerList[existingIndex]
-                
+
                 // Only update if something changed
                 if (
                     existing.command !== remote.command ||
@@ -355,11 +399,11 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                 hasChanges = true
             }
         }
-        
+
         if (hasChanges) {
             set({ servers: newServerList })
             await electron.store.set(storageKey, newServerList)
-            
+
             // Auto-connect any new/updated servers that are not connected
             newServerList
                 .filter(s => s.autoConnect && !s.connected)
@@ -367,16 +411,38 @@ export const useMcpStore = create<McpState>()((set, get) => ({
         }
     },
 
-    getServer: (id) => get().servers.find(s => s.id === id),
-    
-    getAllTools: () => {
-        return get().servers
-            .filter(s => s.connected)
-            .flatMap(s => s.tools)
+    updateServerState: (id, serverState) => {
+        set(state => ({
+            servers: state.servers.map(s =>
+                s.id === id ? { ...s, ...serverState } : s
+            )
+        }))
     },
-    
+
+    getServer: (id) => get().servers.find(s => s.id === id),
+
+    getAllTools: () => {
+        const toolMap: Map<string, MCPTool> = new Map();
+        get().servers.forEach((server) => {
+            if (server.connected) {
+                server.tools.forEach(tool => {
+                    const existing = toolMap.get(tool.name);
+
+                    // If we don't have this tool yet, or if the new one has a richer schema, take it
+                    const newScore = Object.keys(tool.inputSchema?.properties || {}).length;
+                    const existingScore = existing ? Object.keys(existing.inputSchema?.properties || {}).length : -1;
+
+                    if (!existing || newScore > existingScore) {
+                        toolMap.set(tool.name, tool);
+                    }
+                });
+            }
+        });
+        return Array.from(toolMap.values());
+    },
+
     findServerForTool: (toolName) => {
-        return get().servers.find(s => 
+        return get().servers.find(s =>
             s.connected && s.tools.some(t => t.name === toolName)
         ) || null
     }

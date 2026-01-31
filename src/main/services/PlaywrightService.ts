@@ -139,6 +139,14 @@ export class PlaywrightService {
 
                         console.log(`[PlaywrightService] Trying to launch: ${tryBrowser}...`)
                         this.context = await tryLauncher.launchPersistentContext(userDataDir, tryOptions)
+
+                        // Handle unexpected closure
+                        this.context.on('close', () => {
+                            console.log('[PlaywrightService] Browser context closed')
+                            this.context = null
+                            this.page = null
+                        })
+
                         console.log(`[PlaywrightService] Successfully launched: ${tryBrowser}`)
                         break // Success!
                     } catch (error) {
@@ -203,18 +211,76 @@ export class PlaywrightService {
     }
 
     async ensurePage(): Promise<Page> {
+        // 1. Ensure browser context exists
         if (!this.context) {
             await this.ensureBrowser()
         }
-        if (!this.page || this.page.isClosed()) {
-            if (!this.context) throw new Error('Context initialization failed')
-            this.page = await this.context.newPage()
 
-            const settings = ((this.store as any).get?.('mcpPlaywright') || {}) as PlaywrightSettings
-            if (settings.blockAds !== false) {
-                await this.enableResourceBlocking(this.page)
+        // 2. Ensure page exists and is not closed
+        if (!this.page || this.page.isClosed()) {
+            try {
+                // Double check context is alive
+                if (!this.context) throw new Error('Context initialization failed')
+
+                // Reuse existing page if any (e.g. from manual user interaction)
+                const pages = this.context.pages()
+                const validPage = pages.find(p => !p.isClosed())
+
+                if (validPage) {
+                    this.page = validPage
+                } else {
+                    this.page = await this.context.newPage()
+                }
+
+                // Re-apply settings
+                const settings = ((this.store as any).get?.('mcpPlaywright') || {}) as PlaywrightSettings
+                if (settings.blockAds !== false) {
+                    await this.enableResourceBlocking(this.page)
+                }
+            } catch (error) {
+                // Detect "Target page, context or browser has been closed"
+                const msg = error instanceof Error ? error.message : String(error)
+                console.warn('[PlaywrightService] Error in ensurePage:', msg)
+
+                if (msg.includes('closed') || msg.includes('Session closed')) {
+                    console.log('[PlaywrightService] Context appears dead. Restarting browser...')
+                    this.context = null
+                    this.page = null
+
+                    // Retry initialization
+                    await this.ensureBrowser()
+
+                    // After ensureBrowser, verify context state
+                    if (!this.context) {
+                        throw new Error('Failed to restart browser context')
+                    }
+
+                    // Capture verified context in local variable
+                    // TypeScript can't track that ensureBrowser() reassigns this.context
+                    const context = this.context as BrowserContext
+
+                    // Re-create page if needed (after browser restart)
+                    // Get existing pages from the fresh context
+                    const existingPages = context.pages()
+                    const validPage = existingPages.find(p => !p.isClosed())
+
+                    if (validPage) {
+                        this.page = validPage
+                    } else {
+                        this.page = await context.newPage()
+                    }
+
+                    // Re-apply settings to the page
+                    const settings = ((this.store as any).get?.('mcpPlaywright') || {}) as PlaywrightSettings
+                    if (settings.blockAds !== false && this.page) {
+                        await this.enableResourceBlocking(this.page)
+                    }
+                } else {
+                    throw error
+                }
             }
         }
+
         return this.page!
     }
 
@@ -377,7 +443,7 @@ export class PlaywrightService {
                 },
                 {
                     name: 'select_option',
-                    description: 'INPUT: Choose an option from a <select> dropdown menu. Use for country selectors, date pickers, category filters. Provide either the option value or visible text.',
+                    description: 'INPUT: Choose an option from a <select> dropdown menu. REQUIRED: You MUST provide "selector" AND "value". Value should be the option value attribute or visible text.',
                     inputSchema: {
                         type: 'object',
                         properties: {
@@ -443,13 +509,13 @@ export class PlaywrightService {
                 },
                 {
                     name: 'extract_data',
-                    description: 'EXTRACTION: Pull structured data from page. Use type="table" for HTML tables (returns 2D array), type="list" for ul/ol lists, type="custom" with field selectors for complex layouts.',
+                    description: 'EXTRACTION: Pull structured data from page. REQUIRED: "type" is mandatory. If type="custom", "fields" is also required.',
                     inputSchema: {
                         type: 'object',
                         properties: {
                             type: { type: 'string', enum: ['table', 'list', 'custom'], description: 'table=HTML table, list=ul/ol items, custom=define your own fields' },
                             selector: { type: 'string', description: 'CSS selector of container (optional for table/list)' },
-                            fields: { type: 'object', description: 'For custom: {"fieldName": "selector", ...}' }
+                            fields: { type: 'object', description: 'For custom type: {"fieldName": "CSS selector", ...}' }
                         },
                         required: ['type']
                     }
@@ -570,6 +636,13 @@ export class PlaywrightService {
     }
 
     async callTool(name: string, args: any): Promise<{ result: any; error?: string }> {
+        // Detailed logging for bridge debugging
+        console.log(`[PlaywrightService] Request: ${name}`, {
+            args: JSON.stringify(args),
+            argKeys: Object.keys(args || {}),
+            timestamp: new Date().toISOString()
+        })
+
         try {
             // Allow empty objects {} but reject null/undefined - default to empty object
             const safeArgs = args ?? {}
@@ -872,6 +945,11 @@ export class PlaywrightService {
                     return { result: `Typed "${safeArgs.text}" into ${safeArgs.selector}` }
 
                 case 'select_option':
+                    const selectSelectorError = requireParam('selector')
+                    if (selectSelectorError) return { result: null, error: selectSelectorError }
+                    const selectValueError = requireParam('value')
+                    if (selectValueError) return { result: null, error: selectValueError }
+
                     await page.selectOption(safeArgs.selector, safeArgs.value)
                     return { result: `Selected "${safeArgs.value}" in ${safeArgs.selector}` }
 
@@ -925,7 +1003,9 @@ export class PlaywrightService {
                     return { result: { tabs: tabList } }
 
                 case 'click_text':
-                    // Click by visible text - more intuitive for LLMs
+                    const textFindError = requireParam('text')
+                    if (textFindError) return { result: null, error: textFindError }
+
                     const textToFind = safeArgs.text
                     const exactMatch = safeArgs.exact || false
                     const tagFilter = safeArgs.tag ? safeArgs.tag.toLowerCase() : null
@@ -938,6 +1018,9 @@ export class PlaywrightService {
                     return { result: `Clicked element with text "${textToFind}"` }
 
                 case 'extract_data':
+                    const extractTypeError = requireParam('type')
+                    if (extractTypeError) return { result: null, error: extractTypeError }
+
                     const extractType = safeArgs.type || 'table'
                     const extractSelector = safeArgs.selector
 
@@ -984,6 +1067,11 @@ export class PlaywrightService {
                     return { result: null, error: 'Invalid extract_data type' }
 
                 case 'upload_file':
+                    const upSelectError = requireParam('selector')
+                    if (upSelectError) return { result: null, error: upSelectError }
+                    const upPathError = requireParam('filePath')
+                    if (upPathError) return { result: null, error: upPathError }
+
                     await page.setInputFiles(safeArgs.selector, safeArgs.filePath)
                     return { result: `Uploaded file to ${safeArgs.selector}` }
 
@@ -993,6 +1081,11 @@ export class PlaywrightService {
                     return { result: { cookies } }
 
                 case 'set_cookie':
+                    const cNameErr = requireParam('name')
+                    if (cNameErr) return { result: null, error: cNameErr }
+                    const cValErr = requireParam('value')
+                    if (cValErr) return { result: null, error: cValErr }
+
                     if (!this.context) throw new Error('No browser context')
                     const url = page.url()
                     const domain = safeArgs.domain || new URL(url).hostname
@@ -1005,6 +1098,9 @@ export class PlaywrightService {
                     return { result: `Set cookie ${safeArgs.name}` }
 
                 case 'handle_dialog':
+                    const diagActionErr = requireParam('action')
+                    if (diagActionErr) return { result: null, error: diagActionErr }
+
                     // Set up dialog handler for next dialog
                     page.once('dialog', async dialog => {
                         if (safeArgs.action === 'accept') {
@@ -1031,6 +1127,9 @@ export class PlaywrightService {
                     return { result: `Switched to frame ${safeArgs.selector}` }
 
                 case 'find_by_xpath':
+                    const xpErr = requireParam('xpath')
+                    if (xpErr) return { result: null, error: xpErr }
+
                     const xpathAction = safeArgs.action || 'info'
                     const xpathElements = await page.$$(`xpath=${safeArgs.xpath}`)
 
@@ -1058,10 +1157,18 @@ export class PlaywrightService {
                     }
 
                 case 'drag_drop':
+                    const ddsErr = requireParam('sourceSelector')
+                    if (ddsErr) return { result: null, error: ddsErr }
+                    const ddtErr = requireParam('targetSelector')
+                    if (ddtErr) return { result: null, error: ddtErr }
+
                     await page.dragAndDrop(safeArgs.sourceSelector, safeArgs.targetSelector)
                     return { result: `Dragged ${safeArgs.sourceSelector} to ${safeArgs.targetSelector}` }
 
                 case 'check_element':
+                    const chkSelErr = requireParam('selector')
+                    if (chkSelErr) return { result: null, error: chkSelErr }
+
                     const checkSelector = safeArgs.selector
                     const property = safeArgs.property || 'exists'
                     const element = await page.$(checkSelector)
@@ -1111,9 +1218,22 @@ export class PlaywrightService {
             }
         } catch (error) {
             console.error(`[PlaywrightService] Error calling tool ${name}:`, error)
+            let errorMessage = error instanceof Error ? error.message : String(error)
+
+            // Clean up common Playwright timeout errors
+            if (errorMessage.includes('Timeout') && errorMessage.includes('exceeded')) {
+                const selectorMatch = errorMessage.match(/waiting for locator\(['"]([^'"]+)['"]\)/);
+                const selector = selectorMatch ? selectorMatch[1] : 'element';
+                errorMessage = `Timeout: The element '${selector}' was not found within the time limit.\n` +
+                    `Suggestion: The selector might be incorrect or the page structure changed.\n` +
+                    `1. Try using 'get_interactive_elements' to see what IS on the page.\n` +
+                    `2. Try a different selector (e.g. text content or aria-label).\n` +
+                    `3. Be aware that Google Search and other modern sites change IDs effectively randomly. Avoid using IDs like '#lst-ib' or '#tsf'.`;
+            }
+
             return {
                 result: null,
-                error: error instanceof Error ? error.message : String(error)
+                error: errorMessage
             }
         }
     }

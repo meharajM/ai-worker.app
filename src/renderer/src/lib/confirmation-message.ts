@@ -8,6 +8,16 @@ export interface TaskAnalysis {
   detectedIntent: string;
   potentialMistakes: string[];
   shouldConfirm: boolean; // Smart detection result
+  complexity?: TaskComplexity;
+  category?: 'shopping' | 'research' | 'admin' | 'general';
+}
+
+export interface TaskComplexity {
+  level: 'simple' | 'moderate' | 'complex';
+  needsExternalModel: boolean;
+  reason: string;
+  userFriendlyMessage: string;
+  estimatedTime: string;
 }
 
 export interface TaskSuggestion {
@@ -26,45 +36,66 @@ export async function analyzeTask(
   llmSettings: any
 ): Promise<TaskAnalysis> {
   const { chat } = await import('./llm');
-  
-  const analysisPrompt = `You are a task analysis expert. Analyze the following user prompt and determine if it needs clarification.
+
+  const analysisPrompt = `Analyze this user prompt and determine if clarification is needed.
 
 USER PROMPT: "${userPrompt}"
 
-Analyze for:
-1. Missing critical details that CANNOT be inferred (e.g., "email John" - which John?).
-2. Potential typos or "fat finger" mistakes (e.g., "goggle" instead of "google").
-3. Single-word or extremely vague prompts (e.g., "yes", "shoes", "ok").
-4. Follow-up confirmations without clear context (e.g., "yes" after being asked a question).
-5. Missing critical user preferences that should not be guessed (preferred website/platform, size/color/variant, delivery/pincode, budget, account/email).
-6. Any task that could lead to payment, OTP entry, real form submission, login with credentials, irreversible actions, or sensitive personal data handling.
+# ANALYSIS:
+1. **Is the intent clear?** Can you understand exactly what the user wants?
+2. **Missing details?** Are there critical pieces of information needed to complete the task?
+3. **Potential typos?** Common misspellings (e.g., "goolge" = "google")
+4. **Safety concerns?** Does this involve sensitive data, payments, or irreversible actions?
 
-RULES for shouldConfirm:
-- Set shouldConfirm: TRUE if the prompt is a single word, extremely vague, or could mean many different things.
-- Set shouldConfirm: TRUE if the prompt is a confirmation like "yes", "ok", "proceed" but it's unclear what action is being confirmed.
-- Set shouldConfirm: FALSE if the prompt has a clear action and target (e.g., "open google and search for adidas 7 shoes").
-- Set shouldConfirm: FALSE if missing details (like URLs) can be found via search AND the intent is clear.
-- Set shouldConfirm: TRUE for shopping, booking, form-filling, filtering, login, payment-related, or account tasks when platform, account, delivery details, or other preferences are not clearly stated.
-- Set shouldConfirm: TRUE whenever payment submission, OTP entry, real account changes, form submission, or other irreversible/high-risk actions appear possible — even if not explicitly mentioned by the user.
+# COMPLEXITY:
+- **Simple**: Single action, clear target (e.g., "open google.com")
+- **Moderate**: Multiple steps but clear goal (e.g., "search for X on Y")
+- **Complex**: Multi-step with decisions needed (e.g., "compare X and Y, then...")
 
-Generate 2-3 suggestions if shouldConfirm is true.
+# RULES for shouldConfirm:
+- FALSE (DO NOT confirm) for:
+  • Greetings, casual conversation, or pleasantries (e.g., "hi", "hello", "thanks")
+  • Clear, specific tasks (e.g., "open google.com", "search amazon for shoes")
+  • Tasks with reasonable defaults (e.g., "buy shoes" → assume popular site like Amazon)
+  • Questions about the agent (e.g., "what can you do?")
+  • Single-word context replies (e.g., "yes", "no", "continue", "stop")
+  • **Coding/debugging tasks** (agent should explore autonomously)
+  • **Research tasks with clear topics** (agent can start broad, then narrow)
 
-Respond with a JSON object:
+- TRUE (CONFIRM) for:
+  • Vague TASK requests starting a NEW topic (e.g., "buy shoes" - site/size missing?)
+  • Single words that imply a complex action without target (e.g., "research", "booking", "deploy")
+  • Sensitive actions (logins, payments, deletions)
+  • Ambiguous pronouns without context
+
+- If typos detected, auto-correct in suggestions
+
+Respond with JSON:
+# CATEGORY CLASSIFICATION:
+Classify the task into one of these categories:
+- **shopping**: Buying, finding products, prices, e-commerce.
+- **research**: Finding information, summaries, comparison, news.
+- **admin**: Filling forms, scheduling, email, account management, official websites.
+- **general**: Simple navigation, opening sites, weather, etc.
+
+Respond with JSON:
 {
   "isAmbiguous": true/false,
-  "missingDetails": ["detail 1", "detail 2"],
-  "detectedIntent": "what you think the user wants",
-  "potentialMistakes": ["mistake 1"],
+  "missingDetails": ["what's missing"],
+  "detectedIntent": "What you think the user wants",
+  "category": "shopping|research|admin|general",
+  "potentialMistakes": ["typos found"],
   "suggestions": [
-    {
-      "id": "1",
-      "label": "Short description",
-      "enrichedPrompt": "Full detailed prompt",
-      "confidence": 0.9
-    },
-    { "id": "ask_platform", "label": "Ask which website", "enrichedPrompt": "Ask the user: Which website should I use? (e.g. Nike, Amazon, etc.)" }
+    {"id": "1", "label": "Suggested interpretation", "enrichedPrompt": "Clear version of the request", "confidence": 0.9}
   ],
-  "shouldConfirm": true/false
+  "shouldConfirm": true/false,
+  "complexity": {
+    "level": "simple|moderate|complex",
+    "needsExternalModel": true/false,
+    "reason": "Why this complexity",
+    "userFriendlyMessage": "Brief message for user",
+    "estimatedTime": "How long it might take"
+  }
 }`;
 
   try {
@@ -84,7 +115,7 @@ Respond with a JSON object:
     }
 
     const analysis: TaskAnalysis = JSON.parse(jsonMatch[0]);
-    
+
     // Validate and ensure proper structure
     return {
       isAmbiguous: analysis.isAmbiguous || false,
@@ -92,7 +123,9 @@ Respond with a JSON object:
       suggestions: analysis.suggestions || [],
       detectedIntent: analysis.detectedIntent || userPrompt,
       potentialMistakes: analysis.potentialMistakes || [],
-      shouldConfirm: analysis.shouldConfirm || false
+      shouldConfirm: analysis.shouldConfirm || false,
+      complexity: analysis.complexity,
+      category: analysis.category as any
     };
   } catch (error) {
     console.error('[TaskAnalysis] Error analyzing task:', error);
@@ -112,6 +145,14 @@ function createDefaultAnalysis(prompt: string): TaskAnalysis {
     }],
     detectedIntent: prompt,
     potentialMistakes: [],
-    shouldConfirm: false
+    shouldConfirm: false,
+    complexity: {
+      level: 'simple',
+      needsExternalModel: false,
+      reason: 'Direct navigation',
+      userFriendlyMessage: 'Opening now...',
+      estimatedTime: 'Instant'
+    },
+    category: 'general'
   };
 }

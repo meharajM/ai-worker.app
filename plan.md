@@ -430,6 +430,18 @@ ai-worker-app/
 - [x] TypeScript compilation passes for new files
 - [x] Build verified in user terminal
 - [x] Documentation updated
+### ✅ Phase 15: Internal Automation (Playwright) [COMPLETED]
+
+**Goal:** Implement internal zero-latency browser automation via Playwright.
+
+**Implementation:**
+- [x] Implement **Internal Playwright Service** (`src/main/services/PlaywrightService.ts`) regarding the zero-latency automation
+- [x] Add E2E tests for all Playwright tools (`tests/playwright_tools_test.cjs`)
+- [x] Expose 30+ automation tools (navigate, click, fill, screenshot, etc.) directly via main process
+
+**Validation:** ✅
+- [x] Playwright tools execute successfully in E2E tests
+- [x] Zero-latency automation verified
 
 ---
 
@@ -461,6 +473,23 @@ ai-worker-app/
 - [x] Zero-latency automation verified
 
 ---
+
+### ✅ Phase 19: General Purpose Transformation [COMPLETED]
+
+**Goal:** Transform the agent into a "Universal WorkFlow Buddy" capable of handling any task type safely.
+
+**Implementation:**
+- [x] Implement **Dynamic Prompt Injection** in `llm.ts`
+- [x] Create **Prompt Library** (`prompt-library.ts`) for task-specific instructions
+- [x] Implement **Task Categorization** (Shopping, Research, Admin, General)
+- [x] Update Sub-Agents to inherit parent safety contexts
+- [x] Add **Automatic CAPTCHA Solving** with fallback
+- [x] Implement strict **Spending Money Protocol** and **Human-Like Behavior** rules
+
+**Validation:** ✅
+- [x] Architecture verification passed (No side effects)
+- [x] General purpose tasks execute without bias
+- [x] Safety protocols trigger correctly on sensitive tasks
 
 ### 🚀 Phase 16: App Launch Preparation [IN PROGRESS]
 
