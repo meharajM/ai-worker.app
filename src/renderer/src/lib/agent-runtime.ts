@@ -9,6 +9,7 @@ import {
   generateSubAgentInstruction,
   type TaskDecomposition
 } from "./task-decomposer";
+import { MemoryReflector } from "./memory-reflector";
 
 export type AgentStatusCallback = (message: LLMMessage) => string | void;
 
@@ -102,8 +103,10 @@ export class AgentRuntime {
       console.log('[AgentRuntime] Task decomposition:', decomposition);
 
       if (decomposition.shouldFork && decomposition.type === 'multi_context') {
-        console.log(`[AgentRuntime] Auto-forking: ${decomposition.contexts.length} contexts detected`);
-        return this.executeParallelSubAgents(finalPrompt, decomposition);
+        const subAgentResult = await this.executeParallelSubAgents(finalPrompt, decomposition);
+        // Fire-and-forget memory analysis
+        MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+        return subAgentResult;
       }
 
       // For single-context with 3+ actions, we let LLM decide via create_execution_plan
@@ -151,15 +154,15 @@ export class AgentRuntime {
       // Deduplicate tools by name
       const toolMap = new Map<string, LLMTool>();
       const combinedTools = [...llmTools, ...clientLlmTools];
-      
+
       for (const tool of combinedTools) {
         if (!toolMap.has(tool.name)) {
           toolMap.set(tool.name, tool);
         }
       }
-      
+
       const allTools = Array.from(toolMap.values());
-      
+
       const servers = getServers();
       const serverInfo: ServerInfo[] = servers
         .filter((server) => server.connected)
@@ -217,11 +220,11 @@ export class AgentRuntime {
 
       try {
         response = await chat(
-            contextMessages,
-            allTools.length > 0 ? allTools : undefined,
-            this.options.settings,
-            serverInfo.length > 0 ? serverInfo : undefined,
-            this.options.signal
+          contextMessages,
+          allTools.length > 0 ? allTools : undefined,
+          this.options.settings,
+          serverInfo.length > 0 ? serverInfo : undefined,
+          this.options.signal
         );
       } catch (error) {
         console.error("[AgentRuntime] LLM Error:", error);
@@ -267,6 +270,10 @@ Then extract the answer from the results. DO NOT refuse again.`
           content: response.content,
         };
         this.addMessage(assistantMsg);
+
+        // Fire-and-forget memory analysis (Standard Turn Complete)
+        MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+
         return assistantMsg;
       }
 
@@ -583,18 +590,18 @@ Example BAD Response (too verbose):
     // Helper to render the live status message
     const renderStatus = () => {
       let content = `## � Parallel Execution\n\n`;
-      
+
       for (const s of agentStatuses) {
         const icon = s.isRunning ? '⟳' : (s.result?.startsWith('Error') ? '⚠️' : '✓');
         // Bold the context, show status in small text
         content += `- **${s.context}**: ${s.isRunning ? `*${s.status}*` : (s.result ? 'Completed' : s.status)}\n`;
       }
-      
+
       // Add footer if still running
       if (agentStatuses.some(s => s.isRunning)) {
         content += `\n---\n*Working on ${contexts.length} sources...*`;
       }
-      
+
       return content;
     };
 
@@ -603,7 +610,7 @@ Example BAD Response (too verbose):
       role: 'assistant',
       content: renderStatus()
     };
-    
+
     // Capture the ID of the status message so we can update it
     const statusMessageId = this.addMessage(statusMessage) as string | undefined;
 
@@ -625,9 +632,9 @@ Example BAD Response (too verbose):
             // Use thought process or content start
             const content = typeof msg.content === 'string' ? msg.content : '';
             if (content.includes('<think>')) {
-               newStatus = 'Thinking...';
+              newStatus = 'Thinking...';
             } else {
-               newStatus = 'Processing response...';
+              newStatus = 'Processing response...';
             }
           } else if (msg.tool_calls && msg.tool_calls.length > 0) {
             const toolName = msg.tool_calls[0].function.name;
@@ -641,10 +648,10 @@ Example BAD Response (too verbose):
             agentStatuses[index].status = newStatus;
             // Trigger update
             if (statusMessageId && this.options.onMessageUpdate) {
-               this.options.onMessageUpdate(statusMessageId, { content: renderStatus() });
+              this.options.onMessageUpdate(statusMessageId, { content: renderStatus() });
             }
           }
-          
+
           const contentStr = typeof msg.content === 'string'
             ? msg.content
             : msg.content.map(c => c.type === 'text' ? c.text : '[Image]').join(' ');
@@ -662,9 +669,9 @@ Example BAD Response (too verbose):
         agentStatuses[index].isRunning = false;
         agentStatuses[index].result = resultContent;
         agentStatuses[index].status = 'Done';
-        
+
         if (statusMessageId && this.options.onMessageUpdate) {
-           this.options.onMessageUpdate(statusMessageId, { content: renderStatus() });
+          this.options.onMessageUpdate(statusMessageId, { content: renderStatus() });
         }
 
         return {
@@ -676,11 +683,11 @@ Example BAD Response (too verbose):
         agentStatuses[index].isRunning = false;
         agentStatuses[index].status = 'Failed';
         agentStatuses[index].result = `Error: ${error.message}`;
-        
+
         if (statusMessageId && this.options.onMessageUpdate) {
-           this.options.onMessageUpdate(statusMessageId, { content: renderStatus() });
+          this.options.onMessageUpdate(statusMessageId, { content: renderStatus() });
         }
-        
+
         return {
           context,
           success: false,
@@ -719,12 +726,12 @@ Example BAD Response (too verbose):
     // Update the status message one last time with the FINAL result
     // effectively replacing the progress view with the result view
     if (statusMessageId && this.options.onMessageUpdate) {
-        this.options.onMessageUpdate(statusMessageId, { content: summary });
+      this.options.onMessageUpdate(statusMessageId, { content: summary });
     }
-    
+
     return {
-       role: 'assistant',
-       content: summary,
+      role: 'assistant',
+      content: summary,
     };
   }
 }

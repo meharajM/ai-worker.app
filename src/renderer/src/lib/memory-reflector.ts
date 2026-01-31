@@ -55,31 +55,38 @@ export class MemoryReflector {
             const prompt = `
 SYSTEM_TASK: BACKGROUND_MEMORY_EXTRACTION
 
-You are the "Memory Reflector". Your ONLY job is to analyze the conversation below and save ANY permanent user preferences, project facts, or **implicit** working patterns using the \`memory_create_entity\` tool.
+You are the "Memory Reflector". Your ONLY job is to analyze the conversation below and save permanent user preferences, project facts, workflows, or **implicit** working patterns.
+
+**DEDUPLICATION PROTOCOL (CRITICAL)**:
+1. FIRST: Use \`memory_search\` to check if the concept/preference/entity ALREADY exists.
+2. IF EXISTS: Use \`memory_update_entity\` with the existing entity's ID to APPEND a new observation.
+3. IF NOT EXISTS: Use \`memory_create_entity\` to create a new entity.
 
 CONVERSATION:
 ${contextWindow.map(m => `${m.role.toUpperCase()}: ${typeof m.content === 'string' ? m.content : '[Multimedia]'}`).join('\n')}
 
-INSTRUCTIONS:
-1. **Explicit Preferences**: Look for statements like "I like dark mode", "Use Python".
-2. **Implicit Intent**: decode the user's intent from their requests.
-   - Example: "Create a Next.js app" -> Save entity "Next.js" with type "technology_preference".
-   - Example: "Use 2 spaces for indentation" -> Save entity "Indentation" with description "Use 2 spaces".
-3. **Project Facts**: Extract facts about the current project (e.g. framework, language, deadline).
+WHAT TO EXTRACT:
+1. **Explicit Preferences**: Statements like "I like dark mode", "Use Python".
+2. **Selections & Favorites**: Specific choices made by the user (e.g., "I prefer the Casio F-91W", "Add X to cart").
+   - Save as Entity Type: "user_preference" or "product_choice".
+3. **Workflows & SOPs**: Repeated processes or rules (e.g., "Always run tests before commit").
+   - Save as Entity Type: "workflow" or "sop".
+4. **Implicit Intent**: User's implicit intent (e.g., "Create a Next.js app" -> Save entity "Next.js" with type "technology_preference").
+5. **Project Facts**: Facts about the current project (e.g., goals, stack, deadlines).
 
 ANTI-BLOAT RULES (CRITICAL):
 - **DO NOT** save ephemeral context (e.g., "User asked to fix a typo", "User said hello").
 - **DO NOT** save one-off instructions as permanent preferences unless clearly stated.
-- **DO NOT** save the same fact multiple times.
-- Only save **high-value, permanent** information that would be useful in a *future* session.
+- **DO NOT** create duplicate entities. ALWAYS search first and update if exists.
+- Only save **high-value, permanent** information useful in a *future* session.
 
-GOAL: Extract High-Value Implicit & Explicit Memories. Avoid Bloat. Then Stop.
+GOAL: Extract High-Value Implicit & Explicit Memories. Avoid Duplicates & Bloat. Then Stop.
             `;
 
             console.log('[MemoryReflector] Sending prompt to reflector agent...');
             const response = await reflectorAgent.chat(prompt);
             console.log('[MemoryReflector] Analysis complete. Result:', response.content);
-            
+
             // Log tool calls if any
             if (response.tool_calls && response.tool_calls.length > 0) {
                 console.log(`[MemoryReflector] LLM generated ${response.tool_calls.length} tool calls.`);

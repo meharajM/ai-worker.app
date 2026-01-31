@@ -104,11 +104,28 @@ export const MEMORY_SEARCH_TOOL: MCPTool = {
   }
 };
 
+export const MEMORY_UPDATE_ENTITY_TOOL: MCPTool = {
+  name: "memory_update_entity",
+  description: "Update an existing entity by adding a new observation or updating description. Use this to APPEND facts to existing entities instead of creating duplicates.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "The UUID of the entity to update (from memory_search results)" },
+      observation: { type: "string", description: "A new observation/fact to append to the entity's history" },
+      description: { type: "string", description: "Updated description (replaces existing)" },
+      metadata: { type: "object", description: "Merged metadata updates" }
+    },
+    required: ["id"]
+  }
+};
+
 export const CLIENT_TOOLS = [
-  PLANNING_TOOL, 
-  SUB_AGENT_TOOL, 
+  PLANNING_TOOL,
+  SUB_AGENT_TOOL,
   SCAN_PAGE_TOOL,
   MEMORY_CREATE_ENTITY_TOOL,
   MEMORY_CREATE_RELATION_TOOL,
-  MEMORY_SEARCH_TOOL
+  MEMORY_SEARCH_TOOL,
+  MEMORY_UPDATE_ENTITY_TOOL
 ];
+
