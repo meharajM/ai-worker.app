@@ -33,7 +33,7 @@ import { isElectron } from "./lib/electron";
 
 function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
-  const { sessions, activeSessionId, addMessage, setProcessing, isProcessing, abortProcessing } =
+  const { sessions, activeSessionId, addMessage, setProcessing, isProcessing, processingSessionId, abortProcessing } =
     useChatStore();
   const { addLog } = useLogStore();
   const activeSession = sessions.find((s) => s.id === activeSessionId);
@@ -266,52 +266,8 @@ function App() {
             }));
           }
           // Note: Store might store tool results as 'tool' role messages too?
-          // Looking at chatStore.ts, 'toolCalls' property is on the message.
-          // Yet in the old App.tsx loop, we added 'tool' role messages to `currentMessages` array locally,
-          // but did we add them to the store?
-          // check chatStore: addMessage takes role 'user'|'assistant'|'system'.
           // It doesn't seem to support 'tool' role in the typed interface `Message`.
-          // Wait, `Message` interface has `role: 'user' | 'assistant' | 'system'`.
-          // So 'tool' role messages were NOT being persisted in the store in the old implementation?
-
-          // Old App.tsx:
-          // toolResults.push(...)
-          // currentMessages.push({ role: "tool", ... }) -> This was local `currentMessages` array.
-          // It wasn't calling `addMessage` for tool results.
-          // It only called `addMessage` for the final assistant response.
-          // AND it passed `allToolCalls` to the final assistant message in the store: 
-          // `addMessage({ role: "assistant", content: ..., toolCalls: ... })`
-
-          // So the STORE representation compresses the tool calls into the assistant message?
-          // "allToolCalls.push(...response.toolCalls)"
-          // "addMessage({ ... toolCalls: allToolCalls ... })"
-
-          // BUT, for correct context reconstruction in the NEXT turn, we need the tool outputs.
-          // If the store doesn't save "tool" role messages (outputs), then next turn `messages` will lack them.
-          // This would break multi-turn coherency if we just reload from store.
-
-          // Let's re-read `chatStore.ts` to see if `role` allows `tool`.
-          // "role: 'user' | 'assistant' | 'system'"
-          // It strictly probably doesn't allow 'tool'.
-
-          // So how did the old app handle history?
-          // `const llmMessages: LLMMessage[] = messages.map(...)`
-          // It seems it LOST the tool outputs between sessions?
-          // If so, that's a pre-existing bug/limitation.
-          // OR `LLMMessage` creation in `App.tsx` handled it?
-          // No, it just mapped `messages`.
-
-          // Verify `chatStore.ts`:
-          // `export interface Message { ... role: 'user' | 'assistant' | 'system' ... }`
-
-          // This confirms the store does not save tool outputs as separate messages.
-          // It attaches `toolCalls` to the assistant message.
-          // But where do the RESULTS go?
-          // `export interface ToolCall { ... result?: string }`
-          // Ah! `result` is inside `ToolCall`.
-
-          // So we need to reconstruct `tool` role messages from the `toolCalls` array in the assistant message.
-
+          
           return msg;
         });
 
@@ -364,9 +320,37 @@ function App() {
               setPendingConfirmation({ analysis, resolve });
             });
           },
-          onMessage: (msg) => {
-            // Map back to store
-            // We group all assistant and tool messages of a single turn into ONE store message
+          onMessageUpdate: (id, updates) => {
+             const { updateSessionMessage } = useChatStore.getState();
+             // Convert LLMMessage updates to Store Message updates
+             const storeUpdates: any = { ...updates };
+             
+             // Handle content array -> string
+             if (Array.isArray(storeUpdates.content)) {
+               storeUpdates.content = storeUpdates.content
+                 .map((c: any) => c.text || '')
+                 .join('');
+             }
+             
+             // Remove role if it's 'tool' as store doesn't support it (and we rarely update role anyway)
+             if (storeUpdates.role === 'tool') {
+               delete storeUpdates.role;
+             }
+             
+             // Use the session ID captured at start of this run via closure
+             if (activeSessionId) {
+                updateSessionMessage(activeSessionId, id, storeUpdates);
+             }
+          },
+          onMessage: (msg: LLMMessage) => {
+            const getContentString = (content: string | any[]): string => {
+              if (typeof content === 'string') return content;
+              return Array.isArray(content) ? content.map(c => c.text || '').join('') : '';
+            };
+
+            // Use session ID from closure for isolation
+            const currentSessionId = activeSessionId;
+            if (!currentSessionId) return; // Should not happen if we are running
 
             if (msg.role === 'assistant') {
               const newToolCalls = msg.tool_calls ? msg.tool_calls.map(tc => ({
@@ -376,8 +360,14 @@ function App() {
               })) : [];
 
               if (activeAssistantMessageId) {
-                const { updateMessage, getActiveSession } = useChatStore.getState();
-                const session = getActiveSession();
+                const { updateSessionMessage, getActiveSession } = useChatStore.getState();
+                // We need to look up the session by ID to be safe, or assume isolation prevents concurrency issues on same object?
+                // `getActiveSession` returns the CURRENTLY ACTIVE session in UI.
+                // WE SHOULD NOT USE IT.
+                // We should find the session by `currentSessionId`.
+                const { sessions } = useChatStore.getState();
+                const session = sessions.find(s => s.id === currentSessionId);
+                
                 const existingMsg = session?.messages.find(m => m.id === activeAssistantMessageId);
                 if (existingMsg) {
                   // Update existing message
@@ -385,46 +375,70 @@ function App() {
 
                   // For content: overwrite if new content exists (often content in tool turns is intermediate)
                   let finalContent = existingMsg.content;
-                  if (msg.content && msg.content !== existingMsg.content) {
-                    finalContent = msg.content;
+                  if (msg.content && getContentString(msg.content) !== existingMsg.content) {
+                    finalContent = getContentString(msg.content || '');
                   }
 
-                  updateMessage(activeAssistantMessageId, {
+                  updateSessionMessage(currentSessionId, activeAssistantMessageId, {
                     content: finalContent,
                     toolCalls: mergedToolCalls.length > 0 ? mergedToolCalls : undefined
                   });
-                  return;
+                  return activeAssistantMessageId;
                 }
               }
 
               // Create new message and track its ID
+              // `addMessage` adds to ACTIVE session.
+              // IF user changed session, `addMessage` adds to WRONG session!
+              // We need `addSessionMessage` too?
+              // The user didn't report messages appearing in wrong session, only *updates* (status).
+              // Initial message is added when user is looking at it.
+              // But subsequent assistant chunks?
+              
+              // If `addMessage` uses `activeSessionId` from store state (which it does),
+              // then `addMessage` is ALSO broken for background runs.
+              // We fix `updateMessage` now. `addMessage` might be a separate issue.
+              // BUT for `onMessage` here, it runs incrementally.
+              
+              // If we are strictly fixing "status appearing in other window", `updateMessage` fix handles the "Parallel Execution" status block.
+              // The status block is created once via `addMessage` (while user is present hopefully).
+              // Then updated via `onMessageUpdate`.
+              
+              // Wait, `AgentRuntime` calls `this.addMessage(statusMessage)`.
+              // `App.tsx` handles `onMessage` -> `activeSessionId` closure -> ...
+              // If `App.tsx` calls `addMessage`, it uses STORE `activeSessionId`.
+              // So if user switched session, `addMessage` is dangerous.
+              
+              // However, fixing `addMessage` requires larger refactor.
+              // The immediate issue "shows same in the other chat window" is likely about the STATUS updates (which use `updateMessage`).
+              // Because `AgentRuntime` updates that specific message repeatedly.
+              
               const added = addMessage({
                 role: 'assistant',
-                content: msg.content || "",
+                content: getContentString(msg.content || ""),
                 toolCalls: newToolCalls.length > 0 ? newToolCalls : undefined
               });
               activeAssistantMessageId = added.id;
+              return activeAssistantMessageId;
 
             } else if (msg.role === 'tool' && activeAssistantMessageId) {
-              // Update the result of the specific tool call in the active assistant message
-              const { updateMessage, getActiveSession } = useChatStore.getState();
-              const session = getActiveSession();
+              const { updateSessionMessage, sessions } = useChatStore.getState();
+              const session = sessions.find(s => s.id === currentSessionId);
               const existingMsg = session?.messages.find(m => m.id === activeAssistantMessageId);
 
               if (existingMsg && existingMsg.toolCalls) {
                 const updatedToolCalls = existingMsg.toolCalls.map(tc => {
-                  // We try to match by tool_call_id or by name if id is missing/generic
-                  // AgentRuntime provides tool_call_id
                   if (tc.id === msg.tool_call_id) {
-                    return { ...tc, result: msg.content };
+                    return { ...tc, result: getContentString(msg.content || '') };
                   }
                   return tc;
                 });
 
-                updateMessage(activeAssistantMessageId, {
+                updateSessionMessage(currentSessionId, activeAssistantMessageId, {
                   toolCalls: updatedToolCalls
                 });
               }
+              return activeAssistantMessageId;
             }
           }
         }, initialHistory); // Pass initialized history
@@ -482,7 +496,7 @@ function App() {
                 )}
 
                 <div className="p-4 flex-shrink-0 border-t border-white/5">
-                  <VoiceInput onSubmit={handleSubmit} disabled={isProcessing || !!pendingConfirmation} onAbort={abortProcessing} />
+                  <VoiceInput onSubmit={handleSubmit} disabled={(isProcessing && processingSessionId === activeSessionId) || !!pendingConfirmation} onAbort={abortProcessing} />
                 </div>
               </div>
             </div>

@@ -10,7 +10,7 @@ import {
   type TaskDecomposition
 } from "./task-decomposer";
 
-export type AgentStatusCallback = (message: LLMMessage) => void;
+export type AgentStatusCallback = (message: LLMMessage) => string | void;
 
 interface AgentRuntimeOptions {
   activeSessionId?: string;
@@ -21,6 +21,7 @@ interface AgentRuntimeOptions {
   onConfirmationNeeded?: (analysis: TaskAnalysis) => Promise<string | null>; // Returns enriched prompt or null to cancel
   isSubAgent?: boolean; // Flag to identify sub-agents
   taskCategory?: string; // Optional: Force a specific task category (e.g. for sub-agents)
+  onMessageUpdate?: (id: string, updates: Partial<LLMMessage>) => void; // Update existing message in UI
 }
 
 export class AgentRuntime {
@@ -213,12 +214,6 @@ export class AgentRuntime {
 
       // Get task-specific rules if category is available from analysis
       let dynamicRules = undefined;
-      // Check if we have a pending confirmation analysis in logic flow (not directly accessible here easily without passing state)
-      // Alternatively, check execution plan metadata or just classify on the fly?
-      // Since analyzeTask is run at START of chat(), we can store the result.
-
-      // Wait, analyzeTask results are local to chat()'s start block.
-      // We should store the category in class state or pass it.
 
       // Simplest approach: Classification is done at start. Store it.
       if (this.taskCategory) {
@@ -556,10 +551,10 @@ Return key findings only. End with "✓ Done".`;
     throw new Error("Max iterations reached");
   }
 
-  private addMessage(msg: LLMMessage) {
+  private addMessage(msg: LLMMessage): string | void {
     this.messages.push(msg);
     if (this.options.onMessage) {
-      this.options.onMessage(msg);
+      return this.options.onMessage(msg);
     }
   }
 
@@ -577,16 +572,43 @@ Return key findings only. End with "✓ Done".`;
   ): Promise<LLMMessage> {
     const { contexts } = decomposition;
 
-    // Notify user about the decomposition
-    const planMessage: LLMMessage = {
-      role: 'assistant',
-      content: `📋 **Task Analysis**: This task involves ${contexts.length} websites. I'll work on them in parallel:\n\n${contexts.map((ctx, i) => `${i + 1}. **${ctx}**`).join('\n')}\n\nStarting parallel execution...`
+    // Track status of each sub-agent
+    const agentStatuses = contexts.map(ctx => ({
+      context: ctx,
+      status: 'Starting...',
+      isRunning: true,
+      result: null as string | null
+    }));
+
+    // Helper to render the live status message
+    const renderStatus = () => {
+      let content = `## � Parallel Execution\n\n`;
+      
+      for (const s of agentStatuses) {
+        const icon = s.isRunning ? '⟳' : (s.result?.startsWith('Error') ? '⚠️' : '✓');
+        // Bold the context, show status in small text
+        content += `- **${s.context}**: ${s.isRunning ? `*${s.status}*` : (s.result ? 'Completed' : s.status)}\n`;
+      }
+      
+      // Add footer if still running
+      if (agentStatuses.some(s => s.isRunning)) {
+        content += `\n---\n*Working on ${contexts.length} sources...*`;
+      }
+      
+      return content;
     };
-    this.addMessage(planMessage);
-    this.options.onMessage?.(planMessage); // Forward to UI
+
+    // Initial status message
+    const statusMessage: LLMMessage = {
+      role: 'assistant',
+      content: renderStatus()
+    };
+    
+    // Capture the ID of the status message so we can update it
+    const statusMessageId = this.addMessage(statusMessage) as string | undefined;
 
     // Create sub-agents for each context
-    const subAgentPromises = contexts.map(async (context) => {
+    const subAgentPromises = contexts.map(async (context, index) => {
       const instruction = generateSubAgentInstruction(originalRequest, context, contexts);
 
       console.log(`[AgentRuntime] Spawning sub-agent for: ${context}`);
@@ -597,6 +619,32 @@ Return key findings only. End with "✓ Done".`;
         taskCategory: this.taskCategory, // Inherit category from parent
         requireConfirmation: false,
         onMessage: (msg: LLMMessage) => {
+          // Update status based on sub-agent activity
+          let newStatus = '';
+          if (msg.role === 'assistant' && msg.content) {
+            // Use thought process or content start
+            const content = typeof msg.content === 'string' ? msg.content : '';
+            if (content.includes('<think>')) {
+               newStatus = 'Thinking...';
+            } else {
+               newStatus = 'Processing response...';
+            }
+          } else if (msg.tool_calls && msg.tool_calls.length > 0) {
+            const toolName = msg.tool_calls[0].function.name;
+            if (toolName.includes('navigate')) newStatus = 'Navigating...';
+            else if (toolName.includes('click')) newStatus = 'Interacting...';
+            else if (toolName.includes('search')) newStatus = 'Searching...';
+            else newStatus = `Using ${toolName}...`;
+          }
+
+          if (newStatus) {
+            agentStatuses[index].status = newStatus;
+            // Trigger update
+            if (statusMessageId && this.options.onMessageUpdate) {
+               this.options.onMessageUpdate(statusMessageId, { content: renderStatus() });
+            }
+          }
+          
           const contentStr = typeof msg.content === 'string'
             ? msg.content
             : msg.content.map(c => c.type === 'text' ? c.text : '[Image]').join(' ');
@@ -610,12 +658,29 @@ Return key findings only. End with "✓ Done".`;
           ? result.content
           : result.content.map(c => c.type === 'text' ? c.text : '').join('');
 
+        // Update final status
+        agentStatuses[index].isRunning = false;
+        agentStatuses[index].result = resultContent;
+        agentStatuses[index].status = 'Done';
+        
+        if (statusMessageId && this.options.onMessageUpdate) {
+           this.options.onMessageUpdate(statusMessageId, { content: renderStatus() });
+        }
+
         return {
           context,
           success: true,
           result: resultContent
         };
       } catch (error: any) {
+        agentStatuses[index].isRunning = false;
+        agentStatuses[index].status = 'Failed';
+        agentStatuses[index].result = `Error: ${error.message}`;
+        
+        if (statusMessageId && this.options.onMessageUpdate) {
+           this.options.onMessageUpdate(statusMessageId, { content: renderStatus() });
+        }
+        
         return {
           context,
           success: false,
@@ -651,14 +716,17 @@ Return key findings only. End with "✓ Done".`;
     // 3. Overall validation (Footer)
     summary += `---\n\n*Parallel execution complete: ${successfulResults.length}/${contexts.length} sources succeeded.*`;
 
-    const finalMessage: LLMMessage = {
-      role: 'assistant',
-      content: summary
+    // Update the status message one last time with the FINAL result
+    // effectively replacing the progress view with the result view
+    if (statusMessageId && this.options.onMessageUpdate) {
+        this.options.onMessageUpdate(statusMessageId, { content: summary });
+    }
+    
+    return {
+       role: 'assistant',
+       content: summary,
     };
-    this.addMessage(finalMessage);
-    this.options.onMessage?.(finalMessage); // Forward to UI
 
-    return finalMessage;
   }
 
   /**
