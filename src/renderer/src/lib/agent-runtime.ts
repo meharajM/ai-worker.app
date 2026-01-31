@@ -142,66 +142,8 @@ export class AgentRuntime {
         throw new Error("Aborted by user");
       }
 
-      // PROGRESSIVE DELEGATION: After 5 iterations, delegate to sub-agent
-      // This keeps main agent context window efficient
-      const DELEGATION_THRESHOLD = 5;
-      if (!this.options.isSubAgent && iterationCount >= DELEGATION_THRESHOLD) {
-        console.log(`[AgentRuntime] Progressive delegation triggered at iteration ${iterationCount + 1}`);
-
-        // Get original user request to prevent amnesia
-        const originalRequest = this.messages.find(m => m.role === 'user')?.content || 'Usage unknown';
-
-        // Get last status to provide continuity
-        const lastAssistantMsg = this.messages.filter(m => m.role === 'assistant').slice(-1)[0];
-        const lastStatus = typeof lastAssistantMsg?.content === 'string'
-          ? lastAssistantMsg.content.substring(0, 300)
-          : 'In progress';
-
-        // MINIMAL but CONTEXT-AWARE instruction
-        const delegationInstruction = `USER GOAL: ${originalRequest}
-LAST STATUS: ${lastStatus}
-
-Continue the task to completion. State persists (browser/db/file). Check state first. Return a concise summary.`;
-
-        const delegateMessage: LLMMessage = {
-          role: 'assistant',
-          content: `⚡ *Delegating remaining work to sub-agent for efficiency...*`
-        };
-        this.addMessage(delegateMessage);
-        this.options.onMessage?.(delegateMessage);
-
-        // Create sub-agent to continue
-        const subAgent = new AgentRuntime({
-          ...this.options,
-          isSubAgent: true,
-          taskCategory: this.taskCategory,
-          requireConfirmation: false,
-          onMessage: (msg) => {
-            // Forward sub-agent messages to main
-            this.options.onMessage?.(msg);
-          }
-        });
-
-        try {
-          const subResult = await subAgent.chat(delegationInstruction);
-          const resultContent = typeof subResult.content === 'string'
-            ? subResult.content
-            : subResult.content.map(c => c.type === 'text' ? c.text : '').join('');
-
-          // Store only the summary in main agent
-          const summaryMessage: LLMMessage = {
-            role: 'assistant',
-            content: `**Task Completed via Sub-Agent:**\n\n${resultContent.substring(0, 500)}${resultContent.length > 500 ? '...' : ''}`
-          };
-          this.addMessage(summaryMessage);
-          this.options.onMessage?.(summaryMessage);
-
-          return summaryMessage;
-        } catch (error: any) {
-          console.error('[AgentRuntime] Progressive delegation failed:', error);
-          // Continue with main agent if delegation fails
-        }
-      }
+      // Progressive Delegation removed due to infinite loop issues
+      // Other delegation methods (sequential, parallel) are still active
 
       // 1. DCP: Prune context
       this.messages = pruneContext(this.messages);

@@ -133,33 +133,7 @@ Use these prompts to verify the token efficiency, parallelism, and safety featur
 
 ---
 
-## 8. Progressive Delegation (Auto-Handoff After 5 Iterations)
-**Prompt:**
-> "Go to Flipkart, search for 'iPhone 15', filter by price under ₹80,000, sort by popularity, and tell me the top 3 options with prices"
-
-**Expected Behavior:**
-- Main agent starts execution
-- After 5 iterations, automatically delegates to sub-agent
-- Shows: "⚡ Delegating remaining work to sub-agent for efficiency..."
-- Sub-agent continues and completes
-- Main agent only stores summary
-
-**Console Logs to Check:**
-```
-[AgentRuntime] Iteration 1: Calling LLM...
-[AgentRuntime] Iteration 5: Calling LLM...
-[AgentRuntime] Progressive delegation triggered at iteration 6
-[AgentRuntime] Sub-agent created with FRESH context (0 messages)
-[LLM] Using lightweight sub-agent prompt (423 chars vs ~4000+ main)
-```
-
-**Token Savings:**
-- Without delegation: Iterations 6-15 would add ~10,000+ tokens to main context
-- With delegation: Main context stays at ~5 iterations, sub-agent handles rest
-
----
-
-## 9. Fallback to Direct Execution (Simple Tasks)
+## 8. Fallback to Direct Execution (Simple Tasks)
 **Prompt:**
 > "What's the capital of France?"
 
