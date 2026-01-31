@@ -510,6 +510,24 @@ export class MemoryService {
                     return { result: results }
                 }
 
+                case 'memory_update_entity': {
+                    // Check if updateEntity exists on backend (it should via UnifiedMemoryBackend)
+                    if (this.backend && 'updateEntity' in this.backend) {
+                        try {
+                            const updated = await this.backend.updateEntity(args.id, {
+                                description: args.description,
+                                observations: args.observation ? [args.observation] : undefined,
+                                metadata: args.metadata
+                            })
+                            return { result: this.convertToLegacyEntity(updated) }
+                        } catch (e) {
+                            return { result: null, error: `Update failed: ${e instanceof Error ? e.message : String(e)}` }
+                        }
+                    } else {
+                        return { result: null, error: 'Backend does not support entity updates' }
+                    }
+                }
+
                 default:
                     return {
                         result: null,
