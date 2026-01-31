@@ -181,29 +181,14 @@ export function analyzeTaskForDecomposition(
     };
   }
 
-  if (websites.length === 1 && estimatedActions >= 4) {
+  if (websites.length === 1 && estimatedActions >= 3) {
+    // Single website but many actions = sub-agent to save context
     return {
       type: 'single_context',
       contexts: websites,
       estimatedActions,
       shouldFork: true,
       forkReason: `Task involves ${estimatedActions} actions on ${websites[0]} - using sub-agent to protect context`,
-      forkStrategy: 'sequential'
-    };
-  }
-
-  // No website mentioned but many actions - still might benefit from orchestration
-  // But only if there's clear multi-step language AND 5+ actions (higher threshold for generic tasks)
-  const hasMultiStepLanguage = MULTI_STEP_INDICATORS.some(indicator =>
-    userRequest.toLowerCase().includes(indicator)
-  );
-  if (websites.length === 0 && estimatedActions >= 5 && hasMultiStepLanguage) {
-    return {
-      type: 'single_context',
-      contexts: ['current_page'],
-      estimatedActions,
-      shouldFork: true,
-      forkReason: `Complex multi-step task (~${estimatedActions} actions) - using sub-agent to protect context`,
       forkStrategy: 'sequential'
     };
   }
@@ -226,16 +211,32 @@ export function generateSubAgentInstruction(
   targetContext: string,
   allContexts: string[]
 ): string {
-  // MINIMAL instruction - just target and goal
-  if (allContexts.length > 1) {
-    // Parallel comparison - focus on one site
-    return `On ${targetContext}: ${originalRequest}
+  const isComparison = allContexts.length > 1;
 
-Return key findings only. End with "✓ Done".`;
+  if (isComparison) {
+    return `SUB-AGENT TASK: ${targetContext}
+
+OBJECTIVE: ${originalRequest}
+
+YOUR SCOPE: Focus ONLY on ${targetContext}. Other agents handle: ${allContexts.filter(c => c !== targetContext).join(', ')}
+
+OUTPUT REQUIREMENTS:
+- **Concise bullet points** (max 150 words)
+- Key findings only (prices, features, availability)
+- NO navigation steps, NO process description
+- End with: "✓ ${targetContext} complete"
+
+Example: "Amazon.com - Found Dell XPS 13: $1299, 16GB RAM, ships in 2 days. 4.5★ rating. ✓ Amazon complete"`;
   }
 
-  // Single context
-  return `${originalRequest}
+  return `SUB-AGENT TASK
 
-Return brief result. End with "✓ Done".`;
+OBJECTIVE: ${originalRequest}
+
+OUTPUT REQUIREMENTS:
+- Execute task step-by-step
+- Return **concise summary** (max 200 words)
+- Use <think> tags for internal reasoning
+- Focus on results, not process
+- End with: "✓ Complete"`;
 }
