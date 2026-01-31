@@ -594,7 +594,9 @@ Example BAD Response (too verbose):
       role: 'assistant',
       content: renderStatus()
     };
-    this.addMessage(planMessage);
+    
+    // Capture the ID of the status message so we can update it
+    const statusMessageId = this.addMessage(statusMessage) as string | undefined;
 
     // Create sub-agents for each context
     const subAgentPromises = contexts.map(async (context, index) => {
@@ -715,8 +717,5 @@ Example BAD Response (too verbose):
        role: 'assistant',
        content: summary,
     };
-    this.addMessage(finalMessage);
-
   }
 }
-
