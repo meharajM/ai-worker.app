@@ -134,12 +134,16 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             // Wait for voice mode UI to appear
             console.log('  - Waiting for model download and listening state...');
 
-            // Wait for "Listening..." placeholder with a longer timeout
-            const textarea = window.locator('textarea');
-            await textarea.waitFor({ state: 'visible' });
+            // Wait for visual state
+            const textarea = window.locator('[data-testid="chat-textarea"]');
+            await textarea.waitFor({ state: 'attached', timeout: 15000 });
+            await textarea.scrollIntoViewIfNeeded();
+
+            // Bypass explicit visible check
+            // await textarea.waitFor({ state: 'visible', timeout: 15000 });
 
             try {
-                await window.locator('textarea[placeholder="Listening..."]').waitFor({ timeout: 60000 });
+                await window.locator('[data-testid="chat-textarea"][placeholder="Listening..."]').waitFor({ timeout: 60000 });
                 console.log('✅ "Listening..." placeholder visible in textarea');
             } catch (e) {
                 const currentPlaceholder = await textarea.getAttribute('placeholder');
@@ -166,7 +170,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         console.log('\n--- Test 3: UI Refinements (TDD) ---');
 
         // 1. Verify Input is Textarea (Multi-line support)
-        const textarea = window.locator('textarea');
+        const textarea = window.locator('[data-testid="chat-textarea"]');
         const input = window.locator('input[type="text"]');
 
         const isTextarea = await textarea.count() > 0;

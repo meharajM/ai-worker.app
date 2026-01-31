@@ -8,7 +8,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({ onClearChat }: ChatViewProps) {
-    const { sessions, activeSessionId, isProcessing, removeMessage, clearMessages } = useChatStore()
+    const { sessions, activeSessionId, isProcessing, processingSessionId, removeMessage, clearMessages } = useChatStore()
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
     const activeSession = sessions.find(s => s.id === activeSessionId)
@@ -72,8 +72,8 @@ export function ChatView({ onClearChat }: ChatViewProps) {
                     ))
                 )}
 
-                {/* Processing indicator */}
-                {isProcessing && (
+                {/* Processing indicator - Hide if last message is a dynamic status update */}
+                {isProcessing && processingSessionId === activeSessionId && !messages[messages.length - 1]?.content.includes('Parallel Execution') && (
                     <div className="flex gap-3 justify-start">
                         <div className="w-8 h-8 rounded-lg bg-[#00a896] flex items-center justify-center flex-shrink-0">
                             <Bot size={18} className="text-white" />

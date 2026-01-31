@@ -24,7 +24,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
     // Check for agent plan in tool calls (New Method)
     const planToolCall = message.toolCalls?.find(tc => tc.name === 'create_execution_plan');
     const toolPlanData = planToolCall ? parseAgentPlan(planToolCall.arguments) : null;
-    
+
     const agentPlan = toolPlanData;
 
     const visibleToolCalls = message.toolCalls?.filter(tc => tc.name !== 'create_execution_plan');
@@ -59,10 +59,97 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                     {/* Render Agent Plan if present */}
                     {agentPlan && <AgentPlan plan={agentPlan} />}
 
-                    {/* Render Message Content */}
-                    {message.content && (
-                        <FormattedText content={message.content} />
-                    )}
+                    {/* Render Thinking Block (Devin/o1 Style) */}
+                    {(() => {
+                        if (!message.content) return null;
+
+                        // Check for complete block
+                        let thinkMatch = message.content.match(/<think>([\s\S]*?)<\/think>/);
+                        let thinking = thinkMatch ? thinkMatch[1].trim() : null;
+                        let isComplete = !!thinkMatch;
+
+                        // Check for incomplete/streaming block (only if at start)
+                        // This handles the "Thinking..." state while the model is outputting the thoughts
+                        if (!thinking && message.content.trim().startsWith('<think>')) {
+                            thinking = message.content.replace('<think>', '').trim();
+                            isComplete = false;
+                        }
+
+                        // If we have thinking content, render it
+                        if (thinking) {
+                            return (
+                                <details className="mb-3 group" open={!isComplete}>
+                                    <summary className="text-[10px] text-[#00a896] cursor-pointer hover:text-[#4fd1c5] transition-colors list-none flex items-center gap-1.5 font-medium select-none">
+                                        <div className={`w-1 h-3 rounded-full ${isComplete ? 'bg-[#00a896]' : 'bg-yellow-400 animate-pulse'}`} />
+                                        <span>{isComplete ? 'Thinking Process' : 'Thinking...'}</span>
+                                        <ChevronRight size={10} className="group-open:rotate-90 transition-transform text-white/20" />
+                                    </summary>
+                                    <div className="mt-2 text-[11px] leading-relaxed text-white/60 bg-black/20 rounded-md p-3 border border-white/5 font-mono shadow-inner whitespace-pre-wrap">
+                                        {thinking}
+                                    </div>
+                                </details>
+                            );
+                        }
+                        return null;
+                    })()}
+
+                    {/* Render Message Content (cleaned of thinking and unwrapped reasoning) */}
+                    {message.content && (() => {
+                        // Step 1: Remove properly wrapped thinking
+                        let cleanedContent = message.content
+                            .replace(/<think>[\s\S]*?(<\/think>|$)/g, '')
+                            .trim();
+
+                        // Step 2: Detect leaked reasoning patterns (outside <think> tags)
+                        const leakedReasoningPatterns = [
+                            /^,?\s*(?:the user|let me|since this|looking at|wait,?\s+the|I (?:need|should|will|don't|can))/i,
+                            /^(?:Therefore|Thus|So),?\s+(?:the\s+)?(?:response|answer)\s+should/i,
+                            /^(?:Yep|No need|Okay so)/i,
+                            /^(?:Hmm|Well|Alright),?\s+(?:the user|let me|I should)/i,
+                        ];
+
+                        const hasLeakedReasoning = leakedReasoningPatterns.some(p => p.test(cleanedContent));
+
+                        if (hasLeakedReasoning) {
+                            // Try to extract the actual response from the end
+                            // Look for quoted content or content after common conclusion markers
+                            const extractPatterns = [
+                                /["""]([^"""]+)["""]\.?\s*$/,  // Quoted response at end
+                                /(?:should be|responds with|the answer is)[:\s]+[""']?([^""'\n]+)[""']?\s*$/i,
+                                /(?:So|Therefore)[,:\s]+([A-Z][^.!?]*[.!?])\s*$/,  // Sentence after So/Therefore
+                            ];
+
+                            for (const pattern of extractPatterns) {
+                                const match = cleanedContent.match(pattern);
+                                if (match && match[1] && match[1].trim().length > 3) {
+                                    cleanedContent = match[1].trim();
+                                    break;
+                                }
+                            }
+
+                            // If still starts with meta, try last sentence as fallback
+                            if (leakedReasoningPatterns.some(p => p.test(cleanedContent))) {
+                                const sentences = cleanedContent.match(/[^.!?]+[.!?]+/g) || [];
+                                const lastSentence = sentences[sentences.length - 1]?.trim();
+                                if (lastSentence && !leakedReasoningPatterns.some(p => p.test(lastSentence)) && lastSentence.length > 10) {
+                                    cleanedContent = lastSentence;
+                                } else {
+                                    // Can't salvage - show thinking indicator
+                                    return <div className="text-white/40 text-xs italic">Thinking...</div>;
+                                }
+                            }
+                        }
+
+                        // Step 3: Strip leading comma (common artifact)
+                        cleanedContent = cleanedContent.replace(/^,\s*/, '');
+
+                        // Step 4: Hide if too short (likely broken)
+                        if (cleanedContent.length < 5) {
+                            return null;
+                        }
+
+                        return <FormattedText content={cleanedContent} />;
+                    })()}
 
                     {/* Tool calls display - Grouped Action Steps (Checklist Style) */}
                     {visibleToolCalls && visibleToolCalls.length > 0 && (
@@ -80,7 +167,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                                     else if (tool.name.startsWith('fs_') || tool.name.startsWith('file_')) agentName = 'FilesystemAgent';
                                     else if (tool.name.startsWith('mcp_')) agentName = 'MCPAgent';
                                     else if (tool.name === 'create_execution_plan') agentName = 'PlannerAgent';
-                                    
+
                                     if (!acc[agentName]) acc[agentName] = [];
                                     acc[agentName].push(tool);
                                     return acc;
@@ -108,20 +195,21 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                                                     <div className="space-y-1">
                                                         {tools.map((tool) => {
                                                             // Format Description
-                                                            let description = `Executing ${tool.name}`;
+                                                            let description = `Using ${tool.name}`;
                                                             try {
                                                                 const args = typeof tool.arguments === 'string' ? JSON.parse(tool.arguments) : tool.arguments;
-                                                                if (tool.name.includes('navigate') && args.url) description = `Navigating to ${args.url}`;
+                                                                if (tool.name.includes('navigate') && args.url) description = `Visiting ${new URL(args.url).hostname}`;
                                                                 else if (tool.name.includes('type') && args.text) description = `Typing "${args.text}"`;
-                                                                else if (tool.name.includes('click') && args.selector) description = `Clicking element ${args.selector}`;
+                                                                else if (tool.name.includes('click')) description = `Clicking item`;
                                                                 else if (tool.name.includes('search') && args.query) description = `Searching for "${args.query}"`;
-                                                                else if (tool.name.includes('screenshot')) description = `Taking a screenshot`;
-                                                                else if (tool.name.includes('delegate')) description = `Delegating to sub-task`;
+                                                                else if (tool.name.includes('screenshot')) description = `Capturing page view`;
+                                                                else if (tool.name.includes('delegate')) description = `Asking specialist agent`;
+                                                                else if (tool.name.includes('plan')) description = `Creating work plan`;
                                                             } catch (e) { /* ignore parse error */ }
 
-                                                            const isError = tool.result?.startsWith('Error:') || 
-                                                                           tool.result?.toLowerCase().includes('"iserror":true') ||
-                                                                           tool.result?.toLowerCase().includes('"status":"error"');
+                                                            const isError = tool.result?.startsWith('Error:') ||
+                                                                tool.result?.toLowerCase().includes('"iserror":true') ||
+                                                                tool.result?.toLowerCase().includes('"status":"error"');
                                                             const isDone = !!tool.result;
 
                                                             return (

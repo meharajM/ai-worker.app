@@ -18,12 +18,12 @@ import {
 } from "./webllm";
 import { CREATE_PLAN_TOOL } from "./plan_manager";
 import { EXECUTION_PLAN_SCHEMA } from "./agent-protocol";
-import { 
-  LLMMessage, 
-  LLMTool, 
-  ServerInfo, 
-  LLMResponse, 
-  LLMProvider, 
+import {
+  LLMMessage,
+  LLMTool,
+  ServerInfo,
+  LLMResponse,
+  LLMProvider,
   LLMSettings,
   LLMContentPart
 } from "./types";
@@ -676,9 +676,9 @@ async function callBrowserLLM(
     const response = await chatWithWebLLM(
       messages
         .filter(m => m.role !== 'tool')
-        .map(m => ({ 
-          role: m.role as 'user' | 'assistant' | 'system', 
-          content: extractTextForLegacyProviders(m.content) 
+        .map(m => ({
+          role: m.role as 'user' | 'assistant' | 'system',
+          content: extractTextForLegacyProviders(m.content)
         }))
       // No tools passed - avoids "model doesn't support tools" error
     );
@@ -718,8 +718,8 @@ function formatMessagesForOpenAI(messages: LLMMessage[]): any[] {
         type: 'function',
         function: {
           name: tc.function.name,
-          arguments: typeof tc.function.arguments === 'object' 
-            ? JSON.stringify(tc.function.arguments) 
+          arguments: typeof tc.function.arguments === 'object'
+            ? JSON.stringify(tc.function.arguments)
             : tc.function.arguments
         }
       }));
@@ -854,7 +854,7 @@ async function callOpenAI(
   }
 
   const data = await response.json();
-  
+
   if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
     if (data.error) {
       throw new Error(data.error.message || JSON.stringify(data.error));
@@ -868,17 +868,33 @@ async function callOpenAI(
   // If using JSON fallback, try to parse tool calls from content
   let toolCalls = choice.message?.tool_calls?.map(
     (tc: { id: string; function: { name: string; arguments: string } }) => {
-      let args = {};
-      try {
-        args = JSON.parse(tc.function.arguments);
-      } catch (e) {
-        console.warn(`Failed to parse tool arguments for ${tc.function.name}:`, tc.function.arguments);
-        args = { _parse_error: "Invalid JSON arguments from LLM" };
+      let args: any = {};
+
+      // Handle null, undefined, or empty string arguments
+      if (!tc.function.arguments || tc.function.arguments === 'null' || tc.function.arguments === 'undefined') {
+        console.warn(`[LLM] Tool call "${tc.function.name}" has null/empty arguments. Using empty object.`);
+        args = {};
+      } else {
+        try {
+          const parsed = JSON.parse(tc.function.arguments);
+          // JSON.parse(null) returns null, so we need to check the result
+          args = parsed !== null && typeof parsed === 'object' ? parsed : {};
+        } catch (e) {
+          console.warn(`[LLM] Failed to parse tool arguments for "${tc.function.name}":`, tc.function.arguments);
+          args = { _parse_error: "Invalid JSON arguments from LLM" };
+        }
       }
+
+      console.log(`[LLM] Native Tool Call Identified: ${tc.function.name}`, {
+        tool: tc.function.name,
+        arguments: args,
+        raw: tc.function.arguments
+      });
+
       return {
         id: tc.id,
         name: tc.function.name,
-        arguments: ensureRecord(safeParseJSON(tc.function.arguments)),
+        arguments: ensureRecord(args), // Use parsed args
       };
     }
   );
@@ -886,10 +902,13 @@ async function callOpenAI(
   // If no native tool calls, try to parse from content (Self-Healing)
   if (!toolCalls || toolCalls.length === 0) {
     if (useJsonFallback && content) {
-       // Legacy JSON fallback
-       toolCalls = parseToolCallsFromJson(content);
-    } 
-    
+      console.log('[LLM] No native tool calls found. Attempting to parse JSON from content...');
+      toolCalls = parseToolCallsFromJson(content);
+      if (toolCalls && toolCalls.length > 0) {
+        console.log(`[LLM] Successfully recovered ${toolCalls.length} tool calls from content body.`);
+      }
+    }
+
     // Check for XML Plan (Legacy/Model Hallucination Fallback)
     else if (content.includes('<agent_plan>')) {
       // ... existing XML logic ...
@@ -928,24 +947,32 @@ function parseToolCallsFromJson(
     const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
-      
+
       // Standard Format: { "tool_calls": [...] }
       if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
+        console.log('[LLM] Identified Standard JSON Tool Call Format');
         return parsed.tool_calls.map(
           (
             tc: { name: string; arguments: Record<string, unknown> },
             idx: number
-          ) => ({
-            id: `json_call_${Date.now()}_${idx}`,
-            name: tc.name,
-            arguments: ensureRecord(tc.arguments),
-          })
+          ) => {
+            console.log(`[LLM] JSON Recovered Call: ${tc.name}`, tc.arguments);
+            return {
+              id: `json_call_${Date.now()}_${idx}`,
+              name: tc.name,
+              arguments: ensureRecord(tc.arguments),
+            };
+          }
         );
       }
-      
+
       // Alternate Format (Common in some models): { "tool": "name", "params": {...} }
       if (parsed.tool && typeof parsed.tool === 'string') {
-        const params = parsed.params || parsed.parameters || parsed.arguments || {};
+        console.log('[LLM] Identified Alternate JSON Tool Call Format:', parsed.tool);
+        // Normalize parameters: some models use params, parameters, arguments, or even 'args'
+        const params = parsed.params || parsed.parameters || parsed.arguments || parsed.args || {};
+        console.log(`[LLM] Normalized parameters for "${parsed.tool}":`, params);
+
         return [{
           id: `json_call_${Date.now()}`,
           name: parsed.tool,
@@ -964,7 +991,8 @@ function parseToolCallsFromJson(
 function buildSystemPrompt(
   tools?: LLMTool[],
   servers?: ServerInfo[],
-  useJsonFallback = false
+  useJsonFallback = false,
+  dynamicRules?: string // New dynamic injection point
 ): string {
   const toolCount = tools?.length || 0;
   const serverCount = servers?.length || 0;
@@ -999,40 +1027,30 @@ function buildSystemPrompt(
           })`
           : "";
 
-        const server = servers?.find(s => s.toolCount > 0 && tools?.some(t => t.name.startsWith(tool.name.split('_')[0]))); 
+        const server = servers?.find(s => s.toolCount > 0 && tools?.some(t => t.name.startsWith(tool.name.split('_')[0])));
         // Heuristic: check if we can query mcp.ts directly or pass server mapping. 
         // Since we don't have direct mapping here, we can rely on grouping by server context below or just hint.
         // Better: The 'servers' list passed to this function usually contains aggregate info. 
         // Let's simplified: The "Connected MCP Servers" section below handles the grouping.
         // We will just leave the tool description as is, but emphasize the Agent Roles above.
 
-        return `${idx + 1}. **${tool.name}**${paramHint}\n   ${tool.description}`;
+        return `${idx + 1}. **${tool.name}**${paramHint}: ${tool.description}`;
       })
-      .join("\n\n") || "";
+      .join("\n\n") || "No tools available.";
 
   // Group tools by server if we have server info (for context)
   let serverContext = "";
-  if (serverCount > 0 && servers) {
-    const serverList = servers
-      .map((s) => {
-        if (s.isReasoningServer) {
-          return `${s.name} (reasoning server - provides step-by-step reasoning capabilities)`;
-        }
-        return `${s.name} (${s.toolCount} tool${s.toolCount !== 1 ? "s" : ""})`;
-      })
-      .join(", ");
+  if (servers && servers.length > 0) {
+    const reasoningNote = servers.some((s) => s.isReasoningServer)
+      ? `\n\n**Reasoning Servers**: ${servers
+        .filter((s) => s.isReasoningServer)
+        .map((s) => s.name)
+        .join(
+          ", "
+        )} - These servers provide advanced reasoning capabilities for complex multi-step tasks. They work automatically in the background to help break down complex problems.`
+      : "";
 
-    const reasoningServers = servers.filter((s) => s.isReasoningServer);
-    const reasoningNote =
-      reasoningServers.length > 0
-        ? `\n\n**Reasoning Servers Available**: ${reasoningServers
-          .map((s) => s.name)
-          .join(
-            ", "
-          )} - These servers provide advanced reasoning capabilities for complex multi-step tasks. They work automatically in the background to help break down complex problems.`
-        : "";
-
-    serverContext = `\n\n## Connected MCP Servers\nThese are Model Context Protocol (MCP) servers that provide the tools listed above:\n${serverList}${reasoningNote}\n\nWhen users ask about "MCP servers" or "what tools do you have", refer to the tools and servers listed above.`;
+    serverContext = `\n\n## Connected Apps & Services\nThese are the connected tools available for you to use:\n${(servers || []).map(s => `- **${s.name}**: ${s.description}`).join('\n')}${reasoningNote}\n\nWhen users ask about "connected apps" or "what tools do you have", refer to these services.`;
   }
 
   // Detect browser tools for special emphasis
@@ -1070,125 +1088,55 @@ Example: "search for nike shoes on Google" requires:
 DO NOT stop after just navigating - complete the entire workflow!`;
   }
 
-  return `You are a helpful AI assistant with access to ${toolCount} tool${toolCount !== 1 ? "s" : ""
-    } from ${serverCount} connected server${serverCount !== 1 ? "s" : ""
-    }. When users ask you to perform actions, you MUST use the appropriate tools instead of providing manual instructions.${jsonFormatNote}
+  return `You are AI-Worker, an autonomous agent with ${toolCount} tools for browser automation, web navigation, and task execution.${jsonFormatNote}
 
-# Communication Style
-- Use simple, friendly, everyday language — no technical jargon.
-- Never mention tool names, function calls, MCP servers, or internal terms in messages to the user.
-  Good: "Okay, I'll open Google and search for Nike shoes in UK size 8."
-  Bad:  "Calling navigate_tool with url=https://google.com"
-- When showing results (products, forms, tickets, etc.) → describe clearly + mention that a screenshot is included.
-- Keep questions short and use numbered lists for choices.
+# RESPONSE FORMAT (CRITICAL)
+Your responses have TWO parts:
+1. **Internal Processing** (hidden from user): Wrap in \`<think>...</think>\` tags
+2. **User-Facing Output** (shown to user): Everything OUTSIDE think tags
 
-# Available Tools
+FORMAT:
+\`\`\`
+<think>
+[Your analysis, planning, reasoning - user won't see this]
+</think>
+[Direct response to user OR tool call]
+\`\`\`
+
+RULES:
+- Simple tasks (greetings, questions): Skip <think>, respond directly
+- Complex tasks: Use <think> for planning, then act
+- NEVER put reasoning outside <think> tags
+- NEVER start response with: "The user...", "Let me...", "I should..."
+
+# AUTONOMOUS BEHAVIOR
+1. **Use Tools, Don't Explain**: If you need info, search for it. Don't say "I can't access..."
+2. **Google Fallback**: No direct tool for weather/time/news? → Navigate to Google and search
+3. **Act Immediately**: Don't ask permission unless action is irreversible (payments, deletions)
+4. **Self-Correct**: If something fails, try a different approach before asking user
+
+# AVAILABLE TOOLS
 ${toolsDescription}${serverContext}${browserCapabilityNote}
 
-# TASK PLANNING & DELEGATION
-For complex user requests (like "check nike shoes for size 6" or "find and summarize X"), you MUST first create a structured plan using the **create_execution_plan** tool.
+${dynamicRules ? `\n# TASK-SPECIFIC PROTOCOLS\n${dynamicRules}\n` : ''}
 
-**When to use create_execution_plan:**
-1. The request requires multiple steps (search, navigate, verify).
-2. The request involves browsing the web or using multiple tools.
-3. The request is ambiguous and needs to be broken down.
+# EXECUTION FLOW
+1. Understand the request
+2. Plan (in <think> if complex)
+3. Execute tool calls
+4. Verify results
+5. Report to user (outside <think>)
 
-**Agent Roles:**
-${servers && servers.length > 0
-      ? servers.map(s => `- **${s.name.charAt(0).toUpperCase() + s.name.slice(1)}Agent**: Specialized in operations using ${s.name} tools (${s.toolCount} tools available).`).join('\n')
-      : '- **SystemAgent**: General purpose agent.'
-    }
-- **System**: General reasoning and coordination.
+# ERROR HANDLING
+- Element not found? → Scroll or use get_state
+- Click failed? → Try JavaScript click via browser_run_code
+- Same error twice? → Stop, take screenshot, reassess
 
-# SUB-AGENT DECOMPOSITION (AUTO-FORK)
-The system automatically handles complex tasks by spawning sub-agents:
-
-**Automatic Rules (handled by runtime):**
-- Multiple websites mentioned → Parallel sub-agents (1 per site)
-- Single website with 3+ actions → Sub-agent to protect context
-
-**Your Role:**
-- For multi-website tasks: The system will auto-fork. Focus on combining results.
-- For complex single-site tasks: Use \`delegate_sub_task\` if you have 3+ sequential actions.
-- For simple tasks: Execute directly.
-
-# INTERACTIVE CLARIFICATION
-Before starting a task, you MUST analyze the user's prompt.
-1. **Research & Verify First**: If a prompt lacksdetail (e.g., "open router account"), DO NOT ask the user immediately. First, use \`browser_navigate\` to search Google (e.g., "open router account creation") to find the correct URL or service.
-2. **Ask ONLY if Necessary**: Only ask for clarification if research fails or the intent is truly ambiguous (e.g., "email John" with no context).
-3. **Suggest Alternatives**: If you identify a better way to achieve the goal, suggest it.
-
-# SEMANTIC MEMORY & CONTEXT AWARENESS
-You possess a long-term memory managed via \`memory_create_entity\`. You must actively distinguish between **Action Requests** and **Context/Information Sharing**.
-
-**Intent Analysis Protocol**:
-Before executing any tools, ask yourself: "Is the user asking me to DO something, or telling me something about THEMSELVES or the PROJECT?"
-
-1. **Context Sharing (PRIORITY: SAVE)**: If the user shares info like:
-   - "I prefer Chrome" (Preference)
-   - "We use TypeScript here" (Project Fact)
-   - "My API key is ..." (Secret - DO NOT SAVE, redact)
-   - "The deadline is Friday" (Constraint)
-   → **Action**: Call \`memory_create_entity\` immediately.
-   → **Reasoning**: This is permanent context, not a one-off task.
-
-2. **Action Request**: If the user asks:
-   - "Open Chrome" (Task)
-   - "Refactor this to TypeScript" (Task)
-   → **Action**: Use browser/coding tools.
-
-# CRITICAL RULES
-0. **CHECK FOR CONTEXT UPDATES FIRST**: Scan the prompt for new preferences, facts, or constraints. If found, save them to memory *before* or *parallel to* executing tasks.
-   - Example: "Use VS Code for this" -> Save entity "VS Code" (type: editor_preference) -> Then proceed with task.
-   - Example: "I like dark mode" -> Save entity "Dark Mode" (type: ui_preference).
-   **DO NOT** confuse "I prefer X" (Memory) with "Open X" (Action).
-
-1. **RESEARCH FIRST**: If you are unsure about a URL, specific product, or service, SEARCH FOR IT. Do not ask the user for URLs if you can find them.
-2. **PLAN SECOND**: If the task is complex and clear, your NEXT action MUST be to call 'create_execution_plan'. Do not textually describe the plan, use the tool.
-
-2. **USE TOOLS, DON'T EXPLAIN**: When a user asks you to DO something, use the appropriate tool.
-
-3. **AUTONOMOUS EXECUTION**: Execute tool calls immediately.
-
-4. **ITERATIVE EXECUTION**: Call tools in sequence.
-
-5. **CHAINED WORKFLOWS**:
-   - Call 'create_execution_plan' (if complex)
-   - Call the first tool
-   - Use result for next tool
-   - Repeat
-
-6. **E-COMMERCE & SHOPPING**: You can perform full shopping workflows. You have the tools to click 'Add to Cart', select sizes/options, and proceed to checkout. Do NOT claim these actions are unsupported; they are standard web interactions that your browser tools can handle perfectly.
-
-7. **SCREENSHOTS**: Whenever a browser task reaches an important visual state (search results, product listings, filters applied, form ready, confirmation page, ticket) → take a screenshot and include it in your response so the user can see exactly what you see.
-
-8. **CONFIRM WITH RESULTS**: Confirm actions with specific details.
-
-9. **HANDLE ERRORS - RECOVER SMARTLY**: If a tool fails:
-   - Do NOT blindly retry the same action.
-   - Take a screenshot to re-assess the page state.
-   - Try a different selector or approach (e.g., use Enter key instead of clicking).
-   - If 2 retries fail, explain the issue and ask the user for guidance.
-
-10. **VOICE-OPTIMIZED**: Keep responses concise and natural.
-
-# Response Pattern
-- **Complex Task**:
-  [Tool Call: create_execution_plan]
-  [Tool Call: browser_navigate ...]
-- **Memory Update / Context Sharing**:
-  [Tool Call: memory_create_entity]
-  "Got it, I'll keep that in mind."
-- **Simple Task**:
-  [Tool Call: ...]
-  "Done!"
-
-# FINAL CHECKLIST BEFORE REPLYING
-1. **Did the user share a preference/fact?** -> Call \`memory_create_entity\`!
-2. **Is it a complex task?** -> Call \`create_execution_plan\`!
-3. **Is it a simple action?** -> Call the specific tool!
-
-Remember: ACTION over CHAT. If you can save a memory, DO IT.`;
+# KEY REMINDERS
+- You HAVE browser tools. Never refuse by saying "I can't access..."
+- Complete the full workflow, don't stop after navigation
+- Be direct: respond naturally, don't narrate your thinking
+- Tools are your primary capability - USE THEM`;
 }
 
 // Main chat function - automatically selects best provider
@@ -1197,7 +1145,8 @@ export async function chat(
   tools?: LLMTool[],
   settings?: LLMSettings,
   servers?: ServerInfo[],
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  dynamicRules?: string // New optional param
 ): Promise<LLMResponse> {
   // Apply Dynamic Context Pruning (DCP)
   // This removes redundant tool outputs from history to save tokens
@@ -1250,12 +1199,12 @@ export async function chat(
   const systemMsgIndex = messagesWithSystem.findIndex(
     (m) => m.role === "system"
   );
-  
+
   // MERGE default tools with the new CREATE_PLAN_TOOL
   const allTools = [CREATE_PLAN_TOOL, ...(tools || [])];
-  
+
   // Re-build system prompt with current tools and correct fallback setting
-  const systemPrompt = buildSystemPrompt(allTools, servers, useJsonFallback);
+  const systemPrompt = buildSystemPrompt(allTools, servers, useJsonFallback, dynamicRules);
 
   if (systemMsgIndex >= 0) {
     // Replace existing system message to ensure it has current tools
@@ -1458,7 +1407,7 @@ export async function downloadBrowserModel(
 export function ensureRecord(input: any): Record<string, unknown> {
   if (input === null || input === undefined) return {};
   if (typeof input === 'object' && !Array.isArray(input)) return input as Record<string, unknown>;
-  
+
   if (typeof input === 'string') {
     const trimmed = input.trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -1472,7 +1421,7 @@ export function ensureRecord(input: any): Record<string, unknown> {
     }
     return { input: trimmed };
   }
-  
+
   return { value: input };
 }
 
@@ -1481,23 +1430,23 @@ export function safeParseJSON(input: string | any): any {
   if (input === null || input === undefined) return {};
   if (typeof input !== 'string') return input;
   if (!input || input.trim() === '') return {};
-  
+
   try {
     const trimmed = input.trim();
     // Quick path for pure JSON
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-        try {
-            return JSON.parse(trimmed);
-        } catch (e) { /* fall through to extraction */ }
+      try {
+        return JSON.parse(trimmed);
+      } catch (e) { /* fall through to extraction */ }
     }
-    
+
     // Find the first occurrence of { or [ and the last occurrence of } or ]
     const startObj = input.indexOf('{');
     const startArr = input.indexOf('[');
-    
+
     let start = -1;
     let end = -1;
-    
+
     if (startObj !== -1 && (startArr === -1 || startObj < startArr)) {
       start = startObj;
       end = input.lastIndexOf('}');
@@ -1505,12 +1454,12 @@ export function safeParseJSON(input: string | any): any {
       start = startArr;
       end = input.lastIndexOf(']');
     }
-    
+
     if (start !== -1 && end !== -1 && end > start) {
       const potentialJson = input.substring(start, end + 1);
       return JSON.parse(potentialJson);
     }
-    
+
     // If all else fails, return as-is
     return input;
   } catch (error) {

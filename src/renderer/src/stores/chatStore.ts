@@ -28,6 +28,7 @@ interface ChatState {
     sessions: ChatSession[]
     activeSessionId: string | null
     isProcessing: boolean
+    processingSessionId: string | null
     abortController: AbortController | null
     offlineSpeech: boolean
 
@@ -41,6 +42,7 @@ interface ChatState {
     // Message Actions (operate on active session)
     addMessage: (message: Omit<Message, 'id' | 'timestamp'>) => Message
     updateMessage: (id: string, updates: Partial<Message>) => void
+    updateSessionMessage: (sessionId: string, messageId: string, updates: Partial<Message>) => void
     removeMessage: (id: string) => void
     clearMessages: () => void
     setProcessing: (processing: boolean) => void
@@ -57,6 +59,7 @@ export const useChatStore = create<ChatState>()(
             sessions: [],
             activeSessionId: null,
             isProcessing: false,
+            processingSessionId: null,
             abortController: null,
 
             getActiveSession: () => {
@@ -177,6 +180,24 @@ export const useChatStore = create<ChatState>()(
                 })
             },
 
+            updateSessionMessage: (sessionId, messageId, updates) => {
+                set((state) => {
+                    return {
+                        sessions: state.sessions.map((s) =>
+                            s.id === sessionId
+                                ? {
+                                    ...s,
+                                    messages: s.messages.map((msg) =>
+                                        msg.id === messageId ? { ...msg, ...updates } : msg
+                                    ),
+                                    updatedAt: Date.now()
+                                }
+                                : s
+                        ),
+                    }
+                })
+            },
+
             removeMessage: (id) => {
                 set((state) => {
                     if (!state.activeSessionId) return state
@@ -210,10 +231,12 @@ export const useChatStore = create<ChatState>()(
             setProcessing: (processing) => {
                 if (processing) {
                     // Create new AbortController when starting processing
-                    set({ isProcessing: true, abortController: new AbortController() })
+                    // Capture active session ID
+                    const { activeSessionId } = get();
+                    set({ isProcessing: true, processingSessionId: activeSessionId, abortController: new AbortController() })
                 } else {
                     // Clear AbortController when done
-                    set({ isProcessing: false, abortController: null })
+                    set({ isProcessing: false, processingSessionId: null, abortController: null })
                 }
             },
 
