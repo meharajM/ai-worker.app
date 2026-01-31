@@ -181,8 +181,6 @@ export function analyzeTaskForDecomposition(
     };
   }
 
-  // Single website with 4+ actions = sequential sub-agent orchestration
-  // Threshold is 4 (not 3) to avoid over-triggering on simple queries
   if (websites.length === 1 && estimatedActions >= 4) {
     return {
       type: 'single_context',

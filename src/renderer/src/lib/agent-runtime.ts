@@ -631,23 +631,25 @@ Return key findings only. End with "✓ Done".`;
     const successfulResults = results.filter(r => r.success);
     const failedResults = results.filter(r => !r.success);
 
+    // Format the final output using a cleaner structure
     let summary = `## Results from ${contexts.length} sources\n\n`;
 
+    // 1. Successful results
     for (const result of successfulResults) {
-      summary += `### ${result.context}\n${result.result}\n\n`;
+      summary += `### ${result.context}\n${result.result.trim()}\n\n`;
     }
 
+    // 2. Failed results (if any)
     if (failedResults.length > 0) {
       summary += `### ⚠️ Failed Sources\n`;
       for (const result of failedResults) {
         summary += `- **${result.context}**: ${result.result}\n`;
       }
+      summary += `\n`;
     }
 
-    // Add comparison/summary if multiple successful results
-    if (successfulResults.length > 1) {
-      summary += `\n---\n\n*Parallel execution complete: ${successfulResults.length}/${contexts.length} sources succeeded.*`;
-    }
+    // 3. Overall validation (Footer)
+    summary += `---\n\n*Parallel execution complete: ${successfulResults.length}/${contexts.length} sources succeeded.*`;
 
     const finalMessage: LLMMessage = {
       role: 'assistant',
