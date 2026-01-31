@@ -33,7 +33,16 @@ export class AgentRuntime {
 
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
     this.options = options;
-    this.messages = [...initialHistory];
+
+    // CRITICAL: Sub-agents MUST start with empty context for token efficiency
+    if (options.isSubAgent) {
+      this.messages = []; // Force empty - never inherit history
+      console.log('[AgentRuntime] Sub-agent created with FRESH context (0 messages)');
+    } else {
+      this.messages = [...initialHistory];
+      console.log(`[AgentRuntime] Main agent created with ${this.messages.length} historical messages`);
+    }
+
     // Sub-agents get 10 iterations (enough for most tasks), main agents get 20
     this.maxIterations = options.isSubAgent ? 10 : 20;
 
@@ -105,16 +114,23 @@ export class AgentRuntime {
         return this.executeParallelSubAgents(finalPrompt, decomposition);
       }
 
-      // For single-context with 3+ actions, we let LLM decide via create_execution_plan
-      // but add a hint to the prompt
+      // For single-context with 3+ actions, trigger sequential sub-agent orchestration
       if (decomposition.shouldFork && decomposition.type === 'single_context') {
-        console.log(`[AgentRuntime] Complex single-context task: ${decomposition.estimatedActions} actions`);
-        // Continue with normal flow - the LLM will be instructed to use create_execution_plan
+        console.log(`[AgentRuntime] Complex single-context task: ${decomposition.estimatedActions} actions - using sequential sub-agents`);
+        return this.executeSequentialSubAgents(finalPrompt, decomposition);
       }
     }
 
-    const userMsg: LLMMessage = { role: "user", content: finalPrompt };
-    this.addMessage(userMsg);
+    // Add user message (only if not already in history - prevents duplicates)
+    const lastMessage = this.messages[this.messages.length - 1];
+    const alreadyHasMessage = lastMessage?.role === 'user' && lastMessage?.content === finalPrompt;
+
+    if (!alreadyHasMessage) {
+      const userMsg: LLMMessage = { role: "user", content: finalPrompt };
+      this.addMessage(userMsg);
+    } else {
+      console.log('[AgentRuntime] User message already in history, skipping duplicate add');
+    }
 
     let iterationCount = 0;
     let consecutiveErrors = 0; // Track consecutive tool failures
@@ -124,6 +140,67 @@ export class AgentRuntime {
     while (iterationCount < this.maxIterations) {
       if (this.options.signal?.aborted) {
         throw new Error("Aborted by user");
+      }
+
+      // PROGRESSIVE DELEGATION: After 5 iterations, delegate to sub-agent
+      // This keeps main agent context window efficient
+      const DELEGATION_THRESHOLD = 5;
+      if (!this.options.isSubAgent && iterationCount >= DELEGATION_THRESHOLD) {
+        console.log(`[AgentRuntime] Progressive delegation triggered at iteration ${iterationCount + 1}`);
+
+        // Get original user request to prevent amnesia
+        const originalRequest = this.messages.find(m => m.role === 'user')?.content || 'Usage unknown';
+
+        // Get last status to provide continuity
+        const lastAssistantMsg = this.messages.filter(m => m.role === 'assistant').slice(-1)[0];
+        const lastStatus = typeof lastAssistantMsg?.content === 'string'
+          ? lastAssistantMsg.content.substring(0, 300)
+          : 'In progress';
+
+        // MINIMAL but CONTEXT-AWARE instruction
+        const delegationInstruction = `USER GOAL: ${originalRequest}
+LAST STATUS: ${lastStatus}
+
+Continue the task to completion. State persists (browser/db/file). Check state first. Return a concise summary.`;
+
+        const delegateMessage: LLMMessage = {
+          role: 'assistant',
+          content: `⚡ *Delegating remaining work to sub-agent for efficiency...*`
+        };
+        this.addMessage(delegateMessage);
+        this.options.onMessage?.(delegateMessage);
+
+        // Create sub-agent to continue
+        const subAgent = new AgentRuntime({
+          ...this.options,
+          isSubAgent: true,
+          taskCategory: this.taskCategory,
+          requireConfirmation: false,
+          onMessage: (msg) => {
+            // Forward sub-agent messages to main
+            this.options.onMessage?.(msg);
+          }
+        });
+
+        try {
+          const subResult = await subAgent.chat(delegationInstruction);
+          const resultContent = typeof subResult.content === 'string'
+            ? subResult.content
+            : subResult.content.map(c => c.type === 'text' ? c.text : '').join('');
+
+          // Store only the summary in main agent
+          const summaryMessage: LLMMessage = {
+            role: 'assistant',
+            content: `**Task Completed via Sub-Agent:**\n\n${resultContent.substring(0, 500)}${resultContent.length > 500 ? '...' : ''}`
+          };
+          this.addMessage(summaryMessage);
+          this.options.onMessage?.(summaryMessage);
+
+          return summaryMessage;
+        } catch (error: any) {
+          console.error('[AgentRuntime] Progressive delegation failed:', error);
+          // Continue with main agent if delegation fails
+        }
       }
 
       // 1. DCP: Prune context
@@ -209,6 +286,10 @@ export class AgentRuntime {
         dynamicRules = getPromptForCategory(this.taskCategory, this.options.isSubAgent);
         // console.log(`[AgentRuntime] Injecting dynamic rules for: ${this.taskCategory}`);
       }
+      // Sub-agent context verification
+      if (this.options.isSubAgent) {
+        console.log(`[SubAgent] LLM call with ${contextMessages.length} messages (should be 1-3 for fresh sub-agent)`);
+      }
 
       try {
         response = await chat(
@@ -217,7 +298,8 @@ export class AgentRuntime {
           this.options.settings,
           serverInfo.length > 0 ? serverInfo : undefined,
           this.options.signal,
-          dynamicRules
+          dynamicRules,
+          this.options.isSubAgent // NEW: Enable lightweight prompt for sub-agents
         );
       } catch (error) {
         console.error("[AgentRuntime] LLM Error:", error);
@@ -439,25 +521,10 @@ Then extract the answer from the results. DO NOT refuse again.`
           });
 
           try {
-            // Build focused prompt with clear success criteria
-            const prompt = `You are a sub-agent optimized for token efficiency. Complete this task and return ONLY a concise summary.
+            // MINIMAL prompt - just instruction and context
+            const prompt = `${instruction}${context ? `\n\nContext: ${context}` : ''}
 
-TASK: ${instruction}
-${context ? `\nCONTEXT DATA: ${context}` : ''}
-
-CRITICAL RULES:
-- Execute the task using available tools
-- **Return ONLY the key findings** - no explanations, no process description
-- **Maximum 200 words** in your final response
-- Use <think> tags for reasoning (hidden from main agent)
-- Format: Short bullet points or 2-3 sentences MAX
-- When complete, end with: "✓ Complete"
-
-Example Good Response:
-"Found 3 laptops on Amazon: Dell XPS ($1200), HP Spectre ($1400), Lenovo ($999). XPS has best reviews. ✓ Complete"
-
-Example BAD Response (too verbose):
-"I searched Amazon and found several laptops. First I navigated to... then I clicked... The results show that..."`;
+Return key findings only. End with "✓ Done".`;
 
             const finalRes = await subAgent.chat(prompt);
             const finalContent = typeof finalRes.content === 'string'
@@ -574,6 +641,7 @@ Example BAD Response (too verbose):
       content: `📋 **Task Analysis**: This task involves ${contexts.length} websites. I'll work on them in parallel:\n\n${contexts.map((ctx, i) => `${i + 1}. **${ctx}**`).join('\n')}\n\nStarting parallel execution...`
     };
     this.addMessage(planMessage);
+    this.options.onMessage?.(planMessage); // Forward to UI
 
     // Create sub-agents for each context
     const subAgentPromises = contexts.map(async (context) => {
@@ -644,8 +712,177 @@ Example BAD Response (too verbose):
       content: summary
     };
     this.addMessage(finalMessage);
+    this.options.onMessage?.(finalMessage); // Forward to UI
 
     return finalMessage;
+  }
+
+  /**
+   * Execute sub-agents sequentially for complex single-context tasks.
+   * Creates a plan and delegates each step to a fresh sub-agent.
+   */
+  private async executeSequentialSubAgents(
+    originalRequest: string,
+    decomposition: TaskDecomposition
+  ): Promise<LLMMessage> {
+    const { contexts, estimatedActions } = decomposition;
+    const targetContext = contexts[0] || 'task';
+
+    // Notify user about auto-orchestration
+    const planMessage: LLMMessage = {
+      role: 'assistant',
+      content: `📋 **Auto-Orchestration**: This task requires ~${estimatedActions} steps. I'll break it down and execute each part efficiently to preserve context.\n\nAnalyzing...`
+    };
+    this.addMessage(planMessage);
+    this.options.onMessage?.(planMessage); // Forward to UI
+
+    // Step 1: Create high-level plan using LLM
+    console.log('[AgentRuntime] Generating execution plan...');
+    const planPrompt = `Analyze this task and break it into 3-5 concrete steps:
+
+TASK: ${originalRequest}
+
+Create a step-by-step plan. Each step should be:
+- Actionable (can be completed by a sub-agent)
+- Self-contained (doesn't need full conversation history)
+- Sequential (builds on previous steps)
+
+Format as JSON:
+{
+  "steps": [
+    {"id": 1, "description": "Step 1 description"},
+    {"id": 2, "description": "Step 2 description"}
+  ]
+}`;
+
+    try {
+      const planResponse = await chat(
+        [{ role: 'user', content: planPrompt }],
+        [], // tools
+        this.options.settings,
+        [], // servers
+        this.options.signal
+      );
+
+      let planData: { steps: Array<{ id: number; description: string }> } | null = null;
+      try {
+        const jsonMatch = planResponse.content.match(/\{[\s\S]*"steps"[\s\S]*\}/);
+        if (jsonMatch) {
+          planData = JSON.parse(jsonMatch[0]);
+        }
+      } catch {
+        // JSON parse failed, will use fallback
+      }
+
+      // Fallback if no valid plan
+      if (!planData || !planData.steps || planData.steps.length === 0) {
+        planData = {
+          steps: [
+            { id: 1, description: "Clarify task requirements and gather details" },
+            { id: 2, description: `Navigate to ${targetContext} and complete the task` },
+            { id: 3, description: "Verify and summarize results" }
+          ]
+        };
+      }
+
+      const steps = planData.steps;
+      console.log(`[AgentRuntime] Plan created with ${steps.length} steps`);
+
+      // Display plan to user
+      const planDisplayMsg: LLMMessage = {
+        role: 'assistant',
+        content: `## Execution Plan\n\n${steps.map((s) => `**Step ${s.id}**: ${s.description}`).join('\n')}\n\n---\n`
+      };
+      this.addMessage(planDisplayMsg);
+      this.options.onMessage?.(planDisplayMsg);
+
+      // Step 2: Execute each step via sub-agent
+      const results: Array<{ step: number; description: string; result: string }> = [];
+
+      for (const step of steps) {
+        // Check for abort before each step
+        if (this.options.signal?.aborted) {
+          console.log('[AgentRuntime] Sequential orchestration aborted by user');
+          throw new Error('Aborted by user');
+        }
+
+        console.log(`[AgentRuntime] Executing step ${step.id}: ${step.description}`);
+
+        // MINIMAL instruction - just the step + persistence awareness
+        const stateNote = step.id > 1
+          ? ' State persists from previous steps. Check current state first (e.g., get_state, cwd).'
+          : '';
+
+        const subAgentInstruction = `${step.description}${stateNote}
+
+Return brief result. End with "✓ Done".`;
+
+        const subAgent = new AgentRuntime({
+          ...this.options,
+          isSubAgent: true,
+          taskCategory: this.taskCategory,
+          requireConfirmation: false,
+          onMessage: (msg) => {
+            const contentStr = typeof msg.content === 'string'
+              ? msg.content
+              : msg.content.map(c => c.type === 'text' ? c.text : '[Image]').join(' ');
+            console.log(`[SubAgent:Step${step.id}] ${msg.role}: ${contentStr?.substring(0, 50)}...`);
+          }
+        });
+
+        try {
+          const stepResult = await subAgent.chat(subAgentInstruction);
+          const stepContent = typeof stepResult.content === 'string'
+            ? stepResult.content
+            : stepResult.content.map(c => c.type === 'text' ? c.text : '').join('');
+
+          results.push({
+            step: step.id,
+            description: step.description,
+            result: stepContent.trim()
+          });
+
+          // Show progress to user
+          const progressMessage: LLMMessage = {
+            role: 'assistant',
+            content: `✓ **Step ${step.id} completed**\n${stepContent.substring(0, 150)}${stepContent.length > 150 ? '...' : ''}`
+          };
+          this.addMessage(progressMessage);
+          this.options.onMessage?.(progressMessage);
+
+        } catch (error: any) {
+          console.error(`[AgentRuntime] Step ${step.id} failed:`, error);
+          results.push({
+            step: step.id,
+            description: step.description,
+            result: `Error: ${error.message}`
+          });
+        }
+      }
+
+      // Step 3: Compile final summary
+      let finalSummary = `## Task Complete\n\n`;
+      for (const result of results) {
+        finalSummary += `**${result.description}**\n${result.result}\n\n`;
+      }
+      finalSummary += `---\n\n*Sequential orchestration complete: ${results.length} steps executed.*`;
+
+      const finalMessage: LLMMessage = {
+        role: 'assistant',
+        content: finalSummary
+      };
+      this.addMessage(finalMessage);
+      this.options.onMessage?.(finalMessage);
+
+      return finalMessage;
+
+    } catch (error: any) {
+      console.error('[AgentRuntime] Sequential orchestration failed:', error);
+      return {
+        role: 'assistant',
+        content: `Failed to orchestrate task: ${error.message}. Falling back to direct execution.`
+      };
+    }
   }
 }
 
