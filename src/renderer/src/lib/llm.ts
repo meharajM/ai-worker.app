@@ -1122,7 +1122,9 @@ ${dynamicRules ? `\n# TASK-SPECIFIC PROTOCOLS\n${dynamicRules}\n` : ''}
 
 # EXECUTION FLOW
 0. **PRIORITY CHECK**: Is the user sharing a preference (e.g., "I use Chrome", "My name is...") or context? 
-   - YES: Use \`memory_create_entity\` or \`memory_add_observation\` IMMEDIATELY. save it and continue with plan.
+   - YES: **SEARCH FIRST**. Check if this entity already exists.
+   - IF EXISTS: Use \`memory_update_entity\` to modify it.
+   - IF NEW: Use \`memory_create_entity\`.
    - Reply naturally: "I'll keep that in mind" or "Got it."
    - DO NOT say "I have saved this to memory" unless explicitly asked.
 
