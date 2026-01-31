@@ -986,14 +986,50 @@ function parseToolCallsFromJson(
   }
   return undefined;
 }
+/**
+ * Build a compact system prompt for sub-agents (~70% smaller than main prompt)
+ * Includes essential rules (think tags, autonomous behavior) but removes verbose examples
+ */
+function buildSubAgentSystemPrompt(
+  tools?: LLMTool[],
+  dynamicRules?: string
+): string {
+  const toolCount = tools?.length || 0;
+
+  // Compact tool list - just names
+  const toolList = tools?.map(t => `- ${t.name}`).join('\n') || 'No tools';
+
+  return `You are a focused sub-agent executing a delegated task.
+
+TOOLS (${toolCount}):
+${toolList}
+
+# RESPONSE FORMAT
+Use <think>...</think> for reasoning (hidden). Put actions and final response outside <think> tags.
+
+# CORE RULES
+1. **Act, don't explain**: Use tools immediately, don't describe your plan
+2. **Be autonomous**: Don't ask permission, make decisions
+3. **Be concise**: Max 100 words in final response
+4. **Complete task**: Don't stop halfway
+5. **Error handling**: If tool fails, try alternative once, then report
+6. **End marker**: Finish with "✓ Done"
+${dynamicRules ? `\n# TASK-SPECIFIC\n${dynamicRules}` : ''}`;
+}
 
 // Build robust but token-efficient system prompt
 function buildSystemPrompt(
   tools?: LLMTool[],
   servers?: ServerInfo[],
   useJsonFallback = false,
-  dynamicRules?: string // New dynamic injection point
+  dynamicRules?: string,
+  isSubAgent = false // NEW: Flag for lightweight prompt
 ): string {
+  // Use compact prompt for sub-agents
+  if (isSubAgent) {
+    return buildSubAgentSystemPrompt(tools, dynamicRules);
+  }
+
   const toolCount = tools?.length || 0;
   const serverCount = servers?.length || 0;
 
@@ -1146,7 +1182,8 @@ export async function chat(
   settings?: LLMSettings,
   servers?: ServerInfo[],
   abortSignal?: AbortSignal,
-  dynamicRules?: string // New optional param
+  dynamicRules?: string,
+  isSubAgent = false // NEW: Use lightweight prompt for sub-agents
 ): Promise<LLMResponse> {
   // Apply Dynamic Context Pruning (DCP)
   // This removes redundant tool outputs from history to save tokens
@@ -1204,7 +1241,12 @@ export async function chat(
   const allTools = [CREATE_PLAN_TOOL, ...(tools || [])];
 
   // Re-build system prompt with current tools and correct fallback setting
-  const systemPrompt = buildSystemPrompt(allTools, servers, useJsonFallback, dynamicRules);
+  // Sub-agents get a lightweight prompt (~80% smaller)
+  const systemPrompt = buildSystemPrompt(allTools, servers, useJsonFallback, dynamicRules, isSubAgent);
+
+  if (isSubAgent) {
+    console.log(`[LLM] Using lightweight sub-agent prompt (${systemPrompt.length} chars vs ~4000+ main)`);
+  }
 
   if (systemMsgIndex >= 0) {
     // Replace existing system message to ensure it has current tools
