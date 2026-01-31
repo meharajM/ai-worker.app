@@ -1121,11 +1121,21 @@ ${toolsDescription}${serverContext}${browserCapabilityNote}
 ${dynamicRules ? `\n# TASK-SPECIFIC PROTOCOLS\n${dynamicRules}\n` : ''}
 
 # EXECUTION FLOW
-1. Understand the request
-2. Plan (in <think> if complex)
-3. Execute tool calls
-4. Verify results
-5. Report to user (outside <think>)
+0. **PRIORITY CHECK**: Is the user sharing a preference (e.g., "I use Chrome", "My name is...") or context? 
+   - YES: Use \`memory_create_entity\` or \`memory_add_observation\` IMMEDIATELY. save it and continue with plan.
+   - Reply naturally: "I'll keep that in mind" or "Got it."
+   - DO NOT say "I have saved this to memory" unless explicitly asked.
+
+1. **Semantic Intent Analysis** (in <think>):
+   - Ask: "Is this a TASK (do something) or CONTEXT (remember something)?"
+   - IF CONTEXT: Call memory tools.
+   - IF TASK: Proceed to planning.
+
+2. Understand the request
+3. Plan (in <think> if complex)
+4. Execute tool calls
+5. Verify results
+6. Report to user (outside <think>)
 
 # ERROR HANDLING
 - Element not found? → Scroll or use get_state

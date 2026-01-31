@@ -148,7 +148,17 @@ export class AgentRuntime {
         parameters: tool.inputSchema,
       }));
 
-      const allTools = [...llmTools, ...clientLlmTools];
+      // Deduplicate tools by name
+      const toolMap = new Map<string, LLMTool>();
+      const combinedTools = [...llmTools, ...clientLlmTools];
+      
+      for (const tool of combinedTools) {
+        if (!toolMap.has(tool.name)) {
+          toolMap.set(tool.name, tool);
+        }
+      }
+      
+      const allTools = Array.from(toolMap.values());
       
       const servers = getServers();
       const serverInfo: ServerInfo[] = servers
