@@ -105,7 +105,25 @@ export class AgentRuntime {
       }
     }
 
-    // PHASE 0.5: Auto-Fork Analysis (skip for sub-agents)
+    // PHASE 0.1: Check for Dynamic Handoff Confirmation
+    const lastMsg = this.messages[this.messages.length - 1];
+    const isConfirmingHandoff =
+      lastMsg?.role === 'assistant' &&
+      lastMsg?.content?.toString().includes('reached the maximum number of steps') &&
+      /^(yes|continue|proceed|go ahead|sure)$/i.test(userContent.trim());
+
+    if (isConfirmingHandoff) {
+      console.log('[AgentRuntime] User confirmed handoff. Triggering sub-agent...');
+      // Add user confirmation to history
+      this.addMessage({ role: 'user', content: userContent });
+
+      // Get the original goal (approximate by looking back)
+      // Usually the first user message, or we can try to find the "step 1" context
+      // Simplified: use the very first user message as the Goal
+      const originalGoal = this.messages.find(m => m.role === 'user')?.content?.toString() || "Complete the task";
+
+      return this.triggerSubAgentHandoff(originalGoal);
+    }
     if (!this.options.isSubAgent) {
       const decomposition = analyzeTaskForDecomposition(finalPrompt);
       console.log('[AgentRuntime] Task decomposition:', decomposition);
@@ -548,7 +566,145 @@ Return key findings only. End with "✓ Done".`;
       iterationCount++;
     }
 
-    throw new Error("Max iterations reached");
+    // If we reach here, we hit max iterations
+    if (!this.options.isSubAgent) {
+      console.log(`[AgentRuntime] Max iterations (${this.maxIterations}) reached. Checking if user wants to continue...`);
+
+      // Generate summary of progress so far
+      // Generate human-readable summary
+      const recentHistory = this.messages.slice(-15);
+      const summary = recentHistory
+        .map(m => {
+          if (m.role === 'assistant' && (m as any).tool_calls) {
+            const calls = (m as any).tool_calls.map((tc: any) => tc.function.name).join(', ');
+            return `• **Action**: ${calls}`;
+          }
+          if (m.role === 'tool') {
+            try {
+              const content = typeof m.content === 'string' ? JSON.parse(m.content) : m.content;
+
+              // Skip verbose extraction/interaction dumps
+              if (JSON.stringify(content).length > 500) {
+                return `  → *Result*: (Large output/DOM data captured)`;
+              }
+
+              if (content.error) {
+                return `  → ⚠️ **Error**: ${content.error.substring(0, 100)}...`;
+              }
+
+              if (content.content && Array.isArray(content.content)) {
+                const text = content.content.map((c: any) => c.text).join(' ');
+                return `  → *Result*: ${text.substring(0, 150)}...`;
+              }
+
+              const str = typeof m.content === 'string' ? m.content : JSON.stringify(content);
+              return `  → *Result*: ${str.substring(0, 150)}...`;
+            } catch (e) {
+              return `  → *Result*: ${(typeof m.content === 'string' ? m.content : '').substring(0, 100)}...`;
+            }
+          }
+          return null;
+        })
+        .filter(Boolean)
+        .join('\n');
+
+      const handoffMsg: LLMMessage = {
+        role: 'assistant',
+        content: `I've reached the maximum number of steps (${this.maxIterations}) for this agent to prevent infinite loops.
+        
+**Progress Summary:**
+${summary || 'Executed several actions.'}
+
+**Do you want me to continue?**
+Reply "yes" or "continue" to spin up a fresh sub-agent to finish the task.`
+      };
+
+      this.addMessage(handoffMsg);
+      return handoffMsg;
+    }
+
+    throw new Error(`Max iterations (${this.maxIterations}) reached. Task appears stuck or too complex.`);
+  }
+
+  /**
+   * Helper to continue with sub-agent based on history
+   */
+  private async triggerSubAgentHandoff(originalRequest: string): Promise<LLMMessage> {
+    // Recalculate steps roughly based on history length / 2
+    const stepsTaken = Math.floor(this.messages.length / 2);
+    return this.continueWithSubAgent(originalRequest, stepsTaken);
+  }
+
+  /**
+   * Dynamically hand off remaining work to a sub-agent
+   */
+  private async continueWithSubAgent(
+    originalRequest: string,
+    stepsTaken: number
+  ): Promise<LLMMessage> {
+    // Summarize what has been done
+    const recentHistory = this.messages.slice(-15); // Last 15 messages for better context
+    const summary = recentHistory
+      .filter(m => m.role === 'tool' || (m.role === 'assistant' && (m as any).tool_calls))
+      .map(m => {
+        if (m.role === 'assistant') {
+          return `Action: ${(m as any).tool_calls?.map((tc: any) => tc.function.name).join(', ')}`;
+        }
+        try {
+          const content = typeof m.content === 'string' ? JSON.parse(m.content) : m.content;
+          // Extract text content if possible
+          if (content.content && Array.isArray(content.content)) {
+            return `Result: ${content.content.map((c: any) => c.text).join(' ').substring(0, 150)}...`;
+          }
+          return `Result: ${(typeof m.content === 'string' ? m.content : JSON.stringify(content)).substring(0, 150)}...`;
+        } catch (e) {
+          return '';
+        }
+      })
+      .join('\n');
+
+    const instruction = `GOAL: ${originalRequest}
+
+CONTEXT: I have already taken ${stepsTaken} steps but haven't finished.
+Recent actions & results:
+${summary}
+
+INSTRUCTION: Continue the task from here. You have a fresh context window.
+Focus on the next logical steps to complete the goal.
+Use tools immediately. End with "✓ Done".`;
+
+    // Create a sequential sub-agent with the "continuation" instruction
+    const decomposition: TaskDecomposition = {
+      type: 'single_context',
+      contexts: ['continuation'],
+      estimatedActions: 10,
+      shouldFork: true,
+      forkReason: 'User confirmed continuation after max iterations'
+    };
+
+    // Let's manually spin up an AgentRuntime to be safe and direct
+    const subAgent = new AgentRuntime({
+      ...this.options,
+      isSubAgent: true,
+      taskCategory: this.taskCategory,
+      onMessage: (msg) => {
+        if (msg.role === 'assistant' && msg.content) {
+          // Pass through partial updates if needed
+        }
+      }
+    });
+
+    this.addMessage({
+      role: 'assistant',
+      content: `Starting sub-agent to continue the task...`
+    });
+
+    try {
+      const result = await subAgent.chat(instruction);
+      return result;
+    } catch (error) {
+      throw new Error(`Sub-agent failed to complete task: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private addMessage(msg: LLMMessage): string | void {
@@ -749,20 +905,23 @@ Return key findings only. End with "✓ Done".`;
 
     // Step 1: Create high-level plan using LLM
     console.log('[AgentRuntime] Generating execution plan...');
-    const planPrompt = `Analyze this task and break it into 3-5 concrete steps:
+    const planPrompt = `Break this task into 3-5 CONCRETE steps for an automation agent:
 
 TASK: ${originalRequest}
+TARGET: ${targetContext}
 
-Create a step-by-step plan. Each step should be:
-- Actionable (can be completed by a sub-agent)
-- Self-contained (doesn't need full conversation history)
-- Sequential (builds on previous steps)
+Rules:
+- Each step = 1-3 tool calls (could be browser, file, API, database, messaging, etc.)
+- Be specific: include URLs, filenames, endpoints, or identifiers when known
+- NO vague steps like "gather information" or "clarify requirements"
+- Each step should produce a clear, verifiable result
 
 Format as JSON:
 {
   "steps": [
-    {"id": 1, "description": "Step 1 description"},
-    {"id": 2, "description": "Step 2 description"}
+    {"id": 1, "description": "Navigate to example.com OR Open file X OR Call API Y"},
+    {"id": 2, "description": "Perform the main action"},
+    {"id": 3, "description": "Extract/save results"}
   ]
 }`;
 
@@ -789,9 +948,9 @@ Format as JSON:
       if (!planData || !planData.steps || planData.steps.length === 0) {
         planData = {
           steps: [
-            { id: 1, description: "Clarify task requirements and gather details" },
-            { id: 2, description: `Navigate to ${targetContext} and complete the task` },
-            { id: 3, description: "Verify and summarize results" }
+            { id: 1, description: `Navigate to ${targetContext === 'current_page' ? 'the target website' : targetContext}` },
+            { id: 2, description: `Complete the main action: ${originalRequest.substring(0, 80)}` },
+            { id: 3, description: "Verify results and extract relevant information" }
           ]
         };
       }
@@ -819,14 +978,19 @@ Format as JSON:
 
         console.log(`[AgentRuntime] Executing step ${step.id}: ${step.description}`);
 
-        // MINIMAL instruction - just the step + persistence awareness
-        const stateNote = step.id > 1
-          ? ' State persists from previous steps. Check current state first (e.g., get_state, cwd).'
+        // Build context from previous steps
+        const previousStepsSummary = results.length > 0
+          ? `\n\nCOMPLETED STEPS:\n${results.map(r => `- Step ${r.step}: ${r.result.substring(0, 100)}${r.result.length > 100 ? '...' : ''}`).join('\n')}`
           : '';
 
-        const subAgentInstruction = `${step.description}${stateNote}
+        // Include original goal + current step + context
+        const subAgentInstruction = `GOAL: ${originalRequest}
 
-Return brief result. End with "✓ Done".`;
+CURRENT STEP (${step.id}/${steps.length}): ${step.description}
+${previousStepsSummary}
+
+Execute this step using available tools. State persists from previous steps.
+End with "✓ Done" and a brief result.`;
 
         const subAgent = new AgentRuntime({
           ...this.options,
