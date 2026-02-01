@@ -23,20 +23,20 @@ export class MemoryTestRunner {
 
   async runTests(): Promise<{ results: string[], passed: boolean }> {
     this.log('Starting Memory Architecture Verification...')
-    
+
     try {
       this.log('Test 1: Initialization')
       await this.service.initialize()
       this.log('✅ Service initialized')
 
       const testId = Date.now().toString()
-      
+
       // 2. Privacy Check: PII
       this.log('Test 2: PII Detection')
       try {
         await this.service.createEntity(
           'Test PII',
-            'person',
+          'person',
           `Contact me at test${testId}@example.com for details.`
         )
         this.error('Failed to detect PII (Email)')
@@ -53,8 +53,8 @@ export class MemoryTestRunner {
       try {
         await this.service.createEntity(
           'Test Secret',
-            'api_key',
-          `My key is sk_live_${testId}12345`
+          'api_key',
+          `My key is sk_live_${testId}1234567890abcdef`
         )
         this.error('Failed to detect Secret')
       } catch (e: any) {
@@ -70,20 +70,20 @@ export class MemoryTestRunner {
         'test_data',
         'This is a safe test description.'
       )
-      
+
       if (created && created.name === entityName) {
-          this.log(`✅ Entity created: ${created.id}`)
+        this.log(`✅ Entity created: ${created.id}`)
       } else {
-          this.error('Entity creation failed')
+        this.error('Entity creation failed')
       }
 
       // 5. Search
       this.log('Test 5: Search')
       const searchResults = await this.service.search(entityName)
       if (searchResults.length > 0 && searchResults[0].name === entityName) {
-          this.log(`✅ Search found entity: ${searchResults[0].name}`)
+        this.log(`✅ Search found entity: ${searchResults[0].name}`)
       } else {
-          this.error(`Search failed to find ${entityName}`)
+        this.error(`Search failed to find ${entityName}`)
       }
 
       // 6. Metrics/Stats
@@ -99,8 +99,8 @@ export class MemoryTestRunner {
       // 7. Cleanup
       this.log('Test 7: Cleanup')
       if (created && backend) {
-          await backend.deleteEntity(created.id)
-          this.log('✅ Test entity deleted')
+        await backend.deleteEntity(created.id)
+        this.log('✅ Test entity deleted')
       }
 
     } catch (err: any) {

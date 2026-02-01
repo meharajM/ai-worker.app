@@ -67,20 +67,30 @@ ${contextWindow.map(m => `${m.role.toUpperCase()}: ${typeof m.content === 'strin
 
 WHAT TO EXTRACT:
 1. **Explicit Preferences**: Statements like "I like dark mode", "Use Python".
-2. **Selections & Favorites**: Specific choices made by the user (e.g., "I prefer the Casio F-91W", "Add X to cart").
-   - Save as Entity Type: "user_preference" or "product_choice".
-3. **Workflows & SOPs**: Repeated processes or rules (e.g., "Always run tests before commit").
-   - Save as Entity Type: "workflow" or "sop".
-4. **Implicit Intent**: User's implicit intent (e.g., "Create a Next.js app" -> Save entity "Next.js" with type "technology_preference").
-5. **Project Facts**: Facts about the current project (e.g., goals, stack, deadlines).
+   - Description Format: "Prefers dark mode UI." (NOT "User said they like dark mode").
+2. **Selections & Favorites**: Specific choices made by the user.
+   - Description Format: "Casio F-91W selected for purchase." (NOT "User wants to buy...").
+3. **Workflows & SOPs**: Repeated processes or rules.
+   - Example: "Always run tests before commit."
+4. **Project State**: Current goals, active constraints, or tech stack details.
+   - Example: "Project Budget: ₹1500." 
+
+DESCRIPTION WRITING RULES (STRICT):
+- **FORBIDDEN PHRASES**: Do NOT start descriptions with "User said", "User asked", "User requested", "User searched for".
+- **FACTTUAL TONE**: Write descriptions as **facts**. 
+  - BAD: "User requested a background memory extraction." (This is a meta-command, ignore it).
+  - BAD: "User searched for Casio watches."
+  - GOOD: "Project Focus: Finding a Casio watch under ₹1500."
+  - GOOD: "Preferred price range: Under ₹1000."
+- **IGNORE META-COMMANDS**: If the user says "Extract memories from this", satisfying that request is your *job* (the action), but the request *itself* is NOT a memory to be stored.
 
 ANTI-BLOAT RULES (CRITICAL):
-- **DO NOT** save ephemeral context (e.g., "User asked to fix a typo", "User said hello").
-- **DO NOT** save one-off instructions as permanent preferences unless clearly stated.
+- **DO NOT** save specific conversational turns or "User asked..." narratives.
+- **DO NOT** save meta-instructions (e.g., "clean up code", "review this PR") as permanent entities unless they define a long-term project protocol.
 - **DO NOT** create duplicate entities. ALWAYS search first and update if exists.
 - Only save **high-value, permanent** information useful in a *future* session.
 
-GOAL: Extract High-Value Implicit & Explicit Memories. Avoid Duplicates & Bloat. Then Stop.
+GOAL: Extract Facts & State. No Narratives. No Meta-Commentary.
             `;
 
             console.log('[MemoryReflector] Sending prompt to reflector agent...');

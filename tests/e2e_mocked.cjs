@@ -178,7 +178,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await window.locator('button:has(svg.lucide-send)').click({ force: true });
 
         console.log('  - Waiting for assistant response...');
-        await window.locator('div:has-text("thinking")').waitFor({ timeout: 60000 });
+        await window.locator('text="I am thinking about it."').waitFor({ timeout: 60000 });
         console.log('✅ Assistant response received');
 
         await window.waitForTimeout(3000);

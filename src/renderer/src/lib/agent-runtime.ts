@@ -32,12 +32,15 @@ export class AgentRuntime {
   private maxConsecutiveErrors = 3; // Bailout after 3 consecutive tool failures
   private executionPlan: { goal: string; steps: Array<{ id: number; description: string; status: string; result?: string }> } | null = null;
   private taskCategory?: string; // Store identified task category
+  private totalIterations = 0; // Track total iterations across all continuations
+  private readonly ABSOLUTE_MAX_ITERATIONS = 150; // Hard cap to prevent runaway costs
+  private toolCallHistory = new Set<string>(); // Track unique tool signatures for progress detection
 
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
     this.options = options;
     this.messages = [...initialHistory];
-    // Sub-agents get 10 iterations (enough for most tasks), main agents get 20
-    this.maxIterations = options.isSubAgent ? 10 : 20;
+    // Sub-agents get 15 iterations, main agents get 50 to allow for deep reasoning/thinking chains
+    this.maxIterations = options.isSubAgent ? 15 : 50;
 
     // Inherit category if passed
     if (options.taskCategory) {
@@ -125,7 +128,20 @@ export class AgentRuntime {
     const recentToolCalls: string[] = []; // Track recent tool signatures to detect loops
     const MAX_IDENTICAL_CALLS = 3; // Bail out if same tool called 3+ times in a row
 
+
     while (iterationCount < this.maxIterations) {
+      // Check absolute max first to prevent runaway continuations
+      this.totalIterations++;
+
+      if (this.totalIterations >= this.ABSOLUTE_MAX_ITERATIONS) {
+        const absoluteLimitMsg: LLMMessage = {
+          role: 'assistant',
+          content: `⚠️ **Absolute Limit Reached**\n\nI've performed **${this.ABSOLUTE_MAX_ITERATIONS} total steps** across all continuations. This task requires manual intervention or a different approach.\n\n**Recommendations:**\n• Break the task into smaller sub-tasks\n• Review if the goal is achievable with current tools\n• Check for errors or loops in recent steps`
+        };
+        this.addMessage(absoluteLimitMsg);
+        return absoluteLimitMsg;
+      }
+
       if (this.options.signal?.aborted) {
         throw new Error("Aborted by user");
       }
@@ -300,6 +316,9 @@ Then extract the answer from the results. DO NOT refuse again.`
         const toolSignature = `${call.name}:${JSON.stringify(call.arguments)}`;
         recentToolCalls.push(toolSignature);
 
+        // Track unique tool calls for progress monitoring
+        this.toolCallHistory.add(toolSignature);
+
         // Keep only last 5 calls for loop detection
         if (recentToolCalls.length > 5) {
           recentToolCalls.shift();
@@ -312,9 +331,43 @@ Then extract the answer from the results. DO NOT refuse again.`
 
           if (allSame) {
             console.error(`[AgentRuntime] Infinite loop detected: ${call.name} called ${MAX_IDENTICAL_CALLS}+ times with identical arguments`);
+
+            // Gather information from recent tool outputs
+            const recentResults = this.messages
+              .filter(m => m.role === 'tool')
+              .slice(-5) // Last 5 tool results
+              .map(m => {
+                const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+                // Truncate but keep useful info
+                return content.length > 500 ? content.substring(0, 500) + '...' : content;
+              });
+
+            // Count completed steps
+            const completedSteps = this.messages.filter(m => m.role === 'tool').length;
+            const uniqueToolsUsed = this.toolCallHistory.size;
+
             const loopMsg: LLMMessage = {
               role: 'assistant',
-              content: `I detected an infinite loop - I've been calling the same tool (${call.name}) repeatedly without making progress. This usually means the tool isn't working as expected or I need to try a different approach.\n\nLet me stop and ask: Is there a different way I should approach this task?`
+              content: `## ⚠️ I noticed I'm repeating the same action
+
+I've called \`${call.name}\` **${MAX_IDENTICAL_CALLS} times** with identical parameters, which usually means something isn't working as expected.
+
+---
+
+### 📊 Progress So Far
+- **${completedSteps} tool calls** executed
+- **${uniqueToolsUsed} unique actions** tried
+
+### 📋 Recent Results
+${recentResults.length > 0 ? recentResults.map((r, i) => `**Result ${i + 1}:**\n\`\`\`\n${r}\n\`\`\``).join('\n\n') : '_No results captured yet_'}
+
+---
+
+### 🔄 What would you like me to do?
+1. **"Try a different approach"** - I'll use alternative methods
+2. **"Continue anyway"** - I'll keep trying the current approach
+3. **"Stop here"** - I'll stop and you can take over manually
+4. Or give me specific instructions on what to try next`
             };
             this.addMessage(loopMsg);
             return loopMsg;
@@ -555,7 +608,37 @@ Example BAD Response (too verbose):
       iterationCount++;
     }
 
-    throw new Error("Max iterations reached");
+    // Summarize recent tool outputs for context
+    const recentToolOutputs = this.messages
+      .filter(m => m.role === 'tool')
+      .slice(-2) // Last 2 tool outputs
+      .map(m => {
+        const content = typeof m.content === 'string' ? m.content : '';
+        return content.substring(0, 300) + (content.length > 300 ? '...' : '');
+      })
+      .join('\n\n');
+
+    // Progress analysis
+    const uniqueToolsUsed = this.toolCallHistory.size;
+    const progressIndicator = uniqueToolsUsed > iterationCount * 0.5
+      ? '✅ Making diverse progress'
+      : '⚠️ Possibly stuck in a loop';
+
+    const limitReachedMsg: LLMMessage = {
+      role: 'assistant',
+      content: `I've worked for **${this.maxIterations} steps** but haven't finished yet.
+
+**Progress Status:** ${progressIndicator} (${uniqueToolsUsed} unique tool calls so far)
+
+**Latest Results:**
+${recentToolOutputs || 'Processing data...'}
+
+**Do you want me to continue?**
+• Reply **"Yes"** or **"Continue"** to proceed (I'll do another batch of work).
+• Reply **"Stop"** to end here.`
+    };
+    this.addMessage(limitReachedMsg);
+    return limitReachedMsg;
   }
 
   private addMessage(msg: LLMMessage): string | void {

@@ -71,21 +71,21 @@ const MEMORY_TOOLS: ToolSchema[] = [
         inputSchema: {
             type: 'object',
             properties: {
-                name: { 
-                    type: 'string', 
-                    description: 'Display name of the entity' 
+                name: {
+                    type: 'string',
+                    description: 'Display name of the entity'
                 },
-                type: { 
-                    type: 'string', 
-                    description: 'Category: person, project, concept, file, etc.' 
+                type: {
+                    type: 'string',
+                    description: 'Category: person, project, concept, file, etc.'
                 },
-                description: { 
-                    type: 'string', 
-                    description: 'Detailed description for context and searchability' 
+                description: {
+                    type: 'string',
+                    description: 'Detailed factual description. Do NOT use narrative style (e.g., "User said...").'
                 },
-                metadata: { 
-                    type: 'object', 
-                    description: 'Optional structured data (JSON object)' 
+                metadata: {
+                    type: 'object',
+                    description: 'Optional structured data (JSON object)'
                 }
             },
             required: ['name', 'type', 'description']
@@ -97,25 +97,25 @@ const MEMORY_TOOLS: ToolSchema[] = [
         inputSchema: {
             type: 'object',
             properties: {
-                from_entity_id: { 
-                    type: 'string', 
-                    description: 'UUID of the source entity' 
+                from_entity_id: {
+                    type: 'string',
+                    description: 'UUID of the source entity'
                 },
-                to_entity_id: { 
-                    type: 'string', 
-                    description: 'UUID of the target entity' 
+                to_entity_id: {
+                    type: 'string',
+                    description: 'UUID of the target entity'
                 },
-                relation_type: { 
-                    type: 'string', 
-                    description: 'Relationship type: works_on, author_of, relates_to, etc.' 
+                relation_type: {
+                    type: 'string',
+                    description: 'Relationship type: works_on, author_of, relates_to, etc.'
                 },
-                description: { 
-                    type: 'string', 
-                    description: 'Context about this relationship' 
+                description: {
+                    type: 'string',
+                    description: 'Context about this relationship'
                 },
-                weight: { 
-                    type: 'number', 
-                    description: 'Relationship strength from 0.0 (weak) to 1.0 (strong)' 
+                weight: {
+                    type: 'number',
+                    description: 'Relationship strength from 0.0 (weak) to 1.0 (strong)'
                 }
             },
             required: ['from_entity_id', 'to_entity_id', 'relation_type']
@@ -127,13 +127,13 @@ const MEMORY_TOOLS: ToolSchema[] = [
         inputSchema: {
             type: 'object',
             properties: {
-                query: { 
-                    type: 'string', 
-                    description: 'Search query (natural language)' 
+                query: {
+                    type: 'string',
+                    description: 'Search query (natural language)'
                 },
-                limit: { 
-                    type: 'number', 
-                    description: 'Maximum results to return (default: 10)' 
+                limit: {
+                    type: 'number',
+                    description: 'Maximum results to return (default: 10)'
                 }
             },
             required: ['query']
@@ -145,21 +145,21 @@ const MEMORY_TOOLS: ToolSchema[] = [
         inputSchema: {
             type: 'object',
             properties: {
-                id: { 
-                    type: 'string', 
-                    description: 'The UUID of the entity to update (from search results)' 
+                id: {
+                    type: 'string',
+                    description: 'The UUID of the entity to update (from search results)'
                 },
-                description: { 
-                    type: 'string', 
-                    description: 'New or updated description' 
+                description: {
+                    type: 'string',
+                    description: 'New or updated factual description (no narratives)'
                 },
                 observation: {
                     type: 'string',
-                    description: 'A new observation to append to the list'
+                    description: 'A new factual observation to append to the list'
                 },
-                metadata: { 
-                    type: 'object', 
-                    description: 'Merged metadata updates' 
+                metadata: {
+                    type: 'object',
+                    description: 'Merged metadata updates'
                 }
             },
             required: ['id']
@@ -193,23 +193,23 @@ const MEMORY_TOOLS: ToolSchema[] = [
  */
 export class MemoryService {
     private static instance: MemoryService
-    
+
     // New architecture components
     private backend: UnifiedMemoryBackend | null = null
     private piiDetector: PIIDetector
     private secretRedactor: SecretRedactor
     private metricsCollector: MetricsCollector
     private migrationService: MigrationService
-    
+
     // Legacy SQLite (for migration fallback)
     private legacyDb: Database.Database | null = null
     private legacyDbPath: string
-    
+
     private initialized = false
 
     private constructor() {
         this.legacyDbPath = path.join(app.getPath('userData'), 'memory.db')
-        
+
         // Initialize privacy and metrics layers
         this.piiDetector = new PIIDetector()
         this.secretRedactor = new SecretRedactor()
@@ -238,16 +238,16 @@ export class MemoryService {
 
         try {
             console.log('[MemoryService] Initializing with UnifiedMemoryBackend architecture...')
-            
+
             // Create backend from factory
             this.backend = MemoryServiceFactory.create()
             await this.backend.initialize()
-            
+
             console.log(`[MemoryService] Backend initialized: ${MemoryServiceFactory.getCurrentBackend()}`)
-            
+
             // Check if legacy SQLite data exists and needs migration
             await this.migrateLegacyDataIfNeeded()
-            
+
             this.initialized = true
             console.log('[MemoryService] Initialization complete')
         } catch (error) {
@@ -280,10 +280,10 @@ export class MemoryService {
             }
 
             console.log('[MemoryService] Migrating legacy SQLite data to new backend...')
-            
+
             // Export from SQLite
             const legacyData = await this.exportLegacySQLiteData()
-            
+
             if (legacyData.entities.length === 0) {
                 console.log('[MemoryService] No legacy data to migrate')
                 return
@@ -291,9 +291,9 @@ export class MemoryService {
 
             // Import to new backend
             await this.backend!.importAll(legacyData)
-            
+
             console.log(`[MemoryService] Migrated ${legacyData.entities.length} entities and ${legacyData.relations.length} relations`)
-            
+
             // Archive legacy database
             await fs.rename(this.legacyDbPath, this.legacyDbPath + '.backup')
             console.log('[MemoryService] Legacy database archived as memory.db.backup')
@@ -308,12 +308,12 @@ export class MemoryService {
      */
     private async exportLegacySQLiteData(): Promise<ExportData> {
         this.legacyDb = new Database(this.legacyDbPath)
-        
+
         try {
             // Export entities
             const entitiesStmt = this.legacyDb.prepare('SELECT * FROM entities')
             const entityRows = entitiesStmt.all() as any[]
-            
+
             const entities: BackendEntity[] = entityRows.map(row => ({
                 id: row.id,
                 name: row.name,
@@ -327,7 +327,7 @@ export class MemoryService {
             // Export relations (convert to new format)
             const relationsStmt = this.legacyDb.prepare('SELECT * FROM relations')
             const relationRows = relationsStmt.all() as any[]
-            
+
             const relations = relationRows.map(row => ({
                 id: row.id,
                 fromEntityId: row.from_entity_id,
@@ -368,7 +368,16 @@ export class MemoryService {
         if (!this.backend) await this.initialize()
 
         // Ensure string inputs
-        const safeDesc = description || ''
+        let safeDesc = description || ''
+
+        // Quality Check: Validate and auto-correct narrative descriptions
+        const validation = this.validateDescription(safeDesc)
+        if (!validation.valid && validation.suggestion) {
+            console.warn(`[MemoryService] Auto-correcting narrative description`)
+            console.warn(`  Original: "${safeDesc}"`)
+            console.warn(`  Corrected: "${validation.suggestion}"`)
+            safeDesc = validation.suggestion
+        }
 
         // Privacy Check 1: Detect PII
         const piiCheck = this.piiDetector.detect(safeDesc)
@@ -395,7 +404,7 @@ export class MemoryService {
 
         // Update metrics
         this.metricsCollector.increment('entityCount')
-        
+
         // Check if migration suggestion needed
         await this.migrationService.checkAndNotify(this.metricsCollector)
 
@@ -420,9 +429,9 @@ export class MemoryService {
         if (!this.backend) await this.initialize()
 
         const startTime = Date.now()
-        
+
         const results = await this.backend!.search(query, { limit })
-        
+
         const latency = Date.now() - startTime
         this.metricsCollector.recordLatency(latency)
 
@@ -581,6 +590,60 @@ export class MemoryService {
     // ========================================================================
     // HELPER METHODS
     // ========================================================================
+
+    /**
+     * Validate description to prevent narrative-style memory storage
+     * @private
+     */
+    private validateDescription(description: string): { valid: boolean; suggestion?: string } {
+        // Patterns to detect narrative descriptions
+        const narrativePatterns = [
+            { pattern: /^User (said|asked|requested|wanted|searched for|told|mentioned|indicated)/i, type: 'narrative' },
+            { pattern: /^The user (said|asked|requested|wanted|searched for|told|mentioned|indicated)/i, type: 'narrative' },
+            { pattern: /^User is (looking|searching|trying)/i, type: 'narrative' }
+        ]
+
+        // Patterns for legitimate fact-based descriptions (whitelist)
+        const factPatterns = [
+            /^User'?s? (name|prefers|uses|location|email|preference|setting)/i,
+            /^Prefers/i,
+            /^Uses/i,
+            /^Located in/i
+        ]
+
+        // Check if it's a whitelisted fact pattern
+        for (const factPattern of factPatterns) {
+            if (factPattern.test(description)) {
+                return { valid: true }
+            }
+        }
+
+        // Check for narrative patterns
+        for (const { pattern } of narrativePatterns) {
+            const match = description.match(pattern)
+            if (match) {
+                // Auto-correct by removing the narrative prefix
+                let corrected = description.replace(pattern, '').trim()
+
+                // Capitalize first letter
+                if (corrected.length > 0) {
+                    corrected = corrected.charAt(0).toUpperCase() + corrected.slice(1)
+                }
+
+                // Ensure it ends with a period if it doesn't have punctuation
+                if (corrected.length > 0 && !/[.!?]$/.test(corrected)) {
+                    corrected += '.'
+                }
+
+                return {
+                    valid: false,
+                    suggestion: corrected || description // Fallback to original if correction fails
+                }
+            }
+        }
+
+        return { valid: true }
+    }
 
     /**
      * Convert backend entity to legacy format

@@ -14,7 +14,7 @@ export function TaskConfirmationCard({
   onCancel,
   onBypass
 }: TaskConfirmationCardProps) {
-  const [showDetails, setShowDetails] = useState(false);
+
   const [customInput, setCustomInput] = useState('');
 
   return (
@@ -44,8 +44,8 @@ export function TaskConfirmationCard({
       {analysis.complexity && (
         <div className="mb-4 flex items-center gap-3 bg-blue-950/30 rounded-lg p-2 border border-blue-500/20">
           <div className={`px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider ${analysis.complexity.level === 'simple' ? 'bg-green-500/20 text-green-300 border-green-500/30' :
-              analysis.complexity.level === 'moderate' ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' :
-                'bg-orange-500/20 text-orange-300 border-orange-500/30'
+            analysis.complexity.level === 'moderate' ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' :
+              'bg-orange-500/20 text-orange-300 border-orange-500/30'
             } border`}>
             {analysis.complexity.level}
           </div>
@@ -94,31 +94,62 @@ export function TaskConfirmationCard({
       <div className="mb-4">
         <p className="text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">How should I proceed?</p>
         <div className="space-y-2">
-          {analysis.suggestions.map((suggestion) => (
-            <button
-              key={suggestion.id}
-              onClick={() => onConfirm(suggestion.enrichedPrompt)}
-              className="w-full text-left p-3 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 hover:border-blue-400/40 rounded-lg transition-all duration-200 group"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1">
-                  <p className="text-sm text-blue-100 group-hover:text-white transition-colors">
-                    {suggestion.label}
-                  </p>
-                  {showDetails && (
-                    <p className="text-xs text-blue-300/60 mt-1.5 border-t border-blue-500/10 pt-1.5">
+          {analysis.suggestions.map((suggestion) => {
+            // Visual styles based on suggestion type
+            let containerClass = "bg-blue-500/10 hover:bg-blue-500/20 border-blue-500/20 hover:border-blue-400/40";
+            let iconColor = "text-blue-500 group-hover:text-blue-400";
+            let labelColor = "text-blue-100 group-hover:text-white";
+            let descriptionColor = "text-blue-300/60 border-blue-500/10";
+
+            if (suggestion.type === 'defaults') {
+              // Green/Teal for Defaults "Just Go"
+              containerClass = "bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/20 hover:border-emerald-400/40";
+              iconColor = "text-emerald-500 group-hover:text-emerald-400";
+              labelColor = "text-emerald-100 group-hover:text-white";
+              descriptionColor = "text-emerald-300/60 border-emerald-500/10";
+            } else if (suggestion.type === 'memory') {
+              // Purple/Magic for Memory
+              containerClass = "bg-purple-500/10 hover:bg-purple-500/20 border-purple-500/20 hover:border-purple-400/40";
+              iconColor = "text-purple-500 group-hover:text-purple-400";
+              labelColor = "text-purple-100 group-hover:text-white";
+              descriptionColor = "text-purple-300/60 border-purple-500/10";
+            } else if (suggestion.type === 'clarification') {
+              // Yellow for Clarification/Manual
+              containerClass = "bg-yellow-500/10 hover:bg-yellow-500/20 border-yellow-500/20 hover:border-yellow-400/40";
+              iconColor = "text-yellow-500 group-hover:text-yellow-400";
+              labelColor = "text-yellow-100 group-hover:text-white";
+              descriptionColor = "text-yellow-300/60 border-yellow-500/10";
+            }
+
+            return (
+              <button
+                key={suggestion.id}
+                onClick={() => onConfirm(suggestion.enrichedPrompt)}
+                className={`w-full text-left p-3 border rounded-lg transition-all duration-200 group ${containerClass}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <p className={`text-sm font-medium transition-colors ${labelColor}`}>
+                      {suggestion.type === 'memory' && <span className="mr-1.5">🧠</span>}
+                      {suggestion.label}
+                    </p>
+                    <p className={`text-xs mt-1.5 border-t pt-1.5 max-h-20 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent ${descriptionColor}`}>
                       "{suggestion.enrichedPrompt}"
                     </p>
-                  )}
+                  </div>
+                  <div className="pt-0.5">
+                    <svg className={`w-4 h-4 transition-colors transform group-hover:translate-x-0.5 ${iconColor}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      {suggestion.type === 'defaults' ? (
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /> // Lightning
+                      ) : (
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /> // Arrow
+                      )}
+                    </svg>
+                  </div>
                 </div>
-                <div className="pt-0.5">
-                  <svg className="w-4 h-4 text-blue-500 group-hover:text-blue-400 transition-colors transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </div>
-              </div>
-            </button>
-          ))}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -148,16 +179,7 @@ export function TaskConfirmationCard({
       </div>
 
       {/* Footer Actions */}
-      <div className="flex items-center justify-between pt-2 border-t border-white/10">
-        <button
-          onClick={() => setShowDetails(!showDetails)}
-          className="text-xs text-gray-400 hover:text-gray-300 flex items-center gap-1"
-        >
-          <svg className={`w-3 h-3 transition-transform ${showDetails ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-          {showDetails ? 'Hide' : 'Show'} details
-        </button>
+      <div className="flex items-center justify-end pt-2 border-t border-white/10">
         <button
           onClick={onCancel}
           className="text-sm text-gray-400 hover:text-white transition-colors"
