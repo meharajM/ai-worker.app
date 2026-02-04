@@ -23,6 +23,7 @@ interface AgentRuntimeOptions {
   isSubAgent?: boolean; // Flag to identify sub-agents
   taskCategory?: string; // Optional: Force a specific task category (e.g. for sub-agents)
   onMessageUpdate?: (id: string, updates: Partial<LLMMessage>) => void; // Update existing message in UI
+  tabId?: number; // Dedicated browser tab ID for this agent
 }
 
 export class AgentRuntime {
@@ -235,13 +236,39 @@ export class AgentRuntime {
       // Get task-specific rules if category is available from analysis
       let dynamicRules = undefined;
 
-      // Simplest approach: Classification is done at start. Store it.
+      // Import helper dynamically to avoid circular deps
+      const { getPromptForCategory, getComposedPrompts, PROMPTS } = await import('./prompt-library');
+
+      // 1. Start with the base category prompt
+      const promptsToLoad: string[] = [];
       if (this.taskCategory) {
-        // Import helper dynamically to avoid circular deps if needed, or just use imported
-        const { getPromptForCategory } = await import('./prompt-library');
-        // Pass isSubAgent flag to get refined prompts
-        dynamicRules = getPromptForCategory(this.taskCategory, this.options.isSubAgent);
-        // console.log(`[AgentRuntime] Injecting dynamic rules for: ${this.taskCategory}`);
+        promptsToLoad.push(this.taskCategory);
+      }
+
+      // 2. PARALLEL EXECUTION DETECTION (Dynamic Injection)
+      // Inject parallel execution prompt if user request suggests multiple independent tasks
+      // Regex patterns to detect parallel intent: "Research X and Y", "Check 3 websites"
+      const parallelIndicators = [
+        /\band\b/i,          // "Research X and Y"
+        /,/,                 // "Check A, B, C"
+        /\bmultiple\b/i,
+        /\beach\b/i,
+        /\ball\b/i,
+        /\d+\s+(websites|pages|items|products|companies)/i  // "5 websites"
+      ];
+
+      const hasParallelIntent = parallelIndicators.some(pattern => pattern.test(finalPrompt));
+
+      // Only inject if detected AND not already a sub-agent (sub-agents should focus on their specific task)
+      if (hasParallelIntent && !this.options.isSubAgent) {
+        promptsToLoad.push('PARALLEL_EXECUTION');
+        console.log('[AgentRuntime] Parallel execution detected. Injecting PARALLEL_EXECUTION prompt.');
+      }
+
+      // 3. Compose the final dynamic rules
+      if (promptsToLoad.length > 0) {
+        dynamicRules = getComposedPrompts(promptsToLoad, this.options.isSubAgent);
+        console.log(`[AgentRuntime] Injected dynamic rules for: ${promptsToLoad.join(' + ')}`);
       }
       // Sub-agent context verification
       if (this.options.isSubAgent) {
@@ -297,6 +324,16 @@ Then extract the answer from the results. DO NOT refuse again.`
           continue; // Retry with correction
         }
 
+        // Append Progress Summary if available and this is the main agent (user-facing)
+        if (!this.options.isSubAgent && this.progressSummary.length > 0) {
+          const summaryText = this.progressSummary.join('\n');
+          // Avoid duplicating if the model already included it nicely
+          if (!response.content?.includes('Summary')) {
+            if (response.content) response.content += `\n\n## 📝 Execution Report\n${summaryText}`;
+            else response.content = `## 📝 Execution Report\n${summaryText}`;
+          }
+        }
+
         const assistantMsg: LLMMessage = {
           role: "assistant",
           content: response.content,
@@ -321,8 +358,9 @@ Then extract the answer from the results. DO NOT refuse again.`
       this.addMessage(assistantMsg);
 
       // Execute tools
-      for (const call of response.toolCalls) {
-        if (this.options.signal?.aborted) break;
+      // Execute tools in PARALLEL
+      const toolPromises = response.toolCalls.map(async (call) => {
+        if (this.options.signal?.aborted) return null;
 
         // Create a signature for this tool call to detect loops
         const toolSignature = `${call.name}:${JSON.stringify(call.arguments)}`;
@@ -478,17 +516,36 @@ Then extract the answer from the results. DO NOT refuse again.`
 
           console.log(`[AgentRuntime] Delegating to sub-agent: ${instruction}`);
 
-          // Create sub-agent with isolated context
+          // Provision a dedicated browser tab for this sub-agent to ensure isolation
+          let subAgentTabId: number | undefined;
+          try {
+            // Import lock dynamically
+            const { browserLock } = await import('./resource-lock');
+            const tabResult = await browserLock.runExclusive(async () => {
+              return await executeToolCall('new_tab', { url: 'about:blank' });
+            });
+
+            const resAny = tabResult.result as any;
+            if (resAny && resAny.tabId !== undefined) {
+              subAgentTabId = resAny.tabId;
+              console.log(`[AgentRuntime] Provisioned tab ${subAgentTabId} for sub-agent`);
+            }
+          } catch (e) {
+            console.warn('[AgentRuntime] Failed to provision tab for sub-agent', e);
+          }
+
+          // Create sub-agent with isolated context and dedicated tab
           const subAgent = new AgentRuntime({
             ...this.options,
             isSubAgent: true,
+            tabId: subAgentTabId,
             taskCategory: this.taskCategory, // Inherit category for safety protocols
             requireConfirmation: false,
-            onMessage: (msg) => {
+            onMessage: (msg: LLMMessage) => {
               const contentStr = typeof msg.content === 'string'
                 ? msg.content
-                : msg.content.map(c => c.type === 'text' ? c.text : '[Image]').join(' ');
-              console.log(`[SubAgent] ${msg.role}: ${contentStr ? contentStr.substring(0, 50) : '...'}`);
+                : Array.isArray(msg.content) ? msg.content.map(c => c.type === 'text' ? c.text : '[Image]').join(' ') : '';
+              console.log(`[SubAgent Tab:${subAgentTabId ?? 'default'}] ${msg.role}: ${contentStr ? contentStr.substring(0, 50) : '...'}`);
             }
           });
 
@@ -502,6 +559,19 @@ Return key findings only. End with "✓ Done".`;
             const finalContent = typeof finalRes.content === 'string'
               ? finalRes.content
               : finalRes.content.map(c => c.type === 'text' ? c.text : '').join('');
+
+            // CLEANUP: Close the sub-agent's tab to save resources
+            if (subAgentTabId !== undefined) {
+              try {
+                const { browserLock } = await import('./resource-lock');
+                await browserLock.runExclusive(async () => {
+                  await executeToolCall('close_tab', { tabId: subAgentTabId });
+                });
+                console.log(`[AgentRuntime] Closed sub-agent tab ${subAgentTabId}`);
+              } catch (e) {
+                console.warn(`[AgentRuntime] Failed to close sub-agent tab ${subAgentTabId}`, e);
+              }
+            }
 
             // Return raw content without wrapper (save tokens)
             resultStr = finalContent.trim();
@@ -531,12 +601,86 @@ Return key findings only. End with "✓ Done".`;
           }
 
         } else {
-          // Standard MCP tool
+          // Standard MCP tool with SELF-HEALING Wrapper
+          const executeCallWithSelfHealing = async (name: string, args: Record<string, unknown>, attempt = 1): Promise<any> => {
+            try {
+              // DYNAMIC RESOURCE LOCKING
+              // We lock based on tool type to prevent race conditions during parallel execution
+              let result;
+
+              // Import locks dynamically to avoid top-level side effects/circular deps
+              const { browserLock, fileLock } = await import('./resource-lock');
+              const { STATEFUL_BROWSER_TOOLS, STATEFUL_FILE_TOOLS } = await import('./client-tools');
+
+              // 1. Browser Tools -> browserLock (Global for now, effectively serializes tab actions)
+              if (STATEFUL_BROWSER_TOOLS.includes(name)) {
+
+                // INJECTION: If this agent has a dedicated tab, force all browser tools to use it
+                if (this.options.tabId !== undefined) {
+                  args.tabId = this.options.tabId;
+                }
+
+                result = await browserLock.runExclusive(async () => {
+                  return await executeToolCall(name, args);
+                });
+              }
+              // 2. File System Tools -> fileLock (GRANULAR: Lock key = file path)
+              else if (STATEFUL_FILE_TOOLS.includes(name)) {
+                const targetFile = (args.TargetFile || args.path || args.AbsolutePath) as string;
+                // If path is available, lock ONLY that file. Else fallback to global 'unknown' key
+                const lockKey = targetFile || 'global_fs_lock';
+
+                result = await fileLock.runExclusive(lockKey, async () => {
+                  return await executeToolCall(name, args);
+                });
+              }
+              // 3. Other Tools (Search, Memory, etc.) -> No Lock (True Parallelism)
+              else {
+                result = await executeToolCall(name, args);
+              }
+
+              return result;
+
+            } catch (error: any) {
+              const errorStr = String(error);
+
+              // RECOVERY STRATEGIES (Max 2 Attempts)
+              if (attempt <= 2) {
+                // Strategy 1: Context Destroyed (Navigation Race Condition)
+                if (errorStr.includes('Execution context was destroyed')) {
+                  console.log(`[Self-Healing] Context destroyed during ${name}. Waiting 1s and retrying...`);
+                  await new Promise(r => setTimeout(r, 1000));
+                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                }
+
+                // Strategy 2: Stale Element (DOM Update)
+                if (errorStr.includes('Element is not attached') || errorStr.includes('Node is detached')) {
+                  console.log(`[Self-Healing] Stale element in ${name}. Retrying immediately...`);
+                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                }
+
+                // Strategy 3: Timeout (Increase Timeout)
+                if (errorStr.includes('Timeout') && args.timeout && typeof args.timeout === 'number') {
+                  console.log(`[Self-Healing] Timeout in ${name}. Retrying with double timeout...`);
+                  const newArgs = { ...args, timeout: args.timeout * 2 };
+                  return executeCallWithSelfHealing(name, newArgs, attempt + 1);
+                }
+              }
+
+              // Fallback to error return
+              return { result: null, error: errorStr };
+            }
+          };
+
           try {
-            const result = await executeToolCall(call.name, call.arguments as Record<string, unknown>);
-            if (result.error) {
+            // Execute with self-healing wrapper
+            let result = await executeCallWithSelfHealing(call.name, call.arguments as Record<string, unknown>);
+            // Type assertion to handle 'unknown' return from locking
+            const typedResult = result as { result: unknown; error?: string };
+
+            if (typedResult.error) {
               // Enrich error message with recovery hints
-              const errorMsg = result.error;
+              const errorMsg = typedResult.error;
               let recoveryHint = '';
 
               if (errorMsg.includes('not found') || errorMsg.includes('Timeout')) {
@@ -550,9 +694,9 @@ Return key findings only. End with "✓ Done".`;
               resultStr = JSON.stringify({ error: errorMsg + recoveryHint });
               consecutiveErrors++;
             } else {
-              resultStr = typeof result.result === 'string'
-                ? result.result
-                : JSON.stringify(result.result);
+              resultStr = typeof typedResult.result === 'string'
+                ? typedResult.result
+                : JSON.stringify(typedResult.result);
               consecutiveErrors = 0; // Reset on success
             }
           } catch (err: any) {
@@ -611,24 +755,34 @@ Return key findings only. End with "✓ Done".`;
             console.warn('[AgentRuntime] Failed to analyze tool output:', e);
           }
         }
-      }
+        return undefined;
+      });
+
+      const results = await Promise.all(toolPromises);
+
+      // Check for bailouts (e.g. infinite loops)
+      const bailout = results.find(r => r && r.role === 'assistant');
+      if (bailout) return bailout;
 
       iterationCount++;
 
-      // MANDATORY CHECKPOINT: Enforce progress summary at iterations 5, 10, 15, 20
-      if (!this.options.isSubAgent && iterationCount % 5 === 0 && iterationCount > 0) {
-        const checkpointIndex = (iterationCount / 5) - 1; // 0-indexed checkpoint
+      // MANDATORY CHECKPOINT: Enforce progress summary at iterations 15, 30, 45...
+      // User request: Increased from 5 to 15 to allow more flow before interrupting
+      const CHECKPOINT_INTERVAL = 15;
+      if (!this.options.isSubAgent && iterationCount % CHECKPOINT_INTERVAL === 0 && iterationCount > 0) {
+        const checkpointIndex = (iterationCount / CHECKPOINT_INTERVAL) - 1; // 0-indexed checkpoint
 
         // Check if summary was recorded for this checkpoint
         if (this.progressSummary.length <= checkpointIndex) {
           console.log(`[AgentRuntime] Checkpoint ${iterationCount}: Waiting for progress summary...`);
 
-          // Add system message to enforce summary
+          // Add system message to enforce summary (MUST be non-conversational to prevent verbose responses)
           this.addMessage({
             role: 'system',
-            content: `📊 **CHECKPOINT ${iterationCount}**: You MUST call update_progress_summary now to record your findings before proceeding. Summarize what you've accomplished in the last 5 steps.`
+            content: `CHECKPOINT ${iterationCount}: Call update_progress_summary tool NOW with your Summary of your findings and what you've accomplished in the last ${CHECKPOINT_INTERVAL} steps. No text output - tool call only.`
           });
 
+          // Continue loop - LLM will be forced to call the tool on next iteration
           // Continue loop - LLM will be forced to call the tool on next iteration
           continue;
         } else {

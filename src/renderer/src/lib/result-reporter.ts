@@ -165,6 +165,61 @@ function extractNavigation(output: string | any): ExtractedNavigation | null {
     return null;
 }
 
+
+/**
+ * Try to extract text from MCP-style content objects
+ */
+function extractMcpContent(output: any): string | null {
+    // Handle {"content": [{"type": "text", "text": "..."}]} pattern
+    if (output && typeof output === 'object' && Array.isArray(output.content)) {
+        const textParts = output.content
+            .filter((c: any) => c.type === 'text' && c.text)
+            .map((c: any) => c.text)
+            .join('\n');
+
+        // If the extracted text itself is JSON, try to parse it
+        if (textParts.trim().startsWith('[') || textParts.trim().startsWith('{')) {
+            try {
+                const parsed = JSON.parse(textParts);
+                // If it's a list of products/objects, let extractProducts handle it
+                if (Array.isArray(parsed)) return null;
+                // Otherwise return as is (to be flattened later) or just text
+            } catch (e) { /* ignore */ }
+        }
+
+        return textParts.length > 0 ? textParts : null;
+    }
+    return null;
+}
+
+/**
+ * flatten simple JSON objects to bullet definitions
+ */
+function flattenJsonToBullets(obj: any): string | null {
+    if (typeof obj !== 'object' || obj === null) return null;
+
+    // If array, map each item
+    if (Array.isArray(obj)) {
+        const items = obj.map(i => flattenJsonToBullets(i)).filter(Boolean);
+        return items.length > 0 ? items.join('\n') : null;
+    }
+
+    // Capture meaningful keys
+    const keys = ['name', 'title', 'product', 'price', 'cost', 'rating', 'status', 'message'];
+    const foundKeys = keys.filter(k => obj[k]);
+
+    if (foundKeys.length > 0) {
+        const parts = foundKeys.map(k => {
+            const val = obj[k];
+            if (typeof val === 'object') return null;
+            return k === 'name' || k === 'title' ? `**${val}**` : `${k}: ${val}`;
+        }).filter(Boolean);
+        return `• ${parts.join(' - ')}`;
+    }
+
+    return null;
+}
+
 /**
  * Main function: Analyze tool output and determine if it's presentable
  */
@@ -172,10 +227,14 @@ export function analyzeToolOutput(
     toolName: string,
     output: any
 ): PresentableResult {
+    // 1. Try to extract content from MCP structure first
+    const mcpContent = extractMcpContent(output);
+    const effectiveOutput = mcpContent || output;
+
     // Convert to string for pattern matching
-    const outputStr = typeof output === 'string'
-        ? output
-        : JSON.stringify(output);
+    const outputStr = typeof effectiveOutput === 'string'
+        ? effectiveOutput
+        : JSON.stringify(effectiveOutput);
 
     // Quick noise check
     if (isNoise(outputStr)) {
@@ -186,8 +245,8 @@ export function analyzeToolOutput(
     }
 
     // Check for errors first
-    if (output?.error || PRESENTABLE_PATTERNS.error.some(p => p.test(outputStr))) {
-        const errorMsg = output?.error || outputStr.match(/error[:\s]+([^\n]+)/i)?.[1] || 'An error occurred';
+    if (effectiveOutput?.error || PRESENTABLE_PATTERNS.error.some(p => p.test(outputStr))) {
+        const errorMsg = effectiveOutput?.error || outputStr.match(/error[:\s]+([^\n]+)/i)?.[1] || 'An error occurred';
         return {
             hasPresentableData: true,
             summary: `⚠️ ${errorMsg.substring(0, 100)}`,
@@ -196,7 +255,7 @@ export function analyzeToolOutput(
     }
 
     // Check for products/prices
-    const products = extractProducts(output);
+    const products = extractProducts(effectiveOutput);
     if (products && products.length > 0) {
         const summary = products.map(p =>
             `• ${p.name}${p.price ? ` - ${p.price}` : ''}${p.rating ? ` (${p.rating})` : ''}`
@@ -211,7 +270,7 @@ export function analyzeToolOutput(
 
     // Check for navigation
     if (toolName.includes('navigate') || toolName.includes('goto')) {
-        const nav = extractNavigation(output);
+        const nav = extractNavigation(effectiveOutput);
         if (nav) {
             return {
                 hasPresentableData: true,
@@ -234,6 +293,25 @@ export function analyzeToolOutput(
 
     // Check for meaningful text content (not too short, not too long)
     if (outputStr.length > 20 && outputStr.length < 500) {
+        // BLOCK RAW JSON: If it looks like JSON and wasn't handled above, try to flatten or ignore
+        if (outputStr.trim().startsWith('{') || outputStr.trim().startsWith('[')) {
+            try {
+                const parsed = JSON.parse(outputStr);
+                const flattened = flattenJsonToBullets(parsed);
+                if (flattened) {
+                    return {
+                        hasPresentableData: true,
+                        summary: flattened,
+                        extractedData: { type: 'text', message: flattened }
+                    };
+                }
+                // If complex JSON and not flattening, ignore it to avoid dumping raw data
+                return { hasPresentableData: false, summary: '' };
+            } catch (e) {
+                // Not JSON, proceed to text check
+            }
+        }
+
         // Check if it contains actual words, not just JSON/code
         const wordCount = outputStr.split(/\s+/).filter(w => /^[a-zA-Z]+$/.test(w)).length;
         if (wordCount > 5) {

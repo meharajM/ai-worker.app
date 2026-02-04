@@ -284,6 +284,25 @@ export class PlaywrightService {
         return this.page!
     }
 
+    private async getPage(args: any): Promise<Page> {
+        // If tabId is explicitly provided, use key-based access
+        if (typeof args.tabId === 'number') {
+            if (!this.context) await this.ensureBrowser();
+            if (!this.context) throw new Error('Browser context not initialized');
+
+            const pages = this.context.pages();
+            if (args.tabId >= 0 && args.tabId < pages.length) {
+                const targetPage = pages[args.tabId];
+                if (targetPage.isClosed()) throw new Error(`Tab ${args.tabId} is closed`);
+                return targetPage;
+            }
+            throw new Error(`Tab index ${args.tabId} not found (Open tabs: ${pages.length})`);
+        }
+
+        // Fallback to default "active" page logic
+        return this.ensurePage();
+    }
+
     async close(): Promise<void> {
         if (this.context) {
             await this.context.close()
@@ -375,7 +394,7 @@ export class PlaywrightService {
                 },
                 {
                     name: 'evaluate',
-                    description: 'ADVANCED: Execute raw JavaScript code on the page. Use as a last resort when no other tool can accomplish the task. Can access DOM, modify page, or extract complex data.',
+                    description: 'ADVANCED: Execute raw JavaScript code on the page. Use as a last resort when no other tool can accomplish the task. Can access DOM, modify page, or extract complex data. NOTE: document.querySelectorAll returns a NodeList, not Array. Use Array.from() before .map(), .filter(), or .slice(). if any issues occurs while executing the script, try to google the error and fix it.',
                     inputSchema: {
                         type: 'object',
                         properties: {
@@ -662,14 +681,32 @@ export class PlaywrightService {
                 return null
             }
 
-            const page = await this.ensurePage()
+            const page = await this.getPage(safeArgs)
 
             switch (name) {
                 case 'navigate':
                     const navError = requireParam('url')
                     if (navError) return { result: null, error: navError }
-                    await page.goto(safeArgs.url, { waitUntil: 'domcontentloaded' })
-                    return { result: `Navigated to ${safeArgs.url}` }
+                    try {
+                        await page.goto(safeArgs.url, { waitUntil: 'domcontentloaded' })
+                        return { result: `Navigated to ${safeArgs.url}` }
+                    } catch (e) {
+                        // AUTO-FALLBACK: Google Search
+                        // If we failed to resolve the name, it might be a typo or a non-url search query
+                        const errorStr = String(e);
+                        if (errorStr.includes('ERR_NAME_NOT_RESOLVED') || errorStr.includes('ERR_CONNECTION_REFUSED')) {
+                            const fallbackUrl = `https://google.com/search?q=${encodeURIComponent(safeArgs.url)}`;
+                            console.log(`[PlaywrightService] Navigation failed (${errorStr}). Falling back to Google Search: ${fallbackUrl}`);
+                            try {
+                                await page.goto(fallbackUrl, { waitUntil: 'domcontentloaded' });
+                                return { result: `Navigation failed for '${safeArgs.url}', so I searched Google instead. Now at: ${page.url()}` };
+                            } catch (fallbackError) {
+                                // If fallback also fails, return original error
+                                return { result: null, error: `Navigation failed: ${errorStr}` };
+                            }
+                        }
+                        throw e;
+                    }
 
                 case 'screenshot':
                     const buffer = await page.screenshot({ fullPage: safeArgs.fullPage || false })
@@ -892,8 +929,37 @@ export class PlaywrightService {
                 case 'click':
                     const clickError = requireParam('selector')
                     if (clickError) return { result: null, error: clickError }
-                    await page.click(safeArgs.selector)
-                    return { result: `Clicked ${safeArgs.selector}` }
+                    try {
+                        await page.click(safeArgs.selector, { timeout: 5000 }) // Reduce initial timeout to fail fast for fallback
+                        return { result: `Clicked ${safeArgs.selector}` }
+                    } catch (error) {
+                        const errorStr = String(error);
+
+                        // AUTO-FALLBACK: click_text
+                        // Sometimes users pass text as selector or ID changed.
+                        // If selector looks like text (has spaces, no #/.), try click_text
+                        const isSimpleText = !safeArgs.selector.includes('#') && !safeArgs.selector.includes('.') && safeArgs.selector.includes(' ');
+
+                        if (isSimpleText || errorStr.includes('Timeout')) {
+                            console.log(`[PlaywrightService] Click failed. Trying fallback click_text("${safeArgs.selector}")`);
+                            try {
+                                const textWithQuotes = `text="${safeArgs.selector}"`; // Playwright text selector
+                                await page.click(textWithQuotes, { timeout: 5000 });
+                                return { result: `Clicked by Text "${safeArgs.selector}" (Fallback from failed selector)` };
+                            } catch (e2) {
+                                // Fallback failed
+                            }
+                        }
+
+                        const isTimeOut = errorStr.includes('Timeout');
+                        if (isTimeOut) {
+                            return {
+                                result: null,
+                                error: `Timeout clicking '${safeArgs.selector}'. \n\n💡 RECOVERY HINT: Selector failed. Try:\n1. click_text("Visible Text")\n2. get_interactive_elements() to find the ID/Class\n3. screenshot() to check if it's covered/hidden.`
+                            };
+                        }
+                        throw error;
+                    }
 
                 case 'fill':
                     const fillSelectorError = requireParam('selector')
@@ -935,8 +1001,53 @@ export class PlaywrightService {
                     return { result: `Title: ${title}\n\n${content.substring(0, 5000)}...` }
 
                 case 'wait_for_element':
-                    await page.waitForSelector(safeArgs.selector, { timeout: safeArgs.timeout || 5000 })
-                    return { result: `Element ${safeArgs.selector} appeared` }
+                    const originalSelector = safeArgs.selector;
+                    const timeout = safeArgs.timeout || 5000;
+
+                    try {
+                        await page.waitForSelector(originalSelector, { timeout });
+                        return { result: `Element ${originalSelector} appeared` };
+                    } catch (error) {
+                        // AUTO-FALLBACK: Try resilient alternatives if the specific selector fails
+                        const fallbacks: string[] = [];
+
+                        // Strategy 1: Relaxed ID match (e.g. #submit-123 -> [id*="submit"])
+                        if (originalSelector.startsWith('#')) {
+                            const coreId = originalSelector.substring(1).replace(/-\d+$/, ''); // specific heuristic for trailing numbers
+                            if (coreId.length > 3) {
+                                fallbacks.push(`[id*="${coreId}"]`);
+                            }
+                        }
+
+                        // Strategy 2: Relaxed Class match (e.g. .btn.btn-primary -> [class*="btn-primary"])
+                        if (originalSelector.startsWith('.')) {
+                            const classes = originalSelector.split('.').filter(c => c);
+                            classes.forEach(c => {
+                                if (c.length > 4) fallbacks.push(`[class*="${c}"]`);
+                            });
+                        }
+
+                        // Try fallbacks
+                        for (const fallback of fallbacks) {
+                            try {
+                                // Short timeout for fallbacks
+                                await page.waitForSelector(fallback, { timeout: 2000 });
+                                return { result: `Element appeared (auto-recovered using fallback: ${fallback})` };
+                            } catch (e) {
+                                // Fallback failed, continue
+                            }
+                        }
+
+                        // ERROR ENRICHMENT: If all failed, provide helpful hints
+                        const isTimeOut = String(error).includes('Timeout');
+                        if (isTimeOut) {
+                            return {
+                                result: null,
+                                error: `Timeout waiting for '${originalSelector}'. \n\n💡 RECOVERY HINT: The selector might be dynamic or incorrect.\n1. Try finding it by text: click_text("label")\n2. Use get_interactive_elements() to see real selectors.\n3. Take a screenshot to verify visibility.`
+                            };
+                        }
+                        throw error;
+                    }
 
                 case 'type':
                     // Focus and type character by character (simulates real typing)
@@ -968,7 +1079,9 @@ export class PlaywrightService {
                         await newPage.goto(safeArgs.url, { waitUntil: 'domcontentloaded' })
                     }
                     this.page = newPage // Switch to new tab
-                    return { result: `Opened new tab${safeArgs.url ? ` at ${safeArgs.url}` : ''}` }
+                    const newPages = this.context.pages()
+                    const newTabIndex = newPages.indexOf(newPage)
+                    return { result: { message: `Opened new tab${safeArgs.url ? ` at ${safeArgs.url}` : ''}`, tabId: newTabIndex } }
 
                 case 'switch_tab':
                     if (!this.context) throw new Error('No browser context')
@@ -982,13 +1095,22 @@ export class PlaywrightService {
 
                 case 'close_tab':
                     if (!this.context) throw new Error('No browser context')
-                    const allPages = this.context.pages()
-                    if (allPages.length <= 1) {
+                    const pageToClose = await this.getPage(safeArgs)
+
+                    const openPages = this.context.pages().filter(p => !p.isClosed())
+                    if (openPages.length <= 1) {
                         return { result: null, error: 'Cannot close the last tab' }
                     }
-                    await page.close()
-                    this.page = allPages.find(p => !p.isClosed()) || null
-                    return { result: 'Closed current tab' }
+
+                    await pageToClose.close()
+
+                    // If we closed the active page, switch to the last available one
+                    if (this.page === pageToClose || this.page?.isClosed()) {
+                        const remaining = this.context.pages().filter(p => !p.isClosed())
+                        this.page = remaining[remaining.length - 1] || null
+                    }
+
+                    return { result: 'Closed tab' }
 
                 case 'get_tabs':
                     if (!this.context) throw new Error('No browser context')

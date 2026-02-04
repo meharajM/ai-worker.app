@@ -1,4 +1,4 @@
-import { Trash2, Bot, User, History, AlertCircle, CheckCircle2, Circle, ChevronRight } from 'lucide-react'
+import { Trash2, Bot, User, History, AlertCircle, CheckCircle2, Circle, ChevronRight, Save } from 'lucide-react'
 import { Message, useChatStore, ToolCall } from '../stores/chatStore'
 import { AgentPlan, parseAgentPlan } from './AgentPlan'
 import { FormattedText } from './FormattedText'
@@ -27,7 +27,26 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
 
     const agentPlan = toolPlanData;
 
-    const visibleToolCalls = message.toolCalls?.filter(tc => tc.name !== 'create_execution_plan');
+    // Filter out internal tools from the standard checklist view
+    const visibleToolCalls = message.toolCalls?.filter(tc =>
+        tc.name !== 'create_execution_plan' &&
+        tc.name !== 'update_progress_summary'
+    );
+
+    // Check for progress summary update
+    const progressToolCall = message.toolCalls?.find(tc => tc.name === 'update_progress_summary');
+
+    // SPECIAL CASE: If message is ONLY a progress update (no content, no other tools), render minimal badge
+    if (!isUser && !message.content && message.toolCalls?.length === 1 && progressToolCall) {
+        return (
+            <div className="flex justify-center my-2 animate-pulse">
+                <div className="flex items-center gap-1.5 text-white/20 text-[10px] font-medium px-2 py-1 rounded-full bg-white/5">
+                    <Save size={10} />
+                    <span>Saving progress checkpoint...</span>
+                </div>
+            </div>
+        );
+    }
 
     if (isSystem) {
         return (
@@ -151,6 +170,14 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                         return <FormattedText content={cleanedContent} />;
                     })()}
 
+                    {/* Progress checkpoint badge (mixed content) */}
+                    {!isUser && progressToolCall && (message.content || (visibleToolCalls && visibleToolCalls.length > 0)) && (
+                        <div className="flex items-center gap-1.5 text-white/30 text-[10px] font-medium mt-3 px-1 border-t border-white/5 pt-2">
+                            <Save size={10} />
+                            <span>Progress checkpoint saved</span>
+                        </div>
+                    )}
+
                     {/* Tool calls display - Grouped Action Steps (Checklist Style) */}
                     {visibleToolCalls && visibleToolCalls.length > 0 && (
                         <div className="mt-3">
@@ -273,8 +300,8 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                                         }));
                                     }}
                                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${action.type === 'continue'
-                                            ? 'bg-[#00a896] hover:bg-[#00a896]/80 text-white'
-                                            : 'bg-white/10 hover:bg-white/20 text-white/70'
+                                        ? 'bg-[#00a896] hover:bg-[#00a896]/80 text-white'
+                                        : 'bg-white/10 hover:bg-white/20 text-white/70'
                                         }`}
                                 >
                                     {action.label}
