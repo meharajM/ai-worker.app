@@ -88,6 +88,22 @@ const electronAPI = {
         listKeys: (userId?: string) => 
             ipcRenderer.invoke('secure:list-keys', userId),
     },
+    // Filesystem Safe Mode operations
+    fs: {
+        getPendingChanges: () => ipcRenderer.invoke('fs:get-pending-changes'),
+        approveChange: (changeId: string) => ipcRenderer.invoke('fs:approve-change', changeId),
+        rejectChange: (changeId: string) => ipcRenderer.invoke('fs:reject-change', changeId),
+    },
+    // Memory operations
+    memory: {
+        runTests: () => ipcRenderer.invoke('memory:run-tests'),
+        getStats: () => ipcRenderer.invoke('memory:get-stats'),
+        exportAll: () => ipcRenderer.invoke('memory:export-all'),
+        callTool: (name: string, args: any) => ipcRenderer.invoke('memory:call-tool', { name, args }),
+        migrate: () => ipcRenderer.invoke('memory:migrate'),
+        checkMigration: () => ipcRenderer.invoke('memory:check-migration'),
+        openFileLocation: () => ipcRenderer.invoke('memory:open-file-location'),
+    },
 }
 
 // Expose APIs to renderer

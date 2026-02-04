@@ -125,3 +125,72 @@ export const STATEFUL_FILE_TOOLS = [
   'edit_file', // potential alias
   'append_file' // potential alias
 ];
+export const MEMORY_CREATE_ENTITY_TOOL: MCPTool = {
+  name: "memory_create_entity",
+  description: "Create a new entity in the knowledge graph. Use this to remember people, concepts, files, or projects.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "Display name of the entity" },
+      type: { type: "string", description: "Category: person, project, concept, file, etc." },
+      description: { type: "string", description: "Detailed description for context and searchability" },
+      metadata: { type: "object", description: "Optional structured data (JSON object)" }
+    },
+    required: ["name", "type", "description"]
+  }
+};
+
+export const MEMORY_CREATE_RELATION_TOOL: MCPTool = {
+  name: "memory_create_relation",
+  description: "Create a relationship between two entities. Connect concepts in the knowledge graph.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      from_entity_id: { type: "string", description: "UUID of the source entity" },
+      to_entity_id: { type: "string", description: "UUID of the target entity" },
+      relation_type: { type: "string", description: "Relationship type: works_on, author_of, relates_to, etc." },
+      description: { type: "string", description: "Context about this relationship" },
+      weight: { type: "number", description: "Relationship strength from 0.0 (weak) to 1.0 (strong)" }
+    },
+    required: ["from_entity_id", "to_entity_id", "relation_type"]
+  }
+};
+
+export const MEMORY_SEARCH_TOOL: MCPTool = {
+  name: "memory_search",
+  description: "Search the knowledge graph using full-text search. Returns matching entities.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Search query (natural language)" },
+      limit: { type: "number", description: "Maximum results to return (default: 10)" }
+    },
+    required: ["query"]
+  }
+};
+
+export const MEMORY_UPDATE_ENTITY_TOOL: MCPTool = {
+  name: "memory_update_entity",
+  description: "Update an existing entity by adding a new observation or updating description. Use this to APPEND facts to existing entities instead of creating duplicates.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "The UUID of the entity to update (from memory_search results)" },
+      observation: { type: "string", description: "A new observation/fact to append to the entity's history" },
+      description: { type: "string", description: "Updated description (replaces existing)" },
+      metadata: { type: "object", description: "Merged metadata updates" }
+    },
+    required: ["id"]
+  }
+};
+
+export const CLIENT_TOOLS = [
+  PLANNING_TOOL,
+  SUB_AGENT_TOOL,
+  SCAN_PAGE_TOOL,
+  MEMORY_CREATE_ENTITY_TOOL,
+  MEMORY_CREATE_RELATION_TOOL,
+  MEMORY_SEARCH_TOOL,
+  MEMORY_UPDATE_ENTITY_TOOL
+];
+

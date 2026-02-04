@@ -147,13 +147,49 @@ export const electron = {
             return { success: true }
         },
 
-        listKeys: async (userId?: string): Promise<{ success: boolean; keys?: string[]; error?: string }> => {
-            if (isElectron() && window.electron?.secure) {
-                return await window.electron.secure.listKeys(userId)
-            }
-            return { success: true, keys: [] }
-        },
     },
+
+    // Memory operations
+    memory: {
+        callTool: async (name: string, args: any) => {
+            if (isElectron() && window.electron?.memory) {
+                return await window.electron.memory.callTool(name, args)
+            }
+            console.log('[Browser] Memory call tool mock:', { name, args })
+            return { result: null }
+        },
+        getStats: async () => {
+            if (isElectron() && window.electron?.memory) {
+                return await window.electron.memory.getStats()
+            }
+            return { entityCount: 0, relationCount: 0, storageSize: 0, avgSearchLatency: 0, backend: 'mock' }
+        },
+        openFileLocation: async () => {
+            if (isElectron() && window.electron?.memory) {
+                return await window.electron.memory.openFileLocation()
+            }
+        }
+    },
+
+    // Log operations
+    logs: {
+        add: async (entry: any) => {
+            if (isElectron() && window.electron?.logs) {
+                return await window.electron.logs.add(entry)
+            }
+        },
+        getPath: async () => {
+            if (isElectron() && window.electron?.logs) {
+                return await window.electron.logs.getPath()
+            }
+            return 'logs/'
+        },
+        openFolder: async () => {
+            if (isElectron() && window.electron?.logs) {
+                return await window.electron.logs.openFolder()
+            }
+        }
+    }
 }
 
 export default electron
