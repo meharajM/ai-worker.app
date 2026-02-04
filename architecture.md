@@ -14,9 +14,10 @@ This document provides a comprehensive overview of the AI-Worker application arc
 6. [MCP Integration](#mcp-integration)
 7. [LLM & Agent Architecture](#llm--agent-architecture)
 8. [Dynamic Context Pruning](#dynamic-context-pruning)
-9. [Storage Architecture](#storage-architecture)
+9. [Storage & Session Architecture](#storage--session-architecture)
 10. [Security Architecture](#security-architecture)
 11. [Build & Distribution](#build--distribution)
+12. [Autonomous Monitoring & Recovery](#autonomous-monitoring--recovery)
 ---
 
 ## System Overview
@@ -536,18 +537,18 @@ AI-Worker implements a reactive, tool-calling agent loop managed by the `AgentRu
 
 ### Agent Loop (AgentRuntime)
 
-The `AgentRuntime` manages the conversation lifecycle, including planning, tool execution, and context pruning.
+The `AgentRuntime` manages the conversation lifecycle, including planning, tool execution, and context pruning. It features an **Autonomous Interaction Loop** capable of parallel tool dispatch and self-correction.
 
 ```mermaid
 graph TD
     User[User Input] --> Runtime[AgentRuntime]
     Runtime --> DCP[Prune Context]
     DCP --> Plan[Call LLM: create_execution_plan]
-    Plan --> Step1[Execute Tool 1]
-    Step1 --> Result1[Add Result to History]
-    Result1 --> DCP2[Prune Context]
-    DCP2 --> Step2[Execute Tool 2]
-    Step2 --> Final[Generate Final Response]
+    Plan --> Step1[Parallel Dispatch: Tool 1 + Tool 2]
+    Step1 --> Result1[Consolidate Results]
+    Result1 --> Progress[update_progress_summary]
+    Progress --> DCP2[Prune Context]
+    DCP2 --> Step2[Next Actions]
 ```
 
 ### Specialized Sub-agents
@@ -579,13 +580,22 @@ The `AgentRuntime` implements a **Dynamic Prompt Injection** mechanism to adapt 
 - **ADMIN/FORMS**: Enforces double-checking inputs and privacy.
 - **GENERAL**: Optimized for speed and direct navigation.
 
+#### Composed Prompts & Parallelism
+The system utilizes a **Composable Prompt Engine** (`getComposedPrompts`) that allows multiple behavioral protocols to be active simultaneously. For instance, a task can be categorized as both `RESEARCH` and `PARALLEL_EXECUTION`.
+
+**Parallel Execution Protocol**:
+- Detects independent sub-tasks (e.g., comparing multiple websites).
+- Enforces simultaneous `delegate_sub_task` calls in a single turn.
+- Reduces total execution time by running independent operations in dedicated worker tabs.
+
 ### Refusal Detection & Safety Layer
 
 To ensure robustness across different LLM capabilities, the `AgentRuntime` implements a deterministic safety layer that intercepts and corrects agent behavior:
 
 1.  **Refusal Interceptor**: Regular expressions scan every model response for refusal patterns (e.g., "I don't have access", "I am a text model").
 2.  **Auto-Correction**: If a refusal is detected when tools are available, the system injects a high-priority `[SYSTEM CORRECTION]` message.
-3.  **Mandate**: The correction forces the model to use the specific tool required (e.g., `navigate("google.com")`) instead of apologizing.
+3.  **Tool-Call Mandate**: The correction provides a direct example of valid tool usage (e.g., `navigate({url: "google.com"})`). This "jumpstarts" models that incorrectly assume they are limited to text.
+4.  **Loop Prevention**: Correction is applied only once per turn to prevent recursive refusal loops.
 
 ### Structured Response Protocol
 
@@ -646,9 +656,81 @@ sequenceDiagram
 >
 > **Best Practice:** The Main Agent should always summarize or extract *only* the relevant facts needed for the sub-task, rather than dumping the raw conversation history. This is enforced via the `delegate_sub_task` tool definition.
 
+### Resource Locking & Concurrency Management
+
+To support parallel execution of sub-agents and tool calls while maintaining internal state consistency, AI-Worker implements a granular resource locking system.
+
+#### 1. Hybrid Execution Engine
+Tools are classified into three categories:
+
+- **Stateful Browser Tools**: Tools that modify the browser state (e.g., `navigate`, `click`). These share a global **Browser Lock** to prevent race conditions during tab operations.
+- **Stateful File Tools**: Tools that modify the filesystem. These use **Granular Locks** (Keyed Mutexes) where the lock key is the absolute file path. Multiple sub-agents can read/write different files simultaneously without blocking each other.
+- **Stateless Tools**: Tools like `search`, `memory_retrieve`, or `sequential-thinking` that have no side effects. these run in **True Parallelism**.
+
+#### 2. Isolation Strategy
+- **Sub-Agent Tabs**: Each sub-agent is provisioned with a **dedicated browser tab** (`tabId`). This ensures that one sub-agent's navigation does not interrupt another's workflow.
+- **Auto-Cleanup**: Tabs are automatically closed upon sub-task completion to prevent memory leaks.
+
+### Universal Self-Healing Architecture
+
+AI-Worker implements a multi-layered self-healing system designed to make the agent resilient against flaky web pages and dynamic DOM updates.
+
+#### 1. Resilience Middleware
+Located in `agent-runtime.ts`, this middleware wraps all tool executions and intercepts common runtime errors.
+
+```mermaid
+sequenceDiagram
+    participant Agent as AgentRuntime
+    participant Mutex as Resource Lock
+    participant Tool as executeToolCall
+    participant Browser as Playwright/FS
+
+    Agent->>Agent: analyzeTool(name)
+    alt is Stateful
+        Agent->>Mutex: acquireLock(resourceKey)
+        Mutex-->>Agent: Lock Granted
+    end
+    
+    rect rgb(240, 240, 240)
+    Note over Agent, Browser: Self-Healing Loop (Max 3 Attempts)
+    Agent->>Tool: execute(args)
+    Tool->>Browser: Perform Action
+    alt Success
+        Browser-->>Agent: Result
+    else Error (Stale/Context/Timeout)
+        Browser-->>Agent: Error Response
+        Agent->>Agent: analyzeError(retryable?)
+        Agent->>Tool: Retry with adjustments
+    end
+    end
+
+    alt is Stateful
+        Agent->>Mutex: releaseLock(resourceKey)
+    end
+    Agent-->>Agent: updateResponseHistory()
+```
+
+| Error | Recovery Action | Target |
+|-------|-----------------|--------|
+| **Stale Element** | Immediate retry of the specific tool call. | React dynamic updates |
+| **Context Destroyed** | 1s wait + retry. | Navigation race conditions |
+| **Timeout** | Double the timeout + retry. | Slow loading pages |
+
+#### 2. Navigation & Recovery Fallbacks
+- **Auto-Google**: If a URL navigation fails (DNS or typo), the agent automatically converts the URL into a Google search query.
+- **Fuzzy Selector Fallback**: If a strict CSS selector (ID/Class) fails, the system automatically tries "fuzzy" matching or text-based selectors.
+
+#### 3. Sub-Agent Panic Mode
+If a sub-agent enters an unproductive loop (3+ turns with no progress), it triggers **Panic Mode**:
+1. It stops searching/clicking blindly.
+2. It takes a visual snapshot of the page.
+3. It reports the visual state to the parent, allowing the main agent to adjust the plan.
+
 ### Auto-Fork Task Decomposition
 
-The system now includes **automatic task decomposition** that intelligently spawns sub-agents based on context boundaries.
+### Auto-Fork Task Decomposition
+
+The system includes **automatic task decomposition** that intelligently spawns sub-agents based on context boundaries. This prevents "context drowning" where the main loop becomes overwhelmed by tool noise.
 
 #### Decision Logic
 
@@ -687,6 +769,42 @@ flowchart TD
     G --> H
 ```
 
+### Strategic Result Extraction
+
+To provide a premium user experience, AI-Worker separates "agent internal work" from "user-facing results" using the `ResultReporter` (`result-reporter.ts`).
+
+#### 1. Noise Filtering
+Raw tool outputs (e.g., a dump of 50 interactive elements from Playwright) are often several kilobytes of JSON. The `ResultReporter` identifies these as **Noise** based on patterns:
+- Large JSON arrays with `index`, `selector`, and `type` fields.
+- Deeply nested element property objects.
+- Pruned content markers from DCP.
+
+#### 2. Pattern-Based Extraction
+When a tool returns data, the reporter attempts to extract structured entities:
+- **Products**: Matches price symbols (₹, $), ratings (stars), and shopping actions.
+- **Navigation**: Detects successful page loads and extracts page titles.
+- **Confirmations**: Detects success markers (✓, "successfully").
+
+#### 3. Interactive UI Reporting
+Extracted data is formatted into natural language summaries or structured bullets (e.g., "Found 3 items: • Laptop - ₹50,000") which are displayed to the user, while the raw context is maintained for the agent's logic.
+
+### Autonomous Monitoring & Progress Tracking
+
+The `AgentRuntime` implements a persistent tracking layer to provide transparency into long-running tasks.
+
+#### 1. Execution Plans
+The agent can generate an **Execution Plan** via tool call. This plan is tracked in the `AgentRuntime` state:
+- **Granular Steps**: Discrete actions (e.g., "Open Amazon", "Search for shoes").
+- **Status Sync**: Steps transition through `loading` → `done`/`error`.
+- **Result Anchoring**: Sub-agent results are anchored to specific plan steps for parent aggregation.
+
+#### 2. Progress Summaries
+During the interaction loop, the agent generates **Progress Summaries**.
+- **LLM-Driven**: Major chunks of historical work are periodically summarized.
+- **Final Reporting**: If the LLM generates a response without a summary, the `AgentRuntime` automatically appends the cumulative progress report to the final message to ensure the user is never left wondering what happened.
+
+---
+
 #### Example: Multi-Website Task
 
 **User:** "Compare laptop prices on Amazon and BestBuy"
@@ -707,17 +825,51 @@ analyzeTaskForDecomposition() → 2 websites detected
 
 ---
 
-## Dynamic Context Pruning (DCP)
+### Autonomous Monitoring & Progress Tracking
 
-To maintain performance and stay within context limits, the system employs **Dynamic Context Pruning**.
+The `AgentRuntime` implements a persistent tracking layer to provide transparency into long-running tasks and ensure reliability.
 
-**Key Logic:**
-- **Tool Result Pruning**: Identifies redundant or outdated tool outputs in the message history.
-- **Selective Retention**: Keeps the original tool call and the most recent relevant result, replacing historical outputs with placeholders.
-- **Efficiency**: Reduces token usage by up to 60% in multi-step browser or filesystem tasks.
+#### 1. Execution Plans
+The agent can generate an **Execution Plan** via tool call. This plan is tracked in the `AgentRuntime` state:
+- **Granular Steps**: Discrete actions (e.g., "Open Amazon", "Search for shoes").
+- **Status Sync**: Steps transition through `loading` → `done`/`error`.
+- **Result Anchoring**: Sub-agent results are anchored to specific plan steps for parent aggregation.
 
-**Implementation**: Located in [dcp.ts](file:///Users/suhail/ai-worker-app/src/renderer/src/lib/dcp.ts).
-### LLM Configuration
+#### 2. Progress Checkpoints & Summaries
+During the interaction loop, the system enforces a **Mandatory Reporting Protocol**:
+- **Step Checkpoints**: At fixed intervals (steps 5, 10, 15...), the runtime pauses the agent's main loop to enforce a `update_progress_summary` call.
+- **LLM-Driven Summarization**: Major chunks of historical work are periodically summarized into incremental findings.
+- **Badge-Based UI**: Checkpoints are rendered as subtle "Progress saved" badges in the UI, keeping the raw tool noise hidden.
+- **Final Reporting**: If the LLM generates a response without a summary, the `AgentRuntime` automatically appends the cumulative progress report to the final message to ensure the user is never left wondering what happened.
+
+### Token Efficiency & Drift Mitigation
+
+To maintain performance and stay within context limits, the system employs **Dynamic Context Pruning** and **Strict Truncation**.
+
+#### 1. Output Truncation & Agent Guidance
+Tool outputs (especially `get_state` or `evaluate`) can be massive.
+- **Hard Limit**: All tool outputs are truncated to **5000 characters** before reaching the LLM context.
+- **Strategic Tips**: When truncation occurs, the system appends a **[SYSTEM TIP]** to the result. This tip guides the agent to use more specific selectors (e.g., `get_interactive_elements` or `find_by_xpath`) instead of dumping the entire DOM.
+- **Redundancy Pruning (DCP)**: Identifies redundant or outdated tool outputs in the message history and replaces them with placeholders.
+
+#### 2. Session Isolation
+The architecture guarantees strict **Session Isolation** to prevent cross-contamination:
+- **Independent History**: Each chat session maintains a separate `chatStore` partition.
+- **Sub-Agent Scoping**: Sub-agents spawned from a session are strictly bound to that session's context and browser tabs.
+- **Resource Cleanup**: Browser tabs and memory locks are cleared immediately when a session is closed or a task finishes.
+
+### Strategic Result Extraction
+
+To provide a premium user experience, AI-Worker separates "agent internal work" from "user-facing results" using the `ResultReporter` (`result-reporter.ts`).
+
+#### 1. Noise Filtering & Pattern Extraction
+Raw tool outputs (e.g., a dump of 50 interactive elements) are often kilobyte-scale JSON. The `ResultReporter` filters this "Noise" and extracts structured entities:
+- **Products & Prices**: Matches currency symbols (₹, $) and reviews.
+- **Navigation Results**: Detects page loads and extracts titles.
+- **Confirmation Markers**: Identifies success/failure patterns.
+- **UI Formatters**: Extracted data is formatted into natural language summaries displayed to the user, while raw data is kept in the agent's context.
+
+---
 
 ```mermaid
 graph LR
@@ -909,6 +1061,14 @@ sequenceDiagram
 | **App Check** | Request validation | reCAPTCHA Enterprise |
 | **Security Rules** | Data access control | Firestore rules |
 | **Feature Flags** | Gradual rollout | `AUTH_ENABLED` flag |
+
+### LLM Provider Compatibility (Gemini Fixes)
+
+The system includes a **Strict Message Transformer** in `llm.ts` to normalize message history for providers with rigid API requirements:
+
+- **Gemini Role Mapping**: Automatically maps `tool` roles to `user` and merges consecutive messages of the same role to prevent "Unexpected Role Alternation" errors.
+- **Tool ID Tracking**: Maintains a persistent mapping of `tool_call_id` to function names to ensure Gemini's `functionResponse` blocks include the mandatory name field even when not explicitly provided in the internal history.
+- **JSON Fallback**: Seamlessly switches to prompt-based JSON tool calling for models without native tool support.
 
 ### Why Firebase API Keys Are Safe to Bundle
 
@@ -1273,6 +1433,18 @@ ai-worker-app/
 - Enhanced server management with automatic default restoration
 - **Prompt Engineering**: Updated System Prompt with "Global Friendly" communication style and screenshot rules.
 - **Task Analysis**: Enhanced confirmation logic for high-risk and ambiguous tasks (shopping, payments).
+- **Universal Resilience**: Implemented Global Self-Healing middleware for automated recovery from flaky web pages.
+- **Concurrency Safety**: Implemented Keyed Resource Locking for safe parallel tool execution.
+- **Sub-Agent Isolation**: Added dedicated tab provisioning and session scoping for browser sub-tasks.
+- **Parallel Dispatch**: Enhanced `AgentRuntime` and `prompt-library` to support and enforce concurrent sub-agent execution.
+- **Gemini Stability**: Refactored `llm.ts` with role-merging and name-tracking logic to resolve Gemini API strictly-alternating role requirements.
+- **Progress Checkpoints**: Standardized increment reporting via `update_progress_summary` mandatory checkpoints every 5-15 steps.
+- **Token Resilience**: Implemented 5,000ch tool output truncation with automated "Strategic Tips" for agent self-correction.
+- **Session Privacy**: Finalized session-level data isolation and auto-cleanup architecture.
+
+---
+
+## Known Challenges & Solutions
 
 ---
 
