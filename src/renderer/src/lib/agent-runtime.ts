@@ -4,6 +4,7 @@ import { pruneContext } from "./dcp";
 import { executeToolCall, getAllTools, getServers } from "./mcp";
 import { CLIENT_TOOLS } from "./client-tools";
 import { analyzeTask, type TaskAnalysis } from "./confirmation-message";
+import { analyzeToolOutput } from "./result-reporter";
 import {
   analyzeTaskForDecomposition,
   generateSubAgentInstruction,
@@ -31,6 +32,7 @@ export class AgentRuntime {
   private maxConsecutiveErrors = 3; // Bailout after 3 consecutive tool failures
   private executionPlan: { goal: string; steps: Array<{ id: number; description: string; status: string; result?: string }> } | null = null;
   private taskCategory?: string; // Store identified task category
+  private progressSummary: string[] = []; // LLM-driven progress summaries
 
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
     this.options = options;
@@ -448,6 +450,21 @@ Then extract the answer from the results. DO NOT refuse again.`
           }
 
 
+        } else if (call.name === 'update_progress_summary') {
+          const args = call.arguments as any;
+          const summary = args.summary || '';
+
+          if (summary.trim()) {
+            this.progressSummary.push(`**Step ${iterationCount}**: ${summary}`);
+            console.log(`[AgentRuntime] Progress summary recorded (${this.progressSummary.length} total)`);
+          }
+
+          resultStr = JSON.stringify({
+            success: true,
+            message: 'Progress summary recorded.',
+            totalSummaries: this.progressSummary.length
+          });
+
         } else if (call.name === 'delegate_sub_task') {
           const args = call.arguments as any;
           const instruction = args.instruction || "";
@@ -555,58 +572,79 @@ Return key findings only. End with "✓ Done".`;
           }
         }
 
+        // CRITICAL: Truncate tool outputs to prevent context bloat
+        // Tools like get_state can return 100k+ characters, quickly exceeding token limits
+        const MAX_TOOL_OUTPUT_LENGTH = 5000;
+        let truncatedResultStr = resultStr;
+
+        if (resultStr.length > MAX_TOOL_OUTPUT_LENGTH) {
+          // Check if it's an error - preserve full error messages
+          const isError = resultStr.includes('"error":') || resultStr.startsWith('Error:');
+
+          if (!isError) {
+            truncatedResultStr = resultStr.substring(0, MAX_TOOL_OUTPUT_LENGTH) +
+              `\n\n[Tool output truncated from ${resultStr.length} to ${MAX_TOOL_OUTPUT_LENGTH} chars to save context. 💡 TIP: If you don't see what you need, use a more specific selector or filter instead of dumping the whole page.]`;
+            console.log(`[AgentRuntime] Truncated ${call.name} output: ${resultStr.length} → ${MAX_TOOL_OUTPUT_LENGTH} chars`);
+          }
+        }
+
         // Add tool result
         this.addMessage({
           role: "tool",
-          content: resultStr,
+          content: truncatedResultStr,
           tool_call_id: call.id
         });
+
+        // INCREMENTAL REPORTING: Check if this result is presentable to the user
+        if (!this.options.isSubAgent) {
+          try {
+            const analysisResult = analyzeToolOutput(call.name, resultStr);
+            if (analysisResult.hasPresentableData && analysisResult.summary) {
+              // Show findings to user immediately
+              this.addMessage({
+                role: 'assistant',
+                content: `**📋 Finding:**\n${analysisResult.summary}`
+              });
+              console.log(`[AgentRuntime] Reported finding: ${analysisResult.summary.substring(0, 50)}...`);
+            }
+          } catch (e) {
+            console.warn('[AgentRuntime] Failed to analyze tool output:', e);
+          }
+        }
       }
 
       iterationCount++;
+
+      // MANDATORY CHECKPOINT: Enforce progress summary at iterations 5, 10, 15, 20
+      if (!this.options.isSubAgent && iterationCount % 5 === 0 && iterationCount > 0) {
+        const checkpointIndex = (iterationCount / 5) - 1; // 0-indexed checkpoint
+
+        // Check if summary was recorded for this checkpoint
+        if (this.progressSummary.length <= checkpointIndex) {
+          console.log(`[AgentRuntime] Checkpoint ${iterationCount}: Waiting for progress summary...`);
+
+          // Add system message to enforce summary
+          this.addMessage({
+            role: 'system',
+            content: `📊 **CHECKPOINT ${iterationCount}**: You MUST call update_progress_summary now to record your findings before proceeding. Summarize what you've accomplished in the last 5 steps.`
+          });
+
+          // Continue loop - LLM will be forced to call the tool on next iteration
+          continue;
+        } else {
+          console.log(`[AgentRuntime] Checkpoint ${iterationCount}: Summary recorded ✓`);
+        }
+      }
     }
 
     // If we reach here, we hit max iterations
     if (!this.options.isSubAgent) {
       console.log(`[AgentRuntime] Max iterations (${this.maxIterations}) reached. Checking if user wants to continue...`);
 
-      // Generate summary of progress so far
-      // Generate human-readable summary
-      const recentHistory = this.messages.slice(-15);
-      const summary = recentHistory
-        .map(m => {
-          if (m.role === 'assistant' && (m as any).tool_calls) {
-            const calls = (m as any).tool_calls.map((tc: any) => tc.function.name).join(', ');
-            return `• **Action**: ${calls}`;
-          }
-          if (m.role === 'tool') {
-            try {
-              const content = typeof m.content === 'string' ? JSON.parse(m.content) : m.content;
-
-              // Skip verbose extraction/interaction dumps
-              if (JSON.stringify(content).length > 500) {
-                return `  → *Result*: (Large output/DOM data captured)`;
-              }
-
-              if (content.error) {
-                return `  → ⚠️ **Error**: ${content.error.substring(0, 100)}...`;
-              }
-
-              if (content.content && Array.isArray(content.content)) {
-                const text = content.content.map((c: any) => c.text).join(' ');
-                return `  → *Result*: ${text.substring(0, 150)}...`;
-              }
-
-              const str = typeof m.content === 'string' ? m.content : JSON.stringify(content);
-              return `  → *Result*: ${str.substring(0, 150)}...`;
-            } catch (e) {
-              return `  → *Result*: ${(typeof m.content === 'string' ? m.content : '').substring(0, 100)}...`;
-            }
-          }
-          return null;
-        })
-        .filter(Boolean)
-        .join('\n');
+      // Use LLM-generated progress summaries
+      const summary = this.progressSummary.length > 0
+        ? this.progressSummary.join('\n\n')
+        : 'No progress summaries recorded yet. The agent may not have reached any checkpoints.';
 
       const handoffMsg: LLMMessage = {
         role: 'assistant',
@@ -615,8 +653,19 @@ Return key findings only. End with "✓ Done".`;
 **Progress Summary:**
 ${summary || 'Executed several actions.'}
 
-**Do you want me to continue?**
-Reply "yes" or "continue" to spin up a fresh sub-agent to finish the task.`
+Would you like me to continue with a fresh sub-agent?`,
+        actions: [
+          {
+            type: 'continue',
+            label: '▶️ Continue Task',
+            payload: { goal: finalPrompt }
+          },
+          {
+            type: 'cancel',
+            label: '⏹️ Stop Here',
+            payload: {}
+          }
+        ]
       };
 
       this.addMessage(handoffMsg);
@@ -642,32 +691,16 @@ Reply "yes" or "continue" to spin up a fresh sub-agent to finish the task.`
     originalRequest: string,
     stepsTaken: number
   ): Promise<LLMMessage> {
-    // Summarize what has been done
-    const recentHistory = this.messages.slice(-15); // Last 15 messages for better context
-    const summary = recentHistory
-      .filter(m => m.role === 'tool' || (m.role === 'assistant' && (m as any).tool_calls))
-      .map(m => {
-        if (m.role === 'assistant') {
-          return `Action: ${(m as any).tool_calls?.map((tc: any) => tc.function.name).join(', ')}`;
-        }
-        try {
-          const content = typeof m.content === 'string' ? JSON.parse(m.content) : m.content;
-          // Extract text content if possible
-          if (content.content && Array.isArray(content.content)) {
-            return `Result: ${content.content.map((c: any) => c.text).join(' ').substring(0, 150)}...`;
-          }
-          return `Result: ${(typeof m.content === 'string' ? m.content : JSON.stringify(content)).substring(0, 150)}...`;
-        } catch (e) {
-          return '';
-        }
-      })
-      .join('\n');
+    // Use LLM-generated progress summaries instead of reconstructing from messages
+    const progressContext = this.progressSummary.length > 0
+      ? this.progressSummary.join('\n')
+      : 'No detailed progress recorded yet.';
 
     const instruction = `GOAL: ${originalRequest}
 
 CONTEXT: I have already taken ${stepsTaken} steps but haven't finished.
-Recent actions & results:
-${summary}
+Progress so far:
+${progressContext}
 
 INSTRUCTION: Continue the task from here. You have a fresh context window.
 Focus on the next logical steps to complete the goal.
@@ -822,6 +855,12 @@ Use tools immediately. End with "✓ Done".`;
         if (statusMessageId && this.options.onMessageUpdate) {
           this.options.onMessageUpdate(statusMessageId, { content: renderStatus() });
         }
+
+        // REPORTING FIX: Immediately show the result to the user as a distinct message
+        this.addMessage({
+          role: 'assistant',
+          content: `**✅ ${context} Analysis Complete**\n\n${resultContent.substring(0, 500)}${resultContent.length > 500 ? '...' : ''}`
+        });
 
         return {
           context,

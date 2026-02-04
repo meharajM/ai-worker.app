@@ -1227,6 +1227,13 @@ ${dynamicRules ? `\n# TASK-SPECIFIC PROTOCOLS\n${dynamicRules}\n` : ''}
 - Click failed? → Try JavaScript click via browser_run_code
 - Same error twice? → Stop, take screenshot, reassess
 
+# PROGRESS TRACKING
+**MANDATORY**: Call \`update_progress_summary\` every ~5 steps to record your findings.
+- At checkpoints (steps 5, 10, 15, 20...), you MUST summarize progress
+- Focus on RESULTS and DATA, not tool names
+- Examples: "Found 3 products: Puma Huddy ₹1,399..." or "Extracted 50 records with email/phone"
+- Keep it concise and incremental (only NEW findings since last update)
+
 # KEY REMINDERS
 - You HAVE browser tools. Never refuse by saying "I can't access..."
 - Complete the full workflow, don't stop after navigation
@@ -1365,12 +1372,32 @@ async function callGemini(
   const { apiKey, model } = await getGeminiSettings(settings);
   const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
 
+  // Create a map of tool_call_id to function name
+  const toolIdToName = new Map<string, string>();
+  messages.forEach(m => {
+    if (m.role === 'assistant' && m.tool_calls) {
+      m.tool_calls.forEach((tc: any) => {
+        if (tc.id && tc.function?.name) {
+          toolIdToName.set(tc.id, tc.function.name);
+        }
+      });
+    }
+  });
+
   // Convert messages to Gemini format, including tool history
-  const contents = messages.filter(m => m.role !== 'system').map(m => {
-    const role = m.role === 'assistant' ? 'model' : m.role === 'tool' ? 'function' : 'user';
+  // valid roles: 'user', 'model'
+  const contents: any[] = [];
+  const validMessages = messages.filter(m => m.role !== 'system');
+
+  for (const m of validMessages) {
+    let role: 'user' | 'model' | null = null;
+    if (m.role === 'assistant') role = 'model';
+    if (m.role === 'user' || m.role === 'tool') role = 'user';
+    if (!role) continue;
 
     const parts: any[] = [];
-    if (m.content) {
+
+    if (m.role !== 'tool' && m.content) {
       if (typeof m.content === 'string') {
         parts.push({ text: m.content });
       } else {
@@ -1378,7 +1405,6 @@ async function callGemini(
           if (part.type === 'text') {
             parts.push({ text: part.text });
           } else if (part.type === 'image_url') {
-            // Extracts base64 from data URI: data:image/jpeg;base64,...
             const matches = part.image_url.url.match(/^data:([^;]+);base64,(.+)$/);
             if (matches) {
               parts.push({
@@ -1416,18 +1442,32 @@ async function callGemini(
 
     // Handle tool results
     if (m.role === 'tool') {
-      // Gemini expects simple text response for functionResponse
-      const resultText = typeof m.content === 'string' ? m.content : extractTextForLegacyProviders(m.content);
+      const resultText = typeof m.content === 'string'
+        ? m.content
+        : Array.isArray(m.content)
+          ? extractTextForLegacyProviders(m.content)
+          : JSON.stringify(m.content ?? '');
+
+      // Resolve name from ID if not present
+      const fnName = (m as any).name || (m.tool_call_id ? toolIdToName.get(m.tool_call_id) : 'unknown_tool');
+
       parts.push({
         functionResponse: {
-          name: (m as any).name,
+          name: fnName,
           response: { result: resultText }
         }
       });
     }
 
-    return { role, parts };
-  });
+    // Merge logic: If current message has same role as previous, merge parts
+    if (parts.length === 0) continue;
+
+    if (contents.length > 0 && contents[contents.length - 1].role === role) {
+      contents[contents.length - 1].parts.push(...parts);
+    } else {
+      contents.push({ role, parts });
+    }
+  }
 
   const systemMessage = messages.find(m => m.role === 'system');
   const systemInstructionText = systemMessage ? extractTextForLegacyProviders(systemMessage.content) : undefined;

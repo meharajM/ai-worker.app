@@ -259,6 +259,30 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                         </div>
                     )}
 
+                    {/* Action Buttons (for handoff confirmation) */}
+                    {message.actions && message.actions.length > 0 && (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                            {message.actions.map((action, idx) => (
+                                <button
+                                    key={idx}
+                                    onClick={() => {
+                                        // Dispatch custom event to trigger handleSubmit in App.tsx
+                                        const content = action.type === 'continue' ? 'continue' : 'stop';
+                                        window.dispatchEvent(new CustomEvent('agent-action', {
+                                            detail: { type: action.type, content }
+                                        }));
+                                    }}
+                                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${action.type === 'continue'
+                                            ? 'bg-[#00a896] hover:bg-[#00a896]/80 text-white'
+                                            : 'bg-white/10 hover:bg-white/20 text-white/70'
+                                        }`}
+                                >
+                                    {action.label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
                     <p className={`text-[10px] mt-1 ${isUser ? 'text-white/60' : 'text-white/30'}`}>
                         {formatTime(message.timestamp)}
                     </p>

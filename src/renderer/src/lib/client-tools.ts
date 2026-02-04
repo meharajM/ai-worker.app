@@ -60,4 +60,19 @@ export const SCAN_PAGE_TOOL: MCPTool = {
   }
 };
 
-export const CLIENT_TOOLS = [PLANNING_TOOL, SUB_AGENT_TOOL, SCAN_PAGE_TOOL];
+export const PROGRESS_SUMMARY_TOOL: MCPTool = {
+  name: "update_progress_summary",
+  description: "Record a summary of progress/findings so far. Call this every ~5 steps to track what you've accomplished. Be concise and incremental - only add NEW findings since last summary. Examples: 'Found 3 products on Myntra: Puma Huddy ₹1,399...' or 'Extracted 50 user records with email and phone' or 'Completed steps 1-3: navigated to dashboard, logged in, accessed reports section'.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      summary: {
+        type: "string",
+        description: "Concise summary of NEW findings/progress since last update. Focus on results and data, not tool names."
+      }
+    },
+    required: ["summary"]
+  }
+};
+
+export const CLIENT_TOOLS = [PLANNING_TOOL, SUB_AGENT_TOOL, SCAN_PAGE_TOOL, PROGRESS_SUMMARY_TOOL];
