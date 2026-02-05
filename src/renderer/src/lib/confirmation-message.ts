@@ -9,7 +9,7 @@ export interface TaskAnalysis {
   potentialMistakes: string[];
   shouldConfirm: boolean; // Smart detection result
   complexity?: TaskComplexity;
-  category?: 'shopping' | 'research' | 'admin' | 'general';
+  category?: 'shopping' | 'research' | 'admin' | 'coding' | 'filesystem' | 'general';
 }
 
 export interface TaskComplexity {
@@ -77,6 +77,8 @@ Classify the task into one of these categories:
 - **shopping**: Buying, finding products, prices, e-commerce.
 - **research**: Finding information, summaries, comparison, news.
 - **admin**: Filling forms, scheduling, email, account management, official websites.
+- **coding**: Implementing features, fixing bugs, refactoring, reading code.
+- **filesystem**: Managing files, organizing directories, file operations, workspace exploration.
 - **general**: Simple navigation, opening sites, weather, etc.
 
 # SUGGESTION GENERATION RULES (CRITICAL):
@@ -102,7 +104,7 @@ Respond with JSON:
   "isAmbiguous": true/false,
   "missingDetails": ["what's missing"],
   "detectedIntent": "What you think the user wants",
-  "category": "shopping|research|admin|general",
+  "category": "shopping|research|admin|coding|filesystem|general",
   "potentialMistakes": ["typos found"],
   "suggestions": [
     {
