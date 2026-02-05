@@ -86,10 +86,10 @@ DESCRIPTION WRITING RULES (STRICT):
 
 ANTI-BLOAT RULES (CRITICAL):
 - **DO NOT** save specific conversational turns or "User asked..." narratives.
-- **DO NOT** save meta-instructions (e.g., "clean up code", "review this PR") as permanent entities unless they define a long-term project protocol.
+- **DO NOT** save meta-instructions (e.g., "clean up code") as permanent entities.
+- **DO NOT** save transient values (e.g. specific prices, timestamps, or temporary measurements) as independent facts. Only save them if they represent a **constraint** or **goal** (e.g. "Budget Limit: $500", not "Item price: $499.99").
 - **DO NOT** create duplicate entities. ALWAYS search first and update if exists.
 - Only save **high-value, permanent** information useful in a *future* session.
-
 GOAL: Extract Facts & State. No Narratives. No Meta-Commentary.
             `;
 

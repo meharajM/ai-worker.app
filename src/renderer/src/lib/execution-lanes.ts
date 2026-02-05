@@ -1,0 +1,149 @@
+
+import { STATEFUL_BROWSER_TOOLS, STATEFUL_FILE_TOOLS } from './client-tools';
+
+/**
+ * A queue that enforces concurrency limits.
+ * OpenClaw-style execution lane.
+ */
+export class LaneQueue {
+    private queue: Array<() => Promise<void>> = [];
+    private activeCount = 0;
+    private concurrency: number;
+    public readonly id: string;
+
+    constructor(id: string, concurrency: number) {
+        this.id = id;
+        this.concurrency = concurrency;
+    }
+
+    /**
+     * Execute a task in this lane.
+     * If concurrency limit is reached, it waits in queue.
+     */
+    async run<T>(task: () => Promise<T>): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            const wrappedTask = async () => {
+                this.activeCount++;
+                try {
+                    const result = await task();
+                    resolve(result);
+                } catch (error) {
+                    reject(error);
+                } finally {
+                    this.activeCount--;
+                    this.processNext();
+                }
+            };
+
+            if (this.activeCount < this.concurrency) {
+                wrappedTask();
+            } else {
+                this.queue.push(wrappedTask);
+            }
+        });
+    }
+
+    private processNext() {
+        if (this.queue.length > 0 && this.activeCount < this.concurrency) {
+            const nextTask = this.queue.shift();
+            nextTask?.();
+        }
+    }
+
+    get stats() {
+        return {
+            active: this.activeCount,
+            queued: this.queue.length,
+            concurrency: this.concurrency
+        };
+    }
+}
+
+/**
+ * Manages all execution lanes for the agent system.
+ * Routes tools to the correct lane based on type and context.
+ */
+export class LaneManager {
+    private lanes = new Map<string, LaneQueue>();
+
+    // Standard Lanes
+    private globalBrowserLane: LaneQueue;
+    // private apiParallelLane: LaneQueue; // COMMENTED OUT - not using API parallel lane
+    private fileSystemLane: LaneQueue; // Granular locking handled inside? Or just serial?
+    // Current design: FS tools use a granular lock in the old code. 
+    // Here we can make a high-concurrency lane, but we might need KeyedMutex if we want true file-level locking.
+    // For now, let's stick to the Plan: Serial Browser, Parallel API.
+
+    constructor() {
+        // Browser: Serial (1 at a time) to prevent race conditions on the active page
+        this.globalBrowserLane = new LaneQueue('BROWSER_SERIAL', 1);
+
+        // API/Thinking: Parallel (High concurrency)
+        // COMMENTED OUT: Not using API parallel lane for now - everything goes through browser serial
+        // this.apiParallelLane = new LaneQueue('API_PARALLEL', 10);
+
+        // FileSystem: For now, we'll allow parallel file ops (OS handles locking mostly, or we assume different files)
+        // If we need strict file locking, we'd add it here.
+        this.fileSystemLane = new LaneQueue('FILESYSTEM', 5);
+
+        this.lanes.set(this.globalBrowserLane.id, this.globalBrowserLane);
+        // this.lanes.set(this.apiParallelLane.id, this.apiParallelLane); // COMMENTED OUT
+        this.lanes.set(this.fileSystemLane.id, this.fileSystemLane);
+    }
+
+    /**
+     * Get or create a dedicated lane for a specific browser tab.
+     */
+    private getTabLane(tabId: number): LaneQueue {
+        const laneId = `TAB_${tabId}`;
+        if (!this.lanes.has(laneId)) {
+            // Tab lanes are Serial (1 op per tab)
+            const lane = new LaneQueue(laneId, 1);
+            this.lanes.set(laneId, lane);
+        }
+        return this.lanes.get(laneId)!;
+    }
+
+    /**
+     * Routes a tool call to the appropriate execution lane.
+     */
+    getLane(toolName: string, context: { tabId?: number } = {}): LaneQueue {
+        // 1. Browser Tools (including MCP Playwright tools)
+        const isBrowserTool = STATEFUL_BROWSER_TOOLS.includes(toolName) ||
+            toolName.startsWith('playwright_') ||
+            toolName.startsWith('browser_');
+
+        if (isBrowserTool) {
+            // If a specific tab is requested, use its dedicated lane
+            if (context.tabId !== undefined) {
+                return this.getTabLane(context.tabId);
+            }
+            // Otherwise, use the global main window lane
+            return this.globalBrowserLane;
+        }
+
+        // 2. File Tools
+        if (STATEFUL_FILE_TOOLS.includes(toolName)) {
+            return this.fileSystemLane;
+        }
+
+        // 3. Stateless/API Tools (Memory, Search, etc.)
+        // COMMENTED OUT: Forcing all non-browser/file tools to use browser lane for now
+        // return this.apiParallelLane;
+
+        // TEMPORARY: Route everything to browser serial to prevent race conditions
+        return this.globalBrowserLane;
+    }
+
+    // Debugging helper
+    getDebugStats() {
+        const stats: Record<string, any> = {};
+        for (const [id, lane] of this.lanes.entries()) {
+            stats[id] = lane.stats;
+        }
+        return stats;
+    }
+}
+
+// Singleton instance
+export const laneManager = new LaneManager();

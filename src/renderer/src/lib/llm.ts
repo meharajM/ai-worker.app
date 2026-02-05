@@ -1247,21 +1247,19 @@ ${dynamicRules ? `\n# TASK-SPECIFIC PROTOCOLS\n${dynamicRules}\n` : ''}
 5. Verify results
 6. Report to user (outside <think>)
 
-# SELECTOR BEST PRACTICES (CRITICAL)
-**ALWAYS inspect the page BEFORE using specific selectors:**
-1. Take a screenshot() OR use get_interactive_elements() first
-2. Identify actual selectors from the page
-3. Prefer generic, resilient selectors:
-   ❌ BAD: #results-container (specific IDs change between loads)
-   ✅ GOOD: [data-testid="content-list"] (data attributes)
-   ✅ BETTER: div[class*="content"] (partial class match)
-   ✅ BEST: text="Submit" or text="Download" (text-based, most resilient)
+# EFFICIENT DISCOVERY & SELECTOR PROTOCOL (CRITICAL)
+- **NO GUESSING**: Never invent selectors like ".product-item" or "#results".
+- **DISCOVERY HIERARCHY**:
+  1. \`get_interactive_elements\` (LOWEST TOKENS): Use this FIRST to see what is clickable (buttons, inputs, links).
+  2. \`scan_page_accessibility\` (LOW TOKENS): Use to read content structure and find text.
+  3. \`get_state(mode="fast")\` (MEDIUM TOKENS): Use if you need a broader text overview.
+  4. \`get_state(mode="vision")\` (HIGH TOKENS): Use *only* if visual layout is confusing or standard tools fail.
 
-**Workflow for dynamic sites (SPAs, dashboards, web apps):**
-1. navigate() to the page
-2. screenshot() or get_interactive_elements() to inspect
-3. Use discovered selectors (not hardcoded assumptions)
-4. If selector fails, screenshot() again and retry with correct selector
+- **DYNAMIC SITES**: Amazon, Google, etc. use randomized classes (e.g. "s-result-item-XyZ"). You cannot guess these. You MUST inspect them.
+- **INSPECT BEFORE INTERACT**: 
+  1. Navigate
+  2. Inspect (get_interactive_elements)
+  3. Interact (using discovered selectors)
 
 # ERROR HANDLING
 - Element not found? → screenshot() to see actual page, then use correct selector

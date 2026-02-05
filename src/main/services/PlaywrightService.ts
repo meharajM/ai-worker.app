@@ -1146,6 +1146,24 @@ export class PlaywrightService {
                     const extractType = safeArgs.type || 'table'
                     const extractSelector = safeArgs.selector
 
+                    // ERROR: Empty results usually mean bad selector
+                    const validateResults = (data: any, type: string) => {
+                        let isEmpty = false;
+                        if (Array.isArray(data)) {
+                            isEmpty = data.length === 0;
+                        } else if (typeof data === 'object' && data !== null) {
+                            // Check if object values are mostly empty
+                            const values = Object.values(data);
+                            const emptyValues = values.filter(v => !v || (typeof v === 'string' && v.trim() === ''));
+                            isEmpty = emptyValues.length === values.length; // All empty
+                        }
+
+                        if (isEmpty) {
+                            throw new Error(`ExtractionError: The selector '${extractSelector || 'default'}' found no data. \n\n💡 RECOVERY HINT: The page structure likely doesn't match your selector.\n1. Use 'get_interactive_elements' to find valid selectors.\n2. Use 'scan_page_accessibility' to read the page content.\n3. Verify the page is fully loaded.`);
+                        }
+                        return data;
+                    };
+
                     if (extractType === 'table') {
                         const tableData = await page.evaluate((sel) => {
                             const table = sel ? document.querySelector(sel) : document.querySelector('table')
@@ -1162,7 +1180,10 @@ export class PlaywrightService {
                             })
                             return rows
                         }, extractSelector)
+
+                        try { validateResults(tableData, 'table'); } catch (e) { return { result: null, error: (e as Error).message }; }
                         return { result: { type: 'table', data: tableData } }
+
                     } else if (extractType === 'list') {
                         const listData = await page.evaluate((sel) => {
                             const list = sel ? document.querySelector(sel) : document.querySelector('ul, ol')
@@ -1174,7 +1195,10 @@ export class PlaywrightService {
                             })
                             return items
                         }, extractSelector)
+
+                        try { validateResults(listData, 'list'); } catch (e) { return { result: null, error: (e as Error).message }; }
                         return { result: { type: 'list', data: listData } }
+
                     } else if (extractType === 'custom' && safeArgs.fields) {
                         const customData = await page.evaluate((fields) => {
                             const result: Record<string, string> = {}
@@ -1184,6 +1208,8 @@ export class PlaywrightService {
                             }
                             return result
                         }, safeArgs.fields)
+
+                        try { validateResults(customData, 'custom'); } catch (e) { return { result: null, error: (e as Error).message }; }
                         return { result: { type: 'custom', data: customData } }
                     }
                     return { result: null, error: 'Invalid extract_data type' }

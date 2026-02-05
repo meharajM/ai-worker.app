@@ -25,6 +25,8 @@ interface AgentRuntimeOptions {
   taskCategory?: string; // Optional: Force a specific task category (e.g. for sub-agents)
   onMessageUpdate?: (id: string, updates: Partial<LLMMessage>) => void; // Update existing message in UI
   tabId?: number; // Dedicated browser tab ID for this agent
+  parentAgentId?: string; // Link to parent for sub-agents
+  agentInstanceId?: string; // Force specific ID (for pre-seeding memory)
 }
 
 export class AgentRuntime {
@@ -34,10 +36,11 @@ export class AgentRuntime {
   private maxConsecutiveErrors = 3; // Bailout after 3 consecutive tool failures
   private executionPlan: { goal: string; steps: Array<{ id: number; description: string; status: string; result?: string }> } | null = null;
   private taskCategory?: string; // Store identified task category
-  private progressSummary: string[] = []; // LLM-driven progress summaries
   private totalIterations = 0; // Track total iterations across all continuations
   private readonly ABSOLUTE_MAX_ITERATIONS = 150; // Hard cap to prevent runaway costs
   private toolCallHistory = new Set<string>(); // Track unique tool signatures for progress detection
+  private agentInstanceId: string;
+  private lastCheckpoint: { step: number; summary: string; timestamp: number } | null = null;
 
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
     this.options = options;
@@ -58,6 +61,86 @@ export class AgentRuntime {
     if (options.taskCategory) {
       this.taskCategory = options.taskCategory;
     }
+
+    // Generate unique instance ID OR use provided one
+    this.agentInstanceId = options.agentInstanceId || globalThis.crypto.randomUUID();
+  }
+
+  /**
+   * Initialize or Load Session State from Memory
+   */
+  private async initializeSessionState() {
+    const entityName = `AgentState_${this.agentInstanceId}`;
+    try {
+      // Try to read existing state
+      const result = await executeToolCall('memory_read_entity', { name: entityName });
+      if (result && result.result) {
+        const entity = result.result as any;
+        if (entity.Metadata?.lastCheckpoint) {
+          this.lastCheckpoint = entity.Metadata.lastCheckpoint;
+          console.log(`[AgentRuntime] Restored checkpoint from memory: Step ${this.lastCheckpoint?.step}`);
+        }
+      } else {
+        // Create new state
+        await executeToolCall('memory_create_entity', {
+          name: entityName,
+          entityType: 'agent_execution_state',
+          observations: [`Agent initialized at ${new Date().toISOString()}`],
+          Metadata: {
+            agentInstanceId: this.agentInstanceId,
+            sessionId: this.options.activeSessionId || 'unknown',
+            status: 'active',
+            iterationCount: 0,
+            isInternal: true,
+            parentAgentId: this.options.parentAgentId
+          }
+        });
+        console.log(`[AgentRuntime] Created new ExecutionState: ${entityName}`);
+      }
+    } catch (err) {
+      console.warn(`[AgentRuntime] Failed to initialize session state: ${err}`);
+    }
+
+    // GAP FIX 3: Load parent context if sub-agent
+    if (this.options.parentAgentId) {
+      try {
+        const parentState = await executeToolCall('memory_read_entity', {
+          name: `AgentState_${this.options.parentAgentId}`
+        });
+
+        if (parentState.result) {
+          const parent = parentState.result as any;
+          let contextContent = '';
+
+          // Load checkpoint summary
+          if (parent.Metadata?.lastCheckpoint) {
+            const checkpoint = parent.Metadata.lastCheckpoint;
+            contextContent += `[Parent Context - Step ${checkpoint.step}]\n${checkpoint.summary}\n\n`;
+          }
+
+          // Load last 3 observations
+          if (parent.observations && Array.isArray(parent.observations)) {
+            const lastObservations = parent.observations.slice(-3);
+            if (lastObservations.length > 0) {
+              contextContent += `Recent Context:\n`;
+              lastObservations.forEach((obs: string, idx: number) => {
+                contextContent += `${idx + 1}. ${obs}\n`;
+              });
+            }
+          }
+
+          if (contextContent) {
+            this.messages.push({
+              role: 'system',
+              content: `${contextContent}\nYou are a sub-agent. Use this parent context to understand the broader goal.`
+            });
+            console.log(`[AgentRuntime] Loaded parent context from ${this.options.parentAgentId}`);
+          }
+        }
+      } catch (err) {
+        console.warn(`[AgentRuntime] Failed to load parent context: ${err}`);
+      }
+    }
   }
 
   /**
@@ -66,6 +149,59 @@ export class AgentRuntime {
   async chat(userContent: string): Promise<LLMMessage> {
     // PHASE 0: Smart Confirmation (if enabled)
     let finalPrompt = userContent;
+
+    // Initialize State (Idempotent)
+    await this.initializeSessionState();
+
+    // GAP FIX 2B: Detect and resume from pending handoffs
+    if (!this.options.isSubAgent) {
+      try {
+        const handoffCheck = await executeToolCall('memory_search_entities', {
+          query: `handoff ${this.options.activeSessionId || ''}`,
+          entityType: 'agent_handoff'
+        });
+
+        if (handoffCheck.result && typeof handoffCheck.result === 'object') {
+          const resultData = handoffCheck.result as { entities?: any[] };
+          if (resultData.entities && Array.isArray(resultData.entities)) {
+            const pendingHandoffs = resultData.entities.filter((e: any) =>
+              e.Metadata?.sessionId === this.options.activeSessionId
+            );
+
+            if (pendingHandoffs.length > 0) {
+              const handoff = pendingHandoffs[0];
+              console.log(`[AgentRuntime] Resuming from handoff: ${handoff.name}`);
+
+              // Restore context from handoff
+              if (handoff.Metadata?.lastCheckpoint) {
+                this.lastCheckpoint = handoff.Metadata.lastCheckpoint;
+              }
+
+              // Add context message
+              const contextMsg: LLMMessage = {
+                role: 'system',
+                content: `[Resuming from previous agent session]
+Previous progress: ${handoff.Metadata?.lastCheckpoint?.summary || 'In progress...'}
+Original goal: ${handoff.Metadata?.originalGoal || userContent}
+
+Continue from where the previous agent left off.`
+              };
+              this.messages.push(contextMsg);
+
+              // Delete handoff entity (consumed)
+              try {
+                await executeToolCall('memory_delete_entity', { name: handoff.name });
+                console.log(`[AgentRuntime] Deleted consumed handoff: ${handoff.name}`);
+              } catch (e) {
+                console.warn(`[AgentRuntime] Failed to delete handoff: ${e}`);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`[AgentRuntime] Failed to check for handoffs: ${err}`);
+      }
+    }
 
     if (this.options.requireConfirmation && this.options.onConfirmationNeeded) {
       try {
@@ -165,18 +301,71 @@ export class AgentRuntime {
     const recentToolCalls: string[] = []; // Track recent tool signatures to detect loops
     const MAX_IDENTICAL_CALLS = 3; // Bail out if same tool called 3+ times in a row
 
-
     while (iterationCount < this.maxIterations) {
       // Check absolute max first to prevent runaway continuations
       this.totalIterations++;
 
-      if (this.totalIterations >= this.ABSOLUTE_MAX_ITERATIONS) {
-        const absoluteLimitMsg: LLMMessage = {
-          role: 'assistant',
-          content: `⚠️ **Absolute Limit Reached**\n\nI've performed **${this.ABSOLUTE_MAX_ITERATIONS} total steps** across all continuations. This task requires manual intervention or a different approach.\n\n**Recommendations:**\n• Break the task into smaller sub-tasks\n• Review if the goal is achievable with current tools\n• Check for errors or loops in recent steps`
-        };
-        this.addMessage(absoluteLimitMsg);
-        return absoluteLimitMsg;
+      // GAP FIX 2: Context-limit based handoff with progress check
+      // Estimate token usage (rough: 4 chars per token)
+      const contextText = JSON.stringify(this.messages);
+      const estimatedTokens = Math.ceil(contextText.length / 4);
+      const contextLimit = 100000; // Adjust based on model (Gemini 2.0 Flash = 1M tokens, but be conservative)
+      const isApproachingLimit = estimatedTokens > (contextLimit * 0.8); // 80% threshold
+
+      if (isApproachingLimit && !this.options.isSubAgent) {
+        console.warn(`[AgentRuntime] Approaching context limit: ${estimatedTokens} tokens (~${Math.round(estimatedTokens / contextLimit * 100)}%)`);
+
+        // Check if original goal has been met by analyzing progress
+        const originalGoalMsg = this.messages.find(m => m.role === 'user');
+        const originalGoal = originalGoalMsg?.content ? originalGoalMsg.content.toString() : '';
+
+        // Simple progress heuristic: check if there's a checkpoint and if it mentions completion
+        const summary = this.lastCheckpoint?.summary || '';
+        const looksComplete = /complete|done|finished|success/i.test(summary);
+
+        if (!looksComplete) {
+          // Goal not met - create handoff
+          const handoffId = `Handoff_${this.options.activeSessionId}_${Date.now()}`;
+
+          try {
+            await executeToolCall('memory_create_entity', {
+              name: handoffId,
+              entityType: 'agent_handoff',
+              observations: [
+                `Agent ${this.agentInstanceId} approaching context limit (${estimatedTokens} tokens)`,
+                `Handing off at checkpoint: ${this.lastCheckpoint?.summary || 'No checkpoint'}`,
+                `Original goal: ${originalGoal.substring(0, 200)}`
+              ],
+              Metadata: {
+                fromAgentId: this.agentInstanceId,
+                sessionId: this.options.activeSessionId,
+                reason: 'context_limit',
+                originalGoal: originalGoal,
+                lastCheckpoint: this.lastCheckpoint,
+                timestamp: Date.now(),
+                estimatedTokens: estimatedTokens,
+                isInternal: true
+              }
+            });
+
+            console.log(`[AgentRuntime] Created handoff entity: ${handoffId}`);
+
+            const handoffMsg: LLMMessage = {
+              role: 'assistant',
+              content: `I'm approaching my context limit (${estimatedTokens} tokens) and haven't fully completed the task yet. I've saved my progress and will hand off to a fresh agent instance to continue.
+
+**Progress So Far:**
+${this.lastCheckpoint?.summary || 'Working on the task...'}
+
+Please send your next message to continue with a fresh agent.`
+            };
+            this.addMessage(handoffMsg);
+            return handoffMsg;
+
+          } catch (err) {
+            console.error(`[AgentRuntime] Failed to create handoff: ${err}`);
+          }
+        }
       }
 
       if (this.options.signal?.aborted) {
@@ -316,6 +505,28 @@ export class AgentRuntime {
         );
       } catch (error) {
         console.error("[AgentRuntime] LLM Error:", error);
+        console.error("[AgentRuntime] Error details:", {
+          provider: this.options.settings?.preferredProvider || 'auto',
+          messageCount: contextMessages.length,
+          toolCount: allTools.length,
+          hasSignal: !!this.options.signal,
+          errorType: error instanceof Error ? error.constructor.name : typeof error,
+          errorMessage: error instanceof Error ? error.message : String(error)
+        });
+
+        // Provide more helpful error message
+        if (error instanceof Error && error.message.includes('Failed to fetch')) {
+          const provider = this.options.settings?.preferredProvider || 'auto';
+          throw new Error(
+            `Network error when calling LLM (provider: ${provider}). ` +
+            `This could be caused by:\n` +
+            `1. Invalid API key or configuration\n` +
+            `2. Network connectivity issues\n` +
+            `3. CORS issues (if using browser LLM)\n` +
+            `4. Provider service is down\n\n` +
+            `Original error: ${error.message}`
+          );
+        }
         throw error;
       }
 
@@ -354,8 +565,8 @@ Then extract the answer from the results. DO NOT refuse again.`
         }
 
         // Append Progress Summary if available and this is the main agent (user-facing)
-        if (!this.options.isSubAgent && this.progressSummary.length > 0) {
-          const summaryText = this.progressSummary.join('\n');
+        if (!this.options.isSubAgent && this.lastCheckpoint) {
+          const summaryText = `[Resuming Context from Checkpoint ${this.lastCheckpoint.step}]\nSummary: ${this.lastCheckpoint.summary}`;
           // Avoid duplicating if the model already included it nicely
           if (!response.content?.includes('Summary')) {
             if (response.content) response.content += `\n\n## 📝 Execution Report\n${summaryText}`;
@@ -371,6 +582,18 @@ Then extract the answer from the results. DO NOT refuse again.`
 
         // Fire-and-forget memory analysis (Standard Turn Complete)
         MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+
+        // GAP FIX 4: Production Cleanup
+        // Requirement: Keep for debugging in dev mode, clear on completed status in prod
+        if (process.env.NODE_ENV !== 'development') {
+          try {
+            const entityName = `AgentState_${this.agentInstanceId}`;
+            await executeToolCall('memory_delete_entity', { name: entityName });
+            console.log(`[AgentRuntime] Production cleanup: Deleted ${entityName}`);
+          } catch (e) {
+            console.warn(`[AgentRuntime] Production cleanup failed: ${e}`);
+          }
+        }
 
         return assistantMsg;
       }
@@ -563,14 +786,30 @@ ${recentResults.length > 0 ? recentResults.map((r, i) => `**Result ${i + 1}:**\n
           const summary = args.summary || '';
 
           if (summary.trim()) {
-            this.progressSummary.push(`**Step ${iterationCount}**: ${summary}`);
-            console.log(`[AgentRuntime] Progress summary recorded (${this.progressSummary.length} total)`);
+            // Update Local Cache
+            this.lastCheckpoint = {
+              step: iterationCount,
+              summary: summary,
+              timestamp: Date.now()
+            };
+
+            // Update Memory Entity
+            await executeToolCall('memory_update_entity', {
+              name: `AgentState_${this.agentInstanceId}`,
+              Metadata: {
+                lastCheckpoint: this.lastCheckpoint,
+                status: 'active',
+                iterationCount: iterationCount
+              }
+            });
+
+            console.log(`[AgentRuntime] Progress checkpoint saved to memory (Step ${iterationCount})`);
           }
 
           resultStr = JSON.stringify({
             success: true,
-            message: 'Progress summary recorded.',
-            totalSummaries: this.progressSummary.length
+            message: 'Progress checkpoint saved to persistent memory.',
+            checkpointStep: iterationCount
           });
 
         } else if (call.name === 'delegate_sub_task') {
@@ -585,6 +824,33 @@ ${recentResults.length > 0 ? recentResults.map((r, i) => `**Result ${i + 1}:**\n
           }
 
           console.log(`[AgentRuntime] Delegating to sub-agent: ${instruction}`);
+
+          // 1. Generate ID for Sub-Agent
+          const subAgentId = globalThis.crypto.randomUUID();
+
+          // 2. Pre-seed Memory with Context (Avoid passing huge string in constructor)
+          try {
+            const contextEntityName = `AgentState_${subAgentId}`;
+            await executeToolCall('memory_create_entity', {
+              name: contextEntityName,
+              entityType: 'agent_execution_state',
+              observations: [
+                `Sub-agent initialized for task: ${instruction}`,
+                `Context Summary: ${context}`
+              ],
+              Metadata: {
+                agentInstanceId: subAgentId,
+                sessionId: this.options.activeSessionId || 'unknown',
+                status: 'active',
+                iterationCount: 0,
+                parentAgentId: this.agentInstanceId, // Link to me
+                isInternal: true
+              }
+            });
+            console.log(`[AgentRuntime] Pre-seeded memory for sub-agent ${subAgentId}`);
+          } catch (err) {
+            console.warn(`[AgentRuntime] Failed to pre-seed sub-agent memory: ${err}`);
+          }
 
           // Provision a dedicated browser tab for this sub-agent to ensure isolation
           let subAgentTabId: number | undefined;
@@ -611,6 +877,8 @@ ${recentResults.length > 0 ? recentResults.map((r, i) => `**Result ${i + 1}:**\n
             tabId: subAgentTabId,
             taskCategory: this.taskCategory, // Inherit category for safety protocols
             requireConfirmation: false,
+            agentInstanceId: subAgentId, // Use pre-generated ID
+            parentAgentId: this.agentInstanceId, // Link to me
             onMessage: (msg: LLMMessage) => {
               const contentStr = typeof msg.content === 'string'
                 ? msg.content
@@ -678,36 +946,21 @@ Return key findings only. End with "✓ Done".`;
               // We lock based on tool type to prevent race conditions during parallel execution
               let result;
 
-              // Import locks dynamically to avoid top-level side effects/circular deps
-              const { browserLock, fileLock } = await import('./resource-lock');
-              const { STATEFUL_BROWSER_TOOLS, STATEFUL_FILE_TOOLS } = await import('./client-tools');
 
-              // 1. Browser Tools -> browserLock (Global for now, effectively serializes tab actions)
-              if (STATEFUL_BROWSER_TOOLS.includes(name)) {
+              // Import Lane Manager dynamically
+              const { laneManager } = await import('./execution-lanes');
+              const { STATEFUL_BROWSER_TOOLS } = await import('./client-tools');
 
-                // INJECTION: If this agent has a dedicated tab, force all browser tools to use it
-                if (this.options.tabId !== undefined) {
-                  args.tabId = this.options.tabId;
-                }
-
-                result = await browserLock.runExclusive(async () => {
-                  return await executeToolCall(name, args);
-                });
+              // INJECTION: If this agent has a dedicated tab, force all browser tools to use it
+              if (this.options.tabId !== undefined && STATEFUL_BROWSER_TOOLS.includes(name)) {
+                args.tabId = this.options.tabId;
               }
-              // 2. File System Tools -> fileLock (GRANULAR: Lock key = file path)
-              else if (STATEFUL_FILE_TOOLS.includes(name)) {
-                const targetFile = (args.TargetFile || args.path || args.AbsolutePath) as string;
-                // If path is available, lock ONLY that file. Else fallback to global 'unknown' key
-                const lockKey = targetFile || 'global_fs_lock';
 
-                result = await fileLock.runExclusive(lockKey, async () => {
-                  return await executeToolCall(name, args);
-                });
-              }
-              // 3. Other Tools (Search, Memory, etc.) -> No Lock (True Parallelism)
-              else {
-                result = await executeToolCall(name, args);
-              }
+              // EXECUTE via Lane Manager
+              // It handles routing (Browser Serial vs Tab Serial vs API Parallel)
+              result = await laneManager.getLane(name, { tabId: this.options.tabId }).run(async () => {
+                return await executeToolCall(name, args);
+              });
 
               return result;
 
@@ -735,6 +988,40 @@ Return key findings only. End with "✓ Done".`;
                   const newArgs = { ...args, timeout: args.timeout * 2 };
                   return executeCallWithSelfHealing(name, newArgs, attempt + 1);
                 }
+
+                // Strategy 4: Network Errors (Transient)
+                if (errorStr.includes('net::ERR_') || errorStr.includes('ECONNREFUSED') || errorStr.includes('fetch failed')) {
+                  console.log(`[Self-Healing] Network error in ${name}. Retrying in 2s...`);
+                  await new Promise(r => setTimeout(r, 2000));
+                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                }
+
+                // Strategy 5: Browser Context Lost (Transient)
+                if (errorStr.includes('Target closed') || errorStr.includes('Session closed') || errorStr.includes('Browser has been closed')) {
+                  console.log(`[Self-Healing] Browser context lost in ${name}. Retrying in 1s...`);
+                  await new Promise(r => setTimeout(r, 1000));
+                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                }
+
+                // Strategy 6: Element Not Found (Retry with longer wait - page might be loading)
+                if (errorStr.includes('Element not found') || errorStr.includes('waiting for selector') || errorStr.includes('No element matches')) {
+                  console.log(`[Self-Healing] Element not found in ${name}. Retrying with longer wait...`);
+                  const newArgs = { ...args, timeout: (args.timeout as number || 5000) * 1.5 };
+                  return executeCallWithSelfHealing(name, newArgs, attempt + 1);
+                }
+
+                // Strategy 7: Navigation Timeout (Retry with longer timeout)
+                if (errorStr.includes('Navigation timeout') || errorStr.includes('page.goto')) {
+                  console.log(`[Self-Healing] Navigation timeout in ${name}. Retrying with extended timeout...`);
+                  const newArgs = { ...args, timeout: (args.timeout as number || 30000) * 1.5 };
+                  return executeCallWithSelfHealing(name, newArgs, attempt + 1);
+                }
+              }
+
+              // DON'T auto-retry syntax/logic errors - they need LLM intervention
+              if (errorStr.includes('Syntax error') || errorStr.includes('ReferenceError') || errorStr.includes('TypeError') || errorStr.includes('Unexpected identifier')) {
+                console.log(`[Self-Healing] Syntax/logic error detected in ${name} - delegating to LLM for correction`);
+                // Fall through to error return with enhanced hints
               }
 
               // Fallback to error return
@@ -757,8 +1044,12 @@ Return key findings only. End with "✓ Done".`;
                 recoveryHint = '\n\n💡 **Recovery Tip**: The element was not found. Try:\n1. Take a screenshot to see the current page state.\n2. Use `get_state` to list available elements.\n3. Use a different, more general selector (e.g., text-based like `text="Submit"`).\n4. The page might have changed—verify the URL is correct.';
               } else if (errorMsg.includes('not visible') || errorMsg.includes('hidden')) {
                 recoveryHint = '\n\n💡 **Recovery Tip**: The element exists but is hidden. Try:\n1. Scroll the page first (`scroll`).\n2. Wait for animations to complete (`wait`).\n3. Check if a modal or popup is blocking.';
+              } else if (errorMsg.includes('Syntax error') || errorMsg.includes('JavaScript evaluation')) {
+                recoveryHint = '\n\n💡 **Recovery Tip**: Selector syntax error detected. Common fixes:\n1. **Use text-based selectors** instead: `click_text("wireless headphones")` or `click_text("Add to cart")`\n2. **Check attribute quotes**: `div[data-attr="value"]` not `div[data-attr=value]`\n3. **Use simpler selectors**: Try `get_interactive_elements()` to see available elements\n4. **Escape special characters**: Use `\\` before special chars in selectors';
               } else if (errorMsg.includes('Missing required parameter')) {
                 recoveryHint = `\n\n💡 **Recovery Tip**: A required parameter was missing. Check the tool definition and ensure all required fields are provided.`;
+              } else if (errorMsg.includes('ExtractionError')) {
+                recoveryHint = '\n\n💡 **Recovery Tip**: Extraction failed (empty results). The selector is likely wrong. \n1. **Use `get_interactive_elements`** immediately to find the correct selector.\n2. Do NOT retry the same selector.';
               }
 
               resultStr = JSON.stringify({ error: errorMsg + recoveryHint });
@@ -843,7 +1134,7 @@ Return key findings only. End with "✓ Done".`;
         const checkpointIndex = (iterationCount / CHECKPOINT_INTERVAL) - 1; // 0-indexed checkpoint
 
         // Check if summary was recorded for this checkpoint
-        if (this.progressSummary.length <= checkpointIndex) {
+        if ((this.lastCheckpoint?.step || 0) <= checkpointIndex) {
           console.log(`[AgentRuntime] Checkpoint ${iterationCount}: Waiting for progress summary...`);
 
           // Add system message to enforce summary (MUST be non-conversational to prevent verbose responses)
@@ -882,8 +1173,8 @@ Return key findings only. End with "✓ Done".`;
         : '⚠️ Possibly stuck in a loop';
 
       // Use LLM-generated progress summaries
-      const summary = this.progressSummary.length > 0
-        ? this.progressSummary.join('\n\n')
+      const summary = this.lastCheckpoint
+        ? this.lastCheckpoint.summary
         : 'No progress summaries recorded yet. The agent may not have reached any checkpoints.';
 
       const handoffMsg: LLMMessage = {
@@ -937,8 +1228,8 @@ Would you like me to continue with a fresh sub-agent?`,
     stepsTaken: number
   ): Promise<LLMMessage> {
     // Use LLM-generated progress summaries instead of reconstructing from messages
-    const progressContext = this.progressSummary.length > 0
-      ? this.progressSummary.join('\n')
+    const progressContext = this.lastCheckpoint
+      ? `Last Checkpoint: ${this.lastCheckpoint.summary}`
       : 'No detailed progress recorded yet.';
 
     const instruction = `GOAL: ${originalRequest}
@@ -1047,8 +1338,37 @@ Use tools immediately. End with "✓ Done".`;
 
       console.log(`[AgentRuntime] Spawning sub-agent for: ${context}`);
 
+      // GAP FIX 1A: Pre-seed memory for parallel sub-agent
+      const subAgentId = globalThis.crypto.randomUUID();
+
+      try {
+        await executeToolCall('memory_create_entity', {
+          name: `AgentState_${subAgentId}`,
+          entityType: 'agent_execution_state',
+          observations: [
+            `Parallel sub-agent for context: ${context}`,
+            `Task: ${originalRequest}`,
+            `Initialized at ${new Date().toISOString()}`
+          ],
+          Metadata: {
+            agentInstanceId: subAgentId,
+            sessionId: this.options.activeSessionId || 'unknown',
+            parentAgentId: this.agentInstanceId,
+            status: 'active',
+            iterationCount: 0,
+            isInternal: true,
+            context: context
+          }
+        });
+        console.log(`[AgentRuntime] Pre-seeded memory for parallel sub-agent ${subAgentId}`);
+      } catch (err) {
+        console.warn(`[AgentRuntime] Failed to pre-seed sub-agent memory: ${err}`);
+      }
+
       const subAgent = new AgentRuntime({
         ...this.options,
+        agentInstanceId: subAgentId,
+        parentAgentId: this.agentInstanceId,
         isSubAgent: true,
         taskCategory: this.taskCategory, // Inherit category from parent
         requireConfirmation: false,
@@ -1276,8 +1596,39 @@ ${previousStepsSummary}
 Execute this step using available tools. State persists from previous steps.
 End with "✓ Done" and a brief result.`;
 
+        // GAP FIX 1B: Pre-seed memory for sequential sub-agent
+        const subAgentId = globalThis.crypto.randomUUID();
+
+        try {
+          await executeToolCall('memory_create_entity', {
+            name: `AgentState_${subAgentId}`,
+            entityType: 'agent_execution_state',
+            observations: [
+              `Sequential sub-agent for step ${step.id}/${steps.length}`,
+              `Task: ${step.description}`,
+              `Parent task: ${originalRequest}`,
+              `Initialized at ${new Date().toISOString()}`
+            ],
+            Metadata: {
+              agentInstanceId: subAgentId,
+              sessionId: this.options.activeSessionId || 'unknown',
+              parentAgentId: this.agentInstanceId,
+              status: 'active',
+              iterationCount: 0,
+              isInternal: true,
+              stepId: step.id,
+              stepDescription: step.description
+            }
+          });
+          console.log(`[AgentRuntime] Pre-seeded memory for sequential sub-agent ${subAgentId} (step ${step.id})`);
+        } catch (err) {
+          console.warn(`[AgentRuntime] Failed to pre-seed sub-agent memory: ${err}`);
+        }
+
         const subAgent = new AgentRuntime({
           ...this.options,
+          agentInstanceId: subAgentId,
+          parentAgentId: this.agentInstanceId,
           isSubAgent: true,
           taskCategory: this.taskCategory,
           requireConfirmation: false,

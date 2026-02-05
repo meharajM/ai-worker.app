@@ -1,4 +1,4 @@
-import { MCPTool } from "./mcp";
+import { MCPTool } from "../stores/mcpStore";
 
 export const SUB_AGENT_TOOL: MCPTool = {
   name: "delegate_sub_task",
@@ -74,8 +74,6 @@ export const PROGRESS_SUMMARY_TOOL: MCPTool = {
     required: ["summary"]
   }
 };
-
-export const CLIENT_TOOLS = [PLANNING_TOOL, SUB_AGENT_TOOL, SCAN_PAGE_TOOL, PROGRESS_SUMMARY_TOOL];
 
 // Tools that modify browser state and must be serialized (using browserLock)
 export const STATEFUL_BROWSER_TOOLS = [
@@ -169,6 +167,7 @@ export const MEMORY_SEARCH_TOOL: MCPTool = {
   }
 };
 
+
 export const MEMORY_UPDATE_ENTITY_TOOL: MCPTool = {
   name: "memory_update_entity",
   description: "Update an existing entity by adding a new observation or updating description. Use this to APPEND facts to existing entities instead of creating duplicates.",
@@ -188,9 +187,9 @@ export const CLIENT_TOOLS = [
   PLANNING_TOOL,
   SUB_AGENT_TOOL,
   SCAN_PAGE_TOOL,
+  PROGRESS_SUMMARY_TOOL,
   MEMORY_CREATE_ENTITY_TOOL,
   MEMORY_CREATE_RELATION_TOOL,
   MEMORY_SEARCH_TOOL,
   MEMORY_UPDATE_ENTITY_TOOL
 ];
-
