@@ -22,8 +22,9 @@ export interface TaskComplexity {
 
 export interface TaskSuggestion {
   id: string;
-  label: string; // "Search Nike official site for size 6 shoes"
-  enrichedPrompt: string; // Full detailed prompt for execution
+  label: string; // "Proceed with Assumptions"
+  type: 'defaults' | 'memory' | 'clarification'; // New field for UI categorization
+  enrichedPrompt: string; // IMPERATIVE INSTRUCTION: "Assume X... then execute"
   confidence: number; // 0-1
 }
 
@@ -78,6 +79,24 @@ Classify the task into one of these categories:
 - **admin**: Filling forms, scheduling, email, account management, official websites.
 - **general**: Simple navigation, opening sites, weather, etc.
 
+# SUGGESTION GENERATION RULES (CRITICAL):
+You MUST generate 2-3 distinct options for the user. Do NOT ask questions. Provide executable actions.
+
+1. **Option 1: Proceed with Assumptions (type: 'defaults')**
+   - Fill in missing details with the most common/popular choices.
+   - IMPERATIVE prompt: "Assume [Assumption 1] and [Assumption 2], then execute [Task]."
+   - Example: "Assume the user wants a size 10 US Men's shoe from Amazon. Search for 'Nike Air Max size 10' on amazon.com."
+
+2. **Option 2: Use Memory & Context (type: 'memory')**
+   - Instruct the agent to check memory for preferences.
+   - IMPERATIVE prompt: "First, use the 'memory_search' tool to find [Information]. Then use that context to execute [Task]."
+   - Example: "Check memory for the user's shoe size and brand preferences. Then search for matches on their preferred retailer."
+
+3. **Option 3: Clarify (type: 'clarification')** - ONLY if truly blocked
+   - Use this if the task is impossible to guess (e.g., "Delete the file" -> which file?).
+   - Prompt: "Ask the user specifically about [Missing Detail]."
+
+
 Respond with JSON:
 {
   "isAmbiguous": true/false,
@@ -86,7 +105,20 @@ Respond with JSON:
   "category": "shopping|research|admin|general",
   "potentialMistakes": ["typos found"],
   "suggestions": [
-    {"id": "1", "label": "Suggested interpretation", "enrichedPrompt": "Clear version of the request", "confidence": 0.9}
+    {
+      "id": "1", 
+      "label": "Proceed with Assumptions (Amazon)", 
+      "type": "defaults",
+      "enrichedPrompt": "Assume standard Amazon search...", 
+      "confidence": 0.8
+    },
+    {
+      "id": "2", 
+      "label": "Use Memory Context", 
+      "type": "memory",
+      "enrichedPrompt": "Check memory for preferences...", 
+      "confidence": 0.9
+    }
   ],
   "shouldConfirm": true/false,
   "complexity": {
@@ -140,6 +172,7 @@ function createDefaultAnalysis(prompt: string): TaskAnalysis {
     suggestions: [{
       id: 'default',
       label: 'Proceed as typed',
+      type: 'defaults',
       enrichedPrompt: prompt,
       confidence: 1.0
     }],

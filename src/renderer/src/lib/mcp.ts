@@ -1,10 +1,15 @@
 import { ensureRecord } from "./llm";
 import { useMcpStore, MCPServer, MCPTool } from "../stores/mcpStore";
 import electron from "./electron";
+import { STORAGE_KEYS } from "./constants";
 
 /// <reference path="../env.d.ts" />
 
-export { type MCPServer, type MCPTool };
+
+
+
+
+
 
 // Add a custom server
 export async function addCustomServer(
@@ -123,6 +128,17 @@ export async function executeToolCall(
 
   const server = findServerForTool(toolName);
   if (!server) {
+    // FALLBACK: Check if it's an internal memory tool
+    if (toolName.startsWith('memory_')) {
+        logMcpRenderer("info", "Executing memory tool via direct IPC fallback", { tool: toolName });
+        try {
+            const result = await electron.memory.callTool(toolName, safeArgs) as { result: any; error?: string };
+            return result;
+        } catch (err: any) {
+            return { result: null, error: `Direct memory tool call failed: ${err.message}` };
+        }
+    }
+
     const duration = Date.now() - startTime;
     logMcpRenderer("error", "Tool not found in any connected server", {
       operation: "executeToolCall",
@@ -213,13 +229,13 @@ export async function executeToolCall(
   };
 }
 
-export async function autoConnectServers(): Promise<void> {
-  // Already handled by mcpStore.initialize()
-}
+
 
 export async function setAutoConnect(serverId: string, enabled: boolean): Promise<void> {
   return useMcpStore.getState().setAutoConnect(serverId, enabled);
 }
+
+
 
 export async function initializeMcpServers(): Promise<void> {
   return useMcpStore.getState().initialize();

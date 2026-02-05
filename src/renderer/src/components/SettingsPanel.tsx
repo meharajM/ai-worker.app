@@ -45,9 +45,11 @@ import {
     WEBLLM_MODELS, // Kept from original
     deleteWebLLMModel // Kept from original
 } from '../lib/llm'
+import { MemoryPreferencesPanel } from './settings/MemoryPreferencesPanel'
 import { ModelSelect } from './ModelSelect'
+import { ErrorBoundary } from './ErrorBoundary'
 
-type SettingsSection = 'account' | 'llm' | 'voice' | 'browser' | 'appearance' | 'logs' | 'flags' | 'about'
+type SettingsSection = 'account' | 'llm' | 'voice' | 'memory' | 'browser' | 'appearance' | 'logs' | 'flags' | 'about'
 
 interface ProviderStatus {
     ollama: { available: boolean; model?: string; models?: string[]; error?: string; modelsEndpointAvailable?: boolean }
@@ -251,6 +253,7 @@ export function SettingsPanel() {
         ...(FEATURE_FLAGS.AUTH_ENABLED ? [{ id: 'account' as const, label: 'Account', icon: <User size={20} /> }] : []),
         { id: 'llm', label: 'LLM Provider', icon: <Cpu size={20} /> },
         { id: 'voice', label: 'Speech Recognition', icon: <Mic size={20} /> },
+        { id: 'memory', label: 'Memory', icon: <HardDrive size={20} /> },
         { id: 'browser', label: 'Browser Automation', icon: <Globe size={20} /> },
         { id: 'appearance', label: 'Appearance', icon: <Palette size={20} /> },
         { id: 'logs', label: 'Auditing', icon: <FileText size={20} /> },
@@ -285,6 +288,13 @@ export function SettingsPanel() {
                 {/* Account Section */}
                 {activeSection === 'account' && FEATURE_FLAGS.AUTH_ENABLED && (
                     <AccountSettings />
+                )}
+
+                {/* Memory Section */}
+                {activeSection === 'memory' && (
+                    <ErrorBoundary>
+                        <MemoryPreferencesPanel />
+                    </ErrorBoundary>
                 )}
 
                 {/* LLM Provider Section */}

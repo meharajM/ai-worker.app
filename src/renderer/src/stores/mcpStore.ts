@@ -73,10 +73,18 @@ const DEFAULT_MCP_SERVERS = [
     },
     {
         name: 'playwright',
-        description: 'Playwright MCP Server - Browser automation and web interaction tools',
+        description: 'Native Playwright Service - Browser automation (Internal)',
         type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@playwright/mcp'],
+        command: 'internal',
+        args: [],
+        autoConnect: true
+    },
+    {
+        name: 'memory',
+        description: 'Core Memory Service - Knowledge Graph (Internal)',
+        type: 'stdio',
+        command: 'internal-memory',
+        args: [],
         autoConnect: true
     }
 ]

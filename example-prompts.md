@@ -137,66 +137,47 @@ Use these prompts to verify the token efficiency, parallelism, and safety featur
 **Prompt:**
 > "What's the capital of France?"
 
-**Expected Behavior:**
-- NO orchestration triggered
-- NO sub-agents spawned
-- Direct answer from main agent
-
-**Console Logs to Check:**
-```
-[AgentRuntime] Task decomposition: { shouldFork: false, forkReason: 'Simple task - direct execution' }
-```
+**Verify:**
+- [ ] Monitor the DevTools/Terminal logs.
+- [ ] Look for warning: `[AgentRuntime] Sub-agent context too large... truncating to 5000`.
+- [ ] Sub-agent receives truncated context but still attempts the task.
 
 ---
 
-## 9. Context Truncation Safe-Guard
+## 6. Memory & Productivity Workflows
+
+**Test A: Preference Learning (Implicit & Explicit)**
 **Prompt:**
-> "I am analyzing a very long document. [Paste 10,000+ characters of text here]. Use a sub-agent to extract the dates and names from this text."
+> "I'm working on a new React project named 'Orbit'. I strictly use Tailwind CSS and TypeScript. Also, always add a 'Copyright 2026' header to any code you generate."
 
-**Console Logs to Check:**
-```
-[AgentRuntime] Sub-agent context too large (XXXX chars), truncating to 5000
-```
+**Verify:**
+- [ ] MemoryReflector runs in background after response.
+- [ ] Creates Project entity: "Orbit" (Type: `project`).
+- [ ] Creates Preference entity: "Tailwind CSS & TypeScript" (Type: `user_preference` or `technology_preference`).
+- [ ] Creates Workflow/SOP entity: "Code Header Policy" (Type: `workflow`).
 
----
+**Test B: Active Retrieval & Application**
+**Prompt:**
+> "Generate a login component for my project."
 
-## API Payload Comparison Checklist
+**Verify:**
+- [ ] Agent *first* searches memory for "Orbit", "project", "preferences".
+- [ ] Generated code includes `Copyright 2026`.
+- [ ] Generated code uses Tailwind and TypeScript automatically without asking.
 
-### Main Agent (Direct Execution):
-```json
-{
-  "messages": [
-    {"role": "system", "content": "You are AI-Worker..."},
-    {"role": "user", "content": "What's 2+2?"},
-    {"role": "assistant", "content": "4"}
-    // Growing history...
-  ]
-}
-```
+**Test C: Deduplication & Fact Appending**
+**Prompt:**
+> "For the Orbit project, the deadline is next Friday."
 
-### Sub-Agent (Fresh Context):
-```json
-{
-  "messages": [
-    {"role": "system", "content": "You are AI-Worker..."},
-    {"role": "user", "content": "Step 2: Fill in form with Gangavathi to Bengaluru"}
-    // ONLY 1-3 messages, never full history
-  ]
-}
-```
+**Verify:**
+- [ ] Agent searches for "Orbit".
+- [ ] Uses `memory_update_entity` to append the deadline facts to the EXISTING Orbit entity.
+- [ ] Does NOT create a duplicate "Orbit" entity.
 
----
+**Test D: Selections & Favorites**
+**Prompt:**
+> "I like the Logitech MX Master 3S mouse better than the Razer one."
 
-## Quick Verification Commands
-
-**In DevTools Console:**
-```javascript
-// Check last runtime's message count
-console.log('Messages in context:', window.__lastAgentMessages?.length || 'N/A');
-```
-
-**In Terminal (while running):**
-Watch for these log patterns:
-- `FRESH context (0 messages)` = Sub-agent isolation working
-- `LLM call with 1 messages` = Minimal context is correct
-- `skipping duplicate add` = No duplicate user messages
+**Verify:**
+- [ ] MemoryReflector captures this specific choice.
+- [ ] Creates entity (Type: `product_choice` or `user_preference`) with description "Prefers Logitech MX Master 3S over Razer".
