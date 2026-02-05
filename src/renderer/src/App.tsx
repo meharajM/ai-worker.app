@@ -235,16 +235,16 @@ function App() {
       // But `handleSubmit` is a callback closure. `useChatStore.getState()` is safer.
 
       const settingsForLLM = {
-          preferredProvider: settings.preferredProvider,
-          ollamaModel: settings.ollamaModel,
-          ollamaBaseUrl: settings.ollamaBaseUrl,
-          openaiApiKey: settings.openaiApiKey,
-          openaiBaseUrl: settings.openaiBaseUrl,
-          openaiModel: settings.openaiModel,
-          geminiApiKey: settings.geminiApiKey,
-          geminiModel: settings.geminiModel,
-          openrouterApiKey: settings.openrouterApiKey,
-          openrouterModel: settings.openrouterModel,
+        preferredProvider: settings.preferredProvider,
+        ollamaModel: settings.ollamaModel,
+        ollamaBaseUrl: settings.ollamaBaseUrl,
+        openaiApiKey: settings.openaiApiKey,
+        openaiBaseUrl: settings.openaiBaseUrl,
+        openaiModel: settings.openaiModel,
+        geminiApiKey: settings.geminiApiKey,
+        geminiModel: settings.geminiModel,
+        openrouterApiKey: settings.openrouterApiKey,
+        openrouterModel: settings.openrouterModel,
       };
 
       try {
@@ -269,7 +269,7 @@ function App() {
           }
           // Note: Store might store tool results as 'tool' role messages too?
           // It doesn't seem to support 'tool' role in the typed interface `Message`.
-          
+
           return msg;
         });
 
@@ -313,6 +313,7 @@ function App() {
 
         const runtime = new AgentRuntime({
           activeSessionId: activeSessionId || "default",
+          workspacePath: activeSession?.workspacePath,  // Pass workspace path from session
           settings: settingsForLLM,
           signal: useChatStore.getState().getAbortSignal() || undefined,
           requireConfirmation: true, // Enable smart confirmation
@@ -323,26 +324,26 @@ function App() {
             });
           },
           onMessageUpdate: (id, updates) => {
-             const { updateSessionMessage } = useChatStore.getState();
-             // Convert LLMMessage updates to Store Message updates
-             const storeUpdates: any = { ...updates };
-             
-             // Handle content array -> string
-             if (Array.isArray(storeUpdates.content)) {
-               storeUpdates.content = storeUpdates.content
-                 .map((c: any) => c.text || '')
-                 .join('');
-             }
-             
-             // Remove role if it's 'tool' as store doesn't support it (and we rarely update role anyway)
-             if (storeUpdates.role === 'tool') {
-               delete storeUpdates.role;
-             }
-             
-             // Use the session ID captured at start of this run via closure
-             if (activeSessionId) {
-                updateSessionMessage(activeSessionId, id, storeUpdates);
-             }
+            const { updateSessionMessage } = useChatStore.getState();
+            // Convert LLMMessage updates to Store Message updates
+            const storeUpdates: any = { ...updates };
+
+            // Handle content array -> string
+            if (Array.isArray(storeUpdates.content)) {
+              storeUpdates.content = storeUpdates.content
+                .map((c: any) => c.text || '')
+                .join('');
+            }
+
+            // Remove role if it's 'tool' as store doesn't support it (and we rarely update role anyway)
+            if (storeUpdates.role === 'tool') {
+              delete storeUpdates.role;
+            }
+
+            // Use the session ID captured at start of this run via closure
+            if (activeSessionId) {
+              updateSessionMessage(activeSessionId, id, storeUpdates);
+            }
           },
           onMessage: (msg: LLMMessage) => {
             const getContentString = (content: string | any[]): string => {
@@ -369,7 +370,7 @@ function App() {
                 // We should find the session by `currentSessionId`.
                 const { sessions } = useChatStore.getState();
                 const session = sessions.find(s => s.id === currentSessionId);
-                
+
                 const existingMsg = session?.messages.find(m => m.id === activeAssistantMessageId);
                 if (existingMsg) {
                   // Update existing message
@@ -396,25 +397,25 @@ function App() {
               // The user didn't report messages appearing in wrong session, only *updates* (status).
               // Initial message is added when user is looking at it.
               // But subsequent assistant chunks?
-              
+
               // If `addMessage` uses `activeSessionId` from store state (which it does),
               // then `addMessage` is ALSO broken for background runs.
               // We fix `updateMessage` now. `addMessage` might be a separate issue.
               // BUT for `onMessage` here, it runs incrementally.
-              
+
               // If we are strictly fixing "status appearing in other window", `updateMessage` fix handles the "Parallel Execution" status block.
               // The status block is created once via `addMessage` (while user is present hopefully).
               // Then updated via `onMessageUpdate`.
-              
+
               // Wait, `AgentRuntime` calls `this.addMessage(statusMessage)`.
               // `App.tsx` handles `onMessage` -> `activeSessionId` closure -> ...
               // If `App.tsx` calls `addMessage`, it uses STORE `activeSessionId`.
               // So if user switched session, `addMessage` is dangerous.
-              
+
               // However, fixing `addMessage` requires larger refactor.
               // The immediate issue "shows same in the other chat window" is likely about the STATUS updates (which use `updateMessage`).
               // Because `AgentRuntime` updates that specific message repeatedly.
-              
+
               const added = addMessage({
                 role: 'assistant',
                 content: getContentString(msg.content || ""),
@@ -449,15 +450,15 @@ function App() {
         // We run this CONCURRENTLY with the main agent to ensure we capture user intent 
         // even if the main agent gets stuck in a confirmation loop or fails.
         import("./lib/memory-reflector").then(({ MemoryReflector }) => {
-            const currentMessages = useChatStore.getState().getActiveSession()?.messages || [];
-           
-            // Convert to LLMMessage format for the reflector
-            const historyForReflector: LLMMessage[] = currentMessages.map(m => ({
-                role: m.role as "user" | "assistant" | "system",
-                content: m.content
-            }));
-            
-            MemoryReflector.getInstance().analyze(historyForReflector, settingsForLLM);
+          const currentMessages = useChatStore.getState().getActiveSession()?.messages || [];
+
+          // Convert to LLMMessage format for the reflector
+          const historyForReflector: LLMMessage[] = currentMessages.map(m => ({
+            role: m.role as "user" | "assistant" | "system",
+            content: m.content
+          }));
+
+          MemoryReflector.getInstance().analyze(historyForReflector, settingsForLLM);
         });
 
         await runtime.chat(content);

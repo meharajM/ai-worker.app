@@ -41,6 +41,7 @@ const electronAPI = {
     app: {
         getVersion: () => ipcRenderer.invoke('app:get-version'),
         getName: () => ipcRenderer.invoke('app:get-name'),
+        selectFolder: () => ipcRenderer.invoke('app:select-folder'),
     },
 
     // Logging operations
@@ -79,13 +80,13 @@ const electronAPI = {
     // Secure storage operations (encrypted with OS keychain)
     secure: {
         isAvailable: () => ipcRenderer.invoke('secure:is-available'),
-        set: (key: string, value: string, userId?: string) => 
+        set: (key: string, value: string, userId?: string) =>
             ipcRenderer.invoke('secure:set', key, value, userId),
-        get: (key: string, userId?: string) => 
+        get: (key: string, userId?: string) =>
             ipcRenderer.invoke('secure:get', key, userId),
-        delete: (key: string, userId?: string) => 
+        delete: (key: string, userId?: string) =>
             ipcRenderer.invoke('secure:delete', key, userId),
-        listKeys: (userId?: string) => 
+        listKeys: (userId?: string) =>
             ipcRenderer.invoke('secure:list-keys', userId),
     },
     // Filesystem Safe Mode operations

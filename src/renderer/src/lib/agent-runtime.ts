@@ -15,6 +15,7 @@ export type AgentStatusCallback = (message: LLMMessage) => string | void;
 
 interface AgentRuntimeOptions {
   activeSessionId?: string;
+  workspacePath?: string;  // Optional workspace folder for filesystem operations
   settings: any;
   onMessage?: AgentStatusCallback;
   signal?: AbortSignal;
@@ -557,7 +558,43 @@ Return key findings only. End with "✓ Done".`;
         } else {
           // Standard MCP tool
           try {
-            const result = await executeToolCall(call.name, call.arguments as Record<string, unknown>);
+            // Inject workspace path for filesystem tools
+            const isFilesystemTool = call.name.startsWith('fs_');
+            let toolArgs = call.arguments as Record<string, unknown>;
+
+            if (isFilesystemTool) {
+              if (this.options.workspacePath && toolArgs.path && typeof toolArgs.path === 'string') {
+                // Prepend workspace path to relative paths
+                const pathStr = toolArgs.path;
+                // Simple check for absolute path (works cross-platform)
+                const isAbsolute = pathStr.startsWith('/') || /^[A-Za-z]:/.test(pathStr);
+
+                if (!isAbsolute) {
+                  // Join workspace path with relative path
+                  const separator = this.options.workspacePath.includes('\\') ? '\\' : '/';
+                  const joinedPath = this.options.workspacePath.endsWith(separator)
+                    ? this.options.workspacePath + pathStr
+                    : this.options.workspacePath + separator + pathStr;
+
+                  toolArgs = {
+                    ...toolArgs,
+                    path: joinedPath
+                  };
+                  console.log(`[AgentRuntime] Injected workspace: ${this.options.workspacePath} -> ${toolArgs.path}`);
+                }
+              } else if (!this.options.workspacePath) {
+                // Warn user if filesystem tool called without workspace
+                console.warn(`[AgentRuntime] Filesystem tool '${call.name}' called without workspace selection`);
+                // Add a warning message but continue execution
+                const warningMsg: LLMMessage = {
+                  role: 'assistant',
+                  content: `⚠️ **No workspace selected**: Using filesystem tool \`${call.name}\` without a workspace folder. Files will be accessed using absolute paths. Consider selecting a workspace folder for better organization.`
+                };
+                this.addMessage(warningMsg);
+              }
+            }
+
+            const result = await executeToolCall(call.name, toolArgs);
             if (result.error) {
               // Enrich error message with recovery hints
               const errorMsg = result.error;

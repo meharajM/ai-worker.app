@@ -22,6 +22,7 @@ export interface ChatSession {
     messages: Message[]
     createdAt: number
     updatedAt: number
+    workspacePath?: string  // Optional workspace folder for this chat session
 }
 
 interface ChatState {
@@ -33,10 +34,11 @@ interface ChatState {
     offlineSpeech: boolean
 
     // Session Actions
-    createSession: () => string
+    createSession: (workspacePath?: string) => string
     deleteSession: (id: string) => void
     setActiveSession: (id: string) => void
     updateSessionTitle: (id: string, title: string) => void
+    updateSessionWorkspace: (id: string, workspacePath: string) => void
     setOfflineSpeech: (enabled: boolean) => void
 
     // Message Actions (operate on active session)
@@ -67,13 +69,14 @@ export const useChatStore = create<ChatState>()(
                 return sessions.find((s) => s.id === activeSessionId)
             },
 
-            createSession: () => {
+            createSession: (workspacePath?: string) => {
                 const newSession: ChatSession = {
                     id: `chat_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
                     title: 'New Chat',
                     messages: [],
                     createdAt: Date.now(),
                     updatedAt: Date.now(),
+                    workspacePath,  // Store workspace path if provided
                 }
                 set((state) => ({
                     sessions: [newSession, ...state.sessions],
@@ -103,7 +106,15 @@ export const useChatStore = create<ChatState>()(
             updateSessionTitle: (id, title) => {
                 set((state) => ({
                     sessions: state.sessions.map((s) =>
-                        s.id === id ? { ...s, title } : s
+                        s.id === id ? { ...s, title, updatedAt: Date.now() } : s
+                    ),
+                }))
+            },
+
+            updateSessionWorkspace: (id, workspacePath) => {
+                set((state) => ({
+                    sessions: state.sessions.map((s) =>
+                        s.id === id ? { ...s, workspacePath, updatedAt: Date.now() } : s
                     ),
                 }))
             },

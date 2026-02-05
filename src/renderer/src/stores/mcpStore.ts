@@ -86,6 +86,14 @@ const DEFAULT_MCP_SERVERS = [
         command: 'internal-memory',
         args: [],
         autoConnect: true
+    },
+    {
+        name: 'filesystem',
+        description: 'Safe Filesystem Service - Read/Write files with safety checks (Internal)',
+        type: 'stdio',
+        command: 'internal-filesystem',
+        args: [],
+        autoConnect: true
     }
 ]
 

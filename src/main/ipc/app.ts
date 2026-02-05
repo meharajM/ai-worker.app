@@ -1,4 +1,4 @@
-import { app, shell, ipcMain } from 'electron'
+import { app, shell, ipcMain, dialog } from 'electron'
 
 export function registerAppHandlers(): void {
     // Shell operations
@@ -9,4 +9,14 @@ export function registerAppHandlers(): void {
     // App info
     ipcMain.handle('app:get-version', () => app.getVersion())
     ipcMain.handle('app:get-name', () => app.getName())
+
+    // Folder selection
+    ipcMain.handle('app:select-folder', async () => {
+        const result = await dialog.showOpenDialog({
+            properties: ['openDirectory'],
+            title: 'Select Workspace Folder',
+            buttonLabel: 'Select Workspace'
+        })
+        return result.canceled ? null : result.filePaths[0]
+    })
 }

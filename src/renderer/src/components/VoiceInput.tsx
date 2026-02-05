@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react'
-import { Mic, MicOff, Send, X, Maximize2, Minimize2, Square } from 'lucide-react'
+import { Mic, MicOff, Send, X, Maximize2, Minimize2, Square, Folder } from 'lucide-react'
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
 import { VoiceVisualizer } from './VoiceVisualizer'
 import { useLogStore } from '../stores/logStore'
 import { useChatStore } from '../stores/chatStore'
+import electron from '../lib/electron'
 
 interface VoiceInputProps {
     onSubmit: (message: string) => void
@@ -13,9 +14,16 @@ interface VoiceInputProps {
 
 export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputProps) {
     const [textInput, setTextInput] = useState('')
+    const [workspacePath, setWorkspacePath] = useState<string | null>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const { addLog } = useLogStore()
-    const { activeSessionId } = useChatStore()
+    const { activeSessionId, getActiveSession } = useChatStore()
+
+    // Load workspace from active session
+    useEffect(() => {
+        const session = getActiveSession()
+        setWorkspacePath(session?.workspacePath || null)
+    }, [activeSessionId, getActiveSession])
 
     // Use hook's setText to update transcript manually
     const {
@@ -108,6 +116,34 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
         }
     }, [isListening, isInitializing, disabled, startListening, stopListening, textInput, transcript, setText, addLog, activeSessionId])
 
+    // Handle folder selection
+    const handleSelectFolder = useCallback(async () => {
+        try {
+            const selectedPath = await electron.selectFolder()
+            if (selectedPath) {
+                setWorkspacePath(selectedPath)
+
+                // If no active session, create one with workspace
+                const { createSession, activeSessionId: currentSessionId, updateSessionWorkspace } = useChatStore.getState()
+                if (!currentSessionId) {
+                    createSession(selectedPath)
+                } else {
+                    // Update existing session's workspace
+                    updateSessionWorkspace(currentSessionId, selectedPath)
+                }
+
+                addLog({
+                    eventType: 'STATE_CHANGE',
+                    sessionId: currentSessionId || 'unknown',
+                    component: 'VoiceInput',
+                    details: { metadata: { action: 'workspace_selected', path: selectedPath } }
+                })
+            }
+        } catch (error) {
+            console.error('Failed to select folder:', error)
+        }
+    }, [addLog])
+
     // Handle text input submission
     const handleTextSubmit = useCallback(() => {
         const message = textInput.trim()
@@ -180,6 +216,19 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
                         `}
                     />
                 </div>
+
+                {/* Workspace Folder Button */}
+                <button
+                    onClick={handleSelectFolder}
+                    disabled={disabled}
+                    className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${workspacePath
+                        ? 'bg-[#00a896]/20 text-[#00a896] hover:bg-[#00a896]/30'
+                        : 'bg-transparent text-white/40 hover:text-white/60 hover:bg-white/5'
+                        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    title={workspacePath ? `Workspace: ${workspacePath}` : 'Select workspace folder'}
+                >
+                    <Folder size={18} />
+                </button>
 
                 {/* Right Button: Send OR Stop Generation */}
                 {disabled && onAbort ? (
