@@ -1,6 +1,12 @@
-export type LLMContentPart = 
+export type LLMContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } };
+
+export interface MessageAction {
+  type: 'continue' | 'cancel' | 'custom';
+  label: string;
+  payload?: Record<string, unknown>;
+}
 
 export interface LLMMessage {
   role: "user" | "assistant" | "system" | "tool";
@@ -8,6 +14,7 @@ export interface LLMMessage {
   tool_calls?: any[];
   tool_call_id?: string;
   name?: string; // For Gemini/OpenAI tool names
+  actions?: MessageAction[]; // For button-based interactions
 }
 
 export interface LLMTool {
