@@ -38,6 +38,9 @@ interface SettingsState {
     playwrightBrowser: PlaywrightBrowserType
     playwrightHeadless: boolean
 
+    // MCP FileSystem settings
+    fileSystemSafeMode: boolean
+
     // Sync State
     activeUserId: string | null
     isSyncing: boolean
@@ -65,6 +68,12 @@ interface SettingsState {
     setTheme: (theme: Theme) => void
     setPlaywrightBrowser: (browser: PlaywrightBrowserType) => void
     setPlaywrightHeadless: (headless: boolean) => void
+    setFileSystemSafeMode: (enabled: boolean) => void
+    
+    // Memory Settings
+    memoryBackend: 'server-memory' | 'memento-mcp'
+    setMemoryBackend: (backend: 'server-memory' | 'memento-mcp') => void
+    
     resetToDefaults: () => void
 
     // Sync Actions
@@ -100,38 +109,14 @@ const defaultSettings = {
     theme: 'dark' as Theme,
     playwrightBrowser: 'auto' as PlaywrightBrowserType, // Auto-detect based on OS
     playwrightHeadless: false, // Default to headed for user visibility
+    fileSystemSafeMode: true, // Default to safe mode (shadow writes)
+    memoryBackend: 'server-memory' as 'server-memory' | 'memento-mcp', // Default backend
     activeUserId: null,
     isSyncing: false,
     lastSyncTime: 0,
 }
 
-// Migrate API credentials from localStorage/plaintext store to secure storage
-async function migrateToSecureStorage(): Promise<void> {
-    try {
-        // Try to migrate from localStorage (legacy)
-        const localApiKey = localStorage.getItem('openai_api_key')
-        if (localApiKey) {
-            await electron.secure.set('openai_api_key', localApiKey)
-            localStorage.removeItem('openai_api_key')
-            console.log('[Settings] Migrated OpenAI API key from localStorage to secure storage')
-        }
-
-        // Migrate base URL (not sensitive, stays in regular store)
-        const localBaseUrl = localStorage.getItem('openai_base_url')
-        if (localBaseUrl) {
-            await electron.store.set('openai_base_url', localBaseUrl)
-            localStorage.removeItem('openai_base_url')
-        }
-
-        // Note: Old plaintext keys in electron-store will be blocked by store.ts
-        // They can be manually migrated if needed, but new keys will use secure storage
-    } catch (error) {
-        console.error('[Settings] Error migrating to secure storage:', error)
-    }
-}
-
-// Run migration on module load
-migrateToSecureStorage().catch(console.error)
+// ... existing migration code ...
 
 export const useSettingsStore = create<SettingsState>()(
     persist(
@@ -190,6 +175,19 @@ export const useSettingsStore = create<SettingsState>()(
                 // Also save to main process store for PlaywrightService to read
                 const current = await electron.store.get<any>('mcpPlaywright') || {}
                 await electron.store.set('mcpPlaywright', { ...current, headless })
+            },
+            setFileSystemSafeMode: async (enabled) => {
+                set({ fileSystemSafeMode: enabled })
+                // Save to main process store for FileSystemService to read
+                const current = await electron.store.get<any>('mcpFileSystem') || {}
+                await electron.store.set('mcpFileSystem', { ...current, safeMode: enabled })
+            },
+            setMemoryBackend: async (backend) => {
+                set({ memoryBackend: backend })
+                // Update main process store (triggers migration check if changed via UI, though usually handled by IPC)
+                // We store complete config structure
+                const current = await electron.store.get<any>('memory') || {}
+                await electron.store.set('memory', { ...current, backend })
             },
             resetToDefaults: () => set(defaultSettings),
 

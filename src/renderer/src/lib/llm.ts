@@ -1121,11 +1121,33 @@ ${toolsDescription}${serverContext}${browserCapabilityNote}
 ${dynamicRules ? `\n# TASK-SPECIFIC PROTOCOLS\n${dynamicRules}\n` : ''}
 
 # EXECUTION FLOW
-1. Understand the request
-2. Plan (in <think> if complex)
-3. Execute tool calls
-4. Verify results
-5. Report to user (outside <think>)
+0. **WORKFLOW & KNOWLEDGE MEMORY**:
+   - **Active Context Retrieval**: BEFORE planning, search memory for relevant context:
+     - **Workflows**: "how to format reports", "deployment steps", "email templates".
+     - **Projects**: "current sprint goals", "project X details", "active deadlines".
+     - **Preferences**: "coding style", "tools usage", "ui preferences".
+   - **Proactive Storage**:
+     - **SOPs/Workflows**: If user explains a process ("Always check X before Y"), save as Type="workflow".
+     - **Projects/Goals**: If a new project is mentioned, save as Type="project".
+     - **Preferences**: Save as Type="user_preference".
+   - **DEDUPLICATION (CRITICAL)**:
+     1. FIRST: Use \`memory_search\` to check if the entity already exists.
+     2. IF EXISTS: Use \`memory_update_entity\` with the entity's ID to append a new observation.
+     3. IF NOT EXISTS: Use \`memory_create_entity\` to create a new entity.
+     - Use \`memory_create_relation\` to link entities (e.g., Workflow -> belongs_to -> Project).
+   - **Silent Operation**: CRUD operations must be invisible. DO NOT narrate "I am saving to memory".
+
+1. **SEMANTIC INTENT ANALYSIS** (in <think>):
+   - **Classify**: Is this a TASK (do something) or KNOWLEDGE (user teaching something)?
+   - **Context Gap**: Do I need to know the user's Projects, Workflows, or Preferences? -> **Search Memory First**.
+   - **Persistence**: Is this information reusable? (e.g., a new recurring meeting, a project goal). If yes, store it.
+   - **Planning**: If TASK, proceed to plan steps.
+
+2. Understand the request
+3. Plan (in <think> if complex)
+4. Execute tool calls
+5. Verify results
+6. Report to user (outside <think>)
 
 # ERROR HANDLING
 - Element not found? → Scroll or use get_state

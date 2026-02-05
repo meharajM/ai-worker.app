@@ -55,3 +55,43 @@ Use these prompts to verify the token efficiency, parallelism, and safety featur
 - [ ] Monitor the DevTools/Terminal logs.
 - [ ] Look for warning: `[AgentRuntime] Sub-agent context too large... truncating to 5000`.
 - [ ] Sub-agent receives truncated context but still attempts the task.
+
+---
+
+## 6. Memory & Productivity Workflows
+
+**Test A: Preference Learning (Implicit & Explicit)**
+**Prompt:**
+> "I'm working on a new React project named 'Orbit'. I strictly use Tailwind CSS and TypeScript. Also, always add a 'Copyright 2026' header to any code you generate."
+
+**Verify:**
+- [ ] MemoryReflector runs in background after response.
+- [ ] Creates Project entity: "Orbit" (Type: `project`).
+- [ ] Creates Preference entity: "Tailwind CSS & TypeScript" (Type: `user_preference` or `technology_preference`).
+- [ ] Creates Workflow/SOP entity: "Code Header Policy" (Type: `workflow`).
+
+**Test B: Active Retrieval & Application**
+**Prompt:**
+> "Generate a login component for my project."
+
+**Verify:**
+- [ ] Agent *first* searches memory for "Orbit", "project", "preferences".
+- [ ] Generated code includes `Copyright 2026`.
+- [ ] Generated code uses Tailwind and TypeScript automatically without asking.
+
+**Test C: Deduplication & Fact Appending**
+**Prompt:**
+> "For the Orbit project, the deadline is next Friday."
+
+**Verify:**
+- [ ] Agent searches for "Orbit".
+- [ ] Uses `memory_update_entity` to append the deadline facts to the EXISTING Orbit entity.
+- [ ] Does NOT create a duplicate "Orbit" entity.
+
+**Test D: Selections & Favorites**
+**Prompt:**
+> "I like the Logitech MX Master 3S mouse better than the Razer one."
+
+**Verify:**
+- [ ] MemoryReflector captures this specific choice.
+- [ ] Creates entity (Type: `product_choice` or `user_preference`) with description "Prefers Logitech MX Master 3S over Razer".
