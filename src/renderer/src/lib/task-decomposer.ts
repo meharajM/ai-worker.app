@@ -160,13 +160,7 @@ export function analyzeTaskForDecomposition(
   const websites = extractWebsites(userRequest);
   const estimatedActions = countActions(userRequest);
 
-  // Add current URL context if provided and not already in list
-  if (currentUrl) {
-    const currentDomain = currentUrl.replace(/https?:\/\//i, '').replace('www.', '').split('/')[0];
-    if (!websites.includes(currentDomain.toLowerCase())) {
-      // Don't add - we only care about mentioned websites
-    }
-  }
+
 
   // Decision logic
   if (websites.length > 1) {
@@ -192,8 +186,7 @@ export function analyzeTaskForDecomposition(
     };
   }
 
-  // No website mentioned but many actions - still might benefit from orchestration
-  // But only if there's clear multi-step language AND 5+ actions (higher threshold for generic tasks)
+  // No website mentioned but many actions - still might benefit from orchestration       
   const hasMultiStepLanguage = MULTI_STEP_INDICATORS.some(indicator =>
     userRequest.toLowerCase().includes(indicator)
   );

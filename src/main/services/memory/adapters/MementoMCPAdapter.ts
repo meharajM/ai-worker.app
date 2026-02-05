@@ -59,14 +59,8 @@ import type {
  * - Restart app
  */
 export class MementoMCPAdapter implements UnifiedMemoryBackend {
-  private config: {
-    neo4jUri: string
-    username: string
-    password: string
-  }
-
-  constructor(config: { neo4jUri: string; username: string; password: string }) {
-    this.config = config
+  constructor(_config: { neo4jUri: string; username: string; password: string }) {
+    // Config will be used when implementing this adapter
   }
 
   // --- Lifecycle ---
@@ -74,11 +68,11 @@ export class MementoMCPAdapter implements UnifiedMemoryBackend {
   async initialize(): Promise<void> {
     throw new Error(
       'MementoMCPAdapter not yet implemented.\n\n' +
-        'To use this adapter:\n' +
-        '1. Install memento-mcp: npm install memento-mcp\n' +
-        '2. Setup Neo4j database\n' +
-        '3. Implement this adapter based on memento-mcp API\n\n' +
-        'For now, use ServerMemoryAdapter (default).'
+      'To use this adapter:\n' +
+      '1. Install memento-mcp: npm install memento-mcp\n' +
+      '2. Setup Neo4j database\n' +
+      '3. Implement this adapter based on memento-mcp API\n\n' +
+      'For now, use ServerMemoryAdapter (default).'
     )
   }
 

@@ -62,13 +62,13 @@ const FILESYSTEM_TOOLS: ToolSchema[] = [
         inputSchema: {
             type: 'object',
             properties: {
-                path: { 
-                    type: 'string', 
-                    description: 'Absolute file path' 
+                path: {
+                    type: 'string',
+                    description: 'Absolute file path'
                 },
-                content: { 
-                    type: 'string', 
-                    description: 'File content (text)' 
+                content: {
+                    type: 'string',
+                    description: 'File content (text)'
                 }
             },
             required: ['path', 'content']
@@ -80,9 +80,9 @@ const FILESYSTEM_TOOLS: ToolSchema[] = [
         inputSchema: {
             type: 'object',
             properties: {
-                path: { 
-                    type: 'string', 
-                    description: 'Absolute file path' 
+                path: {
+                    type: 'string',
+                    description: 'Absolute file path'
                 }
             },
             required: ['path']
@@ -94,9 +94,9 @@ const FILESYSTEM_TOOLS: ToolSchema[] = [
         inputSchema: {
             type: 'object',
             properties: {
-                path: { 
-                    type: 'string', 
-                    description: 'Absolute directory path' 
+                path: {
+                    type: 'string',
+                    description: 'Absolute directory path'
                 }
             },
             required: ['path']
@@ -186,8 +186,8 @@ export class FileSystemService {
     private async isSafeModeEnabled(): Promise<boolean> {
         try {
             const Store = (await import('electron-store')).default
-            const store = new Store()
-            const settings = (store.get('mcpFileSystem') || {}) as SafeModeSettings
+            const store = new Store<Record<string, any>>()
+            const settings = ((store as any).get('mcpFileSystem', {}) as any) as SafeModeSettings
             return settings.safeMode !== false  // Default to true
         } catch (error) {
             console.warn('[FileSystemService] Failed to check safe mode, defaulting to enabled:', error)
@@ -207,8 +207,8 @@ export class FileSystemService {
      * @returns Change record with staging info
      */
     async stageWrite(
-        filePath: string, 
-        content: string, 
+        filePath: string,
+        content: string,
         sessionId: string = 'default'
     ): Promise<FileChange> {
         const changeId = randomUUID()
@@ -251,14 +251,14 @@ export class FileSystemService {
         try {
             // Ensure parent directory exists
             await fs.mkdir(path.dirname(change.originalPath), { recursive: true })
-            
+
             // Copy shadow file to real location
             await fs.copyFile(change.shadowPath, change.originalPath)
-            
+
             // Cleanup
             await fs.rm(change.shadowPath)
             this.pendingChanges.delete(changeId)
-            
+
             console.log(`[FileSystemService] ✓ Committed ${change.type} to ${change.originalPath}`)
         } catch (error) {
             console.error(`[FileSystemService] ✗ Failed to commit ${changeId}:`, error)
@@ -317,7 +317,7 @@ export class FileSystemService {
                     if (isSafeMode) {
                         // Safe Mode: Stage for user review
                         const change = await this.stageWrite(args.path, args.content)
-                        return { 
+                        return {
                             result: {
                                 status: 'staged',
                                 changeId: change.id,
@@ -328,7 +328,7 @@ export class FileSystemService {
                         // Direct write (Safe Mode disabled)
                         await fs.mkdir(path.dirname(args.path), { recursive: true })
                         await fs.writeFile(args.path, args.content, 'utf8')
-                        return { 
+                        return {
                             result: {
                                 status: 'written',
                                 path: args.path,
@@ -349,15 +349,15 @@ export class FileSystemService {
                 }
 
                 default:
-                    return { 
-                        result: null, 
-                        error: `Unknown tool: ${name}. Available tools: ${FILESYSTEM_TOOLS.map(t => t.name).join(', ')}` 
+                    return {
+                        result: null,
+                        error: `Unknown tool: ${name}. Available tools: ${FILESYSTEM_TOOLS.map(t => t.name).join(', ')}`
                     }
             }
         } catch (error) {
-            return { 
-                result: null, 
-                error: error instanceof Error ? error.message : String(error) 
+            return {
+                result: null,
+                error: error instanceof Error ? error.message : String(error)
             }
         }
     }

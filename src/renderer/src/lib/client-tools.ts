@@ -1,4 +1,4 @@
-import { MCPTool } from "./mcp";
+import { MCPTool } from "../stores/mcpStore";
 
 export const SUB_AGENT_TOOL: MCPTool = {
   name: "delegate_sub_task",
@@ -60,6 +60,69 @@ export const SCAN_PAGE_TOOL: MCPTool = {
   }
 };
 
+export const PROGRESS_SUMMARY_TOOL: MCPTool = {
+  name: "update_progress_summary",
+  description: "Record a summary of progress/findings so far. Call this every ~15 steps to track what you've accomplished. Be concise and incremental - only add NEW findings since last summary. Examples: 'Extracted 50 user records with email and phone' or 'Completed steps 1-3: navigated to dashboard, logged in, accessed reports section' or 'Found 5 matching documents: Q4-Report.pdf, Budget-2024.xlsx...' or 'Submitted form with confirmation ID: ABC123'.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      summary: {
+        type: "string",
+        description: "Concise summary of NEW findings/progress since last update. Focus on results and data, not tool names."
+      }
+    },
+    required: ["summary"]
+  }
+};
+
+// Tools that modify browser state and must be serialized (using browserLock)
+export const STATEFUL_BROWSER_TOOLS = [
+  'navigate',
+  'click',
+  'click_text',
+  'fill',
+  'type',
+  'select_option',
+  'hover',
+  'press',
+  'scroll',
+  'wait_for_element',
+  'wait_for_navigation',
+  'get_state',
+  'get_interactive_elements',
+  'get_page_content',
+  'extract_data',
+  'evaluate',
+  'browser_evaluate', // Alias
+  'browser_run_code', // Alias
+  'screenshot',
+  'upload_file',
+  'handle_dialog',
+  'switch_frame',
+  'get_cookies',
+  'set_cookie',
+  'check_element',
+  'drag_drop',
+  'go_back',
+  'go_forward',
+  'set_viewport',
+  'find_by_xpath',
+  // Tab management is also stateful/browser-locked
+  'new_tab',
+  'switch_tab',
+  'close_tab',
+  'get_tabs'
+];
+
+// Tools that modify file system state (using fileLock)
+export const STATEFUL_FILE_TOOLS = [
+  'write_to_file',
+  'replace_file_content',
+  'create_file',
+  'delete_file',
+  'edit_file', // potential alias
+  'append_file' // potential alias
+];
 export const MEMORY_CREATE_ENTITY_TOOL: MCPTool = {
   name: "memory_create_entity",
   description: "Create a new entity in the knowledge graph. Use this to remember people, concepts, files, or projects.",
@@ -104,6 +167,7 @@ export const MEMORY_SEARCH_TOOL: MCPTool = {
   }
 };
 
+
 export const MEMORY_UPDATE_ENTITY_TOOL: MCPTool = {
   name: "memory_update_entity",
   description: "Update an existing entity by adding a new observation or updating description. Use this to APPEND facts to existing entities instead of creating duplicates.",
@@ -123,9 +187,9 @@ export const CLIENT_TOOLS = [
   PLANNING_TOOL,
   SUB_AGENT_TOOL,
   SCAN_PAGE_TOOL,
+  PROGRESS_SUMMARY_TOOL,
   MEMORY_CREATE_ENTITY_TOOL,
   MEMORY_CREATE_RELATION_TOOL,
   MEMORY_SEARCH_TOOL,
   MEMORY_UPDATE_ENTITY_TOOL
 ];
-

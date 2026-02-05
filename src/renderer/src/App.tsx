@@ -215,6 +215,7 @@ function App() {
     return () => unsubscribe();
   }, [checkLLM]);
 
+
   // Handle message submission
   const handleSubmit = useCallback(
     async (content: string) => {
@@ -249,9 +250,12 @@ function App() {
 
       try {
 
-        // Convert store messages to LLMMessage format
+        // Convert store messages to LLMMessage format with proper tool result reconstruction
         const freshMessages = useChatStore.getState().getActiveSession()?.messages || [];
-        const initialHistory: LLMMessage[] = freshMessages.map((m) => {
+        const reconstructedHistory: LLMMessage[] = [];
+
+        for (const m of freshMessages) {
+          // 1. Add the main message
           const msg: LLMMessage = {
             role: m.role as "user" | "assistant" | "system",
             content: m.content,
@@ -267,44 +271,21 @@ function App() {
               }
             }));
           }
-          // Note: Store might store tool results as 'tool' role messages too?
-          // It doesn't seem to support 'tool' role in the typed interface `Message`.
 
-          return msg;
-        });
-
-        // Reconstruct tool outputs from history
-        const reconstructedHistory: LLMMessage[] = [];
-        for (const msg of initialHistory) {
           reconstructedHistory.push(msg);
-          // If this message has tool calls with results, we need to append synthetic "tool" messages
-          // IF the store actually saved the results.
-          // In `App.tsx` old loop:
-          // `toolResults` had `result`.
-          // But `allToolCalls` passed to `addMessage` was `response.toolCalls` (from LLM) which DOES NOT have results.
-          // Wait. `allToolCalls.push(...response.toolCalls)`.
-          // `response.toolCalls` comes from `callOpenAI` or similar. It has `arguments`. It does NOT have `result` usually.
-          // So the store saved the tool CALLS but not the RESULTS?
-          // If so, the history was indeed broken for tool use.
 
-          // However, looking closer at `App.tsx` old code:
-          // `addMessage({ role: "assistant", content: ..., toolCalls: allToolCalls ... })`
-          // And `message.toolCalls` in store uses `ToolCall` interface which has `result?: string`.
-
-          // If the old code didn't populate `result` in `allToolCalls`, then we lost the results.
-          // Old code: `allToolCalls` came from `response.toolCalls`.
-          // `toolResults` contained the results.
-          // But `toolResults` was NOT saved to store.
-
-          // This implies the old app did NOT persist tool outputs.
-          // I should fix this or at least match behavior.
-          // But `AgentRuntime` needs outputs to work (especially for DCP).
-          // If I only fix it for the current session, that's fine.
-          // `AgentRuntime` keeps `this.messages`.
-
-          // For now, I will map the store messages as best as I can.
-          // And I should update `handleSubmit` to try to save results if possible, 
-          // OR just rely on `AgentRuntime` managing the conversation for the current turn.
+          // 2. Add synthetic tool messages if results exist
+          if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+            for (const tc of m.toolCalls) {
+              if (tc.result !== undefined && tc.result !== null) {
+                reconstructedHistory.push({
+                  role: 'tool',
+                  tool_call_id: tc.id,
+                  content: tc.result
+                });
+              }
+            }
+          }
         }
 
         const { AgentRuntime } = await import("./lib/agent-runtime");
@@ -384,7 +365,8 @@ function App() {
 
                   updateSessionMessage(currentSessionId, activeAssistantMessageId, {
                     content: finalContent,
-                    toolCalls: mergedToolCalls.length > 0 ? mergedToolCalls : undefined
+                    toolCalls: mergedToolCalls.length > 0 ? mergedToolCalls : undefined,
+                    actions: msg.actions ?? existingMsg.actions
                   });
                   return activeAssistantMessageId;
                 }
@@ -416,10 +398,12 @@ function App() {
               // The immediate issue "shows same in the other chat window" is likely about the STATUS updates (which use `updateMessage`).
               // Because `AgentRuntime` updates that specific message repeatedly.
 
-              const added = addMessage({
+              const { addSessionMessage } = useChatStore.getState();
+              const added = addSessionMessage(currentSessionId, {
                 role: 'assistant',
                 content: getContentString(msg.content || ""),
-                toolCalls: newToolCalls.length > 0 ? newToolCalls : undefined
+                toolCalls: newToolCalls.length > 0 ? newToolCalls : undefined,
+                actions: msg.actions
               });
               activeAssistantMessageId = added.id;
               return activeAssistantMessageId;
@@ -444,7 +428,7 @@ function App() {
               return activeAssistantMessageId;
             }
           }
-        }, initialHistory); // Pass initialized history
+        }, reconstructedHistory); // Pass initialized history
 
         // Background Memory Reflection (Fire-and-forget)
         // We run this CONCURRENTLY with the main agent to ensure we capture user intent 
@@ -475,6 +459,20 @@ function App() {
     },
     [messages, addMessage, setProcessing, settings]
   );
+
+  // Listen for action button clicks from MessageBubble
+  useEffect(() => {
+    const handleAgentAction = (e: CustomEvent) => {
+      const { type, content } = e.detail;
+      if (type === 'continue' && !isProcessing) {
+        handleSubmit(content);
+      }
+      // 'cancel' type just stops — no action needed, the agent already returned
+    };
+
+    window.addEventListener('agent-action', handleAgentAction as EventListener);
+    return () => window.removeEventListener('agent-action', handleAgentAction as EventListener);
+  }, [handleSubmit, isProcessing]);
 
   return (
     <div className="flex h-screen bg-[#0f1115] text-white font-sans overflow-hidden">

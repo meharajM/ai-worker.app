@@ -986,6 +986,60 @@ function parseToolCallsFromJson(
   }
   return undefined;
 }
+
+/**
+ * Filter tools to most relevant subset for sub-agents (reduces token usage)
+ * Prioritizes common automation tools across browser, file, API, and messaging categories
+ */
+//TODO: MESSAGE FOR LLM/CODING AGENT : this function need to be uodated based on the mcp servers connected by default in code 
+function filterRelevantTools(tools?: LLMTool[], taskHint?: string): LLMTool[] {
+  if (!tools || tools.length <= 20) return tools || [];
+
+  // Priority patterns for common automation tasks (tool-agnostic)
+  const priorityPatterns = [
+    // Browser/UI operations (Playwright MCP)
+    /browser|navigate|click|type|screenshot|snapshot|goto|page|playwright/i,
+    /fill|submit|select|input|press|scroll|wait|hover/i,
+    // File operations
+    /file|read|write|create|delete|copy|move|list|directory|folder/i,
+    // API/HTTP operations
+    /api|http|request|fetch|post|get|put|patch|endpoint|webhook/i,
+    // Database operations
+    /database|db|query|sql|insert|update|select|table/i,
+    // Messaging/Communication
+    /message|send|email|slack|notification|chat|discord/i,
+    // Data extraction/manipulation
+    /search|find|get|extract|parse|convert|transform/i,
+    // State/Context
+    /state|status|info|current|context/i,
+  ];
+
+  // Score and sort tools by relevance
+  const scored = tools.map(t => {
+    let score = 0;
+    const nameAndDesc = `${t.name} ${t.description || ''}`.toLowerCase();
+
+    for (const pattern of priorityPatterns) {
+      if (pattern.test(nameAndDesc)) {
+        score += 10;
+      }
+    }
+
+    // Boost if task hint matches tool description
+    if (taskHint && nameAndDesc.includes(taskHint.toLowerCase().substring(0, 20))) {
+      score += 5;
+    }
+
+    return { tool: t, score };
+  });
+
+  // Return top 20 most relevant tools (increased from 15 for broader workflows)
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 20)
+    .map(s => s.tool);
+}
+
 /**
  * Build a compact system prompt for sub-agents (~70% smaller than main prompt)
  * Includes essential rules (think tags, autonomous behavior) but removes verbose examples
@@ -994,14 +1048,19 @@ function buildSubAgentSystemPrompt(
   tools?: LLMTool[],
   dynamicRules?: string
 ): string {
-  const toolCount = tools?.length || 0;
+  // Filter to most relevant tools
+  const relevantTools = filterRelevantTools(tools, dynamicRules);
+  const toolCount = relevantTools?.length || 0;
 
-  // Compact tool list - just names
-  const toolList = tools?.map(t => `- ${t.name}`).join('\n') || 'No tools';
+  // Compact tool list with descriptions (max 60 chars each)
+  const toolList = relevantTools?.map(t => {
+    const desc = (t.description || '').substring(0, 60);
+    return `- **${t.name}**: ${desc}${(t.description || '').length > 60 ? '...' : ''}`;
+  }).join('\n') || 'No tools';
 
   return `You are a focused sub-agent executing a delegated task.
 
-TOOLS (${toolCount}):
+AVAILABLE TOOLS (${toolCount}):
 ${toolList}
 
 # RESPONSE FORMAT
@@ -1011,9 +1070,10 @@ Use <think>...</think> for reasoning (hidden). Put actions and final response ou
 1. **Act, don't explain**: Use tools immediately, don't describe your plan
 2. **Be autonomous**: Don't ask permission, make decisions
 3. **Be concise**: Max 100 words in final response
-4. **Complete task**: Don't stop halfway
+4. **Complete the current step**: Focus on what's asked, don't do extra steps
 5. **Error handling**: If tool fails, try alternative once, then report
-6. **End marker**: Finish with "✓ Done"
+6. **Panic Mode**: If you are stuck for 3 turns, run get_state (or snapshot) and report findings.
+7. **End marker**: Finish with "✓ Done"
 ${dynamicRules ? `\n# TASK-SPECIFIC\n${dynamicRules}` : ''}`;
 }
 
@@ -1034,18 +1094,18 @@ function buildSystemPrompt(
   const serverCount = servers?.length || 0;
 
   if (toolCount === 0) {
-    return `You are AI-Worker, a helpful voice-first assistant. When tools become available, use them to perform actions instead of providing manual instructions. Be concise for voice output.`;
+    return `You are AI - Worker, a helpful voice - first assistant.When tools become available, use them to perform actions instead of providing manual instructions.Be concise for voice output.`;
   }
 
   // Ensure we have tools - this should never happen if tools are passed correctly
   if (!tools || tools.length === 0) {
     console.warn("buildSystemPrompt called with empty tools array");
-    return `You are AI-Worker, a helpful voice-first assistant. When tools become available, use them to perform actions instead of providing manual instructions. Be concise for voice output.`;
+    return `You are AI - Worker, a helpful voice - first assistant.When tools become available, use them to perform actions instead of providing manual instructions.Be concise for voice output.`;
   }
 
   // Add JSON format instruction if using fallback
   const jsonFormatNote = useJsonFallback
-    ? `\n\n**CRITICAL: JSON TOOL CALLING FORMAT**\nThis model doesn't support native tool calling. When you need to use a tool, return ONLY a JSON object (no markdown, no code blocks, just raw JSON).\n\nFor the 'create_execution_plan' tool, use this exact structure:\n${JSON.stringify(EXECUTION_PLAN_SCHEMA, null, 2)}\n\nIMPORTANT: \n- Return ONLY the JSON object\n- Do not include any text before or after`
+    ? `\n\n ** CRITICAL: JSON TOOL CALLING FORMAT **\nThis model doesn't support native tool calling. When you need to use a tool, return ONLY a JSON object (no markdown, no code blocks, just raw JSON).\n\nFor the 'create_execution_plan' tool, use this exact structure:\n${JSON.stringify(EXECUTION_PLAN_SCHEMA, null, 2)}\n\nIMPORTANT: \n- Return ONLY the JSON object\n- Do not include any text before or after`
     : "";
 
   // Build tools description - compact format with name and description
@@ -1151,6 +1211,8 @@ RULES:
 3. **Act Immediately**: Don't ask permission unless action is irreversible (payments, deletions)
 4. **Self-Correct**: If something fails, try a different approach before asking user
 
+
+
 # AVAILABLE TOOLS
 ${toolsDescription}${serverContext}${browserCapabilityNote}
 
@@ -1185,13 +1247,38 @@ ${dynamicRules ? `\n# TASK-SPECIFIC PROTOCOLS\n${dynamicRules}\n` : ''}
 5. Verify results
 6. Report to user (outside <think>)
 
+# EFFICIENT DISCOVERY & SELECTOR PROTOCOL (CRITICAL)
+- **NO GUESSING**: Never invent selectors like ".product-item" or "#results".
+- **DISCOVERY HIERARCHY**:
+  1. \`get_interactive_elements\` (LOWEST TOKENS): Use this FIRST to see what is clickable (buttons, inputs, links).
+  2. \`scan_page_accessibility\` (LOW TOKENS): Use to read content structure and find text.
+  3. \`get_state(mode="fast")\` (MEDIUM TOKENS): Use if you need a broader text overview.
+  4. \`get_state(mode="vision")\` (HIGH TOKENS): Use *only* if visual layout is confusing or standard tools fail.
+
+- **DYNAMIC SITES**: Amazon, Google, etc. use randomized classes (e.g. "s-result-item-XyZ"). You cannot guess these. You MUST inspect them.
+- **INSPECT BEFORE INTERACT**: 
+  1. Navigate
+  2. Inspect (get_interactive_elements)
+  3. Interact (using discovered selectors)
+
 # ERROR HANDLING
-- Element not found? → Scroll or use get_state
+- Element not found? → screenshot() to see actual page, then use correct selector
 - Click failed? → Try JavaScript click via browser_run_code
+- Timeout on wait_for_element? → Selector is wrong. Inspect page and use actual selector
 - Same error twice? → Stop, take screenshot, reassess
+
+# PROGRESS TRACKING
+**MANDATORY**: Call \`update_progress_summary\` every ~15 steps to record your findings.
+- At checkpoints (steps 15, 30, 45, 60...), you MUST summarize progress.
+- **CRITICAL**: Do NOT generate any conversational text during this step. ONLY call the tool.
+- Focus on RESULTS and DATA, not tool names.
+- Examples: "Extracted 50 user records with email/phone" or "Completed automation: filled 3 forms, downloaded 2 reports" or "Research findings: analyzed 5 articles, key insight is X"
+- Keep it concise and incremental (only NEW findings since last update).
 
 # KEY REMINDERS
 - You HAVE browser tools. Never refuse by saying "I can't access..."
+- **INSPECT FIRST**: screenshot() or get_interactive_elements() before using selectors
+- **NO HARDCODED SELECTORS**: Never assume element IDs/classes exist without checking
 - Complete the full workflow, don't stop after navigation
 - Be direct: respond naturally, don't narrate your thinking
 - Tools are your primary capability - USE THEM`;
@@ -1259,8 +1346,26 @@ export async function chat(
     (m) => m.role === "system"
   );
 
-  // MERGE default tools with the new CREATE_PLAN_TOOL
-  const allTools = [CREATE_PLAN_TOOL, ...(tools || [])];
+  // MERGE default tools with the new CREATE_PLAN_TOOL (and deduplicate)
+  const toolMap = new Map<string, LLMTool>();
+
+  // Add CREATE_PLAN_TOOL first (default)
+  toolMap.set(CREATE_PLAN_TOOL.name, CREATE_PLAN_TOOL);
+
+  // Add other tools, overriding if name matches (or ignoring if we want to keep default? Usually specific tools > default)
+  // Actually, let's keep the passed tools as priority if they redefine it, OR keep default if we prefer our version.
+  // Given CREATE_PLAN_TOOL is "internal" logic often, let's prioritize it if we want to enforce schema.
+  // But usually 'tools' argument comes from AgentRuntime which might have its own version.
+  // Let's simply add them, but Map handles deduplication by key.
+
+  if (tools) {
+    tools.forEach(t => toolMap.set(t.name, t));
+  }
+
+  // Ensure CREATE_PLAN_TOOL is always there (if it was overwritten by a lesser version, maybe we should force ours?
+  // But usually pass-in is intentional. Let's just ensure we don't have duplicates with same name).
+
+  const allTools = Array.from(toolMap.values());
 
   // Re-build system prompt with current tools and correct fallback setting
   // Sub-agents get a lightweight prompt (~80% smaller)
@@ -1310,12 +1415,32 @@ async function callGemini(
   const { apiKey, model } = await getGeminiSettings(settings);
   const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
 
+  // Create a map of tool_call_id to function name
+  const toolIdToName = new Map<string, string>();
+  messages.forEach(m => {
+    if (m.role === 'assistant' && m.tool_calls) {
+      m.tool_calls.forEach((tc: any) => {
+        if (tc.id && tc.function?.name) {
+          toolIdToName.set(tc.id, tc.function.name);
+        }
+      });
+    }
+  });
+
   // Convert messages to Gemini format, including tool history
-  const contents = messages.filter(m => m.role !== 'system').map(m => {
-    const role = m.role === 'assistant' ? 'model' : m.role === 'tool' ? 'function' : 'user';
+  // valid roles: 'user', 'model'
+  const contents: any[] = [];
+  const validMessages = messages.filter(m => m.role !== 'system');
+
+  for (const m of validMessages) {
+    let role: 'user' | 'model' | null = null;
+    if (m.role === 'assistant') role = 'model';
+    if (m.role === 'user' || m.role === 'tool') role = 'user';
+    if (!role) continue;
 
     const parts: any[] = [];
-    if (m.content) {
+
+    if (m.role !== 'tool' && m.content) {
       if (typeof m.content === 'string') {
         parts.push({ text: m.content });
       } else {
@@ -1323,7 +1448,6 @@ async function callGemini(
           if (part.type === 'text') {
             parts.push({ text: part.text });
           } else if (part.type === 'image_url') {
-            // Extracts base64 from data URI: data:image/jpeg;base64,...
             const matches = part.image_url.url.match(/^data:([^;]+);base64,(.+)$/);
             if (matches) {
               parts.push({
@@ -1361,18 +1485,32 @@ async function callGemini(
 
     // Handle tool results
     if (m.role === 'tool') {
-      // Gemini expects simple text response for functionResponse
-      const resultText = typeof m.content === 'string' ? m.content : extractTextForLegacyProviders(m.content);
+      const resultText = typeof m.content === 'string'
+        ? m.content
+        : Array.isArray(m.content)
+          ? extractTextForLegacyProviders(m.content)
+          : JSON.stringify(m.content ?? '');
+
+      // Resolve name from ID if not present
+      const fnName = (m as any).name || (m.tool_call_id ? toolIdToName.get(m.tool_call_id) : 'unknown_tool');
+
       parts.push({
         functionResponse: {
-          name: (m as any).name,
+          name: fnName,
           response: { result: resultText }
         }
       });
     }
 
-    return { role, parts };
-  });
+    // Merge logic: If current message has same role as previous, merge parts
+    if (parts.length === 0) continue;
+
+    if (contents.length > 0 && contents[contents.length - 1].role === role) {
+      contents[contents.length - 1].parts.push(...parts);
+    } else {
+      contents.push({ role, parts });
+    }
+  }
 
   const systemMessage = messages.find(m => m.role === 'system');
   const systemInstructionText = systemMessage ? extractTextForLegacyProviders(systemMessage.content) : undefined;

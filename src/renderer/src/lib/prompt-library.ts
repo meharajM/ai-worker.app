@@ -167,6 +167,32 @@ export const PROMPTS = {
 - **Output**: Results only, no process description.
 - **Format**: 2-3 sentences max.
 - **End with**: "✓ complete"
+`.trim(),
+
+   // PARALLEL EXECUTION (Cross-cutting concern - can be added to any task)
+   PARALLEL_EXECUTION: `
+# PARALLEL EXECUTION PROTOCOL
+**CRITICAL**: This task has independent sub-parts that MUST run concurrently.
+
+## Why You're Seeing This
+Your current request contains multiple independent entities or batch operations:
+- Multiple subjects (e.g., "Research Apple AND Microsoft")
+- Parallel workflows (e.g., "Check 3 websites")
+- Batch operations (e.g., "Extract data from 5 pages")
+
+## Mandatory Actions
+1. **Identify Independent Sub-Tasks**: Break the goal into parallel-executable units
+2. **Call \`delegate_sub_task\` Simultaneously**: 
+   - ❌ WRONG: Call tool 1 → Wait for result → Call tool 2
+   - ✅ CORRECT: Call tool 1 AND tool 2 in the SAME response
+3. **Example**:
+   - User: "Research Apple and Microsoft stock prices"
+   - You: [Call delegate_sub_task("Research Apple stock") AND delegate_sub_task("Research Microsoft stock") simultaneously]
+
+## Verification Checklist
+- [ ] Did you call multiple \`delegate_sub_task\` tools in ONE turn?
+- [ ] Are the sub-tasks truly independent (no sequential dependency)?
+- If NO to either → Revise your approach immediately.
 `.trim()
 };
 
@@ -183,4 +209,30 @@ export function getPromptForCategory(category: string, isSubAgent = false): stri
       }
    }
    return PROMPTS[key as TaskCategory] || PROMPTS.GENERAL;
+}
+
+/**
+ * Composable multi-prompt loader
+ * Allows multiple prompts to be combined (e.g., SHOPPING + PARALLEL_EXECUTION)
+ * @param categories Array of prompt keys to load
+ * @param isSubAgent Whether this is for a sub-agent
+ * @returns Combined prompt string with all requested protocols
+ */
+export function getComposedPrompts(categories: string[], isSubAgent = false): string {
+   const prompts: string[] = [];
+
+   for (const category of categories) {
+      const prompt = getPromptForCategory(category, isSubAgent);
+      if (prompt && prompt !== PROMPTS.GENERAL) {
+         prompts.push(prompt);
+      }
+   }
+
+   // If no specific prompts were found, return GENERAL
+   if (prompts.length === 0) {
+      return PROMPTS.GENERAL;
+   }
+
+   // Join with double newline for clear separation
+   return prompts.join('\n\n');
 }
