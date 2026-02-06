@@ -180,7 +180,7 @@ export function registerMcpHandlers(): void {
 
             // === MEMORY IN-PROCESS INTERCEPTION ===
             if (command === 'internal-memory' || (args && args.includes('memory-service'))) {
-                 logMcpOperation('info', '🧠 Using in-process Memory service', {
+                logMcpOperation('info', '🧠 Using in-process Memory service', {
                     operation: 'connect',
                     serverId: id,
                     inProcess: true,
@@ -201,7 +201,7 @@ export function registerMcpHandlers(): void {
 
                     return { success: true, serverId: id, inProcess: true }
                 } catch (error) {
-                     logMcpOperation('error', 'In-process Memory failed to initialize', {
+                    logMcpOperation('error', 'In-process Memory failed to initialize', {
                         operation: 'connect',
                         serverId: id,
                         error: error instanceof Error ? error.message : String(error),
@@ -212,7 +212,7 @@ export function registerMcpHandlers(): void {
 
             // === FILESYSTEM IN-PROCESS INTERCEPTION ===
             if (command === 'internal-filesystem' || (args && args.includes('filesystem-service'))) {
-                 logMcpOperation('info', '📁 Using in-process Filesystem service', {
+                logMcpOperation('info', '📁 Using in-process Filesystem service', {
                     operation: 'connect',
                     serverId: id,
                     inProcess: true,
@@ -596,6 +596,29 @@ export function registerMcpHandlers(): void {
                 return { result: null, error: result.error }
             }
 
+            // Check if result is image data (from screenshot tool)
+            const resultObj = result.result as any
+            if (resultObj && typeof resultObj === 'object' && resultObj.type === 'image' && resultObj.data && resultObj.mimeType) {
+                // Preserve image data structure for vision processing
+                logMcpOperation('info', '📸 Image detected, preserving structure for vision processing', {
+                    operation: 'call-tool',
+                    serverId,
+                    toolName,
+                    mimeType: resultObj.mimeType,
+                    imageSizeKB: Math.round(resultObj.data.length / 1024)
+                })
+
+                return {
+                    result: {
+                        content: [{
+                            type: 'image',
+                            data: resultObj.data,
+                            mimeType: resultObj.mimeType
+                        }]
+                    }
+                }
+            }
+
             // Format result to match MCP response structure
             return {
                 result: {
@@ -606,9 +629,9 @@ export function registerMcpHandlers(): void {
 
         // Handle in-process Memory connections
         if (inProcessMemoryConnections.has(serverId)) {
-             const memoryService = MemoryService.getInstance()
-             const result = await memoryService.callTool(toolName, args)
-             const duration = Date.now() - startTime
+            const memoryService = MemoryService.getInstance()
+            const result = await memoryService.callTool(toolName, args)
+            const duration = Date.now() - startTime
 
             logMcpOperation('info', 'In-process Memory tool call completed', {
                 operation: 'call-tool',
@@ -632,9 +655,9 @@ export function registerMcpHandlers(): void {
 
         // Handle in-process Filesystem connections
         if (inProcessFilesystemConnections.has(serverId)) {
-             const fsService = FileSystemService.getInstance()
-             const result = await fsService.callTool(toolName, args)
-             const duration = Date.now() - startTime
+            const fsService = FileSystemService.getInstance()
+            const result = await fsService.callTool(toolName, args)
+            const duration = Date.now() - startTime
 
             logMcpOperation('info', 'In-process Filesystem tool call completed', {
                 operation: 'call-tool',
@@ -669,8 +692,8 @@ export function registerMcpHandlers(): void {
 
         try {
             // Final defensive check to ensure arguments are a record
-            const finalArgs = (args && typeof args === 'object' && !Array.isArray(args)) 
-                ? (args as Record<string, unknown>) 
+            const finalArgs = (args && typeof args === 'object' && !Array.isArray(args))
+                ? (args as Record<string, unknown>)
                 : (typeof args === 'string' ? { input: args } : { value: args });
 
             const result = await client.callTool({

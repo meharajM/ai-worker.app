@@ -1068,9 +1068,85 @@ Return key findings only. End with "✓ Done".`;
               resultStr = JSON.stringify({ error: errorMsg + recoveryHint });
               consecutiveErrors++;
             } else {
-              resultStr = typeof typedResult.result === 'string'
-                ? typedResult.result
-                : JSON.stringify(typedResult.result);
+              // VISION SUPPORT: Check if result contains image data
+              const resultObj = typedResult.result as any;
+              let imageData: { data: string; mimeType: string } | null = null;
+
+              if (resultObj && typeof resultObj === 'object') {
+                // Case 1: MCP-formatted image content (from screenshot tool via MCP bridge)
+                if (resultObj.content && Array.isArray(resultObj.content)) {
+                  const imageContent = resultObj.content.find((c: any) => c.type === 'image');
+                  if (imageContent && imageContent.data && imageContent.mimeType) {
+                    imageData = { data: imageContent.data, mimeType: imageContent.mimeType };
+                  }
+                }
+
+                // Case 2: get_state with screenshot field (structured image object)
+                if (!imageData && resultObj.screenshot && typeof resultObj.screenshot === 'object') {
+                  const screenshot = resultObj.screenshot;
+                  if (screenshot.type === 'image' && screenshot.data && screenshot.mimeType) {
+                    imageData = { data: screenshot.data, mimeType: screenshot.mimeType };
+                  }
+                }
+              }
+
+              // Process image if found
+              if (imageData) {
+                try {
+                  // Validate image size (OpenAI limit: 20MB, base64 is ~1.37x original)
+                  const imageSizeBytes = (imageData.data.length * 3) / 4; // Approximate decoded size
+                  const imageSizeMB = imageSizeBytes / (1024 * 1024);
+                  const MAX_IMAGE_SIZE_MB = 20;
+
+                  if (imageSizeMB > MAX_IMAGE_SIZE_MB) {
+                    console.warn(`[AgentRuntime] ⚠️ Image too large (${imageSizeMB.toFixed(2)}MB > ${MAX_IMAGE_SIZE_MB}MB), skipping vision processing`);
+                    resultStr = JSON.stringify({
+                      warning: `Screenshot captured but too large for vision processing (${imageSizeMB.toFixed(2)}MB). Consider using a smaller viewport or element screenshot.`,
+                      ...resultObj
+                    });
+                  } else {
+                    // Check if current provider supports vision
+                    const currentProvider = this.options.settings?.provider || 'openai';
+                    const visionCapableProviders = ['openai', 'gemini', 'openrouter'];
+
+                    if (!visionCapableProviders.includes(currentProvider)) {
+                      console.warn(`[AgentRuntime] ⚠️ Provider "${currentProvider}" may not support vision. Vision-capable providers: ${visionCapableProviders.join(', ')}`);
+                      // Continue anyway - some Ollama models support vision
+                    }
+
+                    // Construct data URL for vision model
+                    const imageUrl = `data:${imageData.mimeType};base64,${imageData.data}`;
+
+                    console.log(`[AgentRuntime] 📸 Image detected from ${call.name} (${imageSizeMB.toFixed(2)}MB), constructing multimodal message`);
+
+                    // Add multimodal message for LLM vision analysis
+                    this.addMessage({
+                      role: 'user',
+                      content: [
+                        { type: 'text', text: `Screenshot captured successfully. Analyze this image.` },
+                        { type: 'image_url', image_url: { url: imageUrl } }
+                      ]
+                    });
+
+                    // Skip normal tool result processing - image is already added
+                    consecutiveErrors = 0;
+                    return undefined;
+                  }
+                } catch (imageError: any) {
+                  console.error(`[AgentRuntime] Failed to process image from ${call.name}:`, imageError);
+                  resultStr = JSON.stringify({
+                    error: `Image processing failed: ${imageError.message}`,
+                    fallback: 'Continuing without vision analysis'
+                  });
+                }
+              }
+
+              // Normal text result (or fallback if image processing failed)
+              if (!resultStr) {
+                resultStr = typeof typedResult.result === 'string'
+                  ? typedResult.result
+                  : JSON.stringify(typedResult.result);
+              }
               consecutiveErrors = 0; // Reset on success
             }
           } catch (err: any) {

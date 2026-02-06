@@ -606,17 +606,56 @@ async function callOllama(
 ): Promise<LLMResponse> {
   const { baseUrl, model } = getOllamaSettings(settings);
 
-  console.log(`[LLM Chat] Calling Ollama at: ${baseUrl}/api/chat`);
+  // Check if model supports vision (llava, llama3.2-vision, bakllava, moondream, etc.)
+  const visionCapableModels = ['llava', 'llama3.2-vision', 'bakllava', 'moondream'];
+  const isVisionModel = visionCapableModels.some(vm => model.toLowerCase().includes(vm));
+
+  console.log(`[LLM Chat] Calling Ollama at: ${baseUrl}/api/chat (vision: ${isVisionModel})`);
+
+  // Format messages - preserve images for vision models
+  const formattedMessages = messages.map((m) => {
+    if (isVisionModel && typeof m.content !== 'string' && Array.isArray(m.content)) {
+      // Vision model - convert multimodal content to Ollama format
+      const parts = m.content.map(part => {
+        if (part.type === 'text') {
+          return part.text;
+        } else if (part.type === 'image_url') {
+          // Extract base64 data from data URL
+          const matches = part.image_url.url.match(/^data:([^;]+);base64,(.+)$/);
+          if (matches) {
+            return `[Image: ${matches[1]}]`; // Ollama vision models handle images inline
+          }
+        }
+        return '';
+      }).filter(Boolean).join('\n');
+
+      return {
+        role: m.role,
+        content: parts,
+        images: m.content
+          .filter(p => p.type === 'image_url')
+          .map(p => {
+            const matches = p.image_url.url.match(/^data:([^;]+);base64,(.+)$/);
+            return matches ? matches[2] : null;
+          })
+          .filter(Boolean)
+      };
+    } else {
+      // Non-vision model or text-only message
+      return {
+        role: m.role,
+        content: extractTextForLegacyProviders(m.content),
+      };
+    }
+  });
+
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     signal: abortSignal,
     body: JSON.stringify({
       model: model,
-      messages: messages.map((m) => ({
-        role: m.role,
-        content: extractTextForLegacyProviders(m.content),
-      })),
+      messages: formattedMessages,
       stream: false,
       tools: tools?.map((t) => ({
         type: "function",
@@ -853,6 +892,22 @@ async function callOpenAI(
         });
       }
       return callOpenAI(retryMessages, tools, settings, true, servers);
+    }
+
+    // Check if it's an image/vision support error
+    if (errorMessage.toLowerCase().includes("image input") ||
+      errorMessage.toLowerCase().includes("vision") ||
+      errorMessage.toLowerCase().includes("multimodal")) {
+
+      console.warn("[LLM Chat] Model does not support images, retrying with text only...");
+
+      // Strip images from messages
+      const textOnlyMessages = messages.map(m => ({
+        ...m,
+        content: extractTextForLegacyProviders(m.content)
+      }));
+
+      return callOpenAI(textOnlyMessages, tools, settings, useJsonFallback, servers);
     }
 
     throw new Error(errorMessage);

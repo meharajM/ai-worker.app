@@ -327,11 +327,22 @@ export class PlaywrightService {
                 },
                 {
                     name: 'screenshot',
-                    description: 'VISION: Capture the current page as an image. Use when you need to see the page visually or save visual evidence. For perceiving page state, prefer get_state instead.',
+                    description: 'VISION: Capture the page or a specific element as an image. Use for CAPTCHAs, error messages, or visual verification. Supports full page, viewport, element, or custom area capture.',
                     inputSchema: {
                         type: 'object',
                         properties: {
-                            fullPage: { type: 'boolean', description: 'true=capture entire scrollable page, false=visible viewport only' }
+                            fullPage: { type: 'boolean', description: 'true=capture entire scrollable page, false=visible viewport only (default)' },
+                            selector: { type: 'string', description: 'CSS selector of element to screenshot (e.g., "#captcha-image", ".error-message") or something similar as per the elements present in the page. If provided, only this element is captured.' },
+                            clip: {
+                                type: 'object',
+                                description: 'Custom rectangular area to capture {x, y, width, height} in pixels',
+                                properties: {
+                                    x: { type: 'number', description: 'X coordinate from top-left' },
+                                    y: { type: 'number', description: 'Y coordinate from top-left' },
+                                    width: { type: 'number', description: 'Width in pixels' },
+                                    height: { type: 'number', description: 'Height in pixels' }
+                                }
+                            }
                         }
                     }
                 },
@@ -708,15 +719,62 @@ export class PlaywrightService {
                         throw e;
                     }
 
+
                 case 'screenshot':
-                    const buffer = await page.screenshot({ fullPage: safeArgs.fullPage || false })
+                    let screenshotBuffer: Buffer;
+
+                    // Priority: selector > clip > fullPage > viewport (default)
+                    if (safeArgs.selector) {
+                        // Element-specific screenshot
+                        const element = await page.locator(safeArgs.selector).first();
+                        const elementExists = await element.count() > 0;
+
+                        if (!elementExists) {
+                            return {
+                                result: null,
+                                error: `Element not found: ${safeArgs.selector}. Use get_interactive_elements to find available selectors.`
+                            };
+                        }
+
+                        // Wait for element to be visible
+                        await element.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {
+                            console.warn(`Element ${safeArgs.selector} exists but may not be visible`);
+                        });
+
+                        screenshotBuffer = await element.screenshot();
+                        console.log(`[PlaywrightService] Screenshot captured for element: ${safeArgs.selector}`);
+
+                    } else if (safeArgs.clip) {
+                        // Custom rectangular area screenshot
+                        const { x, y, width, height } = safeArgs.clip;
+                        if (typeof x !== 'number' || typeof y !== 'number' || typeof width !== 'number' || typeof height !== 'number') {
+                            return {
+                                result: null,
+                                error: 'Invalid clip coordinates. Required: {x: number, y: number, width: number, height: number}'
+                            };
+                        }
+
+                        screenshotBuffer = await page.screenshot({
+                            clip: { x, y, width, height }
+                        });
+                        console.log(`[PlaywrightService] Screenshot captured for area: ${width}x${height} at (${x},${y})`);
+
+                    } else {
+                        // Full page or viewport screenshot
+                        screenshotBuffer = await page.screenshot({
+                            fullPage: safeArgs.fullPage || false
+                        });
+                        console.log(`[PlaywrightService] Screenshot captured: ${safeArgs.fullPage ? 'full page' : 'viewport'}`);
+                    }
+
                     return {
                         result: {
                             type: 'image',
-                            data: buffer.toString('base64'),
+                            data: screenshotBuffer.toString('base64'),
                             mimeType: 'image/png'
                         }
                     }
+
 
                 case 'get_state':
                     // Mode-based defaults for performance optimization
@@ -849,7 +907,12 @@ export class PlaywrightService {
                                 type: 'jpeg',
                                 quality: 70
                             })
-                            state.screenshot = buffer.toString('base64')
+                            // Return as structured image object for vision processing
+                            state.screenshot = {
+                                type: 'image',
+                                data: buffer.toString('base64'),
+                                mimeType: 'image/jpeg'
+                            }
                         } catch (e) {
                             state.screenshotError = String(e)
                         }
