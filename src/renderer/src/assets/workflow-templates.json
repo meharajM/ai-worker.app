@@ -1,0 +1,66 @@
+[
+    {
+        "id": "market-comparison",
+        "title": "Price Comparison",
+        "description": "Parallel search across Amazon & BestBuy with structured reports.",
+        "prompt": "Task: Compare [Product Name] across Amazon and BestBuy.\nSteps:\n1. IMPORTANT: Call 'delegate_sub_task' twice simultaneously in your FIRST response—one for Amazon and one for BestBuy.\n2. In each site, find the top 3 matching items.\n3. Extract: Full Name, Price, Rating, and Shipping Details.\n4. Present the findings in a Markdown table for easy comparison.\n5. Highlight the 'Best Value' choice based on price and rating.",
+        "iconName": "ShoppingCart",
+        "color": "from-orange-500/20 to-red-600/20 text-orange-400 border-orange-500/30"
+    },
+    {
+        "id": "deep-research",
+        "title": "Deep Market Research",
+        "description": "Synthesize findings from 3+ sources with citations.",
+        "prompt": "Task: Conduct a deep dive into [Industry/Topic].\nRequirements:\n1. Use Google Search to identify at least 3 high-authority sources (docs, news, or reports).\n2. Navigate to each source and extract key information regarding trends, statistics, and major players.\n3. Synthesize the findings into an Executive Summary.\n4. Provide a detailed breakdown of findings with clickable Source URLs for every claim.\n5. End with 3-5 'Future Outlook' bullet points.",
+        "iconName": "Search",
+        "color": "from-blue-600/20 to-cyan-500/20 text-blue-400 border-blue-500/30"
+    },
+    {
+        "id": "code-implementation",
+        "title": "Feature implementation",
+        "description": "Autonomous coding with aesthetic and architectural consistency.",
+        "prompt": "Task: Implement a new [Feature/Component] in the current project.\nExecution Protocol:\n1. First, use search_web or list_dir to find existing components and design patterns.\n2. Read 1-2 relevant files to understand the project's coding style and dependencies.\n3. Plan the implementation: outline where the new files will go and what changes are needed in existing files.\n4. Create/Edit the files using appropriate filesystem tools.\n5. Ensure the UI follows premium aesthetics: use gradients, modern typography (Inter), and smooth hover effects.",
+        "iconName": "Code",
+        "color": "from-emerald-500/20 to-teal-600/20 text-emerald-400 border-emerald-500/30"
+    },
+    {
+        "id": "form-assistant",
+        "title": "Form & Admin Help",
+        "description": "Handle complex official forms and CAPTCHA scenarios.",
+        "prompt": "Task: Assist in filling a form at [URL] for [Action].\nProtocol:\n1. Navigate to the page and identify all required fields.\n2. If I have provided the data, fill the fields using the 'fill' or 'type' tools.\n3. If a field is ambiguous, ask me before proceeding.\n4. If a CAPTCHA or error message appears, take a screenshot, use vision to analyze it, and attempt to resolve it.\n5. Stop at the final 'Submit' button and ask for my confirmation to finish.",
+        "iconName": "FileText",
+        "color": "from-indigo-600/20 to-purple-500/20 text-indigo-400 border-indigo-500/30"
+    },
+    {
+        "id": "batch-orchestrator",
+        "title": "Parallel Site Scan",
+        "description": "Multi-site headline extraction using parallel sub-agents.",
+        "prompt": "Task: Scan multiple sites for news on [Topic].\nSites: [Site 1], [Site 2], [Site 3]\nInstructions:\n1. Trigger 3 independent sub-agents simultaneously, one for each site.\n2. Each sub-agent must extract the top 2 headline titles and their respective URLs.\n3. Once sub-agents return, consolidate all findings into a single, clean list categorized by source.\n4. Ensure no duplicate news items are included in the final report.",
+        "iconName": "Layers",
+        "color": "from-amber-500/20 to-orange-600/20 text-amber-400 border-amber-500/30"
+    },
+    {
+        "id": "memory-preferences",
+        "title": "SOP & Preferences",
+        "description": "Teach the agent your workflows, tech stack, and favorite tools.",
+        "prompt": "Task: Store my development preferences for [Project/Technology].\nDetails:\n1. I strictly use [Stack Name, e.g., TypeScript & Tailwind].\n2. I prefer [Coding Style, e.g., Functional Components with Hooks].\n3. Use 'memory_create_entity' to store this as a 'user_preference' or 'project_sop'.\n4. For all future tasks involving this project, search my memory first to ensure compliance with these rules.\n5. Confirm once the preferences have been successfully indexed.",
+        "iconName": "Database",
+        "color": "from-violet-600/20 to-fuchsia-500/20 text-violet-400 border-violet-500/30"
+    },
+    {
+        "id": "web-discovery",
+        "title": "Discovery & Extract",
+        "description": "Explore navigation trees and extract structured datasets.",
+        "prompt": "Task: Discover and extract [Data Type, e.g., Laptop Specs] from [Website].\nExploration Strategy:\n1. Navigate to the main listing page.\n2. Use 'get_interactive_elements' to identify filtering sidebar or sorting options.\n3. Apply filters for [Criteria, e.g., Price > $1000].\n4. Extract a structured dataset for the top 5 results: Name, Price, Rating, and a summary of key features.\n5. Report the data in a clean CSV-like Markdown format.",
+        "iconName": "Globe",
+        "color": "from-rose-600/20 to-pink-500/20 text-rose-400 border-rose-500/30"
+    },
+    {
+        "id": "travel-planner",
+        "title": "Ultimate Trip Planner",
+        "description": "Multi-step orchestration for flights, hotels, and activities.",
+        "prompt": "Task: Plan a comprehensive 3-day trip to [Destination].\nPlan Outline:\n1. Search for flight options for [Dates] and find the top 3 based on 'Shortest Duration' and 'Lowest Price'.\n2. Search for hotels in [Preferred Area] with at least a 4-star rating.\n3. Identify 3 'must-visit' tourist attractions or local activities.\n4. Create a daily itinerary (Day 1, 2, 3) combining these flights, hotels, and sights.\n5. Provide a rough total budget estimate for the trip.",
+        "iconName": "Zap",
+        "color": "from-blue-500/20 to-indigo-600/20 text-blue-400 border-blue-500/30"
+    }
+]
