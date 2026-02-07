@@ -58,6 +58,10 @@ interface ChatState {
     setProcessing: (processing: boolean) => void
     abortProcessing: () => void
     getAbortSignal: () => AbortSignal | null
+    
+    // UI State
+    sidebarOpen: boolean
+    toggleSidebar: () => void
 
     // Helpers
     getActiveSession: () => ChatSession | undefined
@@ -296,6 +300,9 @@ export const useChatStore = create<ChatState>()(
 
             offlineSpeech: false, // Default to online (Google)
             setOfflineSpeech: (enabled) => set({ offlineSpeech: enabled }),
+
+            sidebarOpen: true,
+            toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
         }),
         {
             name: 'ai-worker-chat-v2', // Versioned storage to avoid conflicts
@@ -303,7 +310,8 @@ export const useChatStore = create<ChatState>()(
             partialize: (state) => ({
                 sessions: state.sessions,
                 activeSessionId: state.activeSessionId,
-                offlineSpeech: state.offlineSpeech
+                offlineSpeech: state.offlineSpeech,
+                sidebarOpen: state.sidebarOpen
             }),
         }
     )

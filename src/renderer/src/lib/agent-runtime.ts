@@ -1350,7 +1350,7 @@ Use tools immediately. End with "✓ Done".`;
 
     // Helper to render the live status message
     const renderStatus = () => {
-      let content = `## � Parallel Execution\n\n`;
+      let content = `## ⚡ Parallel Execution\n\n`;
 
       for (const s of agentStatuses) {
         const icon = s.isRunning ? '⟳' : (s.result?.startsWith('Error') ? '⚠️' : '✓');
