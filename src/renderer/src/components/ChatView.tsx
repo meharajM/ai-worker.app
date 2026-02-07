@@ -67,12 +67,6 @@ export function ChatView({ onClearChat }: ChatViewProps) {
                             </h2>
                             <WorkflowTiles />
                         </div>
-
-                        <div className="flex flex-wrap gap-4 pt-4 border-t border-white/5">
-                            <p className="text-white/40 text-sm">
-                                <span className="text-[#00a896] font-medium">Pro Tip:</span> Connect your MCP servers to enable deep system and browsing capabilities.
-                            </p>
-                        </div>
                     </div>
                 ) : (
                     // Messages list
