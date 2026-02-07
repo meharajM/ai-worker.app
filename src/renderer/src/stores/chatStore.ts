@@ -1,12 +1,19 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 
+export interface MessageAction {
+    type: 'continue' | 'cancel' | 'custom';
+    label: string;
+    payload?: Record<string, unknown>;
+}
+
 export interface Message {
     id: string
     role: 'user' | 'assistant' | 'system'
     content: string
     timestamp: number
     toolCalls?: ToolCall[]
+    actions?: MessageAction[]
 }
 
 export interface ToolCall {
@@ -41,6 +48,7 @@ interface ChatState {
 
     // Message Actions (operate on active session)
     addMessage: (message: Omit<Message, 'id' | 'timestamp'>) => Message
+    addSessionMessage: (sessionId: string, message: Omit<Message, 'id' | 'timestamp'>) => Message
     updateMessage: (id: string, updates: Partial<Message>) => void
     updateSessionMessage: (sessionId: string, messageId: string, updates: Partial<Message>) => void
     removeMessage: (id: string) => void
@@ -157,6 +165,28 @@ export const useChatStore = create<ChatState>()(
                         ),
                         activeSessionId: activeId
                     }
+                })
+                return newMessage
+            },
+
+            addSessionMessage: (sessionId, message) => {
+                const newMessage: Message = {
+                    ...message,
+                    id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
+                    timestamp: Date.now(),
+                }
+
+                set((state) => {
+                    const sessions = state.sessions.map((s) =>
+                        s.id === sessionId
+                            ? {
+                                ...s,
+                                messages: [...s.messages, newMessage],
+                                updatedAt: Date.now()
+                            }
+                            : s
+                    )
+                    return { sessions }
                 })
                 return newMessage
             },

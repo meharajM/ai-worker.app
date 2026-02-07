@@ -4,6 +4,7 @@ import { pruneContext } from "./dcp";
 import { executeToolCall, getAllTools, getServers } from "./mcp";
 import { CLIENT_TOOLS } from "./client-tools";
 import { analyzeTask, type TaskAnalysis } from "./confirmation-message";
+import { analyzeToolOutput } from "./result-reporter";
 import {
   analyzeTaskForDecomposition,
   generateSubAgentInstruction,
@@ -23,6 +24,9 @@ interface AgentRuntimeOptions {
   isSubAgent?: boolean; // Flag to identify sub-agents
   taskCategory?: string; // Optional: Force a specific task category (e.g. for sub-agents)
   onMessageUpdate?: (id: string, updates: Partial<LLMMessage>) => void; // Update existing message in UI
+  tabId?: number; // Dedicated browser tab ID for this agent
+  parentAgentId?: string; // Link to parent for sub-agents
+  agentInstanceId?: string; // Force specific ID (for pre-seeding memory)
 }
 
 export class AgentRuntime {
@@ -35,16 +39,107 @@ export class AgentRuntime {
   private totalIterations = 0; // Track total iterations across all continuations
   private readonly ABSOLUTE_MAX_ITERATIONS = 150; // Hard cap to prevent runaway costs
   private toolCallHistory = new Set<string>(); // Track unique tool signatures for progress detection
+  private agentInstanceId: string;
+  private lastCheckpoint: { step: number; summary: string; timestamp: number } | null = null;
 
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
     this.options = options;
-    this.messages = [...initialHistory];
-    // Sub-agents get 15 iterations, main agents get 50 to allow for deep reasoning/thinking chains
+
+    // CRITICAL: Sub-agents MUST start with empty context for token efficiency
+    if (options.isSubAgent) {
+      this.messages = []; // Force empty - never inherit history
+      console.log('[AgentRuntime] Sub-agent created with FRESH context (0 messages)');
+    } else {
+      this.messages = [...initialHistory];
+      console.log(`[AgentRuntime] Main agent created with ${this.messages.length} historical messages`);
+    }
+
+    // Sub-agents get 15 iterations (enough for most tasks), main agents get 50 to allow for deep reasoning/thinking chains
     this.maxIterations = options.isSubAgent ? 15 : 50;
 
     // Inherit category if passed
     if (options.taskCategory) {
       this.taskCategory = options.taskCategory;
+    }
+
+    // Generate unique instance ID OR use provided one
+    this.agentInstanceId = options.agentInstanceId || globalThis.crypto.randomUUID();
+  }
+
+  /**
+   * Initialize or Load Session State from Memory
+   */
+  private async initializeSessionState() {
+    const entityName = `AgentState_${this.agentInstanceId}`;
+    try {
+      // Try to read existing state
+      const result = await executeToolCall('memory_read_entity', { name: entityName });
+      if (result && result.result) {
+        const entity = result.result as any;
+        if (entity.Metadata?.lastCheckpoint) {
+          this.lastCheckpoint = entity.Metadata.lastCheckpoint;
+          console.log(`[AgentRuntime] Restored checkpoint from memory: Step ${this.lastCheckpoint?.step}`);
+        }
+      } else {
+        // Create new state
+        await executeToolCall('memory_create_entity', {
+          name: entityName,
+          entityType: 'agent_execution_state',
+          observations: [`Agent initialized at ${new Date().toISOString()}`],
+          Metadata: {
+            agentInstanceId: this.agentInstanceId,
+            sessionId: this.options.activeSessionId || 'unknown',
+            status: 'active',
+            iterationCount: 0,
+            isInternal: true,
+            parentAgentId: this.options.parentAgentId
+          }
+        });
+        console.log(`[AgentRuntime] Created new ExecutionState: ${entityName}`);
+      }
+    } catch (err) {
+      console.warn(`[AgentRuntime] Failed to initialize session state: ${err}`);
+    }
+
+    // GAP FIX 3: Load parent context if sub-agent
+    if (this.options.parentAgentId) {
+      try {
+        const parentState = await executeToolCall('memory_read_entity', {
+          name: `AgentState_${this.options.parentAgentId}`
+        });
+
+        if (parentState.result) {
+          const parent = parentState.result as any;
+          let contextContent = '';
+
+          // Load checkpoint summary
+          if (parent.Metadata?.lastCheckpoint) {
+            const checkpoint = parent.Metadata.lastCheckpoint;
+            contextContent += `[Parent Context - Step ${checkpoint.step}]\n${checkpoint.summary}\n\n`;
+          }
+
+          // Load last 3 observations
+          if (parent.observations && Array.isArray(parent.observations)) {
+            const lastObservations = parent.observations.slice(-3);
+            if (lastObservations.length > 0) {
+              contextContent += `Recent Context:\n`;
+              lastObservations.forEach((obs: string, idx: number) => {
+                contextContent += `${idx + 1}. ${obs}\n`;
+              });
+            }
+          }
+
+          if (contextContent) {
+            this.messages.push({
+              role: 'system',
+              content: `${contextContent}\nYou are a sub-agent. Use this parent context to understand the broader goal.`
+            });
+            console.log(`[AgentRuntime] Loaded parent context from ${this.options.parentAgentId}`);
+          }
+        }
+      } catch (err) {
+        console.warn(`[AgentRuntime] Failed to load parent context: ${err}`);
+      }
     }
   }
 
@@ -54,6 +149,59 @@ export class AgentRuntime {
   async chat(userContent: string): Promise<LLMMessage> {
     // PHASE 0: Smart Confirmation (if enabled)
     let finalPrompt = userContent;
+
+    // Initialize State (Idempotent)
+    await this.initializeSessionState();
+
+    // GAP FIX 2B: Detect and resume from pending handoffs
+    if (!this.options.isSubAgent) {
+      try {
+        const handoffCheck = await executeToolCall('memory_search_entities', {
+          query: `handoff ${this.options.activeSessionId || ''}`,
+          entityType: 'agent_handoff'
+        });
+
+        if (handoffCheck.result && typeof handoffCheck.result === 'object') {
+          const resultData = handoffCheck.result as { entities?: any[] };
+          if (resultData.entities && Array.isArray(resultData.entities)) {
+            const pendingHandoffs = resultData.entities.filter((e: any) =>
+              e.Metadata?.sessionId === this.options.activeSessionId
+            );
+
+            if (pendingHandoffs.length > 0) {
+              const handoff = pendingHandoffs[0];
+              console.log(`[AgentRuntime] Resuming from handoff: ${handoff.name}`);
+
+              // Restore context from handoff
+              if (handoff.Metadata?.lastCheckpoint) {
+                this.lastCheckpoint = handoff.Metadata.lastCheckpoint;
+              }
+
+              // Add context message
+              const contextMsg: LLMMessage = {
+                role: 'system',
+                content: `[Resuming from previous agent session]
+Previous progress: ${handoff.Metadata?.lastCheckpoint?.summary || 'In progress...'}
+Original goal: ${handoff.Metadata?.originalGoal || userContent}
+
+Continue from where the previous agent left off.`
+              };
+              this.messages.push(contextMsg);
+
+              // Delete handoff entity (consumed)
+              try {
+                await executeToolCall('memory_delete_entity', { name: handoff.name });
+                console.log(`[AgentRuntime] Deleted consumed handoff: ${handoff.name}`);
+              } catch (e) {
+                console.warn(`[AgentRuntime] Failed to delete handoff: ${e}`);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`[AgentRuntime] Failed to check for handoffs: ${err}`);
+      }
+    }
 
     if (this.options.requireConfirmation && this.options.onConfirmationNeeded) {
       try {
@@ -100,7 +248,25 @@ export class AgentRuntime {
       }
     }
 
-    // PHASE 0.5: Auto-Fork Analysis (skip for sub-agents)
+    // PHASE 0.1: Check for Dynamic Handoff Confirmation
+    const lastMsg = this.messages[this.messages.length - 1];
+    const isConfirmingHandoff =
+      lastMsg?.role === 'assistant' &&
+      lastMsg?.content?.toString().includes('reached the maximum number of steps') &&
+      /^(yes|continue|proceed|go ahead|sure)$/i.test(userContent.trim());
+
+    if (isConfirmingHandoff) {
+      console.log('[AgentRuntime] User confirmed handoff. Triggering sub-agent...');
+      // Add user confirmation to history
+      this.addMessage({ role: 'user', content: userContent });
+
+      // Get the original goal (approximate by looking back)
+      // Usually the first user message, or we can try to find the "step 1" context
+      // Simplified: use the very first user message as the Goal
+      const originalGoal = this.messages.find(m => m.role === 'user')?.content?.toString() || "Complete the task";
+
+      return this.triggerSubAgentHandoff(originalGoal);
+    }
     if (!this.options.isSubAgent) {
       const decomposition = analyzeTaskForDecomposition(finalPrompt);
       console.log('[AgentRuntime] Task decomposition:', decomposition);
@@ -135,18 +301,71 @@ export class AgentRuntime {
     const recentToolCalls: string[] = []; // Track recent tool signatures to detect loops
     const MAX_IDENTICAL_CALLS = 3; // Bail out if same tool called 3+ times in a row
 
-
     while (iterationCount < this.maxIterations) {
       // Check absolute max first to prevent runaway continuations
       this.totalIterations++;
 
-      if (this.totalIterations >= this.ABSOLUTE_MAX_ITERATIONS) {
-        const absoluteLimitMsg: LLMMessage = {
-          role: 'assistant',
-          content: `⚠️ **Absolute Limit Reached**\n\nI've performed **${this.ABSOLUTE_MAX_ITERATIONS} total steps** across all continuations. This task requires manual intervention or a different approach.\n\n**Recommendations:**\n• Break the task into smaller sub-tasks\n• Review if the goal is achievable with current tools\n• Check for errors or loops in recent steps`
-        };
-        this.addMessage(absoluteLimitMsg);
-        return absoluteLimitMsg;
+      // GAP FIX 2: Context-limit based handoff with progress check
+      // Estimate token usage (rough: 4 chars per token)
+      const contextText = JSON.stringify(this.messages);
+      const estimatedTokens = Math.ceil(contextText.length / 4);
+      const contextLimit = 100000; // Adjust based on model (Gemini 2.0 Flash = 1M tokens, but be conservative)
+      const isApproachingLimit = estimatedTokens > (contextLimit * 0.8); // 80% threshold
+
+      if (isApproachingLimit && !this.options.isSubAgent) {
+        console.warn(`[AgentRuntime] Approaching context limit: ${estimatedTokens} tokens (~${Math.round(estimatedTokens / contextLimit * 100)}%)`);
+
+        // Check if original goal has been met by analyzing progress
+        const originalGoalMsg = this.messages.find(m => m.role === 'user');
+        const originalGoal = originalGoalMsg?.content ? originalGoalMsg.content.toString() : '';
+
+        // Simple progress heuristic: check if there's a checkpoint and if it mentions completion
+        const summary = this.lastCheckpoint?.summary || '';
+        const looksComplete = /complete|done|finished|success/i.test(summary);
+
+        if (!looksComplete) {
+          // Goal not met - create handoff
+          const handoffId = `Handoff_${this.options.activeSessionId}_${Date.now()}`;
+
+          try {
+            await executeToolCall('memory_create_entity', {
+              name: handoffId,
+              entityType: 'agent_handoff',
+              observations: [
+                `Agent ${this.agentInstanceId} approaching context limit (${estimatedTokens} tokens)`,
+                `Handing off at checkpoint: ${this.lastCheckpoint?.summary || 'No checkpoint'}`,
+                `Original goal: ${originalGoal.substring(0, 200)}`
+              ],
+              Metadata: {
+                fromAgentId: this.agentInstanceId,
+                sessionId: this.options.activeSessionId,
+                reason: 'context_limit',
+                originalGoal: originalGoal,
+                lastCheckpoint: this.lastCheckpoint,
+                timestamp: Date.now(),
+                estimatedTokens: estimatedTokens,
+                isInternal: true
+              }
+            });
+
+            console.log(`[AgentRuntime] Created handoff entity: ${handoffId}`);
+
+            const handoffMsg: LLMMessage = {
+              role: 'assistant',
+              content: `I'm approaching my context limit (${estimatedTokens} tokens) and haven't fully completed the task yet. I've saved my progress and will hand off to a fresh agent instance to continue.
+
+**Progress So Far:**
+${this.lastCheckpoint?.summary || 'Working on the task...'}
+
+Please send your next message to continue with a fresh agent.`
+            };
+            this.addMessage(handoffMsg);
+            return handoffMsg;
+
+          } catch (err) {
+            console.error(`[AgentRuntime] Failed to create handoff: ${err}`);
+          }
+        }
       }
 
       if (this.options.signal?.aborted) {
@@ -235,13 +454,39 @@ export class AgentRuntime {
       // Get task-specific rules if category is available from analysis
       let dynamicRules = undefined;
 
-      // Simplest approach: Classification is done at start. Store it.
+      // Import helper dynamically to avoid circular deps
+      const { getPromptForCategory, getComposedPrompts, PROMPTS } = await import('./prompt-library');
+
+      // 1. Start with the base category prompt
+      const promptsToLoad: string[] = [];
       if (this.taskCategory) {
-        // Import helper dynamically to avoid circular deps if needed, or just use imported
-        const { getPromptForCategory } = await import('./prompt-library');
-        // Pass isSubAgent flag to get refined prompts
-        dynamicRules = getPromptForCategory(this.taskCategory, this.options.isSubAgent);
-        // console.log(`[AgentRuntime] Injecting dynamic rules for: ${this.taskCategory}`);
+        promptsToLoad.push(this.taskCategory);
+      }
+
+      // 2. PARALLEL EXECUTION DETECTION (Dynamic Injection)
+      // Inject parallel execution prompt if user request suggests multiple independent tasks
+      // Regex patterns to detect parallel intent: "Research X and Y", "Check 3 websites"
+      const parallelIndicators = [
+        /\band\b/i,          // "Research X and Y"
+        /,/,                 // "Check A, B, C"
+        /\bmultiple\b/i,
+        /\beach\b/i,
+        /\ball\b/i,
+        /\d+\s+(websites|pages|items|products|companies)/i  // "5 websites"
+      ];
+
+      const hasParallelIntent = parallelIndicators.some(pattern => pattern.test(finalPrompt));
+
+      // Only inject if detected AND not already a sub-agent (sub-agents should focus on their specific task)
+      if (hasParallelIntent && !this.options.isSubAgent) {
+        promptsToLoad.push('PARALLEL_EXECUTION');
+        console.log('[AgentRuntime] Parallel execution detected. Injecting PARALLEL_EXECUTION prompt.');
+      }
+
+      // 3. Compose the final dynamic rules
+      if (promptsToLoad.length > 0) {
+        dynamicRules = getComposedPrompts(promptsToLoad, this.options.isSubAgent);
+        console.log(`[AgentRuntime] Injected dynamic rules for: ${promptsToLoad.join(' + ')}`);
       }
       // Sub-agent context verification
       if (this.options.isSubAgent) {
@@ -254,10 +499,34 @@ export class AgentRuntime {
           allTools.length > 0 ? allTools : undefined,
           this.options.settings,
           serverInfo.length > 0 ? serverInfo : undefined,
-          this.options.signal
+          this.options.signal,
+          dynamicRules,
+          this.options.isSubAgent // NEW: Enable lightweight prompt for sub-agents
         );
       } catch (error) {
         console.error("[AgentRuntime] LLM Error:", error);
+        console.error("[AgentRuntime] Error details:", {
+          provider: this.options.settings?.preferredProvider || 'auto',
+          messageCount: contextMessages.length,
+          toolCount: allTools.length,
+          hasSignal: !!this.options.signal,
+          errorType: error instanceof Error ? error.constructor.name : typeof error,
+          errorMessage: error instanceof Error ? error.message : String(error)
+        });
+
+        // Provide more helpful error message
+        if (error instanceof Error && error.message.includes('Failed to fetch')) {
+          const provider = this.options.settings?.preferredProvider || 'auto';
+          throw new Error(
+            `Network error when calling LLM (provider: ${provider}). ` +
+            `This could be caused by:\n` +
+            `1. Invalid API key or configuration\n` +
+            `2. Network connectivity issues\n` +
+            `3. CORS issues (if using browser LLM)\n` +
+            `4. Provider service is down\n\n` +
+            `Original error: ${error.message}`
+          );
+        }
         throw error;
       }
 
@@ -295,6 +564,16 @@ Then extract the answer from the results. DO NOT refuse again.`
           continue; // Retry with correction
         }
 
+        // Append Progress Summary if available and this is the main agent (user-facing)
+        if (!this.options.isSubAgent && this.lastCheckpoint) {
+          const summaryText = `[Resuming Context from Checkpoint ${this.lastCheckpoint.step}]\nSummary: ${this.lastCheckpoint.summary}`;
+          // Avoid duplicating if the model already included it nicely
+          if (!response.content?.includes('Summary')) {
+            if (response.content) response.content += `\n\n## 📝 Execution Report\n${summaryText}`;
+            else response.content = `## 📝 Execution Report\n${summaryText}`;
+          }
+        }
+
         const assistantMsg: LLMMessage = {
           role: "assistant",
           content: response.content,
@@ -303,6 +582,18 @@ Then extract the answer from the results. DO NOT refuse again.`
 
         // Fire-and-forget memory analysis (Standard Turn Complete)
         MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+
+        // GAP FIX 4: Production Cleanup
+        // Requirement: Keep for debugging in dev mode, clear on completed status in prod
+        if (process.env.NODE_ENV !== 'development') {
+          try {
+            const entityName = `AgentState_${this.agentInstanceId}`;
+            await executeToolCall('memory_delete_entity', { name: entityName });
+            console.log(`[AgentRuntime] Production cleanup: Deleted ${entityName}`);
+          } catch (e) {
+            console.warn(`[AgentRuntime] Production cleanup failed: ${e}`);
+          }
+        }
 
         return assistantMsg;
       }
@@ -323,8 +614,9 @@ Then extract the answer from the results. DO NOT refuse again.`
       this.addMessage(assistantMsg);
 
       // Execute tools
-      for (const call of response.toolCalls) {
-        if (this.options.signal?.aborted) break;
+      // Execute tools in PARALLEL
+      const toolPromises = response.toolCalls.map(async (call) => {
+        if (this.options.signal?.aborted) return null;
 
         // Create a signature for this tool call to detect loops
         const toolSignature = `${call.name}:${JSON.stringify(call.arguments)}`;
@@ -489,6 +781,37 @@ ${recentResults.length > 0 ? recentResults.map((r, i) => `**Result ${i + 1}:**\n
           }
 
 
+        } else if (call.name === 'update_progress_summary') {
+          const args = call.arguments as any;
+          const summary = args.summary || '';
+
+          if (summary.trim()) {
+            // Update Local Cache
+            this.lastCheckpoint = {
+              step: iterationCount,
+              summary: summary,
+              timestamp: Date.now()
+            };
+
+            // Update Memory Entity
+            await executeToolCall('memory_update_entity', {
+              name: `AgentState_${this.agentInstanceId}`,
+              Metadata: {
+                lastCheckpoint: this.lastCheckpoint,
+                status: 'active',
+                iterationCount: iterationCount
+              }
+            });
+
+            console.log(`[AgentRuntime] Progress checkpoint saved to memory (Step ${iterationCount})`);
+          }
+
+          resultStr = JSON.stringify({
+            success: true,
+            message: 'Progress checkpoint saved to persistent memory.',
+            checkpointStep: iterationCount
+          });
+
         } else if (call.name === 'delegate_sub_task') {
           const args = call.arguments as any;
           const instruction = args.instruction || "";
@@ -502,17 +825,65 @@ ${recentResults.length > 0 ? recentResults.map((r, i) => `**Result ${i + 1}:**\n
 
           console.log(`[AgentRuntime] Delegating to sub-agent: ${instruction}`);
 
-          // Create sub-agent with isolated context
+          // 1. Generate ID for Sub-Agent
+          const subAgentId = globalThis.crypto.randomUUID();
+
+          // 2. Pre-seed Memory with Context (Avoid passing huge string in constructor)
+          try {
+            const contextEntityName = `AgentState_${subAgentId}`;
+            await executeToolCall('memory_create_entity', {
+              name: contextEntityName,
+              entityType: 'agent_execution_state',
+              observations: [
+                `Sub-agent initialized for task: ${instruction}`,
+                `Context Summary: ${context}`
+              ],
+              Metadata: {
+                agentInstanceId: subAgentId,
+                sessionId: this.options.activeSessionId || 'unknown',
+                status: 'active',
+                iterationCount: 0,
+                parentAgentId: this.agentInstanceId, // Link to me
+                isInternal: true
+              }
+            });
+            console.log(`[AgentRuntime] Pre-seeded memory for sub-agent ${subAgentId}`);
+          } catch (err) {
+            console.warn(`[AgentRuntime] Failed to pre-seed sub-agent memory: ${err}`);
+          }
+
+          // Provision a dedicated browser tab for this sub-agent to ensure isolation
+          let subAgentTabId: number | undefined;
+          try {
+            // Import lock dynamically
+            const { browserLock } = await import('./resource-lock');
+            const tabResult = await browserLock.runExclusive(async () => {
+              return await executeToolCall('new_tab', { url: 'about:blank' });
+            });
+
+            const resAny = tabResult.result as any;
+            if (resAny && resAny.tabId !== undefined) {
+              subAgentTabId = resAny.tabId;
+              console.log(`[AgentRuntime] Provisioned tab ${subAgentTabId} for sub-agent`);
+            }
+          } catch (e) {
+            console.warn('[AgentRuntime] Failed to provision tab for sub-agent', e);
+          }
+
+          // Create sub-agent with isolated context and dedicated tab
           const subAgent = new AgentRuntime({
             ...this.options,
             isSubAgent: true,
+            tabId: subAgentTabId,
             taskCategory: this.taskCategory, // Inherit category for safety protocols
             requireConfirmation: false,
-            onMessage: (msg) => {
+            agentInstanceId: subAgentId, // Use pre-generated ID
+            parentAgentId: this.agentInstanceId, // Link to me
+            onMessage: (msg: LLMMessage) => {
               const contentStr = typeof msg.content === 'string'
                 ? msg.content
-                : msg.content.map(c => c.type === 'text' ? c.text : '[Image]').join(' ');
-              console.log(`[SubAgent] ${msg.role}: ${contentStr ? contentStr.substring(0, 50) : '...'}`);
+                : Array.isArray(msg.content) ? msg.content.map(c => c.type === 'text' ? c.text : '[Image]').join(' ') : '';
+              console.log(`[SubAgent Tab:${subAgentTabId ?? 'default'}] ${msg.role}: ${contentStr ? contentStr.substring(0, 50) : '...'}`);
             }
           });
 
@@ -526,6 +897,19 @@ Return key findings only. End with "✓ Done".`;
             const finalContent = typeof finalRes.content === 'string'
               ? finalRes.content
               : finalRes.content.map(c => c.type === 'text' ? c.text : '').join('');
+
+            // CLEANUP: Close the sub-agent's tab to save resources
+            if (subAgentTabId !== undefined) {
+              try {
+                const { browserLock } = await import('./resource-lock');
+                await browserLock.runExclusive(async () => {
+                  await executeToolCall('close_tab', { tabId: subAgentTabId });
+                });
+                console.log(`[AgentRuntime] Closed sub-agent tab ${subAgentTabId}`);
+              } catch (e) {
+                console.warn(`[AgentRuntime] Failed to close sub-agent tab ${subAgentTabId}`, e);
+              }
+            }
 
             // Return raw content without wrapper (save tokens)
             resultStr = finalContent.trim();
@@ -555,28 +939,125 @@ Return key findings only. End with "✓ Done".`;
           }
 
         } else {
-          // Standard MCP tool
+          // Standard MCP tool with SELF-HEALING Wrapper
+          const executeCallWithSelfHealing = async (name: string, args: Record<string, unknown>, attempt = 1): Promise<any> => {
+            try {
+              // DYNAMIC RESOURCE LOCKING
+              // We lock based on tool type to prevent race conditions during parallel execution
+              let result;
+
+
+              // Import Lane Manager dynamically
+              const { laneManager } = await import('./execution-lanes');
+              const { STATEFUL_BROWSER_TOOLS } = await import('./client-tools');
+
+              // INJECTION: If this agent has a dedicated tab, force all browser tools to use it
+              if (this.options.tabId !== undefined && STATEFUL_BROWSER_TOOLS.includes(name)) {
+                args.tabId = this.options.tabId;
+              }
+
+              // EXECUTE via Lane Manager
+              // It handles routing (Browser Serial vs Tab Serial vs API Parallel)
+              result = await laneManager.getLane(name, { tabId: this.options.tabId }).run(async () => {
+                return await executeToolCall(name, args);
+              });
+
+              return result;
+
+            } catch (error: any) {
+              const errorStr = String(error);
+
+              // RECOVERY STRATEGIES (Max 2 Attempts)
+              if (attempt <= 2) {
+                // Strategy 1: Context Destroyed (Navigation Race Condition)
+                if (errorStr.includes('Execution context was destroyed')) {
+                  console.log(`[Self-Healing] Context destroyed during ${name}. Waiting 1s and retrying...`);
+                  await new Promise(r => setTimeout(r, 1000));
+                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                }
+
+                // Strategy 2: Stale Element (DOM Update)
+                if (errorStr.includes('Element is not attached') || errorStr.includes('Node is detached')) {
+                  console.log(`[Self-Healing] Stale element in ${name}. Retrying immediately...`);
+                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                }
+
+                // Strategy 3: Timeout (Increase Timeout)
+                if (errorStr.includes('Timeout') && args.timeout && typeof args.timeout === 'number') {
+                  console.log(`[Self-Healing] Timeout in ${name}. Retrying with double timeout...`);
+                  const newArgs = { ...args, timeout: args.timeout * 2 };
+                  return executeCallWithSelfHealing(name, newArgs, attempt + 1);
+                }
+
+                // Strategy 4: Network Errors (Transient)
+                if (errorStr.includes('net::ERR_') || errorStr.includes('ECONNREFUSED') || errorStr.includes('fetch failed')) {
+                  console.log(`[Self-Healing] Network error in ${name}. Retrying in 2s...`);
+                  await new Promise(r => setTimeout(r, 2000));
+                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                }
+
+                // Strategy 5: Browser Context Lost (Transient)
+                if (errorStr.includes('Target closed') || errorStr.includes('Session closed') || errorStr.includes('Browser has been closed')) {
+                  console.log(`[Self-Healing] Browser context lost in ${name}. Retrying in 1s...`);
+                  await new Promise(r => setTimeout(r, 1000));
+                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                }
+
+                // Strategy 6: Element Not Found (Retry with longer wait - page might be loading)
+                if (errorStr.includes('Element not found') || errorStr.includes('waiting for selector') || errorStr.includes('No element matches')) {
+                  console.log(`[Self-Healing] Element not found in ${name}. Retrying with longer wait...`);
+                  const newArgs = { ...args, timeout: (args.timeout as number || 5000) * 1.5 };
+                  return executeCallWithSelfHealing(name, newArgs, attempt + 1);
+                }
+
+                // Strategy 7: Navigation Timeout (Retry with longer timeout)
+                if (errorStr.includes('Navigation timeout') || errorStr.includes('page.goto')) {
+                  console.log(`[Self-Healing] Navigation timeout in ${name}. Retrying with extended timeout...`);
+                  const newArgs = { ...args, timeout: (args.timeout as number || 30000) * 1.5 };
+                  return executeCallWithSelfHealing(name, newArgs, attempt + 1);
+                }
+              }
+
+              // DON'T auto-retry syntax/logic errors - they need LLM intervention
+              if (errorStr.includes('Syntax error') || errorStr.includes('ReferenceError') || errorStr.includes('TypeError') || errorStr.includes('Unexpected identifier')) {
+                console.log(`[Self-Healing] Syntax/logic error detected in ${name} - delegating to LLM for correction`);
+                // Fall through to error return with enhanced hints
+              }
+
+              // Fallback to error return
+              return { result: null, error: errorStr };
+            }
+          };
+
           try {
-            const result = await executeToolCall(call.name, call.arguments as Record<string, unknown>);
-            if (result.error) {
+            // Execute with self-healing wrapper
+            let result = await executeCallWithSelfHealing(call.name, call.arguments as Record<string, unknown>);
+            // Type assertion to handle 'unknown' return from locking
+            const typedResult = result as { result: unknown; error?: string };
+
+            if (typedResult.error) {
               // Enrich error message with recovery hints
-              const errorMsg = result.error;
+              const errorMsg = typedResult.error;
               let recoveryHint = '';
 
               if (errorMsg.includes('not found') || errorMsg.includes('Timeout')) {
                 recoveryHint = '\n\n💡 **Recovery Tip**: The element was not found. Try:\n1. Take a screenshot to see the current page state.\n2. Use `get_state` to list available elements.\n3. Use a different, more general selector (e.g., text-based like `text="Submit"`).\n4. The page might have changed—verify the URL is correct.';
               } else if (errorMsg.includes('not visible') || errorMsg.includes('hidden')) {
                 recoveryHint = '\n\n💡 **Recovery Tip**: The element exists but is hidden. Try:\n1. Scroll the page first (`scroll`).\n2. Wait for animations to complete (`wait`).\n3. Check if a modal or popup is blocking.';
+              } else if (errorMsg.includes('Syntax error') || errorMsg.includes('JavaScript evaluation')) {
+                recoveryHint = '\n\n💡 **Recovery Tip**: Selector syntax error detected. Common fixes:\n1. **Use text-based selectors** instead: `click_text("wireless headphones")` or `click_text("Add to cart")`\n2. **Check attribute quotes**: `div[data-attr="value"]` not `div[data-attr=value]`\n3. **Use simpler selectors**: Try `get_interactive_elements()` to see available elements\n4. **Escape special characters**: Use `\\` before special chars in selectors';
               } else if (errorMsg.includes('Missing required parameter')) {
                 recoveryHint = `\n\n💡 **Recovery Tip**: A required parameter was missing. Check the tool definition and ensure all required fields are provided.`;
+              } else if (errorMsg.includes('ExtractionError')) {
+                recoveryHint = '\n\n💡 **Recovery Tip**: Extraction failed (empty results). The selector is likely wrong. \n1. **Use `get_interactive_elements`** immediately to find the correct selector.\n2. Do NOT retry the same selector.';
               }
 
               resultStr = JSON.stringify({ error: errorMsg + recoveryHint });
               consecutiveErrors++;
             } else {
-              resultStr = typeof result.result === 'string'
-                ? result.result
-                : JSON.stringify(result.result);
+              resultStr = typeof typedResult.result === 'string'
+                ? typedResult.result
+                : JSON.stringify(typedResult.result);
               consecutiveErrors = 0; // Reset on success
             }
           } catch (err: any) {
@@ -596,48 +1077,203 @@ Return key findings only. End with "✓ Done".`;
           }
         }
 
+        // CRITICAL: Truncate tool outputs to prevent context bloat
+        // Tools like get_state can return 100k+ characters, quickly exceeding token limits
+        const MAX_TOOL_OUTPUT_LENGTH = 5000;
+        let truncatedResultStr = resultStr;
+
+        if (resultStr.length > MAX_TOOL_OUTPUT_LENGTH) {
+          // Check if it's an error - preserve full error messages
+          const isError = resultStr.includes('"error":') || resultStr.startsWith('Error:');
+
+          if (!isError) {
+            truncatedResultStr = resultStr.substring(0, MAX_TOOL_OUTPUT_LENGTH) +
+              `\n\n[Tool output truncated from ${resultStr.length} to ${MAX_TOOL_OUTPUT_LENGTH} chars to save context. 💡 TIP: If you don't see what you need, use a more specific selector or filter instead of dumping the whole page.]`;
+            console.log(`[AgentRuntime] Truncated ${call.name} output: ${resultStr.length} → ${MAX_TOOL_OUTPUT_LENGTH} chars`);
+          }
+        }
+
         // Add tool result
         this.addMessage({
           role: "tool",
-          content: resultStr,
+          content: truncatedResultStr,
           tool_call_id: call.id
         });
-      }
+
+        // INCREMENTAL REPORTING: Check if this result is presentable to the user
+        if (!this.options.isSubAgent) {
+          try {
+            const analysisResult = analyzeToolOutput(call.name, resultStr);
+            if (analysisResult.hasPresentableData && analysisResult.summary) {
+              // Show findings to user immediately
+              this.addMessage({
+                role: 'assistant',
+                content: `**📋 Finding:**\n${analysisResult.summary}`
+              });
+              console.log(`[AgentRuntime] Reported finding: ${analysisResult.summary.substring(0, 50)}...`);
+            }
+          } catch (e) {
+            console.warn('[AgentRuntime] Failed to analyze tool output:', e);
+          }
+        }
+        return undefined;
+      });
+
+      const results = await Promise.all(toolPromises);
+
+      // Check for bailouts (e.g. infinite loops)
+      const bailout = results.find(r => r && r.role === 'assistant');
+      if (bailout) return bailout;
 
       iterationCount++;
+
+      // MANDATORY CHECKPOINT: Enforce progress summary at iterations 15, 30, 45...
+      // User request: Increased from 5 to 15 to allow more flow before interrupting
+      const CHECKPOINT_INTERVAL = 15;
+      if (!this.options.isSubAgent && iterationCount % CHECKPOINT_INTERVAL === 0 && iterationCount > 0) {
+        const checkpointIndex = (iterationCount / CHECKPOINT_INTERVAL) - 1; // 0-indexed checkpoint
+
+        // Check if summary was recorded for this checkpoint
+        if ((this.lastCheckpoint?.step || 0) <= checkpointIndex) {
+          console.log(`[AgentRuntime] Checkpoint ${iterationCount}: Waiting for progress summary...`);
+
+          // Add system message to enforce summary (MUST be non-conversational to prevent verbose responses)
+          this.addMessage({
+            role: 'system',
+            content: `CHECKPOINT ${iterationCount}: Call update_progress_summary tool NOW with your Summary of your findings and what you've accomplished in the last ${CHECKPOINT_INTERVAL} steps. No text output - tool call only.`
+          });
+
+          // Continue loop - LLM will be forced to call the tool on next iteration
+          // Continue loop - LLM will be forced to call the tool on next iteration
+          continue;
+        } else {
+          console.log(`[AgentRuntime] Checkpoint ${iterationCount}: Summary recorded ✓`);
+        }
+      }
     }
 
-    // Summarize recent tool outputs for context
-    const recentToolOutputs = this.messages
-      .filter(m => m.role === 'tool')
-      .slice(-2) // Last 2 tool outputs
-      .map(m => {
-        const content = typeof m.content === 'string' ? m.content : '';
-        return content.substring(0, 300) + (content.length > 300 ? '...' : '');
-      })
-      .join('\n\n');
+    // If we reach here, we hit max iterations
+    if (!this.options.isSubAgent) {
+      console.log(`[AgentRuntime] Max iterations (${this.maxIterations}) reached. Checking if user wants to continue...`);
 
-    // Progress analysis
-    const uniqueToolsUsed = this.toolCallHistory.size;
-    const progressIndicator = uniqueToolsUsed > iterationCount * 0.5
-      ? '✅ Making diverse progress'
-      : '⚠️ Possibly stuck in a loop';
+      // Summarize recent tool outputs for context
+      const recentToolOutputs = this.messages
+        .filter(m => m.role === 'tool')
+        .slice(-2) // Last 2 tool outputs
+        .map(m => {
+          const content = typeof m.content === 'string' ? m.content : '';
+          return content.substring(0, 300) + (content.length > 300 ? '...' : '');
+        })
+        .join('\n\n');
 
-    const limitReachedMsg: LLMMessage = {
-      role: 'assistant',
-      content: `I've worked for **${this.maxIterations} steps** but haven't finished yet.
+      // Progress analysis
+      const uniqueToolsUsed = this.toolCallHistory.size;
+      const progressIndicator = uniqueToolsUsed > iterationCount * 0.5
+        ? '✅ Making diverse progress'
+        : '⚠️ Possibly stuck in a loop';
+
+      // Use LLM-generated progress summaries
+      const summary = this.lastCheckpoint
+        ? this.lastCheckpoint.summary
+        : 'No progress summaries recorded yet. The agent may not have reached any checkpoints.';
+
+      const handoffMsg: LLMMessage = {
+        role: 'assistant',
+        content: `I've worked for **${this.maxIterations} steps** but haven't finished yet.
 
 **Progress Status:** ${progressIndicator} (${uniqueToolsUsed} unique tool calls so far)
+
+**Progress Summary:**
+${summary || 'Executed several actions.'}
 
 **Latest Results:**
 ${recentToolOutputs || 'Processing data...'}
 
-**Do you want me to continue?**
-• Reply **"Yes"** or **"Continue"** to proceed (I'll do another batch of work).
-• Reply **"Stop"** to end here.`
+Would you like me to continue with a fresh sub-agent?`,
+        actions: [
+          {
+            type: 'continue',
+            label: '▶️ Continue Task',
+            payload: { goal: finalPrompt }
+          },
+          {
+            type: 'cancel',
+            label: '⏹️ Stop Here',
+            payload: {}
+          }
+        ]
+      };
+
+      this.addMessage(handoffMsg);
+      return handoffMsg;
+    }
+
+    throw new Error(`Max iterations (${this.maxIterations}) reached. Task appears stuck or too complex.`);
+  }
+
+  /**
+   * Helper to continue with sub-agent based on history
+   */
+  private async triggerSubAgentHandoff(originalRequest: string): Promise<LLMMessage> {
+    // Recalculate steps roughly based on history length / 2
+    const stepsTaken = Math.floor(this.messages.length / 2);
+    return this.continueWithSubAgent(originalRequest, stepsTaken);
+  }
+
+  /**
+   * Dynamically hand off remaining work to a sub-agent
+   */
+  private async continueWithSubAgent(
+    originalRequest: string,
+    stepsTaken: number
+  ): Promise<LLMMessage> {
+    // Use LLM-generated progress summaries instead of reconstructing from messages
+    const progressContext = this.lastCheckpoint
+      ? `Last Checkpoint: ${this.lastCheckpoint.summary}`
+      : 'No detailed progress recorded yet.';
+
+    const instruction = `GOAL: ${originalRequest}
+
+CONTEXT: I have already taken ${stepsTaken} steps but haven't finished.
+Progress so far:
+${progressContext}
+
+INSTRUCTION: Continue the task from here. You have a fresh context window.
+Focus on the next logical steps to complete the goal.
+Use tools immediately. End with "✓ Done".`;
+
+    // Create a sequential sub-agent with the "continuation" instruction
+    const decomposition: TaskDecomposition = {
+      type: 'single_context',
+      contexts: ['continuation'],
+      estimatedActions: 10,
+      shouldFork: true,
+      forkReason: 'User confirmed continuation after max iterations'
     };
-    this.addMessage(limitReachedMsg);
-    return limitReachedMsg;
+
+    // Let's manually spin up an AgentRuntime to be safe and direct
+    const subAgent = new AgentRuntime({
+      ...this.options,
+      isSubAgent: true,
+      taskCategory: this.taskCategory,
+      onMessage: (msg) => {
+        if (msg.role === 'assistant' && msg.content) {
+          // Pass through partial updates if needed
+        }
+      }
+    });
+
+    this.addMessage({
+      role: 'assistant',
+      content: `Starting sub-agent to continue the task...`
+    });
+
+    try {
+      const result = await subAgent.chat(instruction);
+      return result;
+    } catch (error) {
+      throw new Error(`Sub-agent failed to complete task: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private addMessage(msg: LLMMessage): string | void {
@@ -702,8 +1338,37 @@ ${recentToolOutputs || 'Processing data...'}
 
       console.log(`[AgentRuntime] Spawning sub-agent for: ${context}`);
 
+      // GAP FIX 1A: Pre-seed memory for parallel sub-agent
+      const subAgentId = globalThis.crypto.randomUUID();
+
+      try {
+        await executeToolCall('memory_create_entity', {
+          name: `AgentState_${subAgentId}`,
+          entityType: 'agent_execution_state',
+          observations: [
+            `Parallel sub-agent for context: ${context}`,
+            `Task: ${originalRequest}`,
+            `Initialized at ${new Date().toISOString()}`
+          ],
+          Metadata: {
+            agentInstanceId: subAgentId,
+            sessionId: this.options.activeSessionId || 'unknown',
+            parentAgentId: this.agentInstanceId,
+            status: 'active',
+            iterationCount: 0,
+            isInternal: true,
+            context: context
+          }
+        });
+        console.log(`[AgentRuntime] Pre-seeded memory for parallel sub-agent ${subAgentId}`);
+      } catch (err) {
+        console.warn(`[AgentRuntime] Failed to pre-seed sub-agent memory: ${err}`);
+      }
+
       const subAgent = new AgentRuntime({
         ...this.options,
+        agentInstanceId: subAgentId,
+        parentAgentId: this.agentInstanceId,
         isSubAgent: true,
         taskCategory: this.taskCategory, // Inherit category from parent
         requireConfirmation: false,
@@ -755,6 +1420,12 @@ ${recentToolOutputs || 'Processing data...'}
         if (statusMessageId && this.options.onMessageUpdate) {
           this.options.onMessageUpdate(statusMessageId, { content: renderStatus() });
         }
+
+        // REPORTING FIX: Immediately show the result to the user as a distinct message
+        this.addMessage({
+          role: 'assistant',
+          content: `**✅ ${context} Analysis Complete**\n\n${resultContent.substring(0, 500)}${resultContent.length > 500 ? '...' : ''}`
+        });
 
         return {
           context,
@@ -838,20 +1509,23 @@ ${recentToolOutputs || 'Processing data...'}
 
     // Step 1: Create high-level plan using LLM
     console.log('[AgentRuntime] Generating execution plan...');
-    const planPrompt = `Analyze this task and break it into 3-5 concrete steps:
+    const planPrompt = `Break this task into 3-5 CONCRETE steps for an automation agent:
 
 TASK: ${originalRequest}
+TARGET: ${targetContext}
 
-Create a step-by-step plan. Each step should be:
-- Actionable (can be completed by a sub-agent)
-- Self-contained (doesn't need full conversation history)
-- Sequential (builds on previous steps)
+Rules:
+- Each step = 1-3 tool calls (could be browser, file, API, database, messaging, etc.)
+- Be specific: include URLs, filenames, endpoints, or identifiers when known
+- NO vague steps like "gather information" or "clarify requirements"
+- Each step should produce a clear, verifiable result
 
 Format as JSON:
 {
   "steps": [
-    {"id": 1, "description": "Step 1 description"},
-    {"id": 2, "description": "Step 2 description"}
+    {"id": 1, "description": "Navigate to example.com OR Open file X OR Call API Y"},
+    {"id": 2, "description": "Perform the main action"},
+    {"id": 3, "description": "Extract/save results"}
   ]
 }`;
 
@@ -878,9 +1552,9 @@ Format as JSON:
       if (!planData || !planData.steps || planData.steps.length === 0) {
         planData = {
           steps: [
-            { id: 1, description: "Clarify task requirements and gather details" },
-            { id: 2, description: `Navigate to ${targetContext} and complete the task` },
-            { id: 3, description: "Verify and summarize results" }
+            { id: 1, description: `Navigate to ${targetContext === 'current_page' ? 'the target website' : targetContext}` },
+            { id: 2, description: `Complete the main action: ${originalRequest.substring(0, 80)}` },
+            { id: 3, description: "Verify results and extract relevant information" }
           ]
         };
       }
@@ -908,17 +1582,53 @@ Format as JSON:
 
         console.log(`[AgentRuntime] Executing step ${step.id}: ${step.description}`);
 
-        // MINIMAL instruction - just the step + persistence awareness
-        const stateNote = step.id > 1
-          ? ' State persists from previous steps. Check current state first (e.g., get_state, cwd).'
+        // Build context from previous steps
+        const previousStepsSummary = results.length > 0
+          ? `\n\nCOMPLETED STEPS:\n${results.map(r => `- Step ${r.step}: ${r.result.substring(0, 100)}${r.result.length > 100 ? '...' : ''}`).join('\n')}`
           : '';
 
-        const subAgentInstruction = `${step.description}${stateNote}
+        // Include original goal + current step + context
+        const subAgentInstruction = `GOAL: ${originalRequest}
 
-Return brief result. End with "✓ Done".`;
+CURRENT STEP (${step.id}/${steps.length}): ${step.description}
+${previousStepsSummary}
+
+Execute this step using available tools. State persists from previous steps.
+End with "✓ Done" and a brief result.`;
+
+        // GAP FIX 1B: Pre-seed memory for sequential sub-agent
+        const subAgentId = globalThis.crypto.randomUUID();
+
+        try {
+          await executeToolCall('memory_create_entity', {
+            name: `AgentState_${subAgentId}`,
+            entityType: 'agent_execution_state',
+            observations: [
+              `Sequential sub-agent for step ${step.id}/${steps.length}`,
+              `Task: ${step.description}`,
+              `Parent task: ${originalRequest}`,
+              `Initialized at ${new Date().toISOString()}`
+            ],
+            Metadata: {
+              agentInstanceId: subAgentId,
+              sessionId: this.options.activeSessionId || 'unknown',
+              parentAgentId: this.agentInstanceId,
+              status: 'active',
+              iterationCount: 0,
+              isInternal: true,
+              stepId: step.id,
+              stepDescription: step.description
+            }
+          });
+          console.log(`[AgentRuntime] Pre-seeded memory for sequential sub-agent ${subAgentId} (step ${step.id})`);
+        } catch (err) {
+          console.warn(`[AgentRuntime] Failed to pre-seed sub-agent memory: ${err}`);
+        }
 
         const subAgent = new AgentRuntime({
           ...this.options,
+          agentInstanceId: subAgentId,
+          parentAgentId: this.agentInstanceId,
           isSubAgent: true,
           taskCategory: this.taskCategory,
           requireConfirmation: false,

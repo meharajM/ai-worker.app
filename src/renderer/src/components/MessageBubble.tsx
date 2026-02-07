@@ -1,7 +1,8 @@
-import { Trash2, Bot, User, History, AlertCircle, CheckCircle2, Circle, ChevronRight } from 'lucide-react'
+import { Trash2, Bot, User, History, AlertCircle, CheckCircle2, Circle, ChevronRight, Save } from 'lucide-react'
 import { Message, useChatStore, ToolCall } from '../stores/chatStore'
 import { AgentPlan, parseAgentPlan } from './AgentPlan'
 import { FormattedText } from './FormattedText'
+import { filterThinkBlocks, hasLeakedReasoning } from '../lib/thinkBlockFilter'
 import React from 'react';
 
 interface MessageBubbleProps {
@@ -27,7 +28,30 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
 
     const agentPlan = toolPlanData;
 
-    const visibleToolCalls = message.toolCalls?.filter(tc => tc.name !== 'create_execution_plan');
+    // Filter out internal tools from the standard checklist view
+    const visibleToolCalls = message.toolCalls?.filter(tc =>
+        tc.name !== 'create_execution_plan' &&
+        tc.name !== 'update_progress_summary' &&
+        tc.name !== 'memory_update_entity'
+    );
+
+    // Check for progress summary update (Legacy or Memory)
+    const progressToolCall = message.toolCalls?.find(tc =>
+        tc.name === 'update_progress_summary' ||
+        tc.name === 'memory_update_entity'
+    );
+
+    // SPECIAL CASE: If message is ONLY a progress update (no content, no other tools), render minimal badge
+    if (!isUser && !message.content && message.toolCalls?.length === 1 && progressToolCall) {
+        return (
+            <div className="flex justify-center my-2 animate-pulse">
+                <div className="flex items-center gap-1.5 text-white/20 text-[10px] font-medium px-2 py-1 rounded-full bg-white/5">
+                    <Save size={10} />
+                    <span>Saving progress checkpoint...</span>
+                </div>
+            </div>
+        );
+    }
 
     if (isSystem) {
         return (
@@ -59,21 +83,11 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                     {/* Render Agent Plan if present */}
                     {agentPlan && <AgentPlan plan={agentPlan} />}
 
-                    {/* Render Thinking Block (Devin/o1 Style) */}
+                    {/* Render Thinking Block (Universal - works with all LLMs) */}
                     {(() => {
                         if (!message.content) return null;
 
-                        // Check for complete block
-                        let thinkMatch = message.content.match(/<think>([\s\S]*?)<\/think>/);
-                        let thinking = thinkMatch ? thinkMatch[1].trim() : null;
-                        let isComplete = !!thinkMatch;
-
-                        // Check for incomplete/streaming block (only if at start)
-                        // This handles the "Thinking..." state while the model is outputting the thoughts
-                        if (!thinking && message.content.trim().startsWith('<think>')) {
-                            thinking = message.content.replace('<think>', '').trim();
-                            isComplete = false;
-                        }
+                        const { thinking, isComplete } = filterThinkBlocks(message.content);
 
                         // If we have thinking content, render it
                         if (thinking) {
@@ -95,22 +109,14 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
 
                     {/* Render Message Content (cleaned of thinking and unwrapped reasoning) */}
                     {message.content && (() => {
-                        // Step 1: Remove properly wrapped thinking
-                        let cleanedContent = message.content
-                            .replace(/<think>[\s\S]*?(<\/think>|$)/g, '')
-                            .trim();
+                        // Step 1: Remove properly wrapped thinking (universal filter)
+                        const { cleanedContent: initialCleaned } = filterThinkBlocks(message.content);
+                        let cleanedContent = initialCleaned;
 
-                        // Step 2: Detect leaked reasoning patterns (outside <think> tags)
-                        const leakedReasoningPatterns = [
-                            /^,?\s*(?:the user|let me|since this|looking at|wait,?\s+the|I (?:need|should|will|don't|can))/i,
-                            /^(?:Therefore|Thus|So),?\s+(?:the\s+)?(?:response|answer)\s+should/i,
-                            /^(?:Yep|No need|Okay so)/i,
-                            /^(?:Hmm|Well|Alright),?\s+(?:the user|let me|I should)/i,
-                        ];
+                        // Step 2: Detect leaked reasoning patterns (outside think tags)
+                        const hasLeak = hasLeakedReasoning(cleanedContent);
 
-                        const hasLeakedReasoning = leakedReasoningPatterns.some(p => p.test(cleanedContent));
-
-                        if (hasLeakedReasoning) {
+                        if (hasLeak) {
                             // Try to extract the actual response from the end
                             // Look for quoted content or content after common conclusion markers
                             const extractPatterns = [
@@ -128,10 +134,10 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                             }
 
                             // If still starts with meta, try last sentence as fallback
-                            if (leakedReasoningPatterns.some(p => p.test(cleanedContent))) {
+                            if (hasLeakedReasoning(cleanedContent)) {
                                 const sentences = cleanedContent.match(/[^.!?]+[.!?]+/g) || [];
                                 const lastSentence = sentences[sentences.length - 1]?.trim();
-                                if (lastSentence && !leakedReasoningPatterns.some(p => p.test(lastSentence)) && lastSentence.length > 10) {
+                                if (lastSentence && !hasLeakedReasoning(lastSentence) && lastSentence.length > 10) {
                                     cleanedContent = lastSentence;
                                 } else {
                                     // Can't salvage - show thinking indicator
@@ -150,6 +156,14 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
 
                         return <FormattedText content={cleanedContent} />;
                     })()}
+
+                    {/* Progress checkpoint badge (mixed content) */}
+                    {!isUser && progressToolCall && (message.content || (visibleToolCalls && visibleToolCalls.length > 0)) && (
+                        <div className="flex items-center gap-1.5 text-white/30 text-[10px] font-medium mt-3 px-1 border-t border-white/5 pt-2">
+                            <Save size={10} />
+                            <span>Progress checkpoint saved</span>
+                        </div>
+                    )}
 
                     {/* Tool calls display - Grouped Action Steps (Checklist Style) */}
                     {visibleToolCalls && visibleToolCalls.length > 0 && (
@@ -256,6 +270,30 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
 
                                 return renderContent();
                             })()}
+                        </div>
+                    )}
+
+                    {/* Action Buttons (for handoff confirmation) */}
+                    {message.actions && message.actions.length > 0 && (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                            {message.actions.map((action, idx) => (
+                                <button
+                                    key={idx}
+                                    onClick={() => {
+                                        // Dispatch custom event to trigger handleSubmit in App.tsx
+                                        const content = action.type === 'continue' ? 'continue' : 'stop';
+                                        window.dispatchEvent(new CustomEvent('agent-action', {
+                                            detail: { type: action.type, content }
+                                        }));
+                                    }}
+                                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${action.type === 'continue'
+                                        ? 'bg-[#00a896] hover:bg-[#00a896]/80 text-white'
+                                        : 'bg-white/10 hover:bg-white/20 text-white/70'
+                                        }`}
+                                >
+                                    {action.label}
+                                </button>
+                            ))}
                         </div>
                     )}
 
