@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react'
 import { Trash2, Bot } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useChatStore } from '../stores/chatStore'
 import { MessageBubble } from './MessageBubble'
 import { WorkflowTiles } from './WorkflowTiles'
@@ -86,13 +87,28 @@ export function ChatView({ onClearChat }: ChatViewProps) {
                         <div className="w-8 h-8 rounded-lg bg-[#00a896] flex items-center justify-center flex-shrink-0">
                             <Bot size={18} className="text-white" />
                         </div>
-                        <div className="bg-[#1a1d23] border border-white/10 rounded-2xl px-4 py-3">
-                            <div className="flex gap-1.5">
-                                <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                                <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                                <span className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
-                            </div>
-                        </div>
+                            <motion.div 
+                                initial={{ opacity: 0, scale: 0.9 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 0.9 }}
+                                className="bg-[#1a1d23] border border-white/10 rounded-2xl px-4 py-3"
+                            >
+                                <div className="flex gap-1.5">
+                                    {[0, 1, 2].map((i) => (
+                                        <motion.span
+                                            key={i}
+                                            className="w-2 h-2 bg-white/40 rounded-full"
+                                            animate={{ y: [0, -5, 0] }}
+                                            transition={{
+                                                duration: 0.6,
+                                                repeat: Infinity,
+                                                delay: i * 0.15,
+                                                ease: "easeInOut"
+                                            }}
+                                        />
+                                    ))}
+                                </div>
+                            </motion.div>
                     </div>
                 )}
 

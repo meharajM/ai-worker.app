@@ -4,8 +4,10 @@ import { ChatView } from "./components/ChatView";
 import { ChatSidebar } from "./components/ChatSidebar";
 import { ConnectionsPanel } from "./components/ConnectionsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { TaskConfirmationCard } from "./components/TaskConfirmationCard";
+// import { TaskConfirmationCard } from "./components/TaskConfirmationCard"; // Replaced by Dialog
+import { TaskConfirmationDialog } from "./components/TaskConfirmationDialog";
 import { FileChangeReview } from "./components/FileChangeReview";
+import { CommandPalette } from "./components/CommandPalette";
 
 import { Sidebar, View } from "./components/Sidebar";
 import { Header } from "./components/Header";
@@ -463,11 +465,38 @@ function App() {
   // Listen for action button clicks from MessageBubble
   useEffect(() => {
     const handleAgentAction = (e: CustomEvent) => {
-      const { type, content } = e.detail;
+      const { type, content, messageId } = e.detail;
+      
       if (type === 'continue' && !isProcessing) {
         handleSubmit(content);
       }
-      // 'cancel' type just stops — no action needed, the agent already returned
+      
+      if (type === 'regenerate' && !isProcessing) {
+         // Logic: Remove last assistant message, then remove last user message, then re-submit user content.
+         // This effectively "re-runs" the turn.
+         const { sessions, activeSessionId, removeMessage } = useChatStore.getState();
+         const session = sessions.find(s => s.id === activeSessionId);
+         if (!session || session.messages.length === 0) return;
+
+         const messages = session.messages;
+         const lastMsg = messages[messages.length - 1];
+
+         // Only proceed if the last message is indeed the one we want to regenerate (or close to it)
+         // For now, simpler implementation: Always regenerate the LAST interaction.
+         if (lastMsg.role === 'assistant') {
+             const userMsg = messages[messages.length - 2];
+             if (userMsg && userMsg.role === 'user') {
+                 const textToResubmit = userMsg.content;
+                 
+                 // Remove both
+                 removeMessage(lastMsg.id);
+                 removeMessage(userMsg.id);
+                 
+                 // Re-submit
+                 handleSubmit(textToResubmit);
+             }
+         }
+      }
     };
 
     window.addEventListener('agent-action', handleAgentAction as EventListener);
@@ -476,6 +505,8 @@ function App() {
 
   return (
     <div className="flex h-screen bg-[#0f1115] text-white font-sans overflow-hidden">
+      
+      <CommandPalette />
       <Sidebar currentView={currentView} onViewChange={setCurrentView} />
 
       <div className="flex-1 flex flex-col relative min-w-0">
@@ -488,35 +519,37 @@ function App() {
               <div className="flex-1 flex flex-col overflow-hidden min-w-0">
                 <ChatView />
 
-                {/* Confirmation Card - Shows when task needs clarification */}
-                {pendingConfirmation && (
-                  <div className="px-4 py-2 border-t border-white/5">
-                    <TaskConfirmationCard
-                      analysis={pendingConfirmation.analysis}
-                      onConfirm={(enrichedPrompt) => {
-                        pendingConfirmation.resolve(enrichedPrompt);
-                        setPendingConfirmation(null);
-                      }}
-                      onCancel={() => {
-                        pendingConfirmation.resolve(null);
-                        setPendingConfirmation(null);
-                        setProcessing(false);
-                      }}
-                      onBypass={() => {
-                        // Use original prompt
-                        pendingConfirmation.resolve(pendingConfirmation.analysis.detectedIntent);
-                        setPendingConfirmation(null);
-                      }}
-                    />
-                  </div>
-                )}
-
                 <div className="p-4 flex-shrink-0 border-t border-white/5">
                   <VoiceInput onSubmit={handleSubmit} disabled={(isProcessing && processingSessionId === activeSessionId) || !!pendingConfirmation} onAbort={abortProcessing} />
                 </div>
               </div>
             </div>
           )}
+
+          {/* Dialogs */}
+          <TaskConfirmationDialog
+            open={!!pendingConfirmation}
+            analysis={pendingConfirmation?.analysis || null}
+            onConfirm={(enrichedPrompt) => {
+                if (pendingConfirmation) {
+                    pendingConfirmation.resolve(enrichedPrompt);
+                    setPendingConfirmation(null);
+                }
+            }}
+            onCancel={() => {
+                if (pendingConfirmation) {
+                    pendingConfirmation.resolve(null);
+                    setPendingConfirmation(null);
+                    setProcessing(false);
+                }
+            }}
+            onBypass={() => {
+                if (pendingConfirmation) {
+                    pendingConfirmation.resolve(pendingConfirmation.analysis.detectedIntent);
+                    setPendingConfirmation(null);
+                }
+            }}
+          />
 
           {currentView === "connections" && <ConnectionsPanel />}
           {currentView === "settings" && <SettingsPanel />}

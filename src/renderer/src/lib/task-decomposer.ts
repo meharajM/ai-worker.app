@@ -219,16 +219,36 @@ export function generateSubAgentInstruction(
   targetContext: string,
   allContexts: string[]
 ): string {
-  // MINIMAL instruction - just target and goal
-  if (allContexts.length > 1) {
-    // Parallel comparison - focus on one site
-    return `On ${targetContext}: ${originalRequest}
+  const isComparison = allContexts.length > 1;
 
-Return key findings only. End with "✓ Done".`;
+  if (isComparison) {
+    return `SUB-AGENT TASK: ${targetContext}
+
+OBJECTIVE: ${originalRequest}
+
+YOUR SCOPE: Focus ONLY on ${targetContext}. Other agents handle: ${allContexts.filter(c => c !== targetContext).join(', ')}
+
+OUTPUT REQUIREMENTS:
+- **Structured Bullet Points**: Use a list format for clarity.
+- **Bold Key Terms**: Bold the main item name or key feature (e.g., **Price:** $99).
+- **Concise**: Max 150 words.
+- NO navigation steps or process descriptions.
+- End with: "✓ ${targetContext} complete"
+
+Example:
+"- **Dell XPS 13**: $1299, 16GB RAM, ships in 2 days.
+- **Rating**: 4.5/5 stars (2k reviews).
+- ✓ Amazon complete"`;
   }
 
-  // Single context
-  return `${originalRequest}
+  return `SUB-AGENT TASK
 
-Return brief result. End with "✓ Done".`;
+OBJECTIVE: ${originalRequest}
+
+OUTPUT REQUIREMENTS:
+- Execute task step-by-step
+- Return **concise summary** (max 200 words)
+- Use <think> tags for internal reasoning
+- Focus on results, not process
+- End with: "✓ Complete"`;
 }

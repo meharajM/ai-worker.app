@@ -1,8 +1,10 @@
-import { Trash2, Bot, User, History, AlertCircle, CheckCircle2, Circle, ChevronRight, Save } from 'lucide-react'
+import {  Bot, User, History, AlertCircle, CheckCircle2, Circle, ChevronRight, Save, Copy, RotateCcw } from 'lucide-react'
 import { Message, useChatStore, ToolCall } from '../stores/chatStore'
+import { motion } from 'framer-motion';
 import { AgentPlan, parseAgentPlan } from './AgentPlan'
 import { FormattedText } from './FormattedText'
 import { filterThinkBlocks, hasLeakedReasoning } from '../lib/thinkBlockFilter'
+import { cn } from '../lib/utils'
 import React from 'react';
 
 interface MessageBubbleProps {
@@ -64,7 +66,15 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
     }
 
     return (
-        <div className={`flex gap-3 group ${isUser ? 'justify-end' : 'justify-start'}`}>
+        <motion.div 
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.3, ease: 'easeOut' }}
+            className={cn(
+                "flex gap-3 group",
+                isUser ? "justify-end" : "justify-start"
+            )}
+        >
             {/* Avatar for assistant */}
             {!isUser && (
                 <div className="w-8 h-8 rounded-lg bg-[#00a896] flex items-center justify-center flex-shrink-0">
@@ -75,10 +85,12 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
             {/* Message bubble */}
             <div className="relative max-w-[80%] min-w-0 overflow-hidden">
                 <div
-                    className={`rounded-2xl px-4 py-3 ${isUser
-                        ? 'bg-[#4fd1c5] text-white'
-                        : 'bg-[#1a1d23] border border-white/10 text-white/90'
-                        }`}
+                    className={cn(
+                        "rounded-2xl px-4 py-3",
+                        isUser 
+                            ? "bg-[#4fd1c5] text-white" 
+                            : "bg-[#1a1d23] border border-white/10 text-white/90"
+                    )}
                 >
                     {/* Render Agent Plan if present */}
                     {agentPlan && <AgentPlan plan={agentPlan} />}
@@ -89,19 +101,29 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
 
                         const { thinking, isComplete } = filterThinkBlocks(message.content);
 
-                        // If we have thinking content, render it
+                        // If we have thinking content, render it with animation
                         if (thinking) {
                             return (
-                                <details className="mb-3 group" open={!isComplete}>
-                                    <summary className="text-[10px] text-[#00a896] cursor-pointer hover:text-[#4fd1c5] transition-colors list-none flex items-center gap-1.5 font-medium select-none">
-                                        <div className={`w-1 h-3 rounded-full ${isComplete ? 'bg-[#00a896]' : 'bg-yellow-400 animate-pulse'}`} />
-                                        <span>{isComplete ? 'Thinking Process' : 'Thinking...'}</span>
-                                        <ChevronRight size={10} className="group-open:rotate-90 transition-transform text-white/20" />
-                                    </summary>
-                                    <div className="mt-2 text-[11px] leading-relaxed text-white/60 bg-black/20 rounded-md p-3 border border-white/5 font-mono shadow-inner whitespace-pre-wrap">
-                                        {thinking}
-                                    </div>
-                                </details>
+                                <div className="mb-3">
+                                    <details className="group" open={!isComplete}>
+                                        <summary className="text-[10px] text-[#00a896] cursor-pointer hover:text-[#4fd1c5] transition-colors list-none flex items-center gap-1.5 font-medium select-none">
+                                            <div className={`w-1 h-3 rounded-full ${isComplete ? 'bg-[#00a896]' : 'bg-yellow-400 animate-pulse'}`} />
+                                            <span>{isComplete ? 'Thinking Process' : 'Thinking...'}</span>
+                                            <ChevronRight size={10} className="group-open:rotate-90 transition-transform text-white/20" />
+                                        </summary>
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            transition={{ duration: 0.3, ease: 'easeOut' }}
+                                            className="overflow-hidden"
+                                        >
+                                            <div className="mt-2 text-[11px] leading-relaxed text-white/60 bg-black/20 rounded-md p-3 border border-white/5 font-mono shadow-inner whitespace-pre-wrap">
+                                                {thinking}
+                                            </div>
+                                        </motion.div>
+                                    </details>
+                                </div>
                             );
                         }
                         return null;
@@ -154,7 +176,15 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                             return null;
                         }
 
-                        return <FormattedText content={cleanedContent} />;
+                        return (
+                            <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.4, ease: 'easeOut' }}
+                            >
+                                <FormattedText content={cleanedContent} />
+                            </motion.div>
+                        );
                     })()}
 
                     {/* Progress checkpoint badge (mixed content) */}
@@ -302,16 +332,23 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                     </p>
                 </div>
 
-                {/* Delete button on hover */}
-                {onDelete && (
-                    <button
-                        onClick={() => onDelete(message.id)}
-                        className="absolute -right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 
-                       p-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all"
-                        title="Delete message"
-                    >
-                        <Trash2 size={14} />
-                    </button>
+                {/* Action Footer (Copy & Regenerate) */}
+                {!isUser && !isSystem && (
+                    <div className="flex items-center gap-2 mt-2 ml-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                         <CopyButton content={message.content || ''} />
+                         
+                        <button
+                            onClick={() => {
+                                window.dispatchEvent(new CustomEvent('agent-action', {
+                                    detail: { type: 'regenerate', messageId: message.id }
+                                }));
+                            }}
+                            className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+                            title="Regenerate"
+                        >
+                            <RotateCcw size={16} />
+                        </button>
+                    </div>
                 )}
             </div>
 
@@ -321,8 +358,48 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                     <User size={18} className="text-white" />
                 </div>
             )}
-        </div>
+        </motion.div>
     )
+}
+
+function CopyButton({ content }: { content: string }) {
+    const [copied, setCopied] = React.useState(false);
+
+    const handleCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(content);
+            setCopied(true);
+        } catch (err) {
+            console.warn('Clipboard write failed, trying fallback:', err);
+            // Fallback
+            const textArea = document.createElement("textarea");
+            textArea.value = content;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-9999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                setCopied(true);
+            } catch (err) {
+                console.error('Fallback copy failed', err);
+            }
+            document.body.removeChild(textArea);
+        }
+
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    return (
+        <button
+            onClick={handleCopy}
+            className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+            title="Copy"
+        >
+            {copied ? <CheckCircle2 size={16} className="text-green-400" /> : <Copy size={16} />}
+        </button>
+    );
 }
 
 
