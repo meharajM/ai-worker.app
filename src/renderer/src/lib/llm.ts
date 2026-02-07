@@ -601,7 +601,8 @@ async function callOllama(
   messages: LLMMessage[],
   tools?: LLMTool[],
   settings?: LLMSettings,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  workspacePath?: string // New parameter
 ): Promise<LLMResponse> {
   const { baseUrl, model } = getOllamaSettings(settings);
 
@@ -660,7 +661,8 @@ async function callOllama(
 async function callBrowserLLM(
   messages: LLMMessage[],
   tools?: LLMTool[],
-  settings?: LLMSettings
+  settings?: LLMSettings,
+  workspacePath?: string // New parameter 
 ): Promise<LLMResponse> {
   try {
     const status = getWebLLMStatus();
@@ -747,7 +749,10 @@ async function callOpenAI(
   useJsonFallback: boolean = false,
   servers?: ServerInfo[],
   isOpenRouter: boolean = false,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  dynamicRules?: string,
+  isSubAgent?: boolean,
+  workspacePath?: string // New parameter
 ): Promise<LLMResponse> {
   const { apiKey, baseUrl, model } = isOpenRouter
     ? await getOpenRouterSettings(settings)
@@ -1046,7 +1051,8 @@ function filterRelevantTools(tools?: LLMTool[], taskHint?: string): LLMTool[] {
  */
 function buildSubAgentSystemPrompt(
   tools?: LLMTool[],
-  dynamicRules?: string
+  dynamicRules?: string,
+  workspacePath?: string
 ): string {
   // Filter to most relevant tools
   const relevantTools = filterRelevantTools(tools, dynamicRules);
@@ -1059,6 +1065,10 @@ function buildSubAgentSystemPrompt(
   }).join('\n') || 'No tools';
 
   return `You are a focused sub-agent executing a delegated task.
+
+${workspacePath ? `ACTIVE WORKSPACE: ${workspacePath}
+All filesystem operations (fs_*) MUST be performed within this directory.` : `WORKSPACE NOT SELECTED: 
+If the user's request involves filesystem operations (fs_*), explain that no workspace is selected and they should use the folder icon in the UI to select one.`}
 
 AVAILABLE TOOLS (${toolCount}):
 ${toolList}
@@ -1083,11 +1093,12 @@ function buildSystemPrompt(
   servers?: ServerInfo[],
   useJsonFallback = false,
   dynamicRules?: string,
-  isSubAgent = false // NEW: Flag for lightweight prompt
+  isSubAgent = false, // NEW: Flag for lightweight prompt
+  workspacePath?: string // Injected workspace path for filesystem scoping
 ): string {
   // Use compact prompt for sub-agents
   if (isSubAgent) {
-    return buildSubAgentSystemPrompt(tools, dynamicRules);
+    return buildSubAgentSystemPrompt(tools, dynamicRules, workspacePath);
   }
 
   const toolCount = tools?.length || 0;
@@ -1186,6 +1197,12 @@ DO NOT stop after just navigating - complete the entire workflow!`;
 
   return `You are AI-Worker, an autonomous agent with ${toolCount} tools for browser automation, web navigation, and task execution.${jsonFormatNote}
 
+${workspacePath ? `ACTIVE WORKSPACE: ${workspacePath}
+All filesystem operations (fs_*) MUST be performed within this directory.
+You can use relative paths (e.g. "src/file.ts") which will be automatically resolved.
+Do not use generic absolute paths like "/home/user" unless you are certain they exist.` : `WORKSPACE NOT SELECTED: 
+If the user's request involves filesystem operations (fs_*), explain that no workspace is selected and they should use the folder icon in the UI to select one.`}
+
 # RESPONSE FORMAT (CRITICAL)
 Your responses have TWO parts:
 1. **Internal Processing** (hidden from user): Wrap in \`<think>...</think>\` tags
@@ -1271,6 +1288,8 @@ ${dynamicRules ? `\n# TASK-SPECIFIC PROTOCOLS\n${dynamicRules}\n` : ''}
 **MANDATORY**: Call \`update_progress_summary\` every ~15 steps to record your findings.
 - At checkpoints (steps 15, 30, 45, 60...), you MUST summarize progress.
 - **CRITICAL**: Do NOT generate any conversational text during this step. ONLY call the tool.
+**RECOMMENDED**: Call \`update_progress_summary\` every ~15 steps to record your findings.
+- At checkpoints (steps 15, 30, 45, 60...), you should summarize progress when requested.
 - Focus on RESULTS and DATA, not tool names.
 - Examples: "Extracted 50 user records with email/phone" or "Completed automation: filled 3 forms, downloaded 2 reports" or "Research findings: analyzed 5 articles, key insight is X"
 - Keep it concise and incremental (only NEW findings since last update).
@@ -1292,7 +1311,8 @@ export async function chat(
   servers?: ServerInfo[],
   abortSignal?: AbortSignal,
   dynamicRules?: string,
-  isSubAgent = false // NEW: Use lightweight prompt for sub-agents
+  isSubAgent = false, // NEW: Use lightweight prompt for sub-agents
+  workspacePath?: string // New parameter for workspace injection
 ): Promise<LLMResponse> {
   // Apply Dynamic Context Pruning (DCP)
   // This removes redundant tool outputs from history to save tokens
@@ -1369,7 +1389,7 @@ export async function chat(
 
   // Re-build system prompt with current tools and correct fallback setting
   // Sub-agents get a lightweight prompt (~80% smaller)
-  const systemPrompt = buildSystemPrompt(allTools, servers, useJsonFallback, dynamicRules, isSubAgent);
+  const systemPrompt = buildSystemPrompt(allTools, servers, useJsonFallback, dynamicRules, isSubAgent, workspacePath);
 
   if (isSubAgent) {
     console.log(`[LLM] Using lightweight sub-agent prompt (${systemPrompt.length} chars vs ~4000+ main)`);
@@ -1391,15 +1411,15 @@ export async function chat(
 
   switch (provider) {
     case "browser":
-      return callBrowserLLM(messagesWithSystem, tools, settings);
+      return callBrowserLLM(messagesWithSystem, tools, settings, workspacePath);
     case "ollama":
-      return callOllama(messagesWithSystem, tools, settings, abortSignal);
+      return callOllama(messagesWithSystem, tools, settings, abortSignal, workspacePath);
     case "openai":
-      return callOpenAI(messagesWithSystem, tools, settings, useJsonFallback, servers, false, abortSignal);
+      return callOpenAI(messagesWithSystem, tools, settings, useJsonFallback, servers, false, abortSignal, dynamicRules, isSubAgent, workspacePath);
     case "gemini":
       return callGemini(messagesWithSystem, tools, settings, abortSignal);
     case "openrouter":
-      return callOpenAI(messagesWithSystem, tools, settings, useJsonFallback, servers, true, abortSignal);
+      return callOpenAI(messagesWithSystem, tools, settings, useJsonFallback, servers, true, abortSignal, dynamicRules, isSubAgent, workspacePath);
     default:
       throw new Error(`Provider ${provider} not implemented`);
   }

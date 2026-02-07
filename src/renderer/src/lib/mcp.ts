@@ -126,17 +126,49 @@ export async function executeToolCall(
 
   console.log(`[MCP Renderer] Invoking Tool: ${toolName}`, sanitizedArgs);
 
+  // SECURITY: Require workspace for ALL filesystem operations
+  if (toolName.startsWith('fs_')) {
+    // CRITICAL: Block filesystem access entirely if no workspace is selected
+    if (!args || !args.workspacePath) {
+      return {
+        result: null,
+        error: 'WORKSPACE REQUIRED: Please select a workspace folder using the folder icon in the UI before performing filesystem operations.'
+      };
+    }
+
+    const wsPath = args.workspacePath as string;
+    const targetPath = args.path as string;
+
+    if (targetPath) {
+      // Normalize and resolve paths
+      // Note: In renderer we might use path-browserify or string manipulation
+      // Ideally this check should happen in main process but validating here adds layer 1
+      const normalizedWs = wsPath.replace(/\\/g, '/').replace(/\/$/, '');
+      const normalizedTarget = targetPath.replace(/\\/g, '/');
+
+      // Check if target is inside workspace
+      if (!normalizedTarget.startsWith(normalizedWs)) {
+        return {
+          result: null,
+          error: `SECURITY VIOLATION: Access denied. Path '${targetPath}' is outside the active workspace '${wsPath}'.`
+        };
+      }
+    }
+    // Remove workspacePath from args before sending to tool (it doesn't expect it)
+    delete (args as any).workspacePath;
+  }
+
   const server = findServerForTool(toolName);
   if (!server) {
     // FALLBACK: Check if it's an internal memory tool
     if (toolName.startsWith('memory_')) {
-        logMcpRenderer("info", "Executing memory tool via direct IPC fallback", { tool: toolName });
-        try {
-            const result = await electron.memory.callTool(toolName, safeArgs) as { result: any; error?: string };
-            return result;
-        } catch (err: any) {
-            return { result: null, error: `Direct memory tool call failed: ${err.message}` };
-        }
+      logMcpRenderer("info", "Executing memory tool via direct IPC fallback", { tool: toolName });
+      try {
+        const result = await electron.memory.callTool(toolName, safeArgs) as { result: any; error?: string };
+        return result;
+      } catch (err: any) {
+        return { result: null, error: `Direct memory tool call failed: ${err.message}` };
+      }
     }
 
     const duration = Date.now() - startTime;

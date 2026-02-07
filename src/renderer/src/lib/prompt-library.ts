@@ -169,6 +169,15 @@ export const PROMPTS = {
 - **End with**: "✓ complete"
 `.trim(),
 
+   SUB_FILESYSTEM: `
+# SUB-AGENT: FILESYSTEM TASK
+- **Scope**: Operate ONLY on the specified files/paths.
+- **Verification**: Confirm file existence before reading/writing.
+- **Output**: Summary of changes (e.g. "Formatted index.ts, created utils.ts").
+- **Format**: Max 1 statement per action.
+- **End with**: "✓ complete"
+`.trim(),
+
    // PARALLEL EXECUTION (Cross-cutting concern - can be added to any task)
    PARALLEL_EXECUTION: `
 # PARALLEL EXECUTION PROTOCOL
@@ -193,6 +202,23 @@ Your current request contains multiple independent entities or batch operations:
 - [ ] Did you call multiple \`delegate_sub_task\` tools in ONE turn?
 - [ ] Are the sub-tasks truly independent (no sequential dependency)?
 - If NO to either → Revise your approach immediately.
+`.trim(),
+
+   // Filesystem & Workspace Management (New Skill)
+   FILESYSTEM: `
+# FILESYSTEM & WORKSPACE PROTOCOLS
+1. **Safety First**:
+   - **Destructive Actions**: ALWAYS confirm before deleting files or directories.
+   - **Overwrites**: If writing to a file that likely exists, check its content first to avoid losing data.
+2. **Efficient Discovery**:
+   - **Hierarchy**: Use directory listing to understand structure before deep diving.
+   - **Depth**: Explore subdirectories only when relevant to the current sub-task.
+   - **Search**: Use grep or search tools for specific patterns instead of reading every file.
+3. **Organization**:
+   - **Consistent Naming**: Use project-consistent naming conventions (e.g., kebab-case).
+   - **Workspace Context**: All operations are scoped to the active workspace. Do NOT attempt to escape.
+4. **State Management**:
+   - Maintain awareness of the file structure you've explored to minimize redundant IO calls.
 `.trim()
 };
 

@@ -38,6 +38,16 @@ export const electron = {
         return '0.1.0' // Fallback to package.json version
     },
 
+    // Select folder dialog
+    selectFolder: async (): Promise<string | null> => {
+        if (isElectron() && window.electron?.app?.selectFolder) {
+            return await window.electron.app.selectFolder()
+        }
+        // Browser fallback - not supported
+        console.warn('[Browser] Folder selection not supported in browser mode')
+        return null
+    },
+
     // MCP operations
     mcp: {
         connect: async (serverConfig: unknown) => {

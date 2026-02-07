@@ -89,7 +89,8 @@ ANTI-BLOAT RULES (CRITICAL):
 - **DO NOT** save meta-instructions (e.g., "clean up code") as permanent entities.
 - **DO NOT** save transient values (e.g. specific prices, timestamps, or temporary measurements) as independent facts. Only save them if they represent a **constraint** or **goal** (e.g. "Budget Limit: $500", not "Item price: $499.99").
 - **DO NOT** create duplicate entities. ALWAYS search first and update if exists.
-- Only save **high-value, permanent** information useful in a *future* session.
+- **NULL HYPOTHESIS**: If the conversation contains only questions, confirmations ("are you sure?"), or transient interactions or one word messages with NO new facts/preferences, **DO NOT CALL ANY TOOLS**. first check if that can be applied to any of the existing conversations happening in that chat sessions if not applicatble then ask for confirmation from user".
+
 GOAL: Extract Facts & State. No Narratives. No Meta-Commentary.
             `;
 

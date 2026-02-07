@@ -45,6 +45,7 @@ interface ElectronAPI {
     app: {
         getVersion: () => Promise<string>
         getName: () => Promise<string>
+        selectFolder: () => Promise<string | null>
     }
 
     logs?: {

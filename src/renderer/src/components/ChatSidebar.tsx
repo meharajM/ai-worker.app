@@ -95,9 +95,19 @@ export function ChatSidebar() {
                                 aria-label="Edit chat title"
                             />
                         ) : (
-                            <span className="flex-1 text-sm truncate pr-8">
-                                {session.title}
-                            </span>
+                            <div className="flex-1 flex items-center gap-2 pr-8">
+                                <span className="text-sm truncate">
+                                    {session.title}
+                                </span>
+                                {session.workspacePath && (
+                                    <span
+                                        className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-[#00a896]/20 text-[#00a896] border border-[#00a896]/30"
+                                        title={`Workspace: ${session.workspacePath}`}
+                                    >
+                                        📁
+                                    </span>
+                                )}
+                            </div>
                         )}
 
                         {/* Actions (visible on hover or active) */}
