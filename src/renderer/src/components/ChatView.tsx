@@ -2,6 +2,7 @@ import React, { useRef, useEffect } from 'react'
 import { Trash2, Bot } from 'lucide-react'
 import { useChatStore } from '../stores/chatStore'
 import { MessageBubble } from './MessageBubble'
+import { WorkflowTiles } from './WorkflowTiles'
 
 interface ChatViewProps {
     onClearChat?: () => void
@@ -46,18 +47,25 @@ export function ChatView({ onClearChat }: ChatViewProps) {
             <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 space-y-4 min-w-0">
                 {messages.length === 0 ? (
                     // Welcome message
-                    <div className="flex items-start gap-4">
-                        <div className="w-12 h-12 bg-[#00a896] rounded-xl flex items-center justify-center shadow-lg shadow-[#00a896]/20 flex-shrink-0">
-                            <Bot size={24} className="text-white" />
+                    <div className="flex flex-col gap-8 max-w-5xl mx-auto w-full pt-12">
+                        <div className="flex items-start gap-4">
+                            <div className="w-12 h-12 bg-[#00a896] rounded-xl flex items-center justify-center shadow-lg shadow-[#00a896]/20 flex-shrink-0 animate-in zoom-in duration-500">
+                                <Bot size={24} className="text-white" />
+                            </div>
+                            <div>
+                                <h1 className="text-2xl font-bold mb-1 tracking-tight">How can I help you today?</h1>
+                                <p className="text-white/60 text-lg">
+                                    I'm your autonomous AI worker, ready to handle complex browser and local tasks.
+                                </p>
+                            </div>
                         </div>
-                        <div>
-                            <h1 className="text-xl font-bold mb-1">AI Worker</h1>
-                            <p className="text-white/60">
-                                I'm ready to help. Press the mic button to speak or type your message below.
-                            </p>
-                            <p className="text-white/40 mt-2 text-sm">
-                                Connect MCP servers in the Connections tab to enable tool usage.
-                            </p>
+
+                        {/* Workflow Automation Templates Grid */}
+                        <div className="space-y-4">
+                            <h2 className="text-sm font-semibold text-white/40 uppercase tracking-widest pl-1">
+                                Workflow Templates
+                            </h2>
+                            <WorkflowTiles />
                         </div>
                     </div>
                 ) : (

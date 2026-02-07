@@ -161,6 +161,31 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
         }
     }, [handleTextSubmit])
 
+    // Listen for external population events
+    useEffect(() => {
+        const handlePopulate = (e: CustomEvent) => {
+            const { prompt } = e.detail
+            if (prompt) {
+                setTextInput(prompt)
+                setText(prompt) // Sync with speech hook
+
+                // Focus textarea
+                if (textareaRef.current) {
+                    textareaRef.current.focus()
+                    // Set cursor at the end
+                    setTimeout(() => {
+                        if (textareaRef.current) {
+                            textareaRef.current.scrollTop = textareaRef.current.scrollHeight
+                        }
+                    }, 0)
+                }
+            }
+        }
+
+        window.addEventListener('populate-chat-input', handlePopulate as EventListener)
+        return () => window.removeEventListener('populate-chat-input', handlePopulate as EventListener)
+    }, [setText])
+
     return (
         <div className="bg-[#1a1d23]/80 backdrop-blur-md border border-white/10 rounded-2xl p-4 transition-all duration-300 relative">
 
