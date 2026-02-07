@@ -6,7 +6,6 @@ import { CLIENT_TOOLS } from "./client-tools";
 import { analyzeTask, type TaskAnalysis } from "./confirmation-message";
 import { analyzeToolOutput } from "./result-reporter";
 import {
-  analyzeTaskForDecomposition,
   generateSubAgentInstruction,
   type TaskDecomposition
 } from "./task-decomposer";
@@ -204,7 +203,26 @@ Continue from where the previous agent left off.`
       }
     }
 
-    if (this.options.requireConfirmation && this.options.onConfirmationNeeded) {
+
+    // Step 0: Unified Task Analysis (Runs for every root agent message)
+    let analysis: TaskAnalysis | undefined;
+    if (!this.options.isSubAgent) { // Only analyze for root agent to save tokens
+      try {
+        console.log('[AgentRuntime] Running unified task analysis...');
+        analysis = await analyzeTask(userContent, this.options.settings);
+
+        // Capture category from analysis
+        if (analysis.category) {
+          this.taskCategory = analysis.category;
+          console.log(`[AgentRuntime] Identified task category: ${this.taskCategory}`);
+        }
+      } catch (err) {
+        console.warn('[AgentRuntime] Task analysis failed, proceeding with raw prompt:', err);
+      }
+    }
+
+    // Step 1: User Confirmation (Optional, based on analysis)
+    if (this.options.requireConfirmation && this.options.onConfirmationNeeded && analysis) {
       try {
         // Check if this is a simple reply to a previous agent question
         const isSimpleReply = /^(yes|no|ok|okay|sure|nope|continue|stop|proceed|go ahead|skip|next|back)$/i.test(userContent.trim());
@@ -215,37 +233,59 @@ Continue from where the previous agent left off.`
         // Skip confirmation if user is just replying to the agent's question
         if (isSimpleReply && isReplyToQuestion) {
           console.log('[AgentRuntime] Simple reply to agent question. Skipping confirmation.');
+        } else if (analysis.shouldConfirm) {
+          console.log('[AgentRuntime] Task needs confirmation. Asking user...');
+          const enrichedPrompt = await this.options.onConfirmationNeeded(analysis);
+
+          if (enrichedPrompt === null) {
+            // User cancelled
+            return {
+              role: 'assistant',
+              content: 'Task cancelled. Let me know when you want to try again!'
+            };
+          }
+
+          finalPrompt = enrichedPrompt;
+          console.log('[AgentRuntime] Using enriched prompt:', finalPrompt);
         } else {
-          console.log('[AgentRuntime] Analyzing task for ambiguity...');
-          const analysis = await analyzeTask(userContent, this.options.settings);
-
-          // Capture category from analysis
-          if (analysis.category) {
-            this.taskCategory = analysis.category;
-            console.log(`[AgentRuntime] Identified task category: ${this.taskCategory}`);
-          }
-
-          if (analysis.shouldConfirm) {
-            console.log('[AgentRuntime] Task needs confirmation. Asking user...');
-            const enrichedPrompt = await this.options.onConfirmationNeeded(analysis);
-
-            if (enrichedPrompt === null) {
-              // User cancelled
-              return {
-                role: 'assistant',
-                content: 'Task cancelled. Let me know when you want to try again!'
-              };
-            }
-
-            finalPrompt = enrichedPrompt;
-            console.log('[AgentRuntime] Using enriched prompt:', finalPrompt);
-          } else {
-            console.log('[AgentRuntime] Task is clear. Skipping confirmation.');
-          }
+          console.log('[AgentRuntime] Task is clear. Skipping confirmation.');
         }
       } catch (error) {
-        console.error('[AgentRuntime] Confirmation analysis failed:', error);
-        // Continue with original prompt if analysis fails
+        console.error('[AgentRuntime] Confirmation flow error:', error);
+      }
+    }
+
+    // Step 2: Parallel/Sequential Decomposition (Uses the same analysis result)
+    if (analysis && !this.options.isSubAgent) {
+      try {
+        // Checks for decomposition opportunities from the consolidated analysis
+        const contexts = analysis.contexts || [];
+        const isParallel = analysis.isParallelizable || false;
+        const estimatedActions = analysis.estimatedActions || 1;
+
+        // Define decomposition for use in this scope
+        const localDecomposition = {
+          type: (contexts.length > 1 || (isParallel && contexts.length > 0)) ? 'multi_context' : 'single_context',
+          contexts: contexts.length > 0 ? contexts : ['current_page'],
+          estimatedActions: estimatedActions,
+          shouldFork: (contexts.length > 1) || (estimatedActions >= 4),
+          forkStrategy: (contexts.length > 1 || isParallel) ? 'parallel' : 'sequential'
+        };
+
+        if (localDecomposition.type === 'multi_context' && localDecomposition.shouldFork) {
+          console.log(`[AgentRuntime] Parallel task detected from analysis: ${contexts.join(', ')}`);
+          const subAgentResult = await this.executeParallelSubAgents(finalPrompt, localDecomposition as any);
+          MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+          return subAgentResult;
+        }
+
+        // Sequential check
+        if (localDecomposition.type === 'single_context' && localDecomposition.shouldFork) {
+          console.log(`[AgentRuntime] Complex single-context task: ${localDecomposition.estimatedActions} actions - using sequential sub-agents`);
+          return this.executeSequentialSubAgents(finalPrompt, localDecomposition as any);
+        }
+      } catch (error) {
+        console.error('[AgentRuntime] Decomposition error:', error);
       }
     }
 
@@ -262,33 +302,13 @@ Continue from where the previous agent left off.`
       this.addMessage({ role: 'user', content: userContent });
 
       // Get the original goal (approximate by looking back)
-      // Usually the first user message, or we can try to find the "step 1" context
-      // Simplified: use the very first user message as the Goal
       const originalGoal = this.messages.find(m => m.role === 'user')?.content?.toString() || "Complete the task";
-
       return this.triggerSubAgentHandoff(originalGoal);
-    }
-    if (!this.options.isSubAgent) {
-      const decomposition = analyzeTaskForDecomposition(finalPrompt);
-      console.log('[AgentRuntime] Task decomposition:', decomposition);
-
-      if (decomposition.shouldFork && decomposition.type === 'multi_context') {
-        const subAgentResult = await this.executeParallelSubAgents(finalPrompt, decomposition);
-        // Fire-and-forget memory analysis
-        MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
-        return subAgentResult;
-      }
-
-      // For single-context with 3+ actions, trigger sequential sub-agent orchestration
-      if (decomposition.shouldFork && decomposition.type === 'single_context') {
-        console.log(`[AgentRuntime] Complex single-context task: ${decomposition.estimatedActions} actions - using sequential sub-agents`);
-        return this.executeSequentialSubAgents(finalPrompt, decomposition);
-      }
     }
 
     // Add user message (only if not already in history - prevents duplicates)
-    const lastMessage = this.messages[this.messages.length - 1];
-    const alreadyHasMessage = lastMessage?.role === 'user' && lastMessage?.content === finalPrompt;
+    const latestMsg = this.messages[this.messages.length - 1];
+    const alreadyHasMessage = latestMsg?.role === 'user' && latestMsg?.content === finalPrompt;
 
     if (!alreadyHasMessage) {
       const userMsg: LLMMessage = { role: "user", content: finalPrompt };
@@ -1408,11 +1428,29 @@ Use tools immediately. End with "✓ Done".`;
         console.warn(`[AgentRuntime] Failed to pre-seed sub-agent memory: ${err}`);
       }
 
+      // PROVISION DEDICATED TAB for true parallel isolation
+      let subAgentTabId: number | undefined;
+      try {
+        const { browserLock } = await import('./resource-lock');
+        const tabResult = await browserLock.runExclusive(async () => {
+          return await executeToolCall('new_tab', { url: 'about:blank' });
+        });
+
+        const resAny = tabResult.result as any;
+        if (resAny && resAny.tabId !== undefined) {
+          subAgentTabId = resAny.tabId;
+          console.log(`[AgentRuntime] Provisioned tab ${subAgentTabId} for sub-agent (${context})`);
+        }
+      } catch (e) {
+        console.warn(`[AgentRuntime] Failed to provision tab for sub-agent ${context}`, e);
+      }
+
       const subAgent = new AgentRuntime({
         ...this.options,
         agentInstanceId: subAgentId,
         parentAgentId: this.agentInstanceId,
         isSubAgent: true,
+        tabId: subAgentTabId, // Pass the dedicated tab ID
         taskCategory: this.taskCategory, // Inherit category from parent
         requireConfirmation: false,
         onMessage: (msg: LLMMessage) => {
@@ -1489,6 +1527,19 @@ Use tools immediately. End with "✓ Done".`;
           success: false,
           result: `Error: ${error.message}`
         };
+      } finally {
+        // CLEANUP: Close the sub-agent's tab
+        if (subAgentTabId !== undefined) {
+          try {
+            const { browserLock } = await import('./resource-lock');
+            await browserLock.runExclusive(async () => {
+              await executeToolCall('close_tab', { tabId: subAgentTabId });
+            });
+            console.log(`[AgentRuntime] Closed sub-agent tab ${subAgentTabId} (${context})`);
+          } catch (e) {
+            console.warn(`[AgentRuntime] Failed to close sub-agent tab ${subAgentTabId}`, e);
+          }
+        }
       }
     });
 

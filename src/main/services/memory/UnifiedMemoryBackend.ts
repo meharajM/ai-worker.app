@@ -11,7 +11,7 @@
 
 export interface CreateEntityInput {
   name: string
-  type: string
+  entityType: string
   description: string
   observations?: string[]
   metadata?: Record<string, any>
@@ -20,7 +20,7 @@ export interface CreateEntityInput {
 export interface Entity {
   id: string
   name: string
-  type: string
+  entityType: string
   description: string
   observations: string[]
   metadata: Record<string, any>
@@ -81,28 +81,28 @@ export interface UnifiedMemoryBackend {
   // Lifecycle
   initialize(): Promise<void>
   shutdown?(): Promise<void>
-  
+
   // Entity Operations (CRUD)
   createEntity(input: CreateEntityInput): Promise<Entity>
   getEntity(id: string): Promise<Entity | null>
   updateEntity(id: string, updates: Partial<Entity>): Promise<Entity>
   deleteEntity(id: string): Promise<void>
   listEntities(options?: { limit?: number; offset?: number }): Promise<Entity[]>
-  
+
   // Search
   search(query: string, options?: SearchOptions): Promise<Entity[]>
-  
+
   // Relations
   createRelation(input: CreateRelationInput): Promise<Relation>
   getRelation(id: string): Promise<Relation | null>
   deleteRelation(id: string): Promise<void>
   listRelations(entityId: string): Promise<Relation[]>
-  
+
   // Utility
   getStats(): Promise<MemoryStats>
   exportAll(): Promise<ExportData>
   importAll(data: ExportData): Promise<void>
-  
+
   // MCP Tool Interface (for compatibility with MCP protocol)
   listTools(): { tools: any[] }
   callTool(name: string, args: any): Promise<{ result: any; error?: string }>

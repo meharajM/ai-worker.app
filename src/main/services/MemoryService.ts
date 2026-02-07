@@ -33,7 +33,7 @@ interface ToolSchema {
 export interface Entity {
     id: string
     name: string
-    type: string
+    entityType: string
     description: string
     metadata: Record<string, any>
     created_at: string
@@ -75,7 +75,7 @@ const MEMORY_TOOLS: ToolSchema[] = [
                     type: 'string',
                     description: 'Display name of the entity'
                 },
-                type: {
+                entityType: {
                     type: 'string',
                     description: 'Category: person, project, concept, file, etc.'
                 },
@@ -88,7 +88,7 @@ const MEMORY_TOOLS: ToolSchema[] = [
                     description: 'Optional structured data (JSON object)'
                 }
             },
-            required: ['name', 'type', 'description']
+            required: ['name', 'entityType', 'description']
         }
     },
     {
@@ -317,7 +317,7 @@ export class MemoryService {
             const entities: BackendEntity[] = entityRows.map(row => ({
                 id: row.id,
                 name: row.name,
-                type: row.type,
+                entityType: row.type || 'unknown',
                 description: row.description || '',
                 observations: row.description ? [row.description] : [],
                 metadata: row.metadata ? JSON.parse(row.metadata) : {},
@@ -394,7 +394,7 @@ export class MemoryService {
         // Create entity via backend
         const input: CreateEntityInput = {
             name,
-            type,
+            entityType: type, // the parameter is still 'type' for public API
             description: safeDesc,
             observations: [safeDesc],
             metadata
@@ -496,7 +496,7 @@ export class MemoryService {
                 case 'memory_create_entity': {
                     const entity = await this.createEntity(
                         args.name,
-                        args.type,
+                        args.entityType || args.type, // Handle both for safety
                         args.description,
                         args.metadata
                     )
@@ -653,7 +653,7 @@ export class MemoryService {
         return {
             id: backendEntity.id,
             name: backendEntity.name,
-            type: backendEntity.type,
+            entityType: backendEntity.entityType,
             description: backendEntity.description,
             metadata: backendEntity.metadata,
             created_at: backendEntity.createdAt,

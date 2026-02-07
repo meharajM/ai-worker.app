@@ -10,6 +10,10 @@ export interface TaskAnalysis {
   shouldConfirm: boolean; // Smart detection result
   complexity?: TaskComplexity;
   category?: 'shopping' | 'research' | 'admin' | 'coding' | 'filesystem' | 'general';
+  // Decomposition fields (merged)
+  contexts?: string[];
+  isParallelizable?: boolean;
+  estimatedActions?: number;
 }
 
 export interface TaskComplexity {
@@ -81,6 +85,11 @@ Classify the task into one of these categories:
 - **filesystem**: Managing files, organizing directories, file operations, workspace exploration.
 - **general**: Simple navigation, opening sites, weather, etc.
 
+# DECOMPOSITION ANALYSIS:
+- **contexts**: Extract specific websites/domains implied. If none, default to ["google.com"] for the researcha and dicovery tasks.
+- **isParallelizable**: TRUE if task involves multiple independent sites (e.g. "compare Amazon and eBay").
+- **estimatedActions**: specific number of browser steps required.
+
 # SUGGESTION GENERATION RULES (CRITICAL):
 You MUST generate 2-3 distinct options for the user. Do NOT ask questions. Provide executable actions.
 
@@ -129,7 +138,10 @@ Respond with JSON:
     "reason": "Why this complexity",
     "userFriendlyMessage": "Brief message for user",
     "estimatedTime": "How long it might take"
-  }
+  },
+  "contexts": ["amazon.com", "flipkart.com"], 
+  "isParallelizable": true,
+  "estimatedActions": 4
 }`;
 
   try {
@@ -159,7 +171,11 @@ Respond with JSON:
       potentialMistakes: analysis.potentialMistakes || [],
       shouldConfirm: analysis.shouldConfirm || false,
       complexity: analysis.complexity,
-      category: analysis.category as any
+      category: analysis.category as any,
+      // Decomposition fields (merged)
+      contexts: analysis.contexts || [],
+      isParallelizable: !!analysis.isParallelizable,
+      estimatedActions: analysis.estimatedActions || 1
     };
   } catch (error) {
     console.error('[TaskAnalysis] Error analyzing task:', error);
@@ -188,6 +204,9 @@ function createDefaultAnalysis(prompt: string): TaskAnalysis {
       userFriendlyMessage: 'Opening now...',
       estimatedTime: 'Instant'
     },
-    category: 'general'
+    category: 'general',
+    contexts: ['google.com'],
+    isParallelizable: false,
+    estimatedActions: 1
   };
 }

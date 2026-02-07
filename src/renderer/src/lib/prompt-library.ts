@@ -138,35 +138,37 @@ export const PROMPTS = {
 
    SUB_SHOPPING: `
 # SUB-AGENT: SHOPPING TASK
-- **Safety**: NEVER proceed past cart. No checkout, no payments.
-- **Output**: Return ONLY product findings (name, price, availability).
-- **Format**: Bullet points, max 100 words.
-- **End with**: "✓ complete"
+1. **Focus**: Operate ONLY on the assigned store/site.
+2. **Action**: Search/Navigate immediately. Do not ask for clarification.
+3. **Safety**: NEVER proceed past cart. No checkout, no payments.
+4. **Output**: Return ONLY product findings (name, price, availability).
+5. **Stop**: When finished, you MUST end with: "✓ complete".
 `.trim(),
 
    SUB_RESEARCH: `
 # SUB-AGENT: RESEARCH TASK
-- **Verify**: Check 2+ sources before concluding.
-- **Output**: Key findings with source URLs only.
-- **Format**: Bullet points, max 150 words.
-- **End with**: "✓ complete"
+1. **Focus**: Operate ONLY on the assigned source/context.
+2. **Action**: Navigate and extract information immediately.
+3. **Verify**: Check 2+ sources if possible within the context.
+4. **Output**: Key findings with source URLs only.
+5. **Stop**: When finished, you MUST end with: "✓ complete".
 `.trim(),
 
    SUB_ADMIN: `
 # SUB-AGENT: FORM/ADMIN TASK
-- **Privacy**: Never save or expose credentials.
-- **Double-check**: Verify inputs before submission.
-- **Output**: Confirmation of action taken.
-- **Format**: Brief status, max 50 words.
-- **End with**: "✓ complete"
+1. **Focus**: Complete the assigned form/action only.
+2. **Privacy**: Never save or expose credentials.
+3. **Double-check**: Verify inputs before submission.
+4. **Output**: Confirmation of action taken.
+5. **Stop**: When finished, you MUST end with: "✓ complete".
 `.trim(),
 
    SUB_GENERAL: `
 # SUB-AGENT: GENERAL TASK
-- Execute steps efficiently.
-- **Output**: Results only, no process description.
-- **Format**: 2-3 sentences max.
-- **End with**: "✓ complete"
+1. **Focus**: Operate ONLY on the assigned task/context.
+2. **Action**: Use tools immediately to achieve the goal.
+3. **Efficiency**: no process description, just results.
+4. **Stop**: When finished, you MUST end with: "✓ complete".
 `.trim(),
 
    SUB_FILESYSTEM: `

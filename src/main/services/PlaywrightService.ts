@@ -664,7 +664,8 @@ export class PlaywrightService {
 
         try {
             // Allow empty objects {} but reject null/undefined - default to empty object
-            const safeArgs = args ?? {}
+            const safeArgs = (args || {}) as any;
+            const effectiveTimeout = safeArgs.timeout || 30000;
 
             // Helper to validate required parameters
             const requireParam = (paramName: string, paramType: string = 'string'): string | null => {
@@ -688,7 +689,7 @@ export class PlaywrightService {
                     const navError = requireParam('url')
                     if (navError) return { result: null, error: navError }
                     try {
-                        await page.goto(safeArgs.url, { waitUntil: 'domcontentloaded' })
+                        await page.goto(safeArgs.url, { waitUntil: 'domcontentloaded', timeout: safeArgs.timeout || effectiveTimeout })
                         return { result: `Navigated to ${safeArgs.url}` }
                     } catch (e) {
                         // AUTO-FALLBACK: Google Search
@@ -698,7 +699,7 @@ export class PlaywrightService {
                             const fallbackUrl = `https://google.com/search?q=${encodeURIComponent(safeArgs.url)}`;
                             console.log(`[PlaywrightService] Navigation failed (${errorStr}). Falling back to Google Search: ${fallbackUrl}`);
                             try {
-                                await page.goto(fallbackUrl, { waitUntil: 'domcontentloaded' });
+                                await page.goto(fallbackUrl, { waitUntil: 'domcontentloaded', timeout: safeArgs.timeout || effectiveTimeout });
                                 return { result: `Navigation failed for '${safeArgs.url}', so I searched Google instead. Now at: ${page.url()}` };
                             } catch (fallbackError) {
                                 // If fallback also fails, return original error
@@ -1147,7 +1148,7 @@ export class PlaywrightService {
                     const extractSelector = safeArgs.selector
 
                     // ERROR: Empty results usually mean bad selector
-                    const validateResults = (data: any, type: string) => {
+                    const validateResults = (data: any) => {
                         let isEmpty = false;
                         if (Array.isArray(data)) {
                             isEmpty = data.length === 0;
@@ -1181,7 +1182,7 @@ export class PlaywrightService {
                             return rows
                         }, extractSelector)
 
-                        try { validateResults(tableData, 'table'); } catch (e) { return { result: null, error: (e as Error).message }; }
+                        try { validateResults(tableData); } catch (e) { return { result: null, error: (e as Error).message }; }
                         return { result: { type: 'table', data: tableData } }
 
                     } else if (extractType === 'list') {
@@ -1196,7 +1197,7 @@ export class PlaywrightService {
                             return items
                         }, extractSelector)
 
-                        try { validateResults(listData, 'list'); } catch (e) { return { result: null, error: (e as Error).message }; }
+                        try { validateResults(listData); } catch (e) { return { result: null, error: (e as Error).message }; }
                         return { result: { type: 'list', data: listData } }
 
                     } else if (extractType === 'custom' && safeArgs.fields) {
@@ -1209,7 +1210,7 @@ export class PlaywrightService {
                             return result
                         }, safeArgs.fields)
 
-                        try { validateResults(customData, 'custom'); } catch (e) { return { result: null, error: (e as Error).message }; }
+                        try { validateResults(customData); } catch (e) { return { result: null, error: (e as Error).message }; }
                         return { result: { type: 'custom', data: customData } }
                     }
                     return { result: null, error: 'Invalid extract_data type' }
@@ -1357,8 +1358,7 @@ export class PlaywrightService {
                     await page.setViewportSize({ width: safeArgs.width, height: safeArgs.height })
                     return { result: `Viewport set to ${safeArgs.width}x${safeArgs.height}` }
 
-                case 'wait_for_navigation':
-                    await page.waitForLoadState('networkidle', { timeout: safeArgs.timeout || 30000 })
+                    await page.waitForLoadState('networkidle', { timeout: safeArgs.timeout || effectiveTimeout })
                     return { result: 'Navigation completed' }
 
                 default:
