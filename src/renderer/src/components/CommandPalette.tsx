@@ -9,12 +9,16 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const { clearMessages, toggleSidebar } = useChatStore();
 
-  // Toggle with Cmd+K
+  // Toggle with Cmd+K or close with Escape
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         setOpen((open) => !open);
+      }
+      
+      if (e.key === 'Escape') {
+        setOpen(false);
       }
     };
     document.addEventListener('keydown', down);
