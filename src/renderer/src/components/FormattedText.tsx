@@ -49,19 +49,27 @@ const CodeBlock = ({ inline, className, children, ...props }: any) => {
 
   // Render compact version for short, single-line text snippets (like flags or simple commands)
   if (!inline && isSingleLine && isShort && isTextOrUnknown) {
+      // Determine if it's "super short" (like a flag -r or command cp)
+      const isSuperShort = codeContent.length < 10;
+      
       return (
-          <div className="relative group/code my-2">
-               <div className="flex items-center gap-2 bg-[#1e1e1e] border border-white/10 rounded-lg px-3 py-2">
-                   <code className="font-mono text-xs text-[#ce9178] flex-1">
+          <div className="relative group/code my-1 inline-block align-middle">
+               <div className={cn(
+                   "flex items-center gap-2 bg-[#1e1e1e] border border-white/10 rounded-md px-2 py-1",
+                   isSuperShort ? "px-1.5 py-0.5" : ""
+               )}>
+                   <code className="font-mono text-xs text-[#ce9178] flex-1 break-all">
                        {codeContent}
                    </code>
-                   <button
-                        onClick={handleCopy}
-                        className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white transition-all opacity-0 group-hover/code:opacity-100"
-                        title="Copy"
-                    >
-                        {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
-                    </button>
+                   {!isSuperShort && (
+                       <button
+                            onClick={handleCopy}
+                            className="p-0.5 rounded hover:bg-white/10 text-white/40 hover:text-white transition-all opacity-0 group-hover/code:opacity-100"
+                            title="Copy"
+                        >
+                            {copied ? <Check size={10} className="text-green-400" /> : <Copy size={10} />}
+                        </button>
+                   )}
                </div>
           </div>
       )
