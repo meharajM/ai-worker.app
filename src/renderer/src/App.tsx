@@ -236,16 +236,16 @@ function App() {
       // But `handleSubmit` is a callback closure. `useChatStore.getState()` is safer.
 
       const settingsForLLM = {
-          preferredProvider: settings.preferredProvider,
-          ollamaModel: settings.ollamaModel,
-          ollamaBaseUrl: settings.ollamaBaseUrl,
-          openaiApiKey: settings.openaiApiKey,
-          openaiBaseUrl: settings.openaiBaseUrl,
-          openaiModel: settings.openaiModel,
-          geminiApiKey: settings.geminiApiKey,
-          geminiModel: settings.geminiModel,
-          openrouterApiKey: settings.openrouterApiKey,
-          openrouterModel: settings.openrouterModel,
+        preferredProvider: settings.preferredProvider,
+        ollamaModel: settings.ollamaModel,
+        ollamaBaseUrl: settings.ollamaBaseUrl,
+        openaiApiKey: settings.openaiApiKey,
+        openaiBaseUrl: settings.openaiBaseUrl,
+        openaiModel: settings.openaiModel,
+        geminiApiKey: settings.geminiApiKey,
+        geminiModel: settings.geminiModel,
+        openrouterApiKey: settings.openrouterApiKey,
+        openrouterModel: settings.openrouterModel,
       };
 
       try {
@@ -294,6 +294,7 @@ function App() {
 
         const runtime = new AgentRuntime({
           activeSessionId: activeSessionId || "default",
+          workspacePath: activeSession?.workspacePath,  // Pass workspace path from session
           settings: settingsForLLM,
           signal: useChatStore.getState().getAbortSignal() || undefined,
           requireConfirmation: true, // Enable smart confirmation
@@ -354,7 +355,7 @@ function App() {
                 const existingMsg = session?.messages.find(m => m.id === activeAssistantMessageId);
                 if (existingMsg) {
                   // Update existing message
-                const mergedToolCalls = [...(existingMsg.toolCalls || []), ...newToolCalls];
+                  const mergedToolCalls = [...(existingMsg.toolCalls || []), ...newToolCalls];
 
                   // For content: overwrite if new content exists (often content in tool turns is intermediate)
                   let finalContent = existingMsg.content;
@@ -364,8 +365,8 @@ function App() {
 
                   updateSessionMessage(currentSessionId, activeAssistantMessageId, {
                     content: finalContent,
-                  toolCalls: mergedToolCalls.length > 0 ? mergedToolCalls : undefined,
-                  actions: msg.actions ?? existingMsg.actions
+                    toolCalls: mergedToolCalls.length > 0 ? mergedToolCalls : undefined,
+                    actions: msg.actions ?? existingMsg.actions
                   });
                   return activeAssistantMessageId;
                 }
@@ -433,15 +434,15 @@ function App() {
         // We run this CONCURRENTLY with the main agent to ensure we capture user intent 
         // even if the main agent gets stuck in a confirmation loop or fails.
         import("./lib/memory-reflector").then(({ MemoryReflector }) => {
-            const currentMessages = useChatStore.getState().getActiveSession()?.messages || [];
-           
-            // Convert to LLMMessage format for the reflector
-            const historyForReflector: LLMMessage[] = currentMessages.map(m => ({
-                role: m.role as "user" | "assistant" | "system",
-                content: m.content
-            }));
-            
-            MemoryReflector.getInstance().analyze(historyForReflector, settingsForLLM);
+          const currentMessages = useChatStore.getState().getActiveSession()?.messages || [];
+
+          // Convert to LLMMessage format for the reflector
+          const historyForReflector: LLMMessage[] = currentMessages.map(m => ({
+            role: m.role as "user" | "assistant" | "system",
+            content: m.content
+          }));
+
+          MemoryReflector.getInstance().analyze(historyForReflector, settingsForLLM);
         });
 
         await runtime.chat(content);

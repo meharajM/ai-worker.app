@@ -16,6 +16,7 @@ export type AgentStatusCallback = (message: LLMMessage) => string | void;
 
 interface AgentRuntimeOptions {
   activeSessionId?: string;
+  workspacePath?: string;  // Optional workspace folder for filesystem operations
   settings: any;
   onMessage?: AgentStatusCallback;
   signal?: AbortSignal;
@@ -501,7 +502,8 @@ Please send your next message to continue with a fresh agent.`
           serverInfo.length > 0 ? serverInfo : undefined,
           this.options.signal,
           dynamicRules,
-          this.options.isSubAgent // NEW: Enable lightweight prompt for sub-agents
+          this.options.isSubAgent, // NEW: Enable lightweight prompt for sub-agents
+          this.options.workspacePath // Inject workspace path
         );
       } catch (error) {
         console.error("[AgentRuntime] LLM Error:", error);
@@ -620,6 +622,7 @@ Then extract the answer from the results. DO NOT refuse again.`
 
         // Create a signature for this tool call to detect loops
         const toolSignature = `${call.name}:${JSON.stringify(call.arguments)}`;
+        const toolNameOnly = call.name;
         recentToolCalls.push(toolSignature);
 
         // Track unique tool calls for progress monitoring
@@ -630,13 +633,18 @@ Then extract the answer from the results. DO NOT refuse again.`
           recentToolCalls.shift();
         }
 
-        // Detect infinite loops: same tool called 3+ times in a row
+        // ENHANCED LOOP DETECTION: Check for both identical and similar patterns
         if (recentToolCalls.length >= MAX_IDENTICAL_CALLS) {
           const lastN = recentToolCalls.slice(-MAX_IDENTICAL_CALLS);
           const allSame = lastN.every(sig => sig === lastN[0]);
 
-          if (allSame) {
-            console.error(`[AgentRuntime] Infinite loop detected: ${call.name} called ${MAX_IDENTICAL_CALLS}+ times with identical arguments`);
+          // Also check if same tool is being called repeatedly (even with different args)
+          const toolNames = lastN.map(sig => sig.split(':')[0]);
+          const sameToolRepeated = toolNames.every(name => name === toolNames[0]);
+
+          if (allSame || sameToolRepeated) {
+            const loopType = allSame ? 'identical arguments' : 'similar pattern (same tool)';
+            console.error(`[AgentRuntime] Infinite loop detected: ${call.name} called ${MAX_IDENTICAL_CALLS}+ times with ${loopType}`);
 
             // Gather information from recent tool outputs
             const recentResults = this.messages
@@ -656,7 +664,7 @@ Then extract the answer from the results. DO NOT refuse again.`
               role: 'assistant',
               content: `## ⚠️ I noticed I'm repeating the same action
 
-I've called \`${call.name}\` **${MAX_IDENTICAL_CALLS} times** with identical parameters, which usually means something isn't working as expected.
+I've called \`${call.name}\` **${MAX_IDENTICAL_CALLS} times** with ${loopType}, which usually means something isn't working as expected.
 
 ---
 
@@ -956,6 +964,11 @@ Return key findings only. End with "✓ Done".`;
                 args.tabId = this.options.tabId;
               }
 
+              // INJECTION: Add workspace path to filesystem tools for security validation
+              if (name.startsWith('fs_') && this.options.workspacePath) {
+                args.workspacePath = this.options.workspacePath;
+              }
+
               // EXECUTE via Lane Manager
               // It handles routing (Browser Serial vs Tab Serial vs API Parallel)
               result = await laneManager.getLane(name, { tabId: this.options.tabId }).run(async () => {
@@ -1127,28 +1140,58 @@ Return key findings only. End with "✓ Done".`;
 
       iterationCount++;
 
-      // MANDATORY CHECKPOINT: Enforce progress summary at iterations 15, 30, 45...
-      // User request: Increased from 5 to 15 to allow more flow before interrupting
+      // CHECKPOINT: Request progress summary at iterations 15, 30, 45...
+      // Relaxed enforcement to prevent infinite loops
       const CHECKPOINT_INTERVAL = 15;
       if (!this.options.isSubAgent && iterationCount % CHECKPOINT_INTERVAL === 0 && iterationCount > 0) {
-        const checkpointIndex = (iterationCount / CHECKPOINT_INTERVAL) - 1; // 0-indexed checkpoint
+        // Check if summary was recorded for this checkpoint iteration
+        const lastRecordedIteration = this.lastCheckpoint?.step || 0;
 
-        // Check if summary was recorded for this checkpoint
-        if ((this.lastCheckpoint?.step || 0) <= checkpointIndex) {
-          console.log(`[AgentRuntime] Checkpoint ${iterationCount}: Waiting for progress summary...`);
+        if (lastRecordedIteration < iterationCount) {
+          console.log(`[AgentRuntime] Checkpoint ${iterationCount}: Requesting progress summary...`);
 
-          // Add system message to enforce summary (MUST be non-conversational to prevent verbose responses)
+          // Add user message (stronger than system) to request summary
+          // Using 'user' role ensures the LLM sees it as a direct instruction
           this.addMessage({
-            role: 'system',
-            content: `CHECKPOINT ${iterationCount}: Call update_progress_summary tool NOW with your Summary of your findings and what you've accomplished in the last ${CHECKPOINT_INTERVAL} steps. No text output - tool call only.`
+            role: 'user',
+            content: `[CHECKPOINT ${iterationCount}] Please call update_progress_summary now with a brief summary of your findings and progress in the last ${CHECKPOINT_INTERVAL} steps.`
           });
 
-          // Continue loop - LLM will be forced to call the tool on next iteration
-          // Continue loop - LLM will be forced to call the tool on next iteration
-          continue;
+          // DO NOT continue - let the loop proceed normally
+          // The LLM will see the message and likely call the tool
+          // If it doesn't, we'll generate a fallback summary after a few more iterations
         } else {
           console.log(`[AgentRuntime] Checkpoint ${iterationCount}: Summary recorded ✓`);
         }
+      }
+
+      // FALLBACK: If checkpoint was requested 3+ iterations ago but still not recorded, auto-generate summary
+      const lastRecordedIteration = this.lastCheckpoint?.step || 0;
+      const iterationsSinceLastCheckpoint = iterationCount - lastRecordedIteration;
+      const shouldHaveCheckpoint = iterationCount >= CHECKPOINT_INTERVAL && iterationCount % CHECKPOINT_INTERVAL <= 3;
+
+      if (!this.options.isSubAgent && shouldHaveCheckpoint && iterationsSinceLastCheckpoint >= CHECKPOINT_INTERVAL + 3) {
+        console.warn(`[AgentRuntime] Checkpoint overdue by ${iterationsSinceLastCheckpoint - CHECKPOINT_INTERVAL} iterations. Auto-generating summary...`);
+
+        // Generate fallback summary from recent tool outputs
+        const recentToolMessages = this.messages
+          .filter(m => m.role === 'tool')
+          .slice(-5)
+          .map(m => {
+            const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            return content.substring(0, 100);
+          });
+
+        const fallbackSummary = `Auto-generated checkpoint at iteration ${iterationCount}. Recent actions: ${recentToolMessages.join('; ') || 'Processing...'}`.substring(0, 200);
+
+        // Update checkpoint directly
+        this.lastCheckpoint = {
+          step: iterationCount,
+          summary: fallbackSummary,
+          timestamp: Date.now()
+        };
+
+        console.log(`[AgentRuntime] Fallback summary generated: ${fallbackSummary}`);
       }
     }
 
