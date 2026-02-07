@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, Terminal } from 'lucide-react';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { cn } from '../lib/utils';
 
 interface FormattedTextProps {
   content: string;
@@ -11,6 +14,7 @@ interface FormattedTextProps {
 const CodeBlock = ({ inline, className, children, ...props }: any) => {
   const [copied, setCopied] = useState(false);
   const match = /language-(\w+)/.exec(className || '');
+  const language = match?.[1] || 'text';
   const codeContent = String(children).replace(/\n$/, '');
 
   const handleCopy = async () => {
@@ -19,36 +23,105 @@ const CodeBlock = ({ inline, className, children, ...props }: any) => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error('Failed to copy:', err);
+      console.warn('Clipboard write failed, trying fallback:', err);
+        // Fallback
+        const textArea = document.createElement("textarea");
+        textArea.value = codeContent;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-9999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            setCopied(true);
+             setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            console.error('Fallback copy failed', err);
+        }
+        document.body.removeChild(textArea);
     }
   };
 
-  return !inline ? (
-    <div className="relative group/code my-4 rounded-lg bg-black/30 border border-white/10 overflow-hidden">
-      {/* Header / Language Badge */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-white/5 border-b border-white/5">
-        <span className="text-[10px] uppercase font-medium text-white/40 font-mono">
-          {match?.[1] || 'text'}
-        </span>
-        <button
-          onClick={handleCopy}
-          className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white transition-all flex items-center gap-1.5"
-          title="Copy code"
-        >
-          {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
-          <span className="text-[10px]">{copied ? 'Copied!' : 'Copy'}</span>
-        </button>
+  const isSingleLine = !codeContent.includes('\n');
+  const isShort = codeContent.length < 50;
+  const isTextOrUnknown = language === 'text' || !match;
+
+  // Render compact version for short, single-line text snippets (like flags or simple commands)
+  if (!inline && isSingleLine && isShort && isTextOrUnknown) {
+      return (
+          <div className="relative group/code my-2">
+               <div className="flex items-center gap-2 bg-[#1e1e1e] border border-white/10 rounded-lg px-3 py-2">
+                   <code className="font-mono text-xs text-[#ce9178] flex-1">
+                       {codeContent}
+                   </code>
+                   <button
+                        onClick={handleCopy}
+                        className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white transition-all opacity-0 group-hover/code:opacity-100"
+                        title="Copy"
+                    >
+                        {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+                    </button>
+               </div>
+          </div>
+      )
+  }
+
+  if (!inline) {
+    return (
+      <div className="relative group/code my-4 rounded-xl bg-[#1e1e1e] border border-white/10 overflow-hidden shadow-sm">
+        {/* Header / Language Badge */}
+        <div className="flex items-center justify-between px-3 py-2 bg-[#252526] border-b border-white/5">
+          <div className="flex items-center gap-2">
+            <Terminal size={12} className="text-white/40" />
+            <span className="text-[11px] font-medium text-white/60 font-mono tracking-wide">
+              {language}
+            </span>
+          </div>
+          <button
+            onClick={handleCopy}
+            className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white transition-all flex items-center gap-1.5"
+            title="Copy code"
+          >
+            {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+            <span className="text-[10px] opacity-0 group-hover/code:opacity-100 transition-opacity">
+              {copied ? 'Copied!' : 'Copy'}
+            </span>
+          </button>
+        </div>
+        
+        {/* Code Content */}
+        <div className="text-xs">
+           <SyntaxHighlighter
+            style={vscDarkPlus}
+            language={language}
+            PreTag="div"
+            customStyle={{
+                margin: 0,
+                padding: '16px',
+                background: 'transparent',
+                fontSize: '12px',
+                lineHeight: '1.5',
+            }}
+            wrapLines={true}
+            wrapLongLines={true} // Wrap long lines to avoid horizontal scroll for better UX
+            {...props}
+          >
+            {codeContent}
+          </SyntaxHighlighter>
+        </div>
       </div>
-      
-      {/* Code Content */}
-      <div className="overflow-x-auto p-3">
-        <code className={`font-mono text-xs ${className}`} {...props}>
-          {children}
-        </code>
-      </div>
-    </div>
-  ) : (
-    <code className="px-1.5 py-0.5 rounded bg-white/10 text-[#4fd1c5] font-mono text-[0.9em]" {...props}>
+    );
+  }
+
+  return (
+    <code 
+        className={cn(
+            "px-1.5 py-0.5 rounded bg-white/10 text-[#4fd1c5] font-mono text-[0.9em]",
+            className
+        )} 
+        {...props}
+    >
       {children}
     </code>
   );
