@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { Mic, MicOff, Send, X, Maximize2, Minimize2, Square, Folder } from 'lucide-react'
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
+import { useFileDragDrop, generateFileConversionPrompt } from '../hooks/useFileDragDrop'
 import { VoiceVisualizer } from './VoiceVisualizer'
 import { useLogStore } from '../stores/logStore'
 import { useChatStore } from '../stores/chatStore'
@@ -144,6 +145,27 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
         }
     }, [addLog])
 
+    // Handle file drag-and-drop
+    const handleFilesDropped = useCallback((files: File[]) => {
+        const prompt = generateFileConversionPrompt(files)
+        setTextInput(prompt)
+        setText(prompt)
+        
+        // Focus textarea for user to edit/send
+        textareaRef.current?.focus()
+        
+        addLog({
+            eventType: 'STATE_CHANGE',
+            sessionId: activeSessionId || 'unknown',
+            component: 'VoiceInput',
+            details: { metadata: { action: 'files_dropped', count: files.length } }
+        })
+    }, [setText, addLog, activeSessionId])
+
+    const { isDragging, dragHandlers } = useFileDragDrop({
+        onFilesDropped: handleFilesDropped
+    })
+
     // Handle text input submission
     const handleTextSubmit = useCallback(() => {
         const message = textInput.trim()
@@ -218,8 +240,22 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
                     </button>
                 )}
 
-                {/* Text Input - Auto-expanding Textarea */}
-                <div className="flex-1 relative min-h-[44px] flex items-center">
+                {/* Text Input - Auto-expanding Textarea with Drag-and-Drop */}
+                <div 
+                    className={`flex-1 relative min-h-[44px] flex items-center transition-all duration-200 rounded-lg ${
+                        isDragging ? 'ring-2 ring-emerald-500/50 bg-emerald-500/10' : ''
+                    }`}
+                    {...dragHandlers}
+                >
+                    {/* Drag Overlay */}
+                    {isDragging && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                            <div className="bg-emerald-500/20 backdrop-blur-sm border border-emerald-500/50 rounded-lg px-4 py-2 text-emerald-400 text-sm font-medium shadow-lg">
+                                📄 Drop file to convert
+                            </div>
+                        </div>
+                    )}
+                    
                     <textarea
                         ref={textareaRef}
                         value={textInput}
@@ -227,7 +263,7 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
                         onChange={handleInputChange}
                         onKeyDown={handleKeyDown}
                         disabled={disabled && !onAbort}
-                        placeholder={isListening ? "Listening..." : isFirstSetup ? "Downloading model..." : "Message... (Shift+Enter for new line)"}
+                        placeholder={isListening ? "Listening..." : isFirstSetup ? "Downloading model..." : "Message... (Shift+Enter for new line, or drag files here)"}
                         rows={1}
                         style={{
                             resize: 'none',

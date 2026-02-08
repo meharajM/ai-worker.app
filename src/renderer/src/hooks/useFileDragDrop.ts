@@ -1,0 +1,144 @@
+import { useState, useCallback, DragEvent } from 'react'
+
+/**
+ * Supported file extensions for MarkItDown conversion
+ */
+const SUPPORTED_EXTENSIONS = [
+    // Documents
+    '.pdf', '.docx', '.xlsx', '.pptx', '.doc', '.xls', '.ppt',
+    // Images
+    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp',
+    // Audio
+    '.mp3', '.wav', '.m4a', '.ogg', '.flac',
+    // Web & Data
+    '.html', '.htm', '.csv', '.json', '.xml', '.txt', '.md',
+    // Other
+    '.epub', '.zip'
+]
+
+interface UseFileDragDropOptions {
+    onFilesDropped: (files: File[]) => void
+    validateFiles?: boolean
+}
+
+interface UseFileDragDropReturn {
+    isDragging: boolean
+    dragHandlers: {
+        onDragEnter: (e: DragEvent) => void
+        onDragLeave: (e: DragEvent) => void
+        onDragOver: (e: DragEvent) => void
+        onDrop: (e: DragEvent) => void
+    }
+}
+
+/**
+ * Custom hook for handling file drag-and-drop functionality
+ * 
+ * @param options - Configuration options
+ * @param options.onFilesDropped - Callback when files are dropped
+ * @param options.validateFiles - Whether to validate file extensions (default: true)
+ * 
+ * @example
+ * ```tsx
+ * const { isDragging, dragHandlers } = useFileDragDrop({
+ *   onFilesDropped: (files) => console.log('Files:', files)
+ * })
+ * 
+ * return <div {...dragHandlers}>Drop files here</div>
+ * ```
+ */
+export function useFileDragDrop({
+    onFilesDropped,
+    validateFiles = true
+}: UseFileDragDropOptions): UseFileDragDropReturn {
+    const [isDragging, setIsDragging] = useState(false)
+
+    /**
+     * Check if a file has a supported extension
+     */
+    const isSupportedFile = useCallback((file: File): boolean => {
+        const extension = '.' + file.name.split('.').pop()?.toLowerCase()
+        return SUPPORTED_EXTENSIONS.includes(extension)
+    }, [])
+
+    /**
+     * Handle drag enter event
+     */
+    const handleDragEnter = useCallback((e: DragEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setIsDragging(true)
+    }, [])
+
+    /**
+     * Handle drag leave event
+     */
+    const handleDragLeave = useCallback((e: DragEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+        
+        // Only set isDragging to false if we're leaving the drop zone entirely
+        // This prevents flickering when dragging over child elements
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+        const x = e.clientX
+        const y = e.clientY
+        
+        if (x <= rect.left || x >= rect.right || y <= rect.top || y >= rect.bottom) {
+            setIsDragging(false)
+        }
+    }, [])
+
+    /**
+     * Handle drag over event (required to enable drop)
+     */
+    const handleDragOver = useCallback((e: DragEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+    }, [])
+
+    /**
+     * Handle drop event
+     */
+    const handleDrop = useCallback((e: DragEvent) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setIsDragging(false)
+
+        const files = Array.from(e.dataTransfer.files)
+        
+        if (files.length === 0) return
+
+        // Filter supported files if validation is enabled
+        const validFiles = validateFiles
+            ? files.filter(isSupportedFile)
+            : files
+
+        if (validFiles.length > 0) {
+            onFilesDropped(validFiles)
+        }
+    }, [onFilesDropped, validateFiles, isSupportedFile])
+
+    return {
+        isDragging,
+        dragHandlers: {
+            onDragEnter: handleDragEnter,
+            onDragLeave: handleDragLeave,
+            onDragOver: handleDragOver,
+            onDrop: handleDrop
+        }
+    }
+}
+
+/**
+ * Generate a prompt for file conversion based on the number of files
+ */
+export function generateFileConversionPrompt(files: File[]): string {
+    // Extract file paths (Electron provides .path property)
+    const filePaths = files.map(f => (f as any).path || f.name)
+    
+    if (files.length === 1) {
+        return `Convert this file to markdown: ${filePaths[0]}`
+    }
+    
+    return `Convert these files to markdown:\n${filePaths.map(p => `- ${p}`).join('\n')}`
+}
