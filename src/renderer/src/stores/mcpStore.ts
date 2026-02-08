@@ -100,8 +100,8 @@ const DEFAULT_MCP_SERVERS = [
         description: 'MarkItDown - Convert documents (PDF, Word, Excel, images, audio) to Markdown',
         type: 'stdio',
         command: 'uvx',
-        args: ['markitdown-mcp-server'],
-        autoConnect: false // Don't auto-connect since it requires Python/uvx
+        args: ['markitdown-mcp'],
+        autoConnect: true // Enable auto-connect (requires uv/python)
     }
 ]
 
@@ -138,6 +138,11 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                             updated.args = defaultMatch.args;
                             console.log(`[mcpStore] Migrated server "${updated.name}" from internal to ${updated.command}`);
                         }
+                    }
+
+                    // Migration: Enable MarkItDown auto-connect
+                    if (updated.name === 'markitdown') {
+                        updated.autoConnect = true;
                     }
 
                     return {

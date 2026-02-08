@@ -127,6 +127,26 @@ export async function executeToolCall(
   console.log(`[MCP Renderer] Invoking Tool: ${toolName}`, sanitizedArgs);
 
   // SECURITY: Require workspace for ALL filesystem operations
+  if (toolName === 'convert_to_markdown') {
+     const uri = (args?.uri || args?.path) as string;
+     if (uri && typeof uri === 'string') {
+        const isAbsolute = uri.startsWith('/') || uri.match(/^[a-zA-Z]:[\\/]/) || uri.startsWith('file:///');
+        // Check for "file:filename" relative pattern which is problematic
+        const isRelativeFileUri = uri.startsWith('file:') && !uri.startsWith('file:///');
+        
+        if (!isAbsolute || isRelativeFileUri) {
+             return {
+                result: null,
+                error: `CRITICAL ERROR: Relative path detected: '${uri}'. You provided a file name without its full location.
+1. The file is NOT in the current working directory.
+2. You MUST search for it in common user folders like 'Documents', 'Downloads', or 'Desktop'.
+3. Use 'search_files' with path: '/Users/suhail/Documents' (or similar) first.
+4. Once found, call this tool again with the ABSOLUTE path.`
+            };
+        }
+     }
+  }
+
   if (toolName.startsWith('fs_')) {
     // CRITICAL: Block filesystem access entirely if no workspace is selected
     if (!args || !args.workspacePath) {

@@ -34,13 +34,18 @@ export interface TaskSuggestion {
  */
 export async function analyzeTask(
   userPrompt: string,
-  llmSettings: any
+  llmSettings: any,
+  attachments: { name: string; path: string }[] = []
 ): Promise<TaskAnalysis> {
   const { chat } = await import('./llm');
 
+  const attachmentContext = attachments.length > 0
+    ? `\nATTACHED FILES:\n${attachments.map(a => `- ${a.name}`).join('\n')}\n(The user has provided these files, so "convert this" or "check this" likely refers to them.)`
+    : '';
+
   const analysisPrompt = `Analyze this user prompt and determine if clarification is needed.
 
-USER PROMPT: "${userPrompt}"
+USER PROMPT: "${userPrompt}"${attachmentContext}
 
 # ANALYSIS:
 1. **Is the intent clear?** Can you understand exactly what the user wants?
@@ -62,12 +67,14 @@ USER PROMPT: "${userPrompt}"
   • Single-word context replies (e.g., "yes", "no", "continue", "stop")
   • **Coding/debugging tasks** (agent should explore autonomously)
   • **Research tasks with clear topics** (agent can start broad, then narrow)
+  • **Tasks referring to attached files** (e.g. "Summarize this", "Convert this" with a file attached)
+  • **File conversions** (e.g. "convert to markdown") when a file is attached
 
 - TRUE (CONFIRM) for:
   • Vague TASK requests starting a NEW topic (e.g., "buy shoes" - site/size missing?)
   • Single words that imply a complex action without target (e.g., "research", "booking", "deploy")
   • Sensitive actions (logins, payments, deletions)
-  • Ambiguous pronouns without context
+  • Ambiguous pronouns without context AND NO ATTACHMENTS
 
 - If typos detected, auto-correct in suggestions
 
@@ -135,32 +142,52 @@ Respond with JSON:
   try {
     const response = await chat(
       [
-        { role: 'system', content: 'You are a task analysis expert. Always respond with valid JSON.' },
+        { role: 'system', content: 'You are a task analysis expert. Respond ONLY with valid, parseable JSON. Do not include markdown formatting like ```json or comments.' },
         { role: 'user', content: analysisPrompt }
       ],
       undefined,
       llmSettings
     );
 
-    // Parse the LLM response
-    const jsonMatch = response.content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return createDefaultAnalysis(userPrompt);
+    // Clean up content (remove markdown code blocks if present)
+    let content = response.content.trim();
+    if (content.startsWith('```json')) {
+      content = content.replace(/^```json/, '').replace(/```$/, '');
+    } else if (content.startsWith('```')) {
+      content = content.replace(/^```/, '').replace(/```$/, '');
+    }
+    
+    // Find the first '{' and last '}'
+    const startIndex = content.indexOf('{');
+    const endIndex = content.lastIndexOf('}');
+    
+    if (startIndex === -1 || endIndex === -1) {
+       console.warn('[TaskAnalysis] No JSON object found in response:', content);
+       return createDefaultAnalysis(userPrompt);
+    }
+    
+    const jsonString = content.substring(startIndex, endIndex + 1);
+
+    try {
+        const analysis: TaskAnalysis = JSON.parse(jsonString);
+        
+        // Validate and ensure proper structure
+        return {
+          isAmbiguous: analysis.isAmbiguous || false,
+          missingDetails: analysis.missingDetails || [],
+          suggestions: analysis.suggestions || [],
+          detectedIntent: analysis.detectedIntent || userPrompt,
+          potentialMistakes: analysis.potentialMistakes || [],
+          shouldConfirm: analysis.shouldConfirm || false,
+          complexity: analysis.complexity,
+          category: analysis.category as any
+        };
+    } catch (parseError) {
+        console.error('[TaskAnalysis] JSON Parse Error:', parseError);
+        console.error('[TaskAnalysis] Failed Content:', jsonString);
+        return createDefaultAnalysis(userPrompt);
     }
 
-    const analysis: TaskAnalysis = JSON.parse(jsonMatch[0]);
-
-    // Validate and ensure proper structure
-    return {
-      isAmbiguous: analysis.isAmbiguous || false,
-      missingDetails: analysis.missingDetails || [],
-      suggestions: analysis.suggestions || [],
-      detectedIntent: analysis.detectedIntent || userPrompt,
-      potentialMistakes: analysis.potentialMistakes || [],
-      shouldConfirm: analysis.shouldConfirm || false,
-      complexity: analysis.complexity,
-      category: analysis.category as any
-    };
   } catch (error) {
     console.error('[TaskAnalysis] Error analyzing task:', error);
     return createDefaultAnalysis(userPrompt);

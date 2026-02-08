@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react'
-import { Mic, MicOff, Send, X, Maximize2, Minimize2, Square, Folder } from 'lucide-react'
+import { Mic, MicOff, Send, X, Maximize2, Minimize2, Square, Folder, File as FileIcon, XCircle } from 'lucide-react'
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
 import { useFileDragDrop, generateFileConversionPrompt } from '../hooks/useFileDragDrop'
 import { VoiceVisualizer } from './VoiceVisualizer'
@@ -8,7 +8,7 @@ import { useChatStore } from '../stores/chatStore'
 import electron from '../lib/electron'
 
 interface VoiceInputProps {
-    onSubmit: (message: string) => void
+    onSubmit: (message: string, attachments?: File[]) => void
     disabled?: boolean
     onAbort?: () => void
 }
@@ -16,6 +16,7 @@ interface VoiceInputProps {
 export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputProps) {
     const [textInput, setTextInput] = useState('')
     const [workspacePath, setWorkspacePath] = useState<string | null>(null)
+    const [attachments, setAttachments] = useState<File[]>([])
     const textareaRef = useRef<HTMLTextAreaElement>(null)
     const { addLog } = useLogStore()
     const { activeSessionId, getActiveSession } = useChatStore()
@@ -147,9 +148,8 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
 
     // Handle file drag-and-drop
     const handleFilesDropped = useCallback((files: File[]) => {
-        const prompt = generateFileConversionPrompt(files)
-        setTextInput(prompt)
-        setText(prompt)
+        // Add new files to existing attachments
+        setAttachments(prev => [...prev, ...files])
         
         // Focus textarea for user to edit/send
         textareaRef.current?.focus()
@@ -160,7 +160,11 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
             component: 'VoiceInput',
             details: { metadata: { action: 'files_dropped', count: files.length } }
         })
-    }, [setText, addLog, activeSessionId])
+    }, [addLog, activeSessionId])
+
+    const removeAttachment = useCallback((index: number) => {
+        setAttachments(prev => prev.filter((_, i) => i !== index))
+    }, [])
 
     const { isDragging, dragHandlers } = useFileDragDrop({
         onFilesDropped: handleFilesDropped
@@ -169,12 +173,16 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
     // Handle text input submission
     const handleTextSubmit = useCallback(() => {
         const message = textInput.trim()
-        if (message && !disabled) {
-            onSubmit(message)
+        const hasAttachments = attachments.length > 0
+        
+        if ((message || hasAttachments) && !disabled) {
+            // Pass attachments to onSubmit
+            onSubmit(message, attachments)
             setTextInput('')
+            setAttachments([]) // Clear attachments
             resetTranscript()
         }
-    }, [textInput, disabled, onSubmit, resetTranscript])
+    }, [textInput, attachments, disabled, onSubmit, resetTranscript])
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -218,93 +226,115 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
                 </div>
             )}
 
-            <div className="flex items-end gap-3">
-                {/* Left Button: Voice Controls ONLY */}
-                {isFirstSetup ? (
-                    <div className="p-2 flex items-center justify-center h-[44px]" title="Downloading Speech Model...">
-                        <div className="relative w-8 h-8">
-                            <svg className="w-full h-full transform -rotate-90">
-                                <circle cx="16" cy="16" r="14" stroke="currentColor" strokeWidth="3" fill="transparent" className="text-white/10" />
-                                <circle cx="16" cy="16" r="14" stroke="currentColor" strokeWidth="3" fill="transparent" className="text-emerald-500 transition-all duration-300 ease-out" strokeDasharray={88} strokeDashoffset={88 - (88 * (setupProgress || 0) / 100)} strokeLinecap="round" />
-                            </svg>
-                            <div className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-emerald-400">{Math.round(setupProgress || 0)}%</div>
-                        </div>
+            <div className="flex flex-col gap-2">
+                {/* File Chips */}
+                {attachments.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-1 pl-[50px]">
+                        {attachments.map((file, index) => (
+                            <div key={index} className="flex items-center gap-2 bg-white/10 rounded-full px-3 py-1 text-xs text-white/90 border border-white/10 animate-in fade-in zoom-in-95 duration-200">
+                                <FileIcon size={12} className="text-emerald-400" />
+                                <span className="max-w-[200px] truncate" title={(file as any).path || file.name}>
+                                    {file.name}
+                                </span>
+                                <button 
+                                    onClick={() => removeAttachment(index)}
+                                    className="hover:text-red-400 transition-colors"
+                                >
+                                    <XCircle size={14} />
+                                </button>
+                            </div>
+                        ))}
                     </div>
-                ) : isListening || isInitializing ? (
-                    <button onClick={handleMicClick} className="p-3 mb-[1px] rounded-xl flex items-center justify-center transition-all active:scale-95 bg-red-500/20 hover:bg-red-500/30 text-red-400 animate-pulse ring-1 ring-red-500/50 h-[44px] w-[44px]" title="Stop Recording">
-                        <Square size={16} className="fill-current" />
-                    </button>
-                ) : (
-                    <button onClick={handleMicClick} disabled={disabled || !sttSupported} className={`p-3 mb-[1px] rounded-xl flex items-center justify-center transition-all active:scale-95 shadow-lg group bg-white/5 hover:bg-white/10 text-white/80 hover:text-white h-[44px] w-[44px] ${(disabled || !sttSupported) ? 'opacity-50 cursor-not-allowed' : ''}`} title="Start Voice Mode">
-                        <Mic size={20} />
-                    </button>
                 )}
 
-                {/* Text Input - Auto-expanding Textarea with Drag-and-Drop */}
-                <div 
-                    className={`flex-1 relative min-h-[44px] flex items-center transition-all duration-200 rounded-lg ${
-                        isDragging ? 'ring-2 ring-emerald-500/50 bg-emerald-500/10' : ''
-                    }`}
-                    {...dragHandlers}
-                >
-                    {/* Drag Overlay */}
-                    {isDragging && (
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-                            <div className="bg-emerald-500/20 backdrop-blur-sm border border-emerald-500/50 rounded-lg px-4 py-2 text-emerald-400 text-sm font-medium shadow-lg">
-                                📄 Drop file to convert
+                <div className="flex items-end gap-3">
+                    {/* Left Button: Voice Controls ONLY */}
+                    {isFirstSetup ? (
+                        <div className="p-2 flex items-center justify-center h-[44px]" title="Downloading Speech Model...">
+                            <div className="relative w-8 h-8">
+                                <svg className="w-full h-full transform -rotate-90">
+                                    <circle cx="16" cy="16" r="14" stroke="currentColor" strokeWidth="3" fill="transparent" className="text-white/10" />
+                                    <circle cx="16" cy="16" r="14" stroke="currentColor" strokeWidth="3" fill="transparent" className="text-emerald-500 transition-all duration-300 ease-out" strokeDasharray={88} strokeDashoffset={88 - (88 * (setupProgress || 0) / 100)} strokeLinecap="round" />
+                                </svg>
+                                <div className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-emerald-400">{Math.round(setupProgress || 0)}%</div>
                             </div>
                         </div>
+                    ) : isListening || isInitializing ? (
+                        <button onClick={handleMicClick} className="p-3 mb-[1px] rounded-xl flex items-center justify-center transition-all active:scale-95 bg-red-500/20 hover:bg-red-500/30 text-red-400 animate-pulse ring-1 ring-red-500/50 h-[44px] w-[44px]" title="Stop Recording">
+                            <Square size={16} className="fill-current" />
+                        </button>
+                    ) : (
+                        <button onClick={handleMicClick} disabled={disabled || !sttSupported} className={`p-3 mb-[1px] rounded-xl flex items-center justify-center transition-all active:scale-95 shadow-lg group bg-white/5 hover:bg-white/10 text-white/80 hover:text-white h-[44px] w-[44px] ${(disabled || !sttSupported) ? 'opacity-50 cursor-not-allowed' : ''}`} title="Start Voice Mode">
+                            <Mic size={20} />
+                        </button>
                     )}
-                    
-                    <textarea
-                        ref={textareaRef}
-                        value={textInput}
-                        data-testid="chat-textarea"
-                        onChange={handleInputChange}
-                        onKeyDown={handleKeyDown}
-                        disabled={disabled && !onAbort}
-                        placeholder={isListening ? "Listening..." : isFirstSetup ? "Downloading model..." : "Message... (Shift+Enter for new line, or drag files here)"}
-                        rows={1}
-                        style={{
-                            resize: 'none',
-                            minHeight: '24px',
-                            maxHeight: '200px'
-                        }}
-                        className={`
-                            w-full bg-transparent border-none outline-none
-                            text-base py-2 transition-colors scrollbar-hide
-                            ${isListening ? 'text-white/90 placeholder-white/50' : 'text-white placeholder-white/30'}
-                        `}
-                    />
-                </div>
 
-                {/* Workspace Folder Button */}
-                <button
-                    onClick={handleSelectFolder}
-                    disabled={disabled}
-                    className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${workspacePath
-                        ? 'bg-[#00a896]/20 text-[#00a896] hover:bg-[#00a896]/30'
-                        : 'bg-transparent text-white/40 hover:text-white/60 hover:bg-white/5'
-                        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    title={workspacePath ? `Workspace: ${workspacePath}` : 'Select workspace folder'}
-                >
-                    <Folder size={18} />
-                </button>
+                    {/* Text Input - Auto-expanding Textarea with Drag-and-Drop */}
+                    <div 
+                        className={`flex-1 relative min-h-[44px] flex items-center transition-all duration-200 rounded-lg ${
+                            isDragging ? 'ring-2 ring-emerald-500/50 bg-emerald-500/10' : ''
+                        }`}
+                        {...dragHandlers}
+                    >
+                        {/* Drag Overlay */}
+                        {isDragging && (
+                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+                                <div className="bg-emerald-500/20 backdrop-blur-sm border border-emerald-500/50 rounded-lg px-4 py-2 text-emerald-400 text-sm font-medium shadow-lg">
+                                    📄 Drop file to convert
+                                </div>
+                            </div>
+                        )}
+                        
+                        <textarea
+                            ref={textareaRef}
+                            value={textInput}
+                            data-testid="chat-textarea"
+                            onChange={handleInputChange}
+                            onKeyDown={handleKeyDown}
+                            disabled={disabled && !onAbort}
+                            placeholder={isListening ? "Listening..." : isFirstSetup ? "Downloading model..." : "Message... (Shift+Enter for new line, or drag files here)"}
+                            rows={1}
+                            style={{
+                                resize: 'none',
+                                minHeight: '24px',
+                                maxHeight: '200px'
+                            }}
+                            className={`
+                                w-full bg-transparent border-none outline-none
+                                text-base py-2 transition-colors scrollbar-hide
+                                ${isListening ? 'text-white/90 placeholder-white/50' : 'text-white placeholder-white/30'}
+                            `}
+                        />
+                    </div>
 
-                {/* Right Button: Send OR Stop Generation */}
-                {disabled && onAbort ? (
-                    <button onClick={onAbort} className="p-2 mb-[1px] rounded-lg transition-all bg-red-500/20 hover:bg-red-500/30 text-red-400 h-[44px] w-[36px] flex items-center justify-center" title="Stop Generation">
-                        <Square size={18} className="fill-current" />
-                    </button>
-                ) : (
+                    {/* Workspace Folder Button */}
                     <button
-                        onClick={handleTextSubmit}
-                        disabled={disabled || !textInput.trim()}
-                        data-testid="send-button"
-                        className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${textInput.trim() && !disabled ? 'bg-white text-black hover:bg-gray-200' : 'bg-transparent text-white/20 cursor-not-allowed'}`}>
-                        <Send size={18} />
+                        onClick={handleSelectFolder}
+                        disabled={disabled}
+                        className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${workspacePath
+                            ? 'bg-[#00a896]/20 text-[#00a896] hover:bg-[#00a896]/30'
+                            : 'bg-transparent text-white/40 hover:text-white/60 hover:bg-white/5'
+                            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        title={workspacePath ? `Workspace: ${workspacePath}` : 'Select workspace folder'}
+                    >
+                        <Folder size={18} />
                     </button>
-                )}
+
+                    {/* Right Button: Send OR Stop Generation */}
+                    {disabled && onAbort ? (
+                        <button onClick={onAbort} className="p-2 mb-[1px] rounded-lg transition-all bg-red-500/20 hover:bg-red-500/30 text-red-400 h-[44px] w-[36px] flex items-center justify-center" title="Stop Generation">
+                            <Square size={18} className="fill-current" />
+                        </button>
+                    ) : (
+                        <button
+                            onClick={handleTextSubmit}
+                            disabled={disabled || (!textInput.trim() && attachments.length === 0)}
+                            data-testid="send-button"
+                            className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${(textInput.trim() || attachments.length > 0) && !disabled ? 'bg-white text-black hover:bg-gray-200' : 'bg-transparent text-white/20 cursor-not-allowed'}`}>
+                            <Send size={18} />
+                        </button>
+                    )}
+                </div>
             </div>
         </div>
     )

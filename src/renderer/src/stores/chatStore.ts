@@ -14,6 +14,7 @@ export interface Message {
     timestamp: number
     toolCalls?: ToolCall[]
     actions?: MessageAction[]
+    attachments?: { name: string; path: string; type: string }[]
 }
 
 export interface ToolCall {
