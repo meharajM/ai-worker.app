@@ -94,6 +94,14 @@ const DEFAULT_MCP_SERVERS = [
         command: 'internal-filesystem',
         args: [],
         autoConnect: true
+    },
+    {
+        name: 'markitdown',
+        description: 'MarkItDown - Convert documents (PDF, Word, Excel, images, audio) to Markdown',
+        type: 'stdio',
+        command: 'uvx',
+        args: ['markitdown_mcp_server'],
+        autoConnect: false // Don't auto-connect since it requires Python/uvx
     }
 ]
 
