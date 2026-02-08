@@ -109,7 +109,19 @@ function createWindow(): void {
     }
 }
 
-app.whenReady().then(() => {
+import { DependencyService } from './services/DependencyService'
+
+app.whenReady().then(async () => {
+    // Check dependencies on startup
+    const depService = DependencyService.getInstance()
+    const deps = await depService.checkDependencies()
+    const missing = deps.filter(d => !d.installed && d.required)
+    
+    if (missing.length > 0) {
+        // Run this slightly delayed so the main window has a chance to appear (or use dialog directly)
+        depService.showMissingDependencyDialog(missing)
+    }
+
     electronApp.setAppUserModelId('com.aiworker.app')
 
     // Verify environment and paths
