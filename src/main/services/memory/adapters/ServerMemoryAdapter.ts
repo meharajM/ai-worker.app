@@ -67,7 +67,7 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
       await this.client.connect(transport)
 
       console.log(`[ServerMemoryAdapter] Connected to server-memory, storage: ${this.storagePath}`)
-      
+
       // Load existing entities into cache for fast access
       await this.loadCache()
     } catch (error) {
@@ -131,21 +131,21 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
     // result.result is CallToolResult.content (Array<TextContent | ImageContent>)
     const content = result.result
     if (!content || !Array.isArray(content) || content.length === 0) {
-         // It might be that server-memory returns empty list if secret redaction happened internally? 
-         // But here we are just parsing the output.
-         throw new Error('No content returned from create_entities')
+      // It might be that server-memory returns empty list if secret redaction happened internally? 
+      // But here we are just parsing the output.
+      throw new Error('No content returned from create_entities')
     }
 
     const textContent = content[0].text
     if (!textContent) {
-        throw new Error('No text content in create_entities response')
+      throw new Error('No text content in create_entities response')
     }
 
     let createdEntities: any[]
     try {
-        createdEntities = JSON.parse(textContent)
+      createdEntities = JSON.parse(textContent)
     } catch (e) {
-        throw new Error(`Failed to parse create_entities response: ${textContent}`)
+      throw new Error(`Failed to parse create_entities response: ${textContent}`)
     }
 
     const entityData = createdEntities?.[0]
@@ -254,34 +254,34 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
     // Parse MCP content
     const content = result.result
     if (!content || !Array.isArray(content) || content.length === 0) {
-         // Return empty if no content
-         return []
+      // Return empty if no content
+      return []
     }
 
     const textContent = content[0].text // Assuming first content block is the result text
     if (!textContent) {
-        return []
+      return []
     }
 
     let nodes: any[] = []
     try {
-        const parsed = JSON.parse(textContent)
-        // Handle both direct array and { nodes: [...] } object
-        if (Array.isArray(parsed)) {
-            nodes = parsed
-        } else if (parsed && typeof parsed === 'object') {
-            if (Array.isArray(parsed.nodes)) {
-                nodes = parsed.nodes
-            } else if (Array.isArray(parsed.entities)) {
-                nodes = parsed.entities
-            } else {
-                console.warn(`[ServerMemoryAdapter] Unexpected search response structure:`, parsed)
-            }
+      const parsed = JSON.parse(textContent)
+      // Handle both direct array and { nodes: [...] } object
+      if (Array.isArray(parsed)) {
+        nodes = parsed
+      } else if (parsed && typeof parsed === 'object') {
+        if (Array.isArray(parsed.nodes)) {
+          nodes = parsed.nodes
+        } else if (Array.isArray(parsed.entities)) {
+          nodes = parsed.entities
+        } else {
+          console.warn(`[ServerMemoryAdapter] Unexpected search response structure:`, parsed)
         }
+      }
     } catch (e) {
-        // If content isn't JSON, it might be an issue or just empty
-        console.warn(`[ServerMemoryAdapter] Failed to parse search response: ${textContent}`)
-        return []
+      // If content isn't JSON, it might be an issue or just empty
+      console.warn(`[ServerMemoryAdapter] Failed to parse search response: ${textContent}`)
+      return []
     }
 
     let entities = nodes.map((node: any) =>
@@ -486,8 +486,6 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
       return { result: null, error: error.message }
     }
   }
-
-  // --- Helper Methods ---
 
   private ensureInitialized(): void {
     if (!this.client) {

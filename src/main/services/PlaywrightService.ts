@@ -26,6 +26,7 @@ export class PlaywrightService {
     // Browser instance is managed through the context for persistent contexts
     private context: BrowserContext | null = null
     private page: Page | null = null
+    private tabRegistry = new Map<string, Page>()
     private store: Store<Record<string, unknown>>
 
     private constructor() {
@@ -232,6 +233,21 @@ export class PlaywrightService {
                     this.page = await this.context.newPage()
                 }
 
+                // SECURITY: Ensure every page we use is in the tabRegistry
+                let existingId: string | undefined
+                for (const [id, p] of this.tabRegistry.entries()) {
+                    if (p === this.page) {
+                        existingId = id
+                        break
+                    }
+                }
+
+                if (!existingId) {
+                    const newId = `main-${Math.random().toString(36).substring(2, 6)}`
+                    this.tabRegistry.set(newId, this.page)
+                    console.log(`[PlaywrightService] Registered ${newId} for active page`)
+                }
+
                 // Re-apply settings
                 const settings = ((this.store as any).get?.('mcpPlaywright') || {}) as PlaywrightSettings
                 if (settings.blockAds !== false) {
@@ -285,21 +301,20 @@ export class PlaywrightService {
     }
 
     private async getPage(args: any): Promise<Page> {
-        // If tabId is explicitly provided, use key-based access
-        if (typeof args.tabId === 'number') {
-            if (!this.context) await this.ensureBrowser();
-            if (!this.context) throw new Error('Browser context not initialized');
-
-            const pages = this.context.pages();
-            if (args.tabId >= 0 && args.tabId < pages.length) {
-                const targetPage = pages[args.tabId];
-                if (targetPage.isClosed()) throw new Error(`Tab ${args.tabId} is closed`);
-                return targetPage;
+        // Only use stable string ID in registry
+        if (typeof args.tabId === 'string') {
+            const page = this.tabRegistry.get(args.tabId);
+            if (page) {
+                if (page.isClosed()) {
+                    this.tabRegistry.delete(args.tabId);
+                    throw new Error(`Tab ${args.tabId} is closed`);
+                }
+                return page;
             }
-            throw new Error(`Tab index ${args.tabId} not found (Open tabs: ${pages.length})`);
+            throw new Error(`Tab ID ${args.tabId} not found in registry`);
         }
 
-        // Fallback to default "active" page logic
+        // Default to active page
         return this.ensurePage();
     }
 
@@ -308,6 +323,7 @@ export class PlaywrightService {
             await this.context.close()
             this.context = null
             this.page = null
+            this.tabRegistry.clear()
         }
     }
 
@@ -320,7 +336,8 @@ export class PlaywrightService {
                     inputSchema: {
                         type: 'object',
                         properties: {
-                            url: { type: 'string', description: 'Full URL including https://' }
+                            url: { type: 'string', description: 'Full URL including https://' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['url']
                     }
@@ -331,7 +348,8 @@ export class PlaywrightService {
                     inputSchema: {
                         type: 'object',
                         properties: {
-                            fullPage: { type: 'boolean', description: 'true=capture entire scrollable page, false=visible viewport only' }
+                            fullPage: { type: 'boolean', description: 'true=capture entire scrollable page, false=visible viewport only' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         }
                     }
                 },
@@ -341,7 +359,8 @@ export class PlaywrightService {
                     inputSchema: {
                         type: 'object',
                         properties: {
-                            selector: { type: 'string', description: 'CSS selector like #id, .class, or tag[attr="value"]' }
+                            selector: { type: 'string', description: 'CSS selector like #id, .class, or tag[attr="value"]' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['selector']
                     }
@@ -353,7 +372,8 @@ export class PlaywrightService {
                         type: 'object',
                         properties: {
                             selector: { type: 'string', description: 'CSS selector of the input field' },
-                            value: { type: 'string', description: 'Text to enter' }
+                            value: { type: 'string', description: 'Text to enter' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['selector', 'value']
                     }
@@ -364,7 +384,8 @@ export class PlaywrightService {
                     inputSchema: {
                         type: 'object',
                         properties: {
-                            selector: { type: 'string', description: 'CSS selector of element to hover' }
+                            selector: { type: 'string', description: 'CSS selector of element to hover' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['selector']
                     }
@@ -375,7 +396,8 @@ export class PlaywrightService {
                     inputSchema: {
                         type: 'object',
                         properties: {
-                            key: { type: 'string', description: 'Key name: Enter, Escape, Tab, Space, ArrowDown, etc.' }
+                            key: { type: 'string', description: 'Key name: Enter, Escape, Tab, Space, ArrowDown, etc.' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['key']
                     }
@@ -412,7 +434,8 @@ export class PlaywrightService {
                             mode: { type: 'string', enum: ['fast', 'full', 'vision'], description: 'fast=elements only (fastest, lowest tokens), full=elements+DOM tree, vision=screenshot+numbered elements' },
                             screenshot: { type: 'boolean', description: 'Force include screenshot (auto in vision mode)' },
                             tree: { type: 'boolean', description: 'Force include DOM tree (auto in full mode)' },
-                            highlight: { type: 'boolean', description: 'Draw numbered boxes on interactive elements in screenshot' }
+                            highlight: { type: 'boolean', description: 'Draw numbered boxes on interactive elements in screenshot' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         }
                     }
                 },
@@ -423,7 +446,8 @@ export class PlaywrightService {
                         type: 'object',
                         properties: {
                             limit: { type: 'number', description: 'Max elements to return (default: 50, use lower for speed)' },
-                            viewport_only: { type: 'boolean', description: 'Only visible elements (default: true)' }
+                            viewport_only: { type: 'boolean', description: 'Only visible elements (default: true)' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         }
                     }
                 },
@@ -432,7 +456,9 @@ export class PlaywrightService {
                     description: 'EXTRACTION: Get all readable text from the page. Use to read articles, extract information, or understand page content. Returns title + body text.',
                     inputSchema: {
                         type: 'object',
-                        properties: {}
+                        properties: {
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
+                        }
                     }
                 },
                 {
@@ -442,7 +468,8 @@ export class PlaywrightService {
                         type: 'object',
                         properties: {
                             selector: { type: 'string', description: 'CSS selector to wait for' },
-                            timeout: { type: 'number', description: 'Max wait time in ms (default: 5000)' }
+                            timeout: { type: 'number', description: 'Max wait time in ms (default: 5000)' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['selector']
                     }
@@ -455,7 +482,8 @@ export class PlaywrightService {
                         properties: {
                             selector: { type: 'string', description: 'CSS selector of input field' },
                             text: { type: 'string', description: 'Text to type' },
-                            delay: { type: 'number', description: 'Delay between keys in ms (default: 50)' }
+                            delay: { type: 'number', description: 'Delay between keys in ms (default: 50)' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['selector', 'text']
                     }
@@ -467,7 +495,8 @@ export class PlaywrightService {
                         type: 'object',
                         properties: {
                             selector: { type: 'string', description: 'CSS selector of <select> element' },
-                            value: { type: 'string', description: 'Option value attribute OR visible text label' }
+                            value: { type: 'string', description: 'Option value attribute OR visible text label' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['selector', 'value']
                     }
@@ -475,7 +504,12 @@ export class PlaywrightService {
                 {
                     name: 'go_back',
                     description: 'NAVIGATION: Click browser back button. Use to return to previous page after viewing details or search results.',
-                    inputSchema: { type: 'object', properties: {} }
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
+                        }
+                    }
                 },
                 {
                     name: 'go_forward',
@@ -494,23 +528,28 @@ export class PlaywrightService {
                 },
                 {
                     name: 'switch_tab',
-                    description: 'TABS: Switch focus to a different tab. Use get_tabs first to see available tabs and their indices.',
+                    description: 'TABS: Switch focus to a different tab. Use get_tabs first to see available tabIds.',
                     inputSchema: {
                         type: 'object',
                         properties: {
-                            index: { type: 'number', description: 'Tab index from get_tabs (0 = first tab)' }
+                            tabId: { type: 'string', description: 'Stable string tabId from get_tabs' }
                         },
-                        required: ['index']
+                        required: ['tabId']
                     }
                 },
                 {
                     name: 'close_tab',
                     description: 'TABS: Close the current tab. Automatically switches to another open tab. Cannot close the last remaining tab.',
-                    inputSchema: { type: 'object', properties: {} }
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            tabId: { type: 'string', description: 'Stable tab ID to close (optional - defaults to current)' }
+                        }
+                    }
                 },
                 {
                     name: 'get_tabs',
-                    description: 'TABS: List all open tabs with their index, title, and URL. Use before switch_tab to find the right tab.',
+                    description: 'TABS: List all open tabs with their tabId, title, and URL. Use before switch_tab to find the right tab.',
                     inputSchema: { type: 'object', properties: {} }
                 },
                 {
@@ -521,7 +560,8 @@ export class PlaywrightService {
                         properties: {
                             text: { type: 'string', description: 'Visible text on the element (e.g., "Sign In", "Add to Cart")' },
                             exact: { type: 'boolean', description: 'true=exact match, false=partial match (default)' },
-                            tag: { type: 'string', description: 'Limit to tag type: button, a, div, span, etc.' }
+                            tag: { type: 'string', description: 'Limit to tag type: button, a, div, span, etc.' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['text']
                     }
@@ -534,7 +574,8 @@ export class PlaywrightService {
                         properties: {
                             type: { type: 'string', enum: ['table', 'list', 'custom'], description: 'table=HTML table, list=ul/ol items, custom=define your own fields' },
                             selector: { type: 'string', description: 'CSS selector of container (optional for table/list)' },
-                            fields: { type: 'object', description: 'For custom type: {"fieldName": "CSS selector", ...}' }
+                            fields: { type: 'object', description: 'For custom type: {"fieldName": "CSS selector", ...}' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['type']
                     }
@@ -546,7 +587,8 @@ export class PlaywrightService {
                         type: 'object',
                         properties: {
                             selector: { type: 'string', description: 'CSS selector of file input element' },
-                            filePath: { type: 'string', description: 'Absolute path to file on disk' }
+                            filePath: { type: 'string', description: 'Absolute path to file on disk' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['selector', 'filePath']
                     }
@@ -554,7 +596,12 @@ export class PlaywrightService {
                 {
                     name: 'get_cookies',
                     description: 'SESSION: Get all cookies for the current domain. Use to check login state, session tokens, or debug authentication issues.',
-                    inputSchema: { type: 'object', properties: {} }
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
+                        }
+                    }
                 },
                 {
                     name: 'set_cookie',
@@ -565,7 +612,8 @@ export class PlaywrightService {
                             name: { type: 'string', description: 'Cookie name' },
                             value: { type: 'string', description: 'Cookie value' },
                             domain: { type: 'string', description: 'Domain (defaults to current site)' },
-                            path: { type: 'string', description: 'Path scope (default: /)' }
+                            path: { type: 'string', description: 'Path scope (default: /)' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['name', 'value']
                     }
@@ -577,7 +625,8 @@ export class PlaywrightService {
                         type: 'object',
                         properties: {
                             action: { type: 'string', enum: ['accept', 'dismiss'], description: 'accept=click OK, dismiss=click Cancel' },
-                            promptText: { type: 'string', description: 'Text to enter if dialog is a prompt()' }
+                            promptText: { type: 'string', description: 'Text to enter if dialog is a prompt()' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['action']
                     }
@@ -588,7 +637,8 @@ export class PlaywrightService {
                     inputSchema: {
                         type: 'object',
                         properties: {
-                            selector: { type: 'string', description: 'CSS selector of iframe (omit to return to main frame)' }
+                            selector: { type: 'string', description: 'CSS selector of iframe (omit to return to main frame)' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         }
                     }
                 },
@@ -599,7 +649,8 @@ export class PlaywrightService {
                         type: 'object',
                         properties: {
                             xpath: { type: 'string', description: 'XPath expression starting with //' },
-                            action: { type: 'string', enum: ['info', 'click', 'text'], description: 'info=element details, click=click first, text=get text content' }
+                            action: { type: 'string', enum: ['info', 'click', 'text'], description: 'info=element details, click=click first, text=get text content' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['xpath']
                     }
@@ -611,7 +662,8 @@ export class PlaywrightService {
                         type: 'object',
                         properties: {
                             sourceSelector: { type: 'string', description: 'CSS selector of element to drag' },
-                            targetSelector: { type: 'string', description: 'CSS selector of drop destination' }
+                            targetSelector: { type: 'string', description: 'CSS selector of drop destination' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['sourceSelector', 'targetSelector']
                     }
@@ -623,7 +675,8 @@ export class PlaywrightService {
                         type: 'object',
                         properties: {
                             selector: { type: 'string', description: 'CSS selector of element' },
-                            property: { type: 'string', description: 'exists, visible, text, value, href, src, checked, disabled, or any attribute name' }
+                            property: { type: 'string', description: 'exists, visible, text, value, href, src, checked, disabled, or any attribute name' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['selector']
                     }
@@ -635,7 +688,8 @@ export class PlaywrightService {
                         type: 'object',
                         properties: {
                             width: { type: 'number', description: 'Width in pixels' },
-                            height: { type: 'number', description: 'Height in pixels' }
+                            height: { type: 'number', description: 'Height in pixels' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         },
                         required: ['width', 'height']
                     }
@@ -646,7 +700,8 @@ export class PlaywrightService {
                     inputSchema: {
                         type: 'object',
                         properties: {
-                            timeout: { type: 'number', description: 'Max wait in ms (default: 30000)' }
+                            timeout: { type: 'number', description: 'Max wait in ms (default: 30000)' },
+                            tabId: { type: 'string', description: 'Stable tab ID to use (optional)' }
                         }
                     }
                 }
@@ -1075,31 +1130,35 @@ export class PlaywrightService {
                 case 'new_tab':
                     if (!this.context) throw new Error('No browser context')
                     const newPage = await this.context.newPage()
+                    const tabId = Math.random().toString(36).substring(2, 15) // Stable string ID
+                    this.tabRegistry.set(tabId, newPage)
+
                     if (safeArgs.url) {
                         await newPage.goto(safeArgs.url, { waitUntil: 'domcontentloaded' })
                     }
                     this.page = newPage // Switch to new tab
-                    const newPages = this.context.pages()
-                    const newTabIndex = newPages.indexOf(newPage)
-                    return { result: { message: `Opened new tab${safeArgs.url ? ` at ${safeArgs.url}` : ''}`, tabId: newTabIndex } }
+                    return { result: { message: `Opened new tab${safeArgs.url ? ` at ${safeArgs.url}` : ''}`, tabId } }
 
-                case 'switch_tab':
+                case 'switch_tab': {
                     if (!this.context) throw new Error('No browser context')
-                    const pages = this.context.pages()
-                    if (safeArgs.index < 0 || safeArgs.index >= pages.length) {
-                        return { result: null, error: `Tab index ${safeArgs.index} out of range (0-${pages.length - 1})` }
+
+                    if (safeArgs.tabId === undefined) {
+                        return { result: null, error: 'tabId is required for switch_tab' }
                     }
-                    this.page = pages[safeArgs.index]
-                    await this.page.bringToFront()
-                    return { result: `Switched to tab ${safeArgs.index}: ${await this.page.title()}` }
+
+                    const targetPage = await this.getPage(safeArgs)
+                    this.page = targetPage
+                    await targetPage.bringToFront()
+                    return { result: `Switched to tab ${safeArgs.tabId}: ${await targetPage.title()}` }
+                }
 
                 case 'close_tab':
                     if (!this.context) throw new Error('No browser context')
                     const pageToClose = await this.getPage(safeArgs)
 
-                    const openPages = this.context.pages().filter(p => !p.isClosed())
-                    if (openPages.length <= 1) {
-                        return { result: null, error: 'Cannot close the last tab' }
+                    // Clean up registry if using stable ID
+                    if (typeof safeArgs.tabId === 'string') {
+                        this.tabRegistry.delete(safeArgs.tabId)
                     }
 
                     await pageToClose.close()
@@ -1112,17 +1171,36 @@ export class PlaywrightService {
 
                     return { result: 'Closed tab' }
 
-                case 'get_tabs':
+                case 'get_tabs': {
                     if (!this.context) throw new Error('No browser context')
+                    const pages = this.context.pages()
                     const tabList = await Promise.all(
-                        this.context.pages().map(async (p, i) => ({
-                            index: i,
-                            title: await p.title().catch(() => 'Unknown'),
-                            url: p.url(),
-                            active: p === this.page
-                        }))
+                        pages.map(async (p) => {
+                            // 1. Find string ID if it exists in registry
+                            let stringId: string | undefined
+                            for (const [id, page] of this.tabRegistry.entries()) {
+                                if (page === p) {
+                                    stringId = id
+                                    break
+                                }
+                            }
+
+                            // 2. Auto-register if missing (system-boot or manual openings)
+                            if (!stringId) {
+                                stringId = `tab-${Math.random().toString(36).substring(2, 6)}`;
+                                this.tabRegistry.set(stringId, p);
+                            }
+
+                            return {
+                                tabId: stringId, // Guaranteed stable ID
+                                title: await p.title().catch(() => 'Unknown'),
+                                url: p.url(),
+                                active: p === this.page
+                            }
+                        })
                     )
                     return { result: { tabs: tabList } }
+                }
 
                 case 'click_text':
                     const textFindError = requireParam('text')
@@ -1147,7 +1225,7 @@ export class PlaywrightService {
                     const extractSelector = safeArgs.selector
 
                     // ERROR: Empty results usually mean bad selector
-                    const validateResults = (data: any, type: string) => {
+                    const validateResults = (data: any) => {
                         let isEmpty = false;
                         if (Array.isArray(data)) {
                             isEmpty = data.length === 0;
@@ -1181,7 +1259,7 @@ export class PlaywrightService {
                             return rows
                         }, extractSelector)
 
-                        try { validateResults(tableData, 'table'); } catch (e) { return { result: null, error: (e as Error).message }; }
+                        try { validateResults(tableData); } catch (e) { return { result: null, error: (e as Error).message }; }
                         return { result: { type: 'table', data: tableData } }
 
                     } else if (extractType === 'list') {
@@ -1196,7 +1274,7 @@ export class PlaywrightService {
                             return items
                         }, extractSelector)
 
-                        try { validateResults(listData, 'list'); } catch (e) { return { result: null, error: (e as Error).message }; }
+                        try { validateResults(listData); } catch (e) { return { result: null, error: (e as Error).message }; }
                         return { result: { type: 'list', data: listData } }
 
                     } else if (extractType === 'custom' && safeArgs.fields) {
@@ -1209,7 +1287,7 @@ export class PlaywrightService {
                             return result
                         }, safeArgs.fields)
 
-                        try { validateResults(customData, 'custom'); } catch (e) { return { result: null, error: (e as Error).message }; }
+                        try { validateResults(customData); } catch (e) { return { result: null, error: (e as Error).message }; }
                         return { result: { type: 'custom', data: customData } }
                     }
                     return { result: null, error: 'Invalid extract_data type' }

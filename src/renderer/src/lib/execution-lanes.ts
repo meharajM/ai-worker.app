@@ -94,7 +94,7 @@ export class LaneManager {
     /**
      * Get or create a dedicated lane for a specific browser tab.
      */
-    private getTabLane(tabId: number): LaneQueue {
+    private getTabLane(tabId: number | string): LaneQueue {
         const laneId = `TAB_${tabId}`;
         if (!this.lanes.has(laneId)) {
             // Tab lanes are Serial (1 op per tab)
@@ -107,7 +107,7 @@ export class LaneManager {
     /**
      * Routes a tool call to the appropriate execution lane.
      */
-    getLane(toolName: string, context: { tabId?: number } = {}): LaneQueue {
+    getLane(toolName: string, context: { tabId?: number | string } = {}): LaneQueue {
         // 1. Browser Tools (including MCP Playwright tools)
         const isBrowserTool = STATEFUL_BROWSER_TOOLS.includes(toolName) ||
             toolName.startsWith('playwright_') ||

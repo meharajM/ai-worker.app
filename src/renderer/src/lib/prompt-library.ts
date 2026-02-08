@@ -213,12 +213,35 @@ Your current request contains multiple independent entities or batch operations:
 2. **Efficient Discovery**:
    - **Hierarchy**: Use directory listing to understand structure before deep diving.
    - **Depth**: Explore subdirectories only when relevant to the current sub-task.
-   - **Search**: Use grep or search tools for specific patterns instead of reading every file.
-3. **Organization**:
-   - **Consistent Naming**: Use project-consistent naming conventions (e.g., kebab-case).
-   - **Workspace Context**: All operations are scoped to the active workspace. Do NOT attempt to escape.
-4. **State Management**:
    - Maintain awareness of the file structure you've explored to minimize redundant IO calls.
+`.trim(),
+
+   // Orchestration & Planning Turn
+   ORCHESTRATION_PLANNER: `
+# ORCHESTRATION PLANNING PROTOCOL
+You are a high-level planner for an AI agent worker. Your goal is to break down a complex user request into a sequence of CONCRETE, actionable steps.
+
+## Planning Rules
+1. **Cluster Independence**: Group steps that can be performed simultaneously into the same "parallel_cluster" (e.g., searching for different topics).
+2. **Dependency Awareness**: Steps that depend on previous results must NOT have a cluster ID or must have a unique one that follows alphabetical/numerical order.
+3. **Actionable Descriptions**: Use specific verbs and targets (e.g., "Extract product price from amazon.com", "Save findings to report.md").
+4. **No Vague Steps**: Avoid "Understand the task" or "Plan next steps". Every step must use at least one tool.
+
+## Format
+Return a JSON object with a "steps" array.
+Each step MUST have:
+- "id": number
+- "description": string
+- "parallel_cluster": string | null (use the same ID for independent steps, null for strictly sequential)
+
+Example:
+{
+  "steps": [
+    { "id": 1, "description": "Search for Apple stock price", "parallel_cluster": "price_check" },
+    { "id": 2, "description": "Search for Microsoft stock price", "parallel_cluster": "price_check" },
+    { "id": 3, "description": "Compare results and summarize in a table", "parallel_cluster": null }
+  ]
+}
 `.trim()
 };
 

@@ -1,53 +1,16 @@
 /**
- * Task Decomposer Module
+ * Task Decomposer Module (Simplified)
  * 
- * Analyzes user requests to determine the optimal decomposition strategy:
- * - Multiple websites/apps → Parallel sub-agents (1 per context)
- * - Single context, 3+ actions → Sub-agent to protect main context
- * - Single context, 1-2 actions → Direct execution
+ * Analyzes user requests to determine if they are simple or complex.
+ * Complex tasks are handed off to the Orchestrator for structured planning.
  */
 
 export interface TaskDecomposition {
-  type: 'single_context' | 'multi_context';
-  contexts: string[];           // URLs or app names detected
+  type: 'simple' | 'complex';
   estimatedActions: number;     // Estimated number of actions needed
   shouldFork: boolean;          // Whether to spawn sub-agents
   forkReason?: string;          // Explanation for the decision
-  forkStrategy?: 'parallel' | 'sequential'; // How to execute sub-agents
 }
-
-// Common website patterns to detect
-const WEBSITE_PATTERNS = [
-  /amazon\.com/i,
-  /ebay\.com/i,
-  /google\.com/i,
-  /youtube\.com/i,
-  /facebook\.com/i,
-  /twitter\.com|x\.com/i,
-  /linkedin\.com/i,
-  /instagram\.com/i,
-  /reddit\.com/i,
-  /github\.com/i,
-  /netflix\.com/i,
-  /spotify\.com/i,
-  /bestbuy\.com/i,
-  /walmart\.com/i,
-  /target\.com/i,
-  /newegg\.com/i,
-  /booking\.com/i,
-  /airbnb\.com/i,
-  /expedia\.com/i,
-  /kayak\.com/i,
-  /tripadvisor\.com/i,
-  /yelp\.com/i,
-  /zillow\.com/i,
-  /craigslist\.org/i,
-  /indeed\.com/i,
-  /glassdoor\.com/i,
-];
-
-// Generic URL pattern
-const URL_PATTERN = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9-]+(?:\.[a-zA-Z]{2,})+)/gi;
 
 // Action keywords that indicate browser/UI actions
 const ACTION_KEYWORDS = [
@@ -73,55 +36,17 @@ const ACTION_KEYWORDS = [
   'check', 'verify', 'confirm', 'validate',
 ];
 
-// Multi-step task indicators
+// Multi-step task indicators (sequential)
 const MULTI_STEP_INDICATORS = [
   'and then', 'after that', 'next', 'finally', 'then',
   'step 1', 'step 2', 'first', 'second', 'third',
-  'compare', 'multiple', 'several', 'all', 'each',
 ];
 
-/**
- * Extract unique website/domain mentions from text
- */
-function extractWebsites(text: string): string[] {
-  const websites = new Set<string>();
-
-  // Check for known website patterns
-  for (const pattern of WEBSITE_PATTERNS) {
-    const match = text.match(pattern);
-    if (match) {
-      websites.add(match[0].toLowerCase().replace('www.', ''));
-    }
-  }
-
-  // Also check for generic URLs
-  const urlMatches = text.match(URL_PATTERN);
-  if (urlMatches) {
-    for (const url of urlMatches) {
-      const domain = url.replace(/https?:\/\//i, '').replace('www.', '').split('/')[0];
-      websites.add(domain.toLowerCase());
-    }
-  }
-
-  // Check for website mentions without full URLs (e.g., "on Amazon", "at BestBuy")
-  const textLower = text.toLowerCase();
-  const siteKeywords = [
-    'amazon', 'ebay', 'google', 'youtube', 'facebook', 'twitter',
-    'linkedin', 'instagram', 'reddit', 'github', 'netflix', 'spotify',
-    'bestbuy', 'best buy', 'walmart', 'target', 'newegg', 'booking',
-    'airbnb', 'expedia', 'kayak', 'tripadvisor', 'yelp', 'zillow',
-    'craigslist', 'indeed', 'glassdoor'
-  ];
-
-  for (const site of siteKeywords) {
-    if (textLower.includes(site)) {
-      // Normalize "best buy" to "bestbuy"
-      websites.add(site.replace(' ', ''));
-    }
-  }
-
-  return Array.from(websites);
-}
+// Parallel task indicators (manual request for parallelism)
+const PARALLEL_INDICATORS = [
+  'simultaneously', 'concurrently', 'at the same time', 'parallel',
+  'both', 'all of', 'simultaneous', 'in parallel'
+];
 
 /**
  * Count estimated actions in a request
@@ -131,7 +56,6 @@ function countActions(text: string): number {
   let actionCount = 0;
 
   for (const keyword of ACTION_KEYWORDS) {
-    // Count occurrences (but not duplicates in same phrase)
     const regex = new RegExp(`\\b${keyword}\\b`, 'gi');
     const matches = textLower.match(regex);
     if (matches) {
@@ -139,75 +63,54 @@ function countActions(text: string): number {
     }
   }
 
-  // Check for multi-step indicators
+  // Count sequential multi-step indicators
   for (const indicator of MULTI_STEP_INDICATORS) {
     if (textLower.includes(indicator)) {
-      actionCount += 1; // Add bonus for multi-step language
+      actionCount += 1;
     }
   }
 
-  // Minimum of 1 action if any website is mentioned
+  // Count parallel indicators as "complex" but distinct logic
+  for (const indicator of PARALLEL_INDICATORS) {
+    if (textLower.includes(indicator)) {
+      actionCount += 2; // Parallel tasks usually involve multiple steps
+    }
+  }
+
   return Math.max(actionCount, 1);
 }
 
 /**
- * Main function to analyze a task and determine decomposition strategy
+ * Analyze task and decide if it needs decomposition
  */
-export function analyzeTaskForDecomposition(
-  userRequest: string,
-  currentUrl?: string
-): TaskDecomposition {
-  const websites = extractWebsites(userRequest);
-  const estimatedActions = countActions(userRequest);
+export function analyzeTaskForDecomposition(text: string): TaskDecomposition {
+  const actions = countActions(text);
+  const textLower = text.toLowerCase();
 
+  // Complexity indicators:
+  // 1. High action count
+  // 2. Presence of parallel indicators (and, both, all)
+  // 3. Presence of list patterns (A, B, and C)
+  const hasParallelKeywords = PARALLEL_INDICATORS.some(p => textLower.includes(p));
+  const hasListPattern = (text.match(/,/g) || []).length >= 1 && textLower.includes('and');
+  const hasConjunction = textLower.includes(' and ') && actions >= 1;
 
+  const isComplex = actions >= 3 || hasParallelKeywords || hasListPattern || (actions >= 2 && hasConjunction);
 
-  // Decision logic
-  if (websites.length > 1) {
-    // Multiple websites = parallel sub-agents
+  if (isComplex) {
     return {
-      type: 'multi_context',
-      contexts: websites,
-      estimatedActions,
+      type: 'complex',
+      estimatedActions: actions,
       shouldFork: true,
-      forkReason: `Task involves ${websites.length} websites: ${websites.join(', ')}`,
-      forkStrategy: 'parallel'
+      forkReason: `Task detected as complex (${actions} actions, keywords: ${hasParallelKeywords}, list: ${hasListPattern}).`
     };
   }
 
-  if (websites.length === 1 && estimatedActions >= 4) {
-    return {
-      type: 'single_context',
-      contexts: websites,
-      estimatedActions,
-      shouldFork: true,
-      forkReason: `Task involves ${estimatedActions} actions on ${websites[0]} - using sub-agent to protect context`,
-      forkStrategy: 'sequential'
-    };
-  }
-
-  // No website mentioned but many actions - still might benefit from orchestration       
-  const hasMultiStepLanguage = MULTI_STEP_INDICATORS.some(indicator =>
-    userRequest.toLowerCase().includes(indicator)
-  );
-  if (websites.length === 0 && estimatedActions >= 5 && hasMultiStepLanguage) {
-    return {
-      type: 'single_context',
-      contexts: ['current_page'],
-      estimatedActions,
-      shouldFork: true,
-      forkReason: `Complex multi-step task (~${estimatedActions} actions) - using sub-agent to protect context`,
-      forkStrategy: 'sequential'
-    };
-  }
-
-  // Simple task - direct execution
   return {
-    type: 'single_context',
-    contexts: websites.length > 0 ? websites : ['current_page'],
-    estimatedActions,
+    type: 'simple',
+    estimatedActions: actions,
     shouldFork: false,
-    forkReason: 'Simple task - direct execution'
+    forkReason: 'Task is simple and can be handled in a single context.'
   };
 }
 
@@ -216,19 +119,7 @@ export function analyzeTaskForDecomposition(
  */
 export function generateSubAgentInstruction(
   originalRequest: string,
-  targetContext: string,
-  allContexts: string[]
+  targetContext: string
 ): string {
-  // MINIMAL instruction - just target and goal
-  if (allContexts.length > 1) {
-    // Parallel comparison - focus on one site
-    return `On ${targetContext}: ${originalRequest}
-
-Return key findings only. End with "✓ Done".`;
-  }
-
-  // Single context
-  return `${originalRequest}
-
-Return brief result. End with "✓ Done".`;
+  return `Target: ${targetContext}. Goal: ${originalRequest}\n\nReturn brief result. End with "✓ Done".`;
 }

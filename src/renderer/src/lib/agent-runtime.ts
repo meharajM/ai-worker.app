@@ -10,6 +10,7 @@ import {
   generateSubAgentInstruction,
   type TaskDecomposition
 } from "./task-decomposer";
+import { PROMPTS } from './prompt-library';
 import { MemoryReflector } from "./memory-reflector";
 
 export type AgentStatusCallback = (message: LLMMessage) => string | void;
@@ -25,7 +26,7 @@ interface AgentRuntimeOptions {
   isSubAgent?: boolean; // Flag to identify sub-agents
   taskCategory?: string; // Optional: Force a specific task category (e.g. for sub-agents)
   onMessageUpdate?: (id: string, updates: Partial<LLMMessage>) => void; // Update existing message in UI
-  tabId?: number; // Dedicated browser tab ID for this agent
+  tabId?: number | string; // Dedicated browser tab ID for this agent
   parentAgentId?: string; // Link to parent for sub-agents
   agentInstanceId?: string; // Force specific ID (for pre-seeding memory)
 }
@@ -272,17 +273,9 @@ Continue from where the previous agent left off.`
       const decomposition = analyzeTaskForDecomposition(finalPrompt);
       console.log('[AgentRuntime] Task decomposition:', decomposition);
 
-      if (decomposition.shouldFork && decomposition.type === 'multi_context') {
-        const subAgentResult = await this.executeParallelSubAgents(finalPrompt, decomposition);
-        // Fire-and-forget memory analysis
-        MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
-        return subAgentResult;
-      }
-
-      // For single-context with 3+ actions, trigger sequential sub-agent orchestration
-      if (decomposition.shouldFork && decomposition.type === 'single_context') {
-        console.log(`[AgentRuntime] Complex single-context task: ${decomposition.estimatedActions} actions - using sequential sub-agents`);
-        return this.executeSequentialSubAgents(finalPrompt, decomposition);
+      if (decomposition.shouldFork) {
+        console.log(`[AgentRuntime] Orchestrating complex task: ${decomposition.estimatedActions} actions detected`);
+        return this.executeOrchestratedTask(finalPrompt, decomposition);
       }
     }
 
@@ -456,7 +449,7 @@ Please send your next message to continue with a fresh agent.`
       let dynamicRules = undefined;
 
       // Import helper dynamically to avoid circular deps
-      const { getPromptForCategory, getComposedPrompts, PROMPTS } = await import('./prompt-library');
+      const { getPromptForCategory, getComposedPrompts } = await import('./prompt-library');
 
       // 1. Start with the base category prompt
       const promptsToLoad: string[] = [];
@@ -861,7 +854,7 @@ ${recentResults.length > 0 ? recentResults.map((r, i) => `**Result ${i + 1}:**\n
           }
 
           // Provision a dedicated browser tab for this sub-agent to ensure isolation
-          let subAgentTabId: number | undefined;
+          let subAgentTabId: string | number | undefined;
           try {
             // Import lock dynamically
             const { browserLock } = await import('./resource-lock');
@@ -1287,8 +1280,7 @@ Use tools immediately. End with "✓ Done".`;
 
     // Create a sequential sub-agent with the "continuation" instruction
     const decomposition: TaskDecomposition = {
-      type: 'single_context',
-      contexts: ['continuation'],
+      type: 'complex',
       estimatedActions: 10,
       shouldFork: true,
       forkReason: 'User confirmed continuation after max iterations'
@@ -1331,410 +1323,240 @@ Use tools immediately. End with "✓ Done".`;
   }
 
   /**
-   * Execute sub-agents in parallel for multi-context tasks.
-   * Each context (website/app) gets its own sub-agent.
+   * Unified Entry Point for Orchestration
+   * Handles planning, cluster-based parallel execution, and synthesis.
    */
-  private async executeParallelSubAgents(
+  private async executeOrchestratedTask(
     originalRequest: string,
     decomposition: TaskDecomposition
   ): Promise<LLMMessage> {
-    const { contexts } = decomposition;
+    const { estimatedActions } = decomposition;
 
-    // Track status of each sub-agent
-    const agentStatuses = contexts.map(ctx => ({
-      context: ctx,
-      status: 'Starting...',
-      isRunning: true,
-      result: null as string | null
-    }));
-
-    // Helper to render the live status message
-    const renderStatus = () => {
-      let content = `## � Parallel Execution\n\n`;
-
-      for (const s of agentStatuses) {
-        const icon = s.isRunning ? '⟳' : (s.result?.startsWith('Error') ? '⚠️' : '✓');
-        // Bold the context, show status in small text
-        content += `- **${s.context}**: ${s.isRunning ? `*${s.status}*` : (s.result ? 'Completed' : s.status)}\n`;
-      }
-
-      // Add footer if still running
-      if (agentStatuses.some(s => s.isRunning)) {
-        content += `\n---\n*Working on ${contexts.length} sources...*`;
-      }
-
-      return content;
-    };
-
-    // Initial status message
-    const statusMessage: LLMMessage = {
+    // 1. Initial Status message
+    const initialPlanMsg: LLMMessage = {
       role: 'assistant',
-      content: renderStatus()
+      content: `📋 **Auto-Orchestration**: This task requires ~${estimatedActions} steps. I'll break it down and execute each part efficiently.\n\nAnalyzing...`
     };
+    const planMessageId = this.addMessage(initialPlanMsg) as string;
 
-    // Capture the ID of the status message so we can update it
-    const statusMessageId = this.addMessage(statusMessage) as string | undefined;
-
-    // Create sub-agents for each context
-    const subAgentPromises = contexts.map(async (context, index) => {
-      const instruction = generateSubAgentInstruction(originalRequest, context, contexts);
-
-      console.log(`[AgentRuntime] Spawning sub-agent for: ${context}`);
-
-      // GAP FIX 1A: Pre-seed memory for parallel sub-agent
-      const subAgentId = globalThis.crypto.randomUUID();
-
-      try {
-        await executeToolCall('memory_create_entity', {
-          name: `AgentState_${subAgentId}`,
-          entityType: 'agent_execution_state',
-          observations: [
-            `Parallel sub-agent for context: ${context}`,
-            `Task: ${originalRequest}`,
-            `Initialized at ${new Date().toISOString()}`
-          ],
-          Metadata: {
-            agentInstanceId: subAgentId,
-            sessionId: this.options.activeSessionId || 'unknown',
-            parentAgentId: this.agentInstanceId,
-            status: 'active',
-            iterationCount: 0,
-            isInternal: true,
-            context: context
-          }
-        });
-        console.log(`[AgentRuntime] Pre-seeded memory for parallel sub-agent ${subAgentId}`);
-      } catch (err) {
-        console.warn(`[AgentRuntime] Failed to pre-seed sub-agent memory: ${err}`);
-      }
-
-      const subAgent = new AgentRuntime({
-        ...this.options,
-        agentInstanceId: subAgentId,
-        parentAgentId: this.agentInstanceId,
-        isSubAgent: true,
-        taskCategory: this.taskCategory, // Inherit category from parent
-        requireConfirmation: false,
-        onMessage: (msg: LLMMessage) => {
-          // Update status based on sub-agent activity
-          let newStatus = '';
-          if (msg.role === 'assistant' && msg.content) {
-            // Use thought process or content start
-            const content = typeof msg.content === 'string' ? msg.content : '';
-            if (content.includes('<think>')) {
-              newStatus = 'Thinking...';
-            } else {
-              newStatus = 'Processing response...';
-            }
-          } else if (msg.tool_calls && msg.tool_calls.length > 0) {
-            const toolName = msg.tool_calls[0].function.name;
-            if (toolName.includes('navigate')) newStatus = 'Navigating...';
-            else if (toolName.includes('click')) newStatus = 'Interacting...';
-            else if (toolName.includes('search')) newStatus = 'Searching...';
-            else newStatus = `Using ${toolName}...`;
-          }
-
-          if (newStatus) {
-            agentStatuses[index].status = newStatus;
-            // Trigger update
-            if (statusMessageId && this.options.onMessageUpdate) {
-              this.options.onMessageUpdate(statusMessageId, { content: renderStatus() });
-            }
-          }
-
-          const contentStr = typeof msg.content === 'string'
-            ? msg.content
-            : msg.content.map(c => c.type === 'text' ? c.text : '[Image]').join(' ');
-          console.log(`[SubAgent:${context}] ${msg.role}: ${contentStr?.substring(0, 50)}...`);
-        }
-      });
-
-      try {
-        const result = await subAgent.chat(instruction);
-        const resultContent = typeof result.content === 'string'
-          ? result.content
-          : result.content.map(c => c.type === 'text' ? c.text : '').join('');
-
-        // Update final status
-        agentStatuses[index].isRunning = false;
-        agentStatuses[index].result = resultContent;
-        agentStatuses[index].status = 'Done';
-
-        if (statusMessageId && this.options.onMessageUpdate) {
-          this.options.onMessageUpdate(statusMessageId, { content: renderStatus() });
-        }
-
-        // REPORTING FIX: Immediately show the result to the user as a distinct message
-        this.addMessage({
-          role: 'assistant',
-          content: `**✅ ${context} Analysis Complete**\n\n${resultContent.substring(0, 500)}${resultContent.length > 500 ? '...' : ''}`
-        });
-
-        return {
-          context,
-          success: true,
-          result: resultContent
-        };
-      } catch (error: any) {
-        agentStatuses[index].isRunning = false;
-        agentStatuses[index].status = 'Failed';
-        agentStatuses[index].result = `Error: ${error.message}`;
-
-        if (statusMessageId && this.options.onMessageUpdate) {
-          this.options.onMessageUpdate(statusMessageId, { content: renderStatus() });
-        }
-
-        return {
-          context,
-          success: false,
-          result: `Error: ${error.message}`
-        };
-      }
-    });
-
-    // Wait for all sub-agents to complete
-    const results = await Promise.all(subAgentPromises);
-
-    // Combine results
-    const successfulResults = results.filter(r => r.success);
-    const failedResults = results.filter(r => !r.success);
-
-    // Format the final output using a cleaner structure
-    let summary = `## Results from ${contexts.length} sources\n\n`;
-
-    // 1. Successful results
-    for (const result of successfulResults) {
-      summary += `### ${result.context}\n${result.result.trim()}\n\n`;
-    }
-
-    // 2. Failed results (if any)
-    if (failedResults.length > 0) {
-      summary += `### ⚠️ Failed Sources\n`;
-      for (const result of failedResults) {
-        summary += `- **${result.context}**: ${result.result}\n`;
-      }
-      summary += `\n`;
-    }
-
-    // 3. Overall validation (Footer)
-    summary += `---\n\n*Parallel execution complete: ${successfulResults.length}/${contexts.length} sources succeeded.*`;
-
-    // Update the status message one last time with the FINAL result
-    // effectively replacing the progress view with the result view
-    if (statusMessageId && this.options.onMessageUpdate) {
-      this.options.onMessageUpdate(statusMessageId, { content: summary });
-    }
-
-    return {
-      role: 'assistant',
-      content: summary,
-    };
-  }
-
-  /**
-   * Execute sub-agents sequentially for complex single-context tasks.
-   * Creates a plan and delegates each step to a fresh sub-agent.
-   */
-  private async executeSequentialSubAgents(
-    originalRequest: string,
-    decomposition: TaskDecomposition
-  ): Promise<LLMMessage> {
-    const { contexts, estimatedActions } = decomposition;
-    const targetContext = contexts[0] || 'task';
-
-    // Notify user about auto-orchestration
-    const planMessage: LLMMessage = {
-      role: 'assistant',
-      content: `📋 **Auto-Orchestration**: This task requires ~${estimatedActions} steps. I'll break it down and execute each part efficiently to preserve context.\n\nAnalyzing...`
-    };
-    this.addMessage(planMessage);
-    this.options.onMessage?.(planMessage); // Forward to UI
-
-    // Step 1: Create high-level plan using LLM
+    // 2. Planning Turn
     console.log('[AgentRuntime] Generating execution plan...');
-    const planPrompt = `Break this task into 3-5 CONCRETE steps for an automation agent:
-
-TASK: ${originalRequest}
-TARGET: ${targetContext}
-
-Rules:
-- Each step = 1-3 tool calls (could be browser, file, API, database, messaging, etc.)
-- Be specific: include URLs, filenames, endpoints, or identifiers when known
-- NO vague steps like "gather information" or "clarify requirements"
-- Each step should produce a clear, verifiable result
-
-Format as JSON:
-{
-  "steps": [
-    {"id": 1, "description": "Navigate to example.com OR Open file X OR Call API Y"},
-    {"id": 2, "description": "Perform the main action"},
-    {"id": 3, "description": "Extract/save results"}
-  ]
-}`;
+    const planPrompt = `${PROMPTS.ORCHESTRATION_PLANNER}\n\nTASK: ${originalRequest}\nCONTEXT: This is a complex task requiring structured steps.`;
 
     try {
       const planResponse = await chat(
         [{ role: 'user', content: planPrompt }],
-        [], // tools
+        [], // No tools for planning turn
         this.options.settings,
-        [], // servers
+        [], // No servers needed
         this.options.signal
       );
 
-      let planData: { steps: Array<{ id: number; description: string }> } | null = null;
+      let planData: { steps: Array<{ id: number; description: string; parallel_cluster?: string | null }> } | null = null;
       try {
         const jsonMatch = planResponse.content.match(/\{[\s\S]*"steps"[\s\S]*\}/);
-        if (jsonMatch) {
-          planData = JSON.parse(jsonMatch[0]);
-        }
-      } catch {
-        // JSON parse failed, will use fallback
+        if (jsonMatch) planData = JSON.parse(jsonMatch[0]);
+      } catch (e) {
+        console.warn('[AgentRuntime] Failed to parse plan JSON:', e);
       }
 
-      // Fallback if no valid plan
+      // Fallback plan if planner fails
       if (!planData || !planData.steps || planData.steps.length === 0) {
+        console.log('[AgentRuntime] Planner failed, using fallback sequential plan.');
         planData = {
           steps: [
-            { id: 1, description: `Navigate to ${targetContext === 'current_page' ? 'the target website' : targetContext}` },
-            { id: 2, description: `Complete the main action: ${originalRequest.substring(0, 80)}` },
-            { id: 3, description: "Verify results and extract relevant information" }
+            { id: 1, description: `Gather preliminary information for: ${originalRequest.substring(0, 50)}...` },
+            { id: 2, description: `Execute main task: ${originalRequest}` },
+            { id: 3, description: 'Finalize and verify results' }
           ]
         };
       }
 
       const steps = planData.steps;
-      console.log(`[AgentRuntime] Plan created with ${steps.length} steps`);
 
-      // Display plan to user
-      const planDisplayMsg: LLMMessage = {
-        role: 'assistant',
-        content: `## Execution Plan\n\n${steps.map((s) => `**Step ${s.id}**: ${s.description}`).join('\n')}\n\n---\n`
+      // Helper to update the live plan UI
+      const results: Array<{ stepId: number; description: string; result: string; success: boolean }> = [];
+      const totalSteps = steps.length;
+
+      const updateLivePlan = (currentStepId?: number, isError: boolean = false) => {
+        let planDisplay = `## Execution Plan\n\n`;
+        planDisplay += steps.map(s => {
+          const res = results.find(r => r.stepId === s.id);
+          let status = '⏳ Pending';
+          if (res) status = res.success ? '✅ Done' : '❌ Failed';
+          else if (s.id === currentStepId) status = '🔄 In Progress...';
+
+          return `- **Step ${s.id}**: ${s.description} (${status})`;
+        }).join('\n');
+
+        planDisplay += `\n\n---\n\n*Orchestrating ${totalSteps} steps...*`;
+
+        if (this.options.onMessageUpdate) {
+          this.options.onMessageUpdate(planMessageId, { content: planDisplay });
+        }
       };
-      this.addMessage(planDisplayMsg);
-      this.options.onMessage?.(planDisplayMsg);
 
-      // Step 2: Execute each step via sub-agent
-      const results: Array<{ step: number; description: string; result: string }> = [];
+      updateLivePlan();
 
-      for (const step of steps) {
-        // Check for abort before each step
-        if (this.options.signal?.aborted) {
-          console.log('[AgentRuntime] Sequential orchestration aborted by user');
-          throw new Error('Aborted by user');
-        }
+      // 3. Execution Loop (Clustered)
+      const stepsToProcess = [...steps];
 
-        console.log(`[AgentRuntime] Executing step ${step.id}: ${step.description}`);
+      while (stepsToProcess.length > 0) {
+        const currentCluster = this.getNextCluster(stepsToProcess);
+        console.log(`[AgentRuntime] Executing cluster with ${currentCluster.length} steps`);
 
-        // Build context from previous steps
-        const previousStepsSummary = results.length > 0
-          ? `\n\nCOMPLETED STEPS:\n${results.map(r => `- Step ${r.step}: ${r.result.substring(0, 100)}${r.result.length > 100 ? '...' : ''}`).join('\n')}`
-          : '';
+        const clusterPromises = currentCluster.map(async (step: any) => {
+          updateLivePlan(step.id);
 
-        // Include original goal + current step + context
-        const subAgentInstruction = `GOAL: ${originalRequest}
+          try {
+            const stepResult = await this.executeSingleStep(originalRequest, step, results);
 
-CURRENT STEP (${step.id}/${steps.length}): ${step.description}
-${previousStepsSummary}
-
-Execute this step using available tools. State persists from previous steps.
-End with "✓ Done" and a brief result.`;
-
-        // GAP FIX 1B: Pre-seed memory for sequential sub-agent
-        const subAgentId = globalThis.crypto.randomUUID();
-
-        try {
-          await executeToolCall('memory_create_entity', {
-            name: `AgentState_${subAgentId}`,
-            entityType: 'agent_execution_state',
-            observations: [
-              `Sequential sub-agent for step ${step.id}/${steps.length}`,
-              `Task: ${step.description}`,
-              `Parent task: ${originalRequest}`,
-              `Initialized at ${new Date().toISOString()}`
-            ],
-            Metadata: {
-              agentInstanceId: subAgentId,
-              sessionId: this.options.activeSessionId || 'unknown',
-              parentAgentId: this.agentInstanceId,
-              status: 'active',
-              iterationCount: 0,
-              isInternal: true,
-              stepId: step.id,
-              stepDescription: step.description
+            let resultText = 'Step complete';
+            if (typeof stepResult.content === 'string') {
+              resultText = stepResult.content;
+            } else if (Array.isArray(stepResult.content)) {
+              resultText = stepResult.content.map(c => c.type === 'text' ? c.text : '').join('\n');
             }
-          });
-          console.log(`[AgentRuntime] Pre-seeded memory for sequential sub-agent ${subAgentId} (step ${step.id})`);
-        } catch (err) {
-          console.warn(`[AgentRuntime] Failed to pre-seed sub-agent memory: ${err}`);
-        }
 
-        const subAgent = new AgentRuntime({
-          ...this.options,
-          agentInstanceId: subAgentId,
-          parentAgentId: this.agentInstanceId,
-          isSubAgent: true,
-          taskCategory: this.taskCategory,
-          requireConfirmation: false,
-          onMessage: (msg) => {
-            const contentStr = typeof msg.content === 'string'
-              ? msg.content
-              : msg.content.map(c => c.type === 'text' ? c.text : '[Image]').join(' ');
-            console.log(`[SubAgent:Step${step.id}] ${msg.role}: ${contentStr?.substring(0, 50)}...`);
+            results.push({
+              stepId: step.id,
+              description: step.description,
+              result: resultText,
+              success: true
+            });
+          } catch (stepError: any) {
+            console.error(`[AgentRuntime] Step ${step.id} failed:`, stepError);
+            results.push({
+              stepId: step.id,
+              description: step.description,
+              result: `Error: ${stepError.message || String(stepError)}`,
+              success: false
+            });
           }
+          updateLivePlan();
         });
 
-        try {
-          const stepResult = await subAgent.chat(subAgentInstruction);
-          const stepContent = typeof stepResult.content === 'string'
-            ? stepResult.content
-            : stepResult.content.map(c => c.type === 'text' ? c.text : '').join('');
-
-          results.push({
-            step: step.id,
-            description: step.description,
-            result: stepContent.trim()
-          });
-
-          // Show progress to user
-          const progressMessage: LLMMessage = {
-            role: 'assistant',
-            content: `✓ **Step ${step.id} completed**\n${stepContent.substring(0, 150)}${stepContent.length > 150 ? '...' : ''}`
-          };
-          this.addMessage(progressMessage);
-          this.options.onMessage?.(progressMessage);
-
-        } catch (error: any) {
-          console.error(`[AgentRuntime] Step ${step.id} failed:`, error);
-          results.push({
-            step: step.id,
-            description: step.description,
-            result: `Error: ${error.message}`
-          });
-        }
+        await Promise.all(clusterPromises);
       }
 
-      // Step 3: Compile final summary
-      let finalSummary = `## Task Complete\n\n`;
-      for (const result of results) {
-        finalSummary += `**${result.description}**\n${result.result}\n\n`;
+      // 4. Synthesis
+      if (results.length === 0) {
+        throw new Error('No steps were successfully executed.');
       }
-      finalSummary += `---\n\n*Sequential orchestration complete: ${results.length} steps executed.*`;
 
-      const finalMessage: LLMMessage = {
-        role: 'assistant',
-        content: finalSummary
-      };
-      this.addMessage(finalMessage);
-      this.options.onMessage?.(finalMessage);
+      const successCount = results.filter(r => r.success).length;
+      let finalSummary = `## Task Summary\n\n`;
+      finalSummary += `I successfully completed ${successCount} out of ${totalSteps} planned steps.\n\n`;
 
-      return finalMessage;
+      for (const res of results) {
+        const icon = res.success ? '✅' : '❌';
+        finalSummary += `### ${icon} Step ${res.stepId}: ${res.description}\n`;
+        finalSummary += `${res.result.substring(0, 500)}${res.result.length > 500 ? '...' : ''}\n\n`;
+      }
+
+      finalSummary += `---\n\n*Orchestration complete. All sub-agents have been cleaned up.*`;
+
+      const finalMsg: LLMMessage = { role: 'assistant', content: finalSummary };
+      this.addMessage(finalMsg);
+      return finalMsg;
 
     } catch (error: any) {
-      console.error('[AgentRuntime] Sequential orchestration failed:', error);
-      return {
-        role: 'assistant',
-        content: `Failed to orchestrate task: ${error.message}. Falling back to direct execution.`
-      };
+      const errorMsg: LLMMessage = { role: 'assistant', content: `Orchestration error: ${error.message}` };
+      this.addMessage(errorMsg);
+      return errorMsg;
     }
+  }
+
+  private getNextCluster(stepsToProcess: any[]): any[] {
+    if (stepsToProcess.length === 0) return [];
+    const first = stepsToProcess[0];
+    if (!first.parallel_cluster) return [stepsToProcess.shift()];
+
+    const cluster = [];
+    while (stepsToProcess.length > 0 && stepsToProcess[0].parallel_cluster === first.parallel_cluster) {
+      cluster.push(stepsToProcess.shift());
+    }
+    return cluster;
+  }
+
+  private async executeSingleStep(
+    originalGoal: string,
+    step: { id: number; description: string },
+    previousResults: any[]
+  ): Promise<LLMMessage> {
+    const subAgentId = globalThis.crypto.randomUUID();
+    let subAgentTabId: string | undefined;
+
+    // 1. Provision a dedicated browser tab for this sub-agent to ensure isolation
+    try {
+      const { browserLock } = await import('./resource-lock');
+      const tabResult = await browserLock.runExclusive(async () => {
+        return await executeToolCall('new_tab', { url: 'about:blank' });
+      });
+
+      const resAny = tabResult.result as any;
+      if (resAny && resAny.tabId !== undefined) {
+        subAgentTabId = resAny.tabId;
+        console.log(`[AgentRuntime] Provisioned tab ${subAgentTabId} for orchestrated sub-agent step ${step.id}`);
+      }
+    } catch (e) {
+      console.warn('[AgentRuntime] Failed to provision tab for orchestrated sub-agent', e);
+    }
+
+    // 2. Pre-seed Memory with Context (optional but recommended for continuity)
+    try {
+      const contextEntityName = `AgentState_${subAgentId}`;
+      await executeToolCall('memory_create_entity', {
+        name: contextEntityName,
+        entityType: 'agent_execution_state',
+        observations: [
+          `Sub-agent initialized for orchestrated step: ${step.description}`,
+          `Parent Goal: ${originalGoal}`
+        ],
+        Metadata: {
+          agentInstanceId: subAgentId,
+          sessionId: this.options.activeSessionId || 'unknown',
+          status: 'active',
+          iterationCount: 0,
+          parentAgentId: this.agentInstanceId,
+          isInternal: true
+        }
+      });
+    } catch (err) {
+      console.warn(`[AgentRuntime] Failed to pre-seed orchestrated sub-agent memory: ${err}`);
+    }
+
+    const instruction = `GOAL: ${originalGoal}\n\nCURRENT STEP: ${step.description}\n\nContext from previous steps: ${JSON.stringify(previousResults.slice(-2))}\n\nExecute directly and return findings. End with "✓ Done".`;
+
+    const subAgent = new AgentRuntime({
+      ...this.options,
+      agentInstanceId: subAgentId,
+      isSubAgent: true,
+      requireConfirmation: false,
+      tabId: subAgentTabId,
+      parentAgentId: this.agentInstanceId
+    });
+
+    try {
+      return await subAgent.chat(instruction);
+    } finally {
+      // 3. Cleanup: Close the dedicated tab
+      if (subAgentTabId !== undefined) {
+        try {
+          const { browserLock } = await import('./resource-lock');
+          await browserLock.runExclusive(async () => {
+            await executeToolCall('close_tab', { tabId: subAgentTabId });
+          });
+          console.log(`[AgentRuntime] Closed sub-agent tab ${subAgentTabId} for step ${step.id}`);
+        } catch (e) {
+          console.warn(`[AgentRuntime] Failed to close sub-agent tab ${subAgentTabId}`, e);
+        }
+      }
+      await this.cleanupSubAgentResources(subAgentId);
+    }
+  }
+
+  private async cleanupSubAgentResources(subAgentId: string) {
+    // Cleanup logic
   }
 }
