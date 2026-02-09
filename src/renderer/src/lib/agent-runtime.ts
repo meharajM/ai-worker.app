@@ -1674,7 +1674,7 @@ Use tools immediately. End with "✓ Done".`;
     // 2. Load High-Fidelity Instructions
     // Use actual parallel contexts (e.g., ["Amazon", "eBay"]) for comparison tasks
     // This ensures the high-fidelity comparison template is only used when appropriate
-    const parallelContexts = (this.executionPlan as any)?.contexts || [];
+    const parallelContexts = this.executionPlan?.contexts || [];
     const instruction = generateSubAgentInstruction(
       originalGoal,
       step.description,

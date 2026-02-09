@@ -23,5 +23,25 @@
     - Updated `create_execution_plan` tool to support dynamic parallelism.
 - **Status**: ✅ Resolved
 
+## 4. Orchestration: High-Fidelity Instructions & Traceability
+- **Problem**: Sub-agents received generic instructions, causing poor formatting (e.g., missing bolding/bullets in comparisons). Execution lineage was missing in memory.
+- **Solution**: 
+    - Restored specialized sub-agent instruction templates in `task-decomposer.ts`.
+    - Enriched memory entities with `Parent Goal`, `Initialized at`, and `stepDescription` for better self-healing.
+- **Status**: ✅ Resolved
+
+## 5. Orchestration: Resource Overload (Tab Bloat)
+- **Problem**: Opening all planned tabs upfront consumed excessive system memory.
+- **Solution**: 
+    - Implemented **Just-In-Time (JIT) Tab Allocation**.
+    - Tabs are now provisioned only at the start of each execution cluster.
+- **Status**: ✅ Resolved
+
+## 6. Orchestration: Non-Deterministic Result Ordering
+- **Problem**: Parallel sub-agents pushed results to the summary out-of-order.
+- **Solution**: 
+    - Implemented deterministic sorting by `stepId` before final synthesis.
+- **Status**: ✅ Resolved
+
 ---
-*Last Updated: 2026-02-08*
+*Last Updated: 2026-02-09*
