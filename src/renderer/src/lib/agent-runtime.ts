@@ -75,7 +75,7 @@ export class AgentRuntime {
   private options: AgentRuntimeOptions;
   private maxIterations: number;
   private maxConsecutiveErrors = 3; // Bailout after 3 consecutive tool failures
-  private executionPlan: { goal: string; steps: Array<{ id: number; description: string; status: string; result?: string }> } | null = null;
+  private executionPlan: { goal: string; steps: Array<{ id: number; description: string; status: string; result?: string }>; contexts?: string[] } | null = null;
   private taskCategory?: string; // Store identified task category
   private totalIterations = 0; // Track total iterations across all continuations
   private readonly ABSOLUTE_MAX_ITERATIONS = 150; // Hard cap to prevent runaway costs
@@ -125,9 +125,9 @@ export class AgentRuntime {
         // Create new state
         await executeToolCall('memory_create_entity', {
           name: entityName,
-          entityType: 'agent_execution_state',
-          observations: [`Agent initialized at ${new Date().toISOString()}`],
-          Metadata: {
+          type: 'agent_execution_state',
+          description: `Agent initialized at ${new Date().toISOString()}`,
+          metadata: {
             agentInstanceId: this.agentInstanceId,
             sessionId: this.options.activeSessionId || 'unknown',
             status: 'active',
@@ -187,9 +187,21 @@ export class AgentRuntime {
   /**
    * Main entry point to run the agent loop.
    */
-  async chat(userContent: string): Promise<LLMMessage> {
+  async chat(userContent: string, attachments?: { name: string; path: string; type: string }[]): Promise<LLMMessage> {
     // PHASE 0: Smart Confirmation (if enabled)
     let finalPrompt = userContent;
+
+    // INJECT ATTACHMENTS CONTEXT
+    // We append this to the user message to ensure it survives system prompt replacement in llm.ts
+    // and to keep it tightly coupled with the user's request.
+    let attachmentContext = '';
+    if (attachments && attachments.length > 0) {
+      const resourceList = attachments.map(a => `- ${a.name} (Path: ${a.path})`).join('\n');
+      const toolHint = `\n\n[To analyze these files, use the 'convert_to_markdown' tool with file:// URIs. Example: convert_to_markdown(uri="file:///absolute/path")]`;
+
+      attachmentContext = `\n\n[System Note: User attached the following files. Use absolute paths to access them.]\n${resourceList}${toolHint}`;
+      console.log('[AgentRuntime] Prepared attachment context:', resourceList);
+    }
 
     // Initialize State (Idempotent)
     await this.initializeSessionState();
@@ -197,9 +209,8 @@ export class AgentRuntime {
     // GAP FIX 2B: Detect and resume from pending handoffs
     if (!this.options.isSubAgent) {
       try {
-        const handoffCheck = await executeToolCall('memory_search_entities', {
-          query: `handoff ${this.options.activeSessionId || ''}`,
-          entityType: 'agent_handoff'
+        const handoffCheck = await executeToolCall('memory_search', {
+          query: `handoff ${this.options.activeSessionId || ''}`
         });
 
         if (handoffCheck.result && typeof handoffCheck.result === 'object') {
@@ -257,7 +268,8 @@ Continue from where the previous agent left off.`
           console.log('[AgentRuntime] Simple reply to agent question. Skipping confirmation.');
         } else {
           console.log('[AgentRuntime] Analyzing task for ambiguity...');
-          const analysis = await analyzeTask(userContent, this.options.settings);
+          // Pass attachments to analysis - this ensures "convert this" with an attachment is NOT marked ambiguous
+          const analysis = await analyzeTask(userContent, this.options.settings, attachments);
 
           // Capture category from analysis
           if (analysis.category) {
@@ -318,15 +330,19 @@ Continue from where the previous agent left off.`
       }
     }
 
-    // Add user message (only if not already in history - prevents duplicates)
+    // Handle User Message Addition & Context Injection
     const lastMessage = this.messages[this.messages.length - 1];
     const alreadyHasMessage = lastMessage?.role === 'user' && lastMessage?.content === finalPrompt;
 
-    if (!alreadyHasMessage) {
-      const userMsg: LLMMessage = { role: "user", content: finalPrompt };
-      this.addMessage(userMsg);
+    if (alreadyHasMessage && lastMessage) {
+      // User message exists in history (from UI). Update it with attachment context.
+      // We modify the message in place to include the hidden system note
+      lastMessage.content = finalPrompt + attachmentContext;
+      console.log('[AgentRuntime] Updated existing user message with attachment context');
     } else {
-      console.log('[AgentRuntime] User message already in history, skipping duplicate add');
+      // User message not in history (new session or sub-agent). Add it with context.
+      const userMsg: LLMMessage = { role: "user", content: finalPrompt + attachmentContext };
+      this.addMessage(userMsg);
     }
 
     let iterationCount = 0;
@@ -363,13 +379,13 @@ Continue from where the previous agent left off.`
           try {
             await executeToolCall('memory_create_entity', {
               name: handoffId,
-              entityType: 'agent_handoff',
-              observations: [
+              type: 'agent_handoff',
+              description: [
                 `Agent ${this.agentInstanceId} approaching context limit (${estimatedTokens} tokens)`,
                 `Handing off at checkpoint: ${this.lastCheckpoint?.summary || 'No checkpoint'}`,
                 `Original goal: ${originalGoal.substring(0, 200)}`
-              ],
-              Metadata: {
+              ].join('\n'),
+              metadata: {
                 fromAgentId: this.agentInstanceId,
                 sessionId: this.options.activeSessionId,
                 reason: 'context_limit',
@@ -873,12 +889,12 @@ ${recentResults.length > 0 ? recentResults.map((r, i) => `**Result ${i + 1}:**\n
             const contextEntityName = `AgentState_${subAgentId}`;
             await executeToolCall('memory_create_entity', {
               name: contextEntityName,
-              entityType: 'agent_execution_state',
-              observations: [
+              type: 'agent_execution_state',
+              description: [
                 `Sub-agent initialized for task: ${instruction}`,
                 `Context Summary: ${context}`
-              ],
-              Metadata: {
+              ].join('\n'),
+              metadata: {
                 agentInstanceId: subAgentId,
                 sessionId: this.options.activeSessionId || 'unknown',
                 status: 'active',
@@ -1322,6 +1338,7 @@ Use tools immediately. End with "✓ Done".`;
       type: 'complex',
       estimatedActions: 10,
       shouldFork: true,
+      contexts: [],
       forkReason: 'User confirmed continuation after max iterations'
     };
 
@@ -1371,12 +1388,38 @@ Use tools immediately. End with "✓ Done".`;
   ): Promise<LLMMessage> {
     const { estimatedActions } = decomposition;
 
+    // Track status of each step for the Dashboard
+    const stepStatuses = new Map<number, { status: string; isRunning: boolean; result?: string; success?: boolean }>();
+
+    // Helper to render the live dashboard message
+    const renderDashboard = () => {
+      let content = `## 📋 Auto-Orchestration Dashboard\n\n`;
+      content += `Objective: *${originalRequest.substring(0, 150)}${originalRequest.length > 150 ? '...' : ''}*\n\n`;
+
+      if (this.executionPlan) {
+        for (const step of this.executionPlan.steps) {
+          const s = stepStatuses.get(step.id) || { status: 'Pending', isRunning: false };
+          let icon = '⚪';
+          if (s.isRunning) icon = '⟳';
+          else if (s.status === 'Done') icon = s.success === false ? '⚠️' : '✅';
+          else if (s.status === 'Failed') icon = '❌';
+
+          content += `- ${icon} **Step ${step.id}**: ${step.description} *(${s.status})*\n`;
+        }
+      } else {
+        content += `*Analyzing task requirements and generating plan...*\n`;
+      }
+
+      content += `\n---\n*Estimated complexity: ${estimatedActions} actions*`;
+      return content;
+    };
+
     // 1. Initial Status message
     const initialPlanMsg: LLMMessage = {
       role: 'assistant',
-      content: `📋 **Auto-Orchestration**: This task requires ~${estimatedActions} steps. I'll break it down and execute each part efficiently.\n\nAnalyzing...`
+      content: renderDashboard()
     };
-    const planMessageId = this.addMessage(initialPlanMsg) as string;
+    const dashboardMessageId = this.addMessage(initialPlanMsg) as string;
 
     // 2. Planning Turn
     console.log('[AgentRuntime] Generating execution plan...');
@@ -1395,60 +1438,52 @@ Use tools immediately. End with "✓ Done".`;
       try {
         planData = safeParseJSON(planResponse.content);
         if (planData && !planData.steps && (planData as any).plan) {
-          // Handle common hallucination where model wraps in 'plan' key
           planData = (planData as any).plan;
         }
       } catch (e) {
         console.warn('[AgentRuntime] Failed to parse plan JSON:', e);
       }
 
-      // Fallback plan if planner fails or returned invalid structure
+      // Fallback plan
       if (!planData || !planData.steps || !Array.isArray(planData.steps) || planData.steps.length === 0) {
-        console.log('[AgentRuntime] Planner failed, using fallback sequential plan.');
         planData = {
           steps: [
-            { id: 1, description: `Gather preliminary information for: ${originalRequest.substring(0, 50)}...` },
-            { id: 2, description: `Execute main task: ${originalRequest}` },
+            { id: 1, description: `Gather preliminary information` },
+            { id: 2, description: `Execute main task components` },
             { id: 3, description: 'Finalize and verify results' }
           ]
         };
       }
 
       const steps = planData.steps;
+      this.executionPlan = {
+        goal: originalRequest,
+        steps: steps.map(s => ({ ...s, status: 'pending' })),
+        contexts: decomposition.contexts || [] // Store contexts for sub-agent instruction generation
+      };
 
-      // Helper to update the live plan UI
-      const results: Array<{ stepId: number; description: string; result: string; success: boolean }> = [];
-      const totalSteps = steps.length;
+      // Update Dashboard with plan
+      if (dashboardMessageId && this.options.onMessageUpdate) {
+        this.options.onMessageUpdate(dashboardMessageId, { content: renderDashboard() });
+      }
 
-      const updateLivePlan = (currentStepId?: number, isError: boolean = false) => {
-        let planDisplay = `## Execution Plan\n\n`;
-        planDisplay += steps.map(s => {
-          const res = results.find(r => r.stepId === s.id);
-          let status = '⏳ Pending';
-          if (res) status = res.success ? '✅ Done' : '❌ Failed';
-          else if (s.id === currentStepId) status = '🔄 In Progress...';
-
-          return `- **Step ${s.id}**: ${s.description} (${status})`;
-        }).join('\n');
-
-        planDisplay += `\n\n---\n\n*Orchestrating ${totalSteps} steps...*`;
-
-        if (this.options.onMessageUpdate) {
-          this.options.onMessageUpdate(planMessageId, { content: planDisplay });
+      // Helper to update live statuses
+      const updateStepStatus = (stepId: number, status: string, isRunning: boolean, success?: boolean, result?: string) => {
+        stepStatuses.set(stepId, { status, isRunning, result, success });
+        if (dashboardMessageId && this.options.onMessageUpdate) {
+          this.options.onMessageUpdate(dashboardMessageId, { content: renderDashboard() });
         }
       };
 
-      updateLivePlan();
-
-      // 3. Execution Loop - OPTIMIZED: Pre-allocate ALL tabs upfront
+      const results: Array<{ stepId: number; description: string; result: string; success: boolean }> = [];
+      const tabAllocations = new Map<number, string | number>();
       const stepsToProcess = [...steps];
-      const tabAllocations: Map<number, string | number> = new Map();
 
-      // Wrap in try-finally for cleanup
+      // Step 3: Execution Loop
       try {
-        // PRE-ALLOCATE ALL TABS FOR THE ENTIRE ORCHESTRATION
-        console.log(`[AgentRuntime] Pre-allocating ${steps.length} tabs for orchestration`);
+        // Pre-allocate tabs upfront for isolation
         const { browserLock } = await import('./resource-lock');
+        console.log(`[AgentRuntime] Pre-allocating tabs for ${steps.length} steps`);
 
         for (const step of steps) {
           try {
@@ -1458,24 +1493,21 @@ Use tools immediately. End with "✓ Done".`;
             const resAny = tabResult.result as any;
             if (resAny && resAny.tabId !== undefined) {
               tabAllocations.set(step.id, resAny.tabId);
-              console.log(`[AgentRuntime] Pre-allocated tab ${resAny.tabId} for step ${step.id}`);
             }
           } catch (e) {
-            console.warn(`[AgentRuntime] Failed to pre-allocate tab for step ${step.id}`, e);
+            console.warn(`[AgentRuntime] Failed to pre-allocate tab for step ${step.id}:`, e);
           }
         }
 
-        // Execute steps in clusters (sequential or parallel)
+        // Process steps in clusters
         while (stepsToProcess.length > 0) {
           const currentCluster = this.getNextCluster(stepsToProcess);
-          const isSequential = currentCluster.length === 1 && currentCluster[0].parallel_cluster === null;
+          const isParallel = currentCluster.length > 1;
 
-          console.log(`[AgentRuntime] Executing cluster: ${currentCluster.length} steps, sequential=${isSequential}`);
+          console.log(`[AgentRuntime] Executing cluster: ${currentCluster.length} steps, parallel=${isParallel}`);
 
-          if (isSequential) {
-            // SEQUENTIAL STEP
-            const step = currentCluster[0];
-            updateLivePlan(step.id);
+          const clusterPromises = currentCluster.map(async (step: any) => {
+            updateStepStatus(step.id, 'In Progress...', true);
 
             try {
               const stepResult = await this.executeSingleStep(
@@ -1492,155 +1524,88 @@ Use tools immediately. End with "✓ Done".`;
                 resultText = stepResult.content.map(c => c.type === 'text' ? c.text : '').join('\n');
               }
 
-              // Detect graceful failures (sub-agent reported it couldn't complete)
-              const isGracefulFailure = resultText.includes('✗ Failed:');
+              const success = !resultText.includes('✗ Failed:');
+              updateStepStatus(step.id, 'Done', false, success, resultText);
 
               results.push({
                 stepId: step.id,
                 description: step.description,
                 result: resultText,
-                success: !isGracefulFailure  // Mark as failed if sub-agent reported failure
+                success
               });
 
-              if (isGracefulFailure) {
-                console.warn(`[AgentRuntime] Step ${step.id} reported graceful failure`);
-              }
             } catch (stepError: any) {
               console.error(`[AgentRuntime] Step ${step.id} failed:`, stepError);
+              const errorText = `Error: ${stepError.message || String(stepError)}`;
+              updateStepStatus(step.id, 'Failed', false, false, errorText);
               results.push({
                 stepId: step.id,
                 description: step.description,
-                result: `Error: ${stepError.message || String(stepError)}`,
+                result: errorText,
                 success: false
               });
             }
-            updateLivePlan();
+          });
 
-          } else {
-            // PARALLEL CLUSTER - Execute all steps simultaneously
-            const clusterPromises = currentCluster.map(async (step: any) => {
-              updateLivePlan(step.id);
-
-              try {
-                const stepResult = await this.executeSingleStep(
-                  originalRequest,
-                  step,
-                  results,
-                  tabAllocations.get(step.id)
-                );
-
-                let resultText = 'Step complete';
-                if (typeof stepResult.content === 'string') {
-                  resultText = stepResult.content;
-                } else if (Array.isArray(stepResult.content)) {
-                  resultText = stepResult.content.map(c => c.type === 'text' ? c.text : '').join('\n');
-                }
-
-                // Detect graceful failures (sub-agent reported it couldn't complete)
-                const isGracefulFailure = resultText.includes('✗ Failed:');
-
-                results.push({
-                  stepId: step.id,
-                  description: step.description,
-                  result: resultText,
-                  success: !isGracefulFailure
-                });
-
-                if (isGracefulFailure) {
-                  console.warn(`[AgentRuntime] Step ${step.id} reported graceful failure`);
-                }
-              } catch (stepError: any) {
-                console.error(`[AgentRuntime] Step ${step.id} failed:`, stepError);
-                results.push({
-                  stepId: step.id,
-                  description: step.description,
-                  result: `Error: ${stepError.message || String(stepError)}`,
-                  success: false
-                });
-              }
-              updateLivePlan();
-            });
-
+          if (isParallel) {
             await Promise.all(clusterPromises);
+          } else {
+            await clusterPromises[0];
           }
         }
-      } finally {
-        // CLEANUP: Close all allocated tabs
-        console.log(`[AgentRuntime] Starting cleanup of ${tabAllocations.size} allocated tabs...`);
-        const { browserLock } = await import('./resource-lock');
-        let closedCount = 0;
-        let failedCount = 0;
 
+      } finally {
+        // Cleanup tabs
+        console.log(`[AgentRuntime] Cleaning up ${tabAllocations.size} tabs`);
+        const { browserLock } = await import('./resource-lock');
         for (const [stepId, tabId] of tabAllocations.entries()) {
           try {
-            console.log(`[AgentRuntime] Attempting to close tab ${tabId} for step ${stepId}...`);
             await browserLock.runExclusive(async () => {
               await executeToolCall('close_tab', { tabId });
             });
-            closedCount++;
-            console.log(`[AgentRuntime] ✅ Closed tab ${tabId} for step ${stepId}`);
           } catch (e) {
-            failedCount++;
-            console.error(`[AgentRuntime] ❌ Failed to close tab ${tabId} for step ${stepId}:`, e);
+            console.warn(`[AgentRuntime] Failed to close tab ${tabId} for step ${stepId}`);
           }
         }
-
-        console.log(`[AgentRuntime] Cleanup complete: ${closedCount} closed, ${failedCount} failed`);
       }
 
-      // 4. Synthesis
-      if (results.length === 0) {
-        throw new Error('No steps were successfully executed.');
-      }
-
+      // Step 4: Final Synthesis
       const successCount = results.filter(r => r.success).length;
-      const failedCount = totalSteps - successCount;
+      let finalSummary = `## 🏁 Task Result\n\n`;
+      finalSummary += `Completed ${successCount} of ${steps.length} planned steps.\n\n`;
 
-      let finalSummary = `## Task Summary\n\n`;
-      finalSummary += `I successfully completed ${successCount} out of ${totalSteps} planned steps.\n\n`;
-
-      // Extract alternatives from failed steps
       const alternatives: Array<{ stepId: number; description: string; suggestion: string }> = [];
 
       for (const res of results) {
         const icon = res.success ? '✅' : '❌';
         finalSummary += `### ${icon} Step ${res.stepId}: ${res.description}\n`;
 
-        // For failed steps, try to extract alternative suggestions
+        const truncatedResult = res.result.substring(0, 800) + (res.result.length > 800 ? '...' : '');
+        finalSummary += `${truncatedResult}\n\n`;
+
         if (!res.success) {
           const altMatch = res.result.match(/Alternative:\s*(.+?)(?:\n|$)/i);
           if (altMatch) {
-            const suggestion = altMatch[1].trim();
-            alternatives.push({
-              stepId: res.stepId,
-              description: res.description,
-              suggestion
-            });
-            // Highlight the alternative in the result
-            finalSummary += `${res.result.substring(0, 500)}${res.result.length > 500 ? '...' : ''}\n`;
-            finalSummary += `\n**💡 Suggested Alternative:** ${suggestion}\n\n`;
-          } else {
-            finalSummary += `${res.result.substring(0, 500)}${res.result.length > 500 ? '...' : ''}\n\n`;
+            alternatives.push({ stepId: res.stepId, description: res.description, suggestion: altMatch[1].trim() });
           }
-        } else {
-          finalSummary += `${res.result.substring(0, 500)}${res.result.length > 500 ? '...' : ''}\n\n`;
         }
       }
 
-      // Add alternatives section if any were found
       if (alternatives.length > 0) {
-        finalSummary += `---\n\n## 💡 Suggested Alternatives for Failed Steps\n\n`;
-        finalSummary += `The following alternatives were suggested by sub-agents. You can retry the task with these modifications:\n\n`;
+        finalSummary += `### 💡 Suggested Alternatives\n\n`;
         for (const alt of alternatives) {
-          finalSummary += `- **Step ${alt.stepId}** (${alt.description}): ${alt.suggestion}\n`;
+          finalSummary += `- **Step ${alt.stepId}**: ${alt.suggestion}\n`;
         }
-        finalSummary += `\n`;
       }
-
-      finalSummary += `---\n\n*Orchestration complete. All sub-agents have been cleaned up.*`;
 
       const finalMsg: LLMMessage = { role: 'assistant', content: finalSummary };
       this.addMessage(finalMsg);
+
+      // Final update to dashboard to show it's complete
+      if (dashboardMessageId && this.options.onMessageUpdate) {
+        this.options.onMessageUpdate(dashboardMessageId, { content: finalSummary });
+      }
+
       return finalMsg;
 
     } catch (error: any) {
@@ -1668,92 +1633,63 @@ Use tools immediately. End with "✓ Done".`;
     previousResults: any[],
     tabId?: string | number
   ): Promise<LLMMessage> {
-    // Simple and optimal: use provided tab or run without dedicated tab
     const subAgentId = globalThis.crypto.randomUUID();
-    const subAgentTabId = tabId;
 
-    if (subAgentTabId) {
-      console.log(`[AgentRuntime] Executing step ${step.id} with tab ${subAgentTabId}`);
-    } else {
-      console.log(`[AgentRuntime] Executing step ${step.id} without dedicated tab`);
-    }
-
-    // 2. Pre-seed Memory with Context
+    // 1. Pre-seed Memory with Context (High-Fidelity Metadata)
     try {
       const contextEntityName = `AgentState_${subAgentId}`;
       const prevResultsSummary = previousResults.length > 0
-        ? `Previous results: ${JSON.stringify(previousResults.slice(-2))}`
-        : 'No previous results yet';
+        ? `Knowledge gained from previous steps: ${JSON.stringify(previousResults.slice(-2).map(r => ({ step: r.stepId, desc: r.description, success: r.success })))}`
+        : 'Initial step - no prior results.';
 
       await executeToolCall('memory_create_entity', {
         name: contextEntityName,
-        entityType: 'agent_execution_state',
-        observations: [
-          `Sub-agent initialized for orchestrated step ${step.id}: ${step.description}`,
+        type: 'agent_execution_state',
+        description: [
+          `Sub-agent for orchestrated step ${step.id}: ${step.description}`,
           `Parent Goal: ${originalGoal}`,
-          subAgentTabId ? `Executing in browser tab ${subAgentTabId}` : 'No dedicated tab',
-          prevResultsSummary
-        ],
-        Metadata: {
+          `Initialized at: ${new Date().toISOString()}`
+        ].join('\n'),
+        metadata: {
           agentInstanceId: subAgentId,
           sessionId: this.options.activeSessionId || 'unknown',
+          parentAgentId: this.agentInstanceId,
           status: 'active',
           iterationCount: 0,
-          parentAgentId: this.agentInstanceId,
-          isInternal: true
+          isInternal: true,
+          stepId: step.id,
+          stepDescription: step.description,
+          observations: [
+            `Current Step: ${step.description}`,
+            `Overall Goal: ${originalGoal}`,
+            `Tab: ${tabId || 'N/A'}`,
+            prevResultsSummary
+          ]
         }
       });
-      console.log(`[AgentRuntime] Created memory for sub-agent ${subAgentId}`);
     } catch (err) {
-      console.warn(`[AgentRuntime] Failed to pre-seed orchestrated sub-agent memory: ${err}`);
+      console.warn(`[AgentRuntime] Failed to pre-seed memory for step ${step.id}:`, err);
     }
 
-    const instruction = `GOAL: ${originalGoal}
-
-CURRENT STEP: ${step.description}
-
-Context from previous steps: ${JSON.stringify(previousResults.slice(-2))}
-
-INSTRUCTIONS:
-1. Execute this step directly and efficiently
-2. If you cannot find an expected element after 3-4 attempts, report what you found instead
-3. If the page structure is different than expected, describe what you see and suggest specific alternatives
-4. If you encounter an error or blocker, report it clearly and move on
-5. DO NOT retry the same failed action more than 3 times
-6. End your response with "✓ Done" when complete OR "✗ Failed: [reason]" if you cannot complete the step
-
-ALTERNATIVE SUGGESTIONS (when reporting failures):
-When you cannot complete a step, provide SPECIFIC, ACTIONABLE alternatives:
-
-Examples of GOOD alternatives:
-✅ "Button 'Add to Cart' not found. Alternative: Click 'Buy Now' button (located below price, blue color)"
-✅ "Product 'Casio F-91W' not in results. Alternative: Try searching for 'Casio F91W' (without hyphen)" os show the available products to user 
-✅ "File 'report.pdf' not found in Downloads. Alternative: Check Documents folder or search for '*.pdf'"
-✅ "Category 'Electronics' link broken. Alternative: Use search bar with 'electronics' keyword"
-
-Examples of BAD alternatives (too vague):
-❌ "Try a different button"
-❌ "Look somewhere else"
-❌ "Use another method"
-
-IMPORTANT: It's better to report partial progress or failure quickly than to get stuck in loops. Be decisive and specific with alternatives.`;
+    // 2. Load High-Fidelity Instructions
+    // Use actual parallel contexts (e.g., ["Amazon", "eBay"]) for comparison tasks
+    // This ensures the high-fidelity comparison template is only used when appropriate
+    const parallelContexts = (this.executionPlan as any)?.contexts || [];
+    const instruction = generateSubAgentInstruction(
+      originalGoal,
+      step.description,
+      parallelContexts
+    );
 
     const subAgent = new AgentRuntime({
       ...this.options,
       agentInstanceId: subAgentId,
       isSubAgent: true,
       requireConfirmation: false,
-      tabId: subAgentTabId,
+      tabId: tabId,
       parentAgentId: this.agentInstanceId
     });
 
-    try {
-      return await subAgent.chat(instruction);
-    } finally {
-      // Orchestrator handles all tab cleanup centrally
-      // Memory cleanup is handled automatically by MCP service
-    }
+    return await subAgent.chat(instruction);
   }
-
-
 }

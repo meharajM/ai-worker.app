@@ -497,3 +497,180 @@ Watch for these critical log patterns:
 **Verify:**
 - [ ] MemoryReflector captures this specific choice.
 - [ ] Creates entity (Type: `product_choice` or `user_preference`) with description "Prefers Logitech MX Master 3S over Razer".
+
+---
+
+## 19. MarkItDown Document Conversion
+
+**Test A: PDF to Markdown**
+**Prompt:**
+> "Convert this PDF to markdown: /Users/suhail/Documents/report.pdf"
+
+**Expected Behavior:**
+- 📄 Agent recognizes the conversion request
+- 🔍 Searches for available tools and finds MarkItDown
+- 🔄 Calls the `convert_to_markdown` tool with the file path
+- ✅ Returns the markdown content extracted from the PDF
+
+**Verify:**
+- [ ] MarkItDown server is connected in Settings
+- [ ] Tool call appears in the agent's thought process
+- [ ] Markdown output is properly formatted
+- [ ] Preserves document structure (headings, lists, tables)
+
+**Console Logs to Check:**
+```
+[MCP Renderer] Invoking Tool: convert_to_markdown
+[MCP] Tool call completed successfully
+[AgentRuntime] Document converted to markdown
+```
+
+---
+
+**Test B: Word Document Conversion**
+**Prompt:**
+> "Extract the text from my Word document at ~/Downloads/meeting-notes.docx and summarize the key points"
+
+**Expected Behavior:**
+- 📝 Agent converts Word doc to markdown first
+- 🤖 Then analyzes and summarizes the content
+- ✅ Returns structured summary with key points
+
+**Verify:**
+- [ ] Two-step process: conversion then analysis
+- [ ] Markdown preserves formatting (bold, italic, lists)
+- [ ] Summary is accurate and concise
+
+---
+
+**Test C: Image OCR (Text Extraction)**
+**Prompt:**
+> "What text is in this screenshot: /Users/suhail/Desktop/screenshot.png"
+
+**Expected Behavior:**
+- 🖼️ Agent uses MarkItDown's OCR capability
+- 📝 Extracts text from the image
+- ✅ Returns the extracted text in markdown format
+
+**Verify:**
+- [ ] OCR successfully extracts text from image
+- [ ] Handles different image formats (PNG, JPG, GIF)
+- [ ] Returns readable, formatted text
+
+---
+
+**Test D: Excel to Markdown Table**
+**Prompt:**
+> "Convert this Excel spreadsheet to a markdown table: ~/Documents/sales-data.xlsx"
+
+**Expected Behavior:**
+- 📊 Converts Excel data to markdown table format
+- ✅ Preserves table structure and data
+- 📋 Returns formatted markdown table
+
+**Verify:**
+- [ ] Table structure is preserved
+- [ ] Data is accurately converted
+- [ ] Markdown table is properly formatted
+
+---
+
+**Test E: Audio Transcription**
+**Prompt:**
+> "Transcribe this audio recording: /Users/suhail/Music/meeting-recording.mp3"
+
+**Expected Behavior:**
+- 🎵 Agent uses MarkItDown's speech transcription
+- 📝 Converts audio to text
+- ✅ Returns transcription in markdown
+
+**Verify:**
+- [ ] Audio is successfully transcribed
+- [ ] Transcription is accurate
+- [ ] Supports various audio formats (MP3, WAV, M4A)
+
+---
+
+**Test F: Batch Conversion**
+**Prompt:**
+> "Convert all PDFs in my ~/Documents/reports/ folder to markdown and create a summary of each"
+
+**Expected Behavior:**
+- 📁 Agent processes multiple files
+- 🔄 Converts each PDF to markdown
+- 📝 Creates individual summaries
+- ✅ Returns organized results
+
+**Verify:**
+- [ ] Handles multiple files correctly
+- [ ] Each file is processed independently
+- [ ] Results are clearly organized
+
+---
+
+**Test G: HTML to Markdown**
+**Prompt:**
+> "Convert this saved webpage to markdown: ~/Downloads/article.html"
+
+**Expected Behavior:**
+- 🌐 Converts HTML to clean markdown
+- ✅ Removes HTML tags and formatting
+- 📝 Preserves content structure
+
+**Verify:**
+- [ ] HTML is properly converted
+- [ ] Links are preserved in markdown format
+- [ ] Content structure is maintained
+
+---
+
+**Test H: Error Handling (Missing File)**
+**Prompt:**
+> "Convert this file: /nonexistent/file.pdf"
+
+**Expected Behavior:**
+- ❌ Agent attempts conversion
+- 🚨 MarkItDown returns error (file not found)
+- 💬 Agent explains the error to user
+
+**Verify:**
+- [ ] Error is handled gracefully
+- [ ] User receives clear error message
+- [ ] Agent doesn't crash or hang
+
+---
+
+**Test I: Unsupported Format Handling**
+**Prompt:**
+> "Convert this video to markdown: ~/Videos/tutorial.mp4"
+
+**Expected Behavior:**
+- ⚠️ Agent attempts conversion
+- 🚨 MarkItDown may not support video files
+- 💬 Agent explains limitation or suggests alternatives
+
+**Verify:**
+- [ ] Unsupported formats are handled gracefully
+- [ ] User receives helpful feedback
+- [ ] Agent suggests alternative approaches if applicable
+
+---
+
+## Quick MarkItDown Test Files
+
+Create these test files to verify functionality:
+
+**1. Simple PDF:**
+```bash
+# Create a test PDF (macOS)
+echo "# Test Document\n\nThis is a test PDF.\n\n- Item 1\n- Item 2" | textutil -stdin -output ~/Desktop/test.pdf -format txt -convert pdf
+```
+
+**2. Text File (as fallback):**
+```bash
+echo "# Sample Document\n\nThis is a test file for MarkItDown.\n\n## Features\n- PDF conversion\n- OCR support\n- Audio transcription" > ~/Desktop/test.txt
+```
+
+**3. Test Prompt:**
+> "Convert ~/Desktop/test.pdf to markdown and show me the result"
+

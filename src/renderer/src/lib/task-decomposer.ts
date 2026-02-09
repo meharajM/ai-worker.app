@@ -1,5 +1,5 @@
 /**
- * Task Decomposer Module (Simplified)
+ * Task Decomposer Module
  * 
  * Analyzes user requests to determine if they are simple or complex.
  * Complex tasks are handed off to the Orchestrator for structured planning.
@@ -9,30 +9,21 @@ export interface TaskDecomposition {
   type: 'simple' | 'complex';
   estimatedActions: number;     // Estimated number of actions needed
   shouldFork: boolean;          // Whether to spawn sub-agents
+  contexts: string[];           // Extracted contexts (e.g. websites, entities) for parallel tasks
   forkReason?: string;          // Explanation for the decision
 }
 
 // Action keywords that indicate browser/UI actions
 const ACTION_KEYWORDS = [
-  // Navigation
   'go to', 'open', 'navigate', 'visit', 'browse',
-  // Search
   'search', 'find', 'look for', 'look up', 'search for',
-  // Interaction
   'click', 'tap', 'press', 'select', 'choose', 'pick',
-  // Input
   'type', 'enter', 'fill', 'write', 'input', 'fill out', 'fill in',
-  // Form actions
   'submit', 'send', 'confirm', 'apply', 'save',
-  // Shopping
   'add to cart', 'buy', 'purchase', 'checkout', 'order',
-  // Comparison
   'compare', 'vs', 'versus', 'difference between',
-  // Data extraction
   'get', 'extract', 'copy', 'download', 'scrape',
-  // Scrolling
   'scroll', 'scroll down', 'scroll up',
-  // Verification
   'check', 'verify', 'confirm', 'validate',
 ];
 
@@ -42,7 +33,7 @@ const MULTI_STEP_INDICATORS = [
   'step 1', 'step 2', 'first', 'second', 'third',
 ];
 
-// Parallel task indicators (manual request for parallelism)
+// Parallel task indicators
 const PARALLEL_INDICATORS = [
   'simultaneously', 'concurrently', 'at the same time', 'parallel',
   'both', 'all of', 'simultaneous', 'in parallel'
@@ -63,17 +54,15 @@ function countActions(text: string): number {
     }
   }
 
-  // Count sequential multi-step indicators
   for (const indicator of MULTI_STEP_INDICATORS) {
     if (textLower.includes(indicator)) {
       actionCount += 1;
     }
   }
 
-  // Count parallel indicators as "complex" but distinct logic
   for (const indicator of PARALLEL_INDICATORS) {
     if (textLower.includes(indicator)) {
-      actionCount += 2; // Parallel tasks usually involve multiple steps
+      actionCount += 2;
     }
   }
 
@@ -81,45 +70,89 @@ function countActions(text: string): number {
 }
 
 /**
+ * Extract contexts (websites, entities) for parallel processing
+ */
+function extractContexts(text: string): string[] {
+  const textLower = text.toLowerCase();
+
+  // Look for comparison patterns: "Amazon vs eBay vs Walmart"
+  if (textLower.includes(' vs ') || textLower.includes(' versus ')) {
+    return text.split(/\s+vs\s+|\s+versus\s+/i).map(c => c.trim());
+  }
+
+  // Look for "on X and Y"
+  const onMatch = text.match(/\bon\s+(.+?)(?:\.|$)/i);
+  if (onMatch) {
+    const apps = onMatch[1].split(/\s+and\s+|,\s*/i);
+    if (apps.length > 1) return apps.map(a => a.trim());
+  }
+
+  return [];
+}
+
+/**
  * Analyze task and decide if it needs decomposition
  */
 export function analyzeTaskForDecomposition(text: string): TaskDecomposition {
   const actions = countActions(text);
+  const contexts = extractContexts(text);
   const textLower = text.toLowerCase();
 
-  // Complexity indicators:
-  // 1. High action count
-  // 2. Presence of parallel indicators (and, both, all)
-  // 3. Presence of list patterns (A, B, and C)
   const hasParallelKeywords = PARALLEL_INDICATORS.some(p => textLower.includes(p));
   const hasListPattern = (text.match(/,/g) || []).length >= 1 && textLower.includes('and');
   const hasConjunction = textLower.includes(' and ') && actions >= 1;
 
-  const isComplex = actions >= 3 || hasParallelKeywords || hasListPattern || (actions >= 2 && hasConjunction);
-
-  if (isComplex) {
-    return {
-      type: 'complex',
-      estimatedActions: actions,
-      shouldFork: true,
-      forkReason: `Task detected as complex (${actions} actions, keywords: ${hasParallelKeywords}, list: ${hasListPattern}).`
-    };
-  }
+  const isComplex = actions >= 3 || hasParallelKeywords || hasListPattern || (actions >= 2 && hasConjunction) || contexts.length > 1;
 
   return {
-    type: 'simple',
+    type: isComplex ? 'complex' : 'simple',
     estimatedActions: actions,
-    shouldFork: false,
-    forkReason: 'Task is simple and can be handled in a single context.'
+    shouldFork: isComplex,
+    contexts: contexts,
+    forkReason: isComplex ? `Complex task (${actions} actions, ${contexts.length} contexts)` : 'Simple task'
   };
 }
 
 /**
- * Generate sub-agent instructions for a specific context
+ * Generate high-fidelity sub-agent instructions
  */
 export function generateSubAgentInstruction(
   originalRequest: string,
-  targetContext: string
+  targetContext: string,
+  allContexts: string[] = []
 ): string {
-  return `Target: ${targetContext}. Goal: ${originalRequest}\n\nReturn brief result. End with "✓ Done".`;
+  const isComparison = allContexts.length > 1;
+
+  if (isComparison) {
+    return `SUB-AGENT TASK: ${targetContext}
+
+OBJECTIVE: ${originalRequest}
+
+YOUR SCOPE: Focus ONLY on ${targetContext}. Other agents handle: ${allContexts.filter(c => c !== targetContext).join(', ')}
+
+OUTPUT REQUIREMENTS:
+- **Structured Bullet Points**: Use a list format for clarity.
+- **Bold Key Terms**: Bold the main item name or key feature (e.g., **Price:** $99).
+- **Concise**: Max 150 words.
+- NO navigation steps or process descriptions.
+- End with: "✓ ${targetContext} complete"
+
+Example:
+"- **Dell XPS 13**: $1299, 16GB RAM, ships in 2 days.
+- **Rating**: 4.5/5 stars (2k reviews).
+- ✓ ${targetContext} complete"`;
+  }
+
+  return `SUB-AGENT TASK
+
+OBJECTIVE: ${originalRequest}
+
+CURRENT FOCUS: ${targetContext}
+
+OUTPUT REQUIREMENTS:
+- Execute task step-by-step
+- Return **concise summary** (max 200 words)
+- Use <think> tags for internal reasoning
+- Focus on results, not process
+- End with: "✓ Complete"`;
 }

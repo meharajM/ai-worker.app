@@ -756,10 +756,20 @@ function getInstallInstructions(cmd: string, args?: string[]): string {
     }
     if (cmd.includes('uv')) {
         const installCmd = isWin ? 'powershell -c "irm https://astral.sh/uv/install.ps1 | iex"' : 'curl -LsSf https://astral.sh/uv/install.sh | sh'
-        let steps = `1. Run this command in your terminal:\n\`${installCmd}\`\n2. Restart the app.`
+        let steps = `1. **Install Python 3** (required):\n`
+        
+        if (isMac) steps += `   \`brew install python\`\n`
+        else if (isWin) steps += `   Download from [python.org](https://www.python.org/downloads/) and check 'Add to PATH'\n`
+        else steps += `   \`sudo apt install python3\`\n`
+        
+        steps += `\n2. **Install uv** (Python package runner):\n   \`${installCmd}\`\n\n3. **Restart the AI-Worker app**`
 
         if (args?.some(a => a.includes('mcp-server-git') || a.includes('mcp_server_git'))) {
-            steps += `\n3. **Quick Fix:** Use \`uvx mcp-server-git /path/to/your/repo\` to run without installing.`
+            steps += `\n\n💡 **Quick Fix:** Use \`uvx mcp-server-git /path/to/your/repo\` to run without installing.`
+        }
+        
+        if (args?.some(a => a.includes('markitdown'))) {
+            steps += `\n\n📄 **MarkItDown** will be automatically available once uv is installed. It converts PDFs, Word docs, Excel, images, and audio files to Markdown!`
         }
 
         return `${header}\n\n${steps}`
