@@ -4,6 +4,7 @@
  */
 
 import * as webllm from '@mlc-ai/web-llm';
+import { safeParseJSON } from './llm';
 
 // Extend Navigator type for WebGPU
 declare global {
@@ -447,7 +448,7 @@ class WebLLMManager {
                     id: tc.id || `call_${Date.now()}_${idx}`,
                     name: tc.function.name,
                     arguments: typeof tc.function.arguments === 'string'
-                        ? JSON.parse(tc.function.arguments)
+                        ? safeParseJSON(tc.function.arguments)
                         : tc.function.arguments,
                 }));
             }
@@ -482,7 +483,7 @@ class WebLLMManager {
             // Try to find JSON object
             const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
-                const parsed = JSON.parse(jsonMatch[0]);
+                const parsed = safeParseJSON(jsonMatch[0]);
                 if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
                     return parsed.tool_calls.map((tc: any, idx: number) => ({
                         id: `json_call_${Date.now()}_${idx}`,
@@ -537,7 +538,7 @@ Set needsExternalModel to true if the task requires:
         const content = response.choices[0].message.content || '';
 
         try {
-            return JSON.parse(content);
+            return safeParseJSON(content);
         } catch {
             // Default to moderate if parsing fails
             return {

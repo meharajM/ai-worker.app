@@ -5,6 +5,8 @@
  * structured data (products, prices, search results, etc.) for user display.
  */
 
+import { safeParseJSON } from './llm';
+
 export interface ExtractedProduct {
     name: string;
     price?: string;
@@ -180,7 +182,7 @@ function extractMcpContent(output: any): string | null {
         // If the extracted text itself is JSON, try to parse it
         if (textParts.trim().startsWith('[') || textParts.trim().startsWith('{')) {
             try {
-                const parsed = JSON.parse(textParts);
+                const parsed = safeParseJSON(textParts);
                 // If it's a list of products/objects, let extractProducts handle it
                 if (Array.isArray(parsed)) return null;
                 // Otherwise return as is (to be flattened later) or just text
@@ -296,7 +298,7 @@ export function analyzeToolOutput(
         // BLOCK RAW JSON: If it looks like JSON and wasn't handled above, try to flatten or ignore
         if (outputStr.trim().startsWith('{') || outputStr.trim().startsWith('[')) {
             try {
-                const parsed = JSON.parse(outputStr);
+                const parsed = safeParseJSON(outputStr);
                 const flattened = flattenJsonToBullets(parsed);
                 if (flattened) {
                     return {

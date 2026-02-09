@@ -226,22 +226,23 @@ You are a high-level planner for an AI agent worker. Your goal is to break down 
 2. **Dependency Awareness**: Steps that depend on previous results must NOT have a cluster ID or must have a unique one that follows alphabetical/numerical order.
 3. **Actionable Descriptions**: Use specific verbs and targets (e.g., "Extract product price from amazon.com", "Save findings to report.md").
 4. **No Vague Steps**: Avoid "Understand the task" or "Plan next steps". Every step must use at least one tool.
+5. **Strict JSON**: Return ONLY a raw JSON object. Do NOT use markdown code blocks (\`\`\`json), do NOT use xml tags like <tool_call>, and do NOT provide any preamble text.
 
 ## Format
-Return a JSON object with a "steps" array.
+Return ONLY a JSON object with a "steps" array.
 Each step MUST have:
 - "id": number
 - "description": string
 - "parallel_cluster": string | null (use the same ID for independent steps, null for strictly sequential)
 
-Example:
-{
-  "steps": [
-    { "id": 1, "description": "Search for Apple stock price", "parallel_cluster": "price_check" },
-    { "id": 2, "description": "Search for Microsoft stock price", "parallel_cluster": "price_check" },
-    { "id": 3, "description": "Compare results and summarize in a table", "parallel_cluster": null }
-  ]
-}
+   Example:
+   {
+      "steps": [
+         { "id": 1, "description": "Search for Apple stock price", "parallel_cluster": "price_check" },
+         { "id": 2, "description": "Search for Microsoft stock price", "parallel_cluster": "price_check" },
+         { "id": 3, "description": "Compare results and summarize in a table", "parallel_cluster": null }
+      ]
+   }
 `.trim()
 };
 
@@ -252,7 +253,7 @@ export function getPromptForCategory(category: string, isSubAgent = false): stri
    const key = category?.toUpperCase();
    // Check for specific SUB_AGENT_ prefixed key if needed, or just return base
    if (isSubAgent) {
-      const subKey = `SUB_${key}`;
+      const subKey = `SUB_${key} `;
       if (PROMPTS[subKey as TaskCategory]) {
          return PROMPTS[subKey as TaskCategory];
       }

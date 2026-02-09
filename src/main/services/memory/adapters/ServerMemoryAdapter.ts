@@ -143,9 +143,11 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
 
     let createdEntities: any[]
     try {
-      createdEntities = JSON.parse(textContent)
+      createdEntities = this.extractJson(textContent)
     } catch (e) {
-      throw new Error(`Failed to parse create_entities response: ${textContent}`)
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      const snippet = textContent.length > 200 ? textContent.substring(0, 200) + '...' : textContent;
+      throw new Error(`Failed to parse create_entities response: ${errorMsg}. Text: ${snippet}`)
     }
 
     const entityData = createdEntities?.[0]
@@ -265,7 +267,7 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
 
     let nodes: any[] = []
     try {
-      const parsed = JSON.parse(textContent)
+      const parsed = this.extractJson(textContent)
       // Handle both direct array and { nodes: [...] } object
       if (Array.isArray(parsed)) {
         nodes = parsed
@@ -523,5 +525,84 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
       relations: Array.from(this.relationCache.values())
     })
     return new Blob([jsonString]).size
+  }
+
+  /**
+   * Robustly extract JSON from potentially noisy output.
+   * Handles noise before, after, or between multiple JSON objects.
+   * Uses a bracket-counting algorithm to isolate the first valid JSON structure.
+   */
+  private extractJson(text: string): any {
+    if (!text) throw new Error('Empty text content');
+
+    // 1. Direct parse attempt (fast path)
+    try {
+      return JSON.parse(text.trim());
+    } catch (e) {
+      // Continue to robust extraction
+    }
+
+    // 2. Bracket-counting extraction
+    let firstBrace = text.indexOf('{');
+    let firstBracket = text.indexOf('[');
+
+    // Start with whichever comes first
+    let startIdx = -1;
+    let stack: string[] = [];
+    let opener = '';
+    let closer = '';
+
+    if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+      startIdx = firstBrace;
+      opener = '{';
+      closer = '}';
+    } else if (firstBracket !== -1) {
+      startIdx = firstBracket;
+      opener = '[';
+      closer = ']';
+    }
+
+    if (startIdx === -1) {
+      throw new Error('No JSON-like structure (starting with { or [) found in text.');
+    }
+
+    let inString = false;
+    let escape = false;
+
+    for (let i = startIdx; i < text.length; i++) {
+      const char = text[i];
+
+      if (char === '"' && !escape) {
+        inString = !inString;
+        continue;
+      }
+
+      if (inString) {
+        if (char === '\\') {
+          escape = !escape;
+        } else {
+          escape = false;
+        }
+        continue;
+      }
+
+      if (char === opener) {
+        stack.push(opener);
+      } else if (char === closer) {
+        stack.pop();
+        if (stack.length === 0) {
+          // Found a potentially complete JSON structure
+          const candidate = text.substring(startIdx, i + 1);
+          try {
+            return JSON.parse(candidate);
+          } catch (e) {
+            // Not a valid JSON, maybe it was a false match? 
+            // Continue searching for the next potential end
+          }
+        }
+      }
+    }
+
+    throw new Error('Found start of JSON-like structure but could not find matching closing bracket.');
   }
 }

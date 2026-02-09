@@ -5,6 +5,7 @@ This document tracks the progress and verification of fixes for the core infrast
 | Issue | Modular Plan | Implementation Status | Verification Status |
 | :--- | :--- | :--- | :--- |
 | **1. Orchestration: Misidentification of Parallel Tasks** | [Plan 1](file:///Users/meharaj/.gemini/antigravity/brain/077e6c13-624f-4e48-84ea-fafb47dfd5d5/01_orchestration_decomposer_plan.md) | Implemented | Verified (Lints fixed, Structure restored) |
+| **4. Orchestration: Sub-agent Reset in Sequential Tasks** | [Plan 4](file:///Users/meharaj/.gemini/antigravity/brain/2f8aede5-dd58-41c0-95e9-2a77a3397d9b/implementation_plan.md) | Implemented | Verified (Stateful reuse implemented) |
 | **2. Memory Service: JSON Parsing Errors** | [Plan 2](file:///Users/meharaj/.gemini/antigravity/brain/077e6c13-624f-4e48-84ea-fafb47dfd5d5/02_memory_stability_plan.md) | ⏳ Not Started | ⏳ Not Started |
 | **3. Architecture: Unified Orchestration & System Prompts** | [Plan 3](file:///Users/meharaj/.gemini/antigravity/brain/077e6c13-624f-4e48-84ea-fafb47dfd5d5/03_architecture_prompts_plan.md) | ⏳ Not Started | ⏳ Not Started |
 

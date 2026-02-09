@@ -133,6 +133,8 @@ Respond with JSON:
 }`;
 
   try {
+    const { chat, safeParseJSON } = await import('./llm');
+
     const response = await chat(
       [
         { role: 'system', content: 'You are a task analysis expert. Always respond with valid JSON.' },
@@ -142,13 +144,8 @@ Respond with JSON:
       llmSettings
     );
 
-    // Parse the LLM response
-    const jsonMatch = response.content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return createDefaultAnalysis(userPrompt);
-    }
-
-    const analysis: TaskAnalysis = JSON.parse(jsonMatch[0]);
+    // Parse the LLM response robustly
+    const analysis: TaskAnalysis = safeParseJSON(response.content);
 
     // Validate and ensure proper structure
     return {

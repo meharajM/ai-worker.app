@@ -881,7 +881,7 @@ async function callOpenAI(
         args = {};
       } else {
         try {
-          const parsed = JSON.parse(tc.function.arguments);
+          const parsed = safeParseJSON(tc.function.arguments);
           // JSON.parse(null) returns null, so we need to check the result
           args = parsed !== null && typeof parsed === 'object' ? parsed : {};
         } catch (e) {
@@ -939,54 +939,65 @@ function parseToolCallsFromJson(
   content: string
 ): LLMResponse["toolCalls"] | undefined {
   try {
-    // Try to find JSON in the content (might be in code blocks or raw)
-    let jsonStr = content.trim();
+    // 1. Tag-based extraction (handles <tool_call>JSON</tool_call>)
+    const tagMatches = Array.from(content.matchAll(/<tool_call>([\s\S]*?)<\/tool_call>/g));
+    if (tagMatches.length > 0) {
+      const calls: LLMResponse["toolCalls"] = [];
+      for (const match of tagMatches) {
+        try {
+          const jsonStr = match[1].trim();
+          const parsed = JSON.parse(jsonStr);
+          const name = parsed.name || parsed.tool || parsed.function?.name;
+          const args = parsed.arguments || parsed.params || parsed.parameters || parsed.args || parsed.function?.arguments || {};
 
-    // Remove markdown code blocks if present
-    jsonStr = jsonStr
-      .replace(/```json\n?/g, "")
-      .replace(/```\n?/g, "")
-      .trim();
-
-    // Try to extract JSON object
-    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-
-      // Standard Format: { "tool_calls": [...] }
-      if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
-        console.log('[LLM] Identified Standard JSON Tool Call Format');
-        return parsed.tool_calls.map(
-          (
-            tc: { name: string; arguments: Record<string, unknown> },
-            idx: number
-          ) => {
-            console.log(`[LLM] JSON Recovered Call: ${tc.name}`, tc.arguments);
-            return {
-              id: `json_call_${Date.now()}_${idx}`,
-              name: tc.name,
-              arguments: ensureRecord(tc.arguments),
-            };
+          if (name) {
+            calls.push({
+              id: `tag_call_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+              name,
+              arguments: typeof args === 'string' ? safeParseJSON(args) : ensureRecord(args)
+            });
           }
-        );
+        } catch (e) {
+          console.warn("[LLM] Failed to parse JSON inside tool_call tag:", e);
+        }
       }
+      if (calls.length > 0) return calls;
+    }
 
-      // Alternate Format (Common in some models): { "tool": "name", "params": {...} }
-      if (parsed.tool && typeof parsed.tool === 'string') {
-        console.log('[LLM] Identified Alternate JSON Tool Call Format:', parsed.tool);
-        // Normalize parameters: some models use params, parameters, arguments, or even 'args'
-        const params = parsed.params || parsed.parameters || parsed.arguments || parsed.args || {};
-        console.log(`[LLM] Normalized parameters for "${parsed.tool}":`, params);
+    // 2. Regular JSON extraction (fallback)
+    const parsed = safeParseJSON(content);
+    if (!parsed || typeof parsed !== 'object') return undefined;
 
-        return [{
-          id: `json_call_${Date.now()}`,
-          name: parsed.tool,
-          arguments: ensureRecord(params)
-        }];
-      }
+    // Standard Format: { "tool_calls": [...] }
+    if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
+      console.log('[LLM] Identified Standard JSON Tool Call Format');
+      return parsed.tool_calls.map(
+        (
+          tc: { name?: string; tool?: string; arguments?: any; params?: any },
+          idx: number
+        ) => {
+          const name = tc.name || tc.tool;
+          const args = tc.arguments || tc.params;
+          return {
+            id: `json_call_${Date.now()}_${idx}`,
+            name: name || "unknown_tool",
+            arguments: ensureRecord(args),
+          };
+        }
+      );
+    }
+
+    // Alternate Format: { "tool": "name", "params": {...} } or { "name": "...", "arguments": {...} }
+    const name = parsed.name || parsed.tool || (parsed.function && parsed.function.name);
+    if (name && typeof name === 'string') {
+      const params = parsed.arguments || parsed.params || parsed.parameters || parsed.args || (parsed.function && parsed.function.arguments) || {};
+      return [{
+        id: `json_call_${Date.now()}`,
+        name: name,
+        arguments: typeof params === 'string' ? safeParseJSON(params) : ensureRecord(params)
+      }];
     }
   } catch (error) {
-    // Failed to parse, return undefined
     console.warn("Failed to parse tool calls from JSON:", error);
   }
   return undefined;
@@ -1631,61 +1642,97 @@ export function ensureRecord(input: any): Record<string, unknown> {
   if (typeof input === 'object' && !Array.isArray(input)) return input as Record<string, unknown>;
 
   if (typeof input === 'string') {
-    const trimmed = input.trim();
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
-        return { input: parsed };
-      } catch (e) {
-        // Fall through to default wrapping
-      }
-    }
-    return { input: trimmed };
+    const parsed = safeParseJSON(input);
+    if (typeof parsed === 'object' && !Array.isArray(parsed) && parsed !== null) return parsed as Record<string, unknown>;
+    return { input: parsed };
   }
-
   return { value: input };
 }
 
-// Helper to safely parse JSON that might contain surrounding text or trailing garbage
+/**
+ * Helper to safely parse JSON that might contain surrounding text, markdown code blocks, or trailing garbage.
+ * Handles noise before, after, or between multiple JSON objects by finding the first valid structure.
+ */
 export function safeParseJSON(input: string | any): any {
   if (input === null || input === undefined) return {};
   if (typeof input !== 'string') return input;
-  if (!input || input.trim() === '') return {};
 
+  const text = input.trim();
+  if (!text) return {};
+
+  // 1. Tag-based or Markdown-based cleanup
+  let clearText = text
+    .replace(/```json\n?/g, "")
+    .replace(/```\n?/g, "")
+    .trim();
+
+  // 2. Direct parse attempt (fast path)
   try {
-    const trimmed = input.trim();
-    // Quick path for pure JSON
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      try {
-        return JSON.parse(trimmed);
-      } catch (e) { /* fall through to extraction */ }
-    }
+    return JSON.parse(clearText);
+  } catch (e) {
+    // Continue to robust extraction
+  }
 
-    // Find the first occurrence of { or [ and the last occurrence of } or ]
-    const startObj = input.indexOf('{');
-    const startArr = input.indexOf('[');
+  // 3. Bracket-counting extraction
+  let firstBrace = clearText.indexOf('{');
+  let firstBracket = clearText.indexOf('[');
 
-    let start = -1;
-    let end = -1;
+  // Start with whichever comes first
+  let startIdx = -1;
+  let stack: string[] = [];
+  let opener = '';
+  let closer = '';
 
-    if (startObj !== -1 && (startArr === -1 || startObj < startArr)) {
-      start = startObj;
-      end = input.lastIndexOf('}');
-    } else if (startArr !== -1) {
-      start = startArr;
-      end = input.lastIndexOf(']');
-    }
+  if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+    startIdx = firstBrace;
+    opener = '{';
+    closer = '}';
+  } else if (firstBracket !== -1) {
+    startIdx = firstBracket;
+    opener = '[';
+    closer = ']';
+  }
 
-    if (start !== -1 && end !== -1 && end > start) {
-      const potentialJson = input.substring(start, end + 1);
-      return JSON.parse(potentialJson);
-    }
-
-    // If all else fails, return as-is
-    return input;
-  } catch (error) {
-    console.warn('[safeParseJSON] Extraction failed:', error);
+  if (startIdx === -1) {
+    // Return original string if no brackets found (legacy behavior fallback)
     return input;
   }
+
+  let inString = false;
+  let escape = false;
+
+  for (let i = startIdx; i < clearText.length; i++) {
+    const char = clearText[i];
+
+    // Handle strings to skip braces inside them
+    if (char === '"' && !escape) {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) {
+      if (char === '\\') escape = !escape;
+      else escape = false;
+      continue;
+    }
+
+    if (char === opener) {
+      stack.push(opener);
+    } else if (char === closer) {
+      stack.pop();
+      if (stack.length === 0) {
+        // Found a potentially complete JSON structure
+        const candidate = clearText.substring(startIdx, i + 1);
+        try {
+          return JSON.parse(candidate);
+        } catch (e) {
+          // Continue searching for the next potential end
+        }
+      }
+    }
+  }
+
+  // If extraction fails completely
+  console.warn('[safeParseJSON] Could not find matching closing bracket');
+  return input;
 }

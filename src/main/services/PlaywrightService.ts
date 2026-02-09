@@ -984,22 +984,46 @@ export class PlaywrightService {
                 case 'click':
                     const clickError = requireParam('selector')
                     if (clickError) return { result: null, error: clickError }
+
                     try {
-                        await page.click(safeArgs.selector, { timeout: 5000 }) // Reduce initial timeout to fail fast for fallback
+                        // DETECT NEW TAB: Wrap click in a race to see if a new page opens
+                        const newPagePromiseClick = this.context?.waitForEvent('page', { timeout: 2000 }).catch(() => null);
+
+                        await page.click(safeArgs.selector, { timeout: 5000 });
+
+                        const newPageClick = await newPagePromiseClick;
+
+                        if (newPageClick) {
+                            await newPageClick.waitForLoadState('domcontentloaded');
+                            await newPageClick.bringToFront();
+                            this.page = newPageClick; // AUTO-SWITCH context
+                            return {
+                                result: `Clicked ${safeArgs.selector} and SWITCHED to new tab: ${newPageClick.url()}`
+                            };
+                        }
+
                         return { result: `Clicked ${safeArgs.selector}` }
                     } catch (error) {
                         const errorStr = String(error);
 
-                        // AUTO-FALLBACK: click_text
-                        // Sometimes users pass text as selector or ID changed.
-                        // If selector looks like text (has spaces, no #/.), try click_text
+                        // AUTO-FALLBACK: click_text logic (same as before)
                         const isSimpleText = !safeArgs.selector.includes('#') && !safeArgs.selector.includes('.') && safeArgs.selector.includes(' ');
 
                         if (isSimpleText || errorStr.includes('Timeout')) {
                             console.log(`[PlaywrightService] Click failed. Trying fallback click_text("${safeArgs.selector}")`);
                             try {
-                                const textWithQuotes = `text="${safeArgs.selector}"`; // Playwright text selector
+                                const textWithQuotes = `text="${safeArgs.selector}"`;
+                                // Reuse new tab logic for fallback too
+                                const newPagePromiseFallback = this.context?.waitForEvent('page', { timeout: 2000 }).catch(() => null);
                                 await page.click(textWithQuotes, { timeout: 5000 });
+                                const newPageFallback = await newPagePromiseFallback;
+
+                                if (newPageFallback) {
+                                    await newPageFallback.waitForLoadState('domcontentloaded');
+                                    await newPageFallback.bringToFront();
+                                    this.page = newPageFallback;
+                                    return { result: `Clicked by Text "${safeArgs.selector}" and SWITCHED to new tab: ${newPageFallback.url()}` };
+                                }
                                 return { result: `Clicked by Text "${safeArgs.selector}" (Fallback from failed selector)` };
                             } catch (e2) {
                                 // Fallback failed
@@ -1214,7 +1238,22 @@ export class PlaywrightService {
                         ? `${tagFilter}:has-text("${textToFind}")`
                         : `text=${exactMatch ? `"${textToFind}"` : textToFind}`
 
-                    await page.click(clickTextSelector)
+                    // DETECT NEW TAB: Wrap click in a race
+                    const newPagePromiseText = this.context?.waitForEvent('page', { timeout: 2000 }).catch(() => null);
+
+                    await page.click(clickTextSelector);
+
+                    const newPageText = await newPagePromiseText;
+
+                    if (newPageText) {
+                        await newPageText.waitForLoadState('domcontentloaded');
+                        await newPageText.bringToFront();
+                        this.page = newPageText;
+                        return {
+                            result: `Clicked element with text "${textToFind}" and SWITCHED to new tab: ${newPageText.url()}`
+                        };
+                    }
+
                     return { result: `Clicked element with text "${textToFind}"` }
 
                 case 'extract_data':
