@@ -1147,7 +1147,7 @@ export class PlaywrightService {
                     const extractSelector = safeArgs.selector
 
                     // ERROR: Empty results usually mean bad selector
-                    const validateResults = (data: any, type: string) => {
+                    const validateResults = (data: any, _p0?: string) => {
                         let isEmpty = false;
                         if (Array.isArray(data)) {
                             isEmpty = data.length === 0;

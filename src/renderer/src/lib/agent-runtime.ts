@@ -85,9 +85,9 @@ export class AgentRuntime {
         // Create new state
         await executeToolCall('memory_create_entity', {
           name: entityName,
-          entityType: 'agent_execution_state',
-          observations: [`Agent initialized at ${new Date().toISOString()}`],
-          Metadata: {
+          type: 'agent_execution_state',
+          description: `Agent initialized at ${new Date().toISOString()}`,
+          metadata: {
             agentInstanceId: this.agentInstanceId,
             sessionId: this.options.activeSessionId || 'unknown',
             status: 'active',
@@ -147,9 +147,21 @@ export class AgentRuntime {
   /**
    * Main entry point to run the agent loop.
    */
-  async chat(userContent: string): Promise<LLMMessage> {
+  async chat(userContent: string, attachments?: { name: string; path: string; type: string }[]): Promise<LLMMessage> {
     // PHASE 0: Smart Confirmation (if enabled)
     let finalPrompt = userContent;
+
+    // INJECT ATTACHMENTS CONTEXT
+    // We append this to the user message to ensure it survives system prompt replacement in llm.ts
+    // and to keep it tightly coupled with the user's request.
+    let attachmentContext = '';
+    if (attachments && attachments.length > 0) {
+        const resourceList = attachments.map(a => `- ${a.name} (Path: ${a.path})`).join('\n');
+        const toolHint = `\n\n[To analyze these files, use the 'convert_to_markdown' tool with file:// URIs. Example: convert_to_markdown(uri="file:///absolute/path")]`;
+        
+        attachmentContext = `\n\n[System Note: User attached the following files. Use absolute paths to access them.]\n${resourceList}${toolHint}`;
+        console.log('[AgentRuntime] Prepared attachment context:', resourceList);
+    }
 
     // Initialize State (Idempotent)
     await this.initializeSessionState();
@@ -157,9 +169,8 @@ export class AgentRuntime {
     // GAP FIX 2B: Detect and resume from pending handoffs
     if (!this.options.isSubAgent) {
       try {
-        const handoffCheck = await executeToolCall('memory_search_entities', {
-          query: `handoff ${this.options.activeSessionId || ''}`,
-          entityType: 'agent_handoff'
+        const handoffCheck = await executeToolCall('memory_search', {
+          query: `handoff ${this.options.activeSessionId || ''}`
         });
 
         if (handoffCheck.result && typeof handoffCheck.result === 'object') {
@@ -217,7 +228,8 @@ Continue from where the previous agent left off.`
           console.log('[AgentRuntime] Simple reply to agent question. Skipping confirmation.');
         } else {
           console.log('[AgentRuntime] Analyzing task for ambiguity...');
-          const analysis = await analyzeTask(userContent, this.options.settings);
+          // Pass attachments to analysis - this ensures "convert this" with an attachment is NOT marked ambiguous
+          const analysis = await analyzeTask(userContent, this.options.settings, attachments);
 
           // Capture category from analysis
           if (analysis.category) {
@@ -286,15 +298,19 @@ Continue from where the previous agent left off.`
       }
     }
 
-    // Add user message (only if not already in history - prevents duplicates)
+    // Handle User Message Addition & Context Injection
     const lastMessage = this.messages[this.messages.length - 1];
     const alreadyHasMessage = lastMessage?.role === 'user' && lastMessage?.content === finalPrompt;
 
-    if (!alreadyHasMessage) {
-      const userMsg: LLMMessage = { role: "user", content: finalPrompt };
-      this.addMessage(userMsg);
+    if (alreadyHasMessage && lastMessage) {
+        // User message exists in history (from UI). Update it with attachment context.
+        // We modify the message in place to include the hidden system note
+        lastMessage.content = finalPrompt + attachmentContext;
+        console.log('[AgentRuntime] Updated existing user message with attachment context');
     } else {
-      console.log('[AgentRuntime] User message already in history, skipping duplicate add');
+        // User message not in history (new session or sub-agent). Add it with context.
+        const userMsg: LLMMessage = { role: "user", content: finalPrompt + attachmentContext };
+        this.addMessage(userMsg);
     }
 
     let iterationCount = 0;
@@ -331,13 +347,13 @@ Continue from where the previous agent left off.`
           try {
             await executeToolCall('memory_create_entity', {
               name: handoffId,
-              entityType: 'agent_handoff',
-              observations: [
+              type: 'agent_handoff',
+              description: [
                 `Agent ${this.agentInstanceId} approaching context limit (${estimatedTokens} tokens)`,
                 `Handing off at checkpoint: ${this.lastCheckpoint?.summary || 'No checkpoint'}`,
                 `Original goal: ${originalGoal.substring(0, 200)}`
-              ],
-              Metadata: {
+              ].join('\n'),
+              metadata: {
                 fromAgentId: this.agentInstanceId,
                 sessionId: this.options.activeSessionId,
                 reason: 'context_limit',
@@ -841,12 +857,12 @@ ${recentResults.length > 0 ? recentResults.map((r, i) => `**Result ${i + 1}:**\n
             const contextEntityName = `AgentState_${subAgentId}`;
             await executeToolCall('memory_create_entity', {
               name: contextEntityName,
-              entityType: 'agent_execution_state',
-              observations: [
+              type: 'agent_execution_state',
+              description: [
                 `Sub-agent initialized for task: ${instruction}`,
                 `Context Summary: ${context}`
-              ],
-              Metadata: {
+              ].join('\n'),
+              metadata: {
                 agentInstanceId: subAgentId,
                 sessionId: this.options.activeSessionId || 'unknown',
                 status: 'active',
@@ -1387,13 +1403,13 @@ Use tools immediately. End with "✓ Done".`;
       try {
         await executeToolCall('memory_create_entity', {
           name: `AgentState_${subAgentId}`,
-          entityType: 'agent_execution_state',
-          observations: [
+          type: 'agent_execution_state',
+          description: [
             `Parallel sub-agent for context: ${context}`,
             `Task: ${originalRequest}`,
             `Initialized at ${new Date().toISOString()}`
-          ],
-          Metadata: {
+          ].join('\n'),
+          metadata: {
             agentInstanceId: subAgentId,
             sessionId: this.options.activeSessionId || 'unknown',
             parentAgentId: this.agentInstanceId,
@@ -1645,14 +1661,14 @@ End with "✓ Done" and a brief result.`;
         try {
           await executeToolCall('memory_create_entity', {
             name: `AgentState_${subAgentId}`,
-            entityType: 'agent_execution_state',
-            observations: [
+            type: 'agent_execution_state',
+            description: [
               `Sequential sub-agent for step ${step.id}/${steps.length}`,
               `Task: ${step.description}`,
               `Parent task: ${originalRequest}`,
               `Initialized at ${new Date().toISOString()}`
-            ],
-            Metadata: {
+            ].join('\n'),
+            metadata: {
               agentInstanceId: subAgentId,
               sessionId: this.options.activeSessionId || 'unknown',
               parentAgentId: this.agentInstanceId,

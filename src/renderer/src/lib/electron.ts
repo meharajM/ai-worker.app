@@ -199,6 +199,15 @@ export const electron = {
                 return await window.electron.logs.openFolder()
             }
         }
+    },
+    // Clipboard operations
+    clipboard: {
+        readFilePaths: (): string[] => {
+            if (isElectron() && window.electron?.clipboard) {
+                return window.electron.clipboard.readFilePaths()
+            }
+            return []
+        }
     }
 }
 

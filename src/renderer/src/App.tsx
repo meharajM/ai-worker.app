@@ -220,11 +220,19 @@ function App() {
 
   // Handle message submission
   const handleSubmit = useCallback(
-    async (content: string) => {
-      if (!content.trim()) return;
+    async (content: string, attachments?: File[]) => {
+      if (!content.trim() && (!attachments || attachments.length === 0)) return;
 
       setProcessing(true);
-      addMessage({ role: 'user', content });
+      
+      // Map File objects to attachment metadata
+      const attachmentData = attachments?.map(file => ({
+          name: file.name,
+          path: (file as any).path || '', // Electron exposes path
+          type: file.type
+      }));
+
+      addMessage({ role: 'user', content, attachments: attachmentData });
       const abortController = new AbortController();
       // We need to use a mutable ref or store for the controller if we want to support external aborts
       // effectively (like the stop button). 
@@ -447,7 +455,7 @@ function App() {
           MemoryReflector.getInstance().analyze(historyForReflector, settingsForLLM);
         });
 
-        await runtime.chat(content);
+        await runtime.chat(content, attachmentData);
 
       } catch (error) {
         console.error("Handler error:", error);

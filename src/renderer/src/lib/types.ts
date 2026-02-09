@@ -15,6 +15,7 @@ export interface LLMMessage {
   tool_call_id?: string;
   name?: string; // For Gemini/OpenAI tool names
   actions?: MessageAction[]; // For button-based interactions
+  attachments?: { name: string; path: string; type: string }[]; // User-uploaded files
 }
 
 export interface LLMTool {

@@ -94,6 +94,10 @@ interface ElectronAPI {
         checkMigration: () => Promise<{ success: boolean; shouldMigrate?: boolean; error?: string }>
         openFileLocation: () => Promise<{ success: boolean; error?: string }>
     }
+
+    clipboard: {
+        readFilePaths: () => string[]
+    }
 }
 
 // Web Speech API types - placed inside declare global to be available everywhere
