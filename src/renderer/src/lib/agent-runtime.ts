@@ -510,6 +510,11 @@ Please send your next message to continue with a fresh agent.`
         console.log(`[SubAgent] LLM call with ${contextMessages.length} messages (should be 1-3 for fresh sub-agent)`);
       }
 
+      if (this.options.signal?.aborted) {
+        throw new Error("Aborted by user");
+      }
+
+
       try {
         response = await chat(
           contextMessages,
