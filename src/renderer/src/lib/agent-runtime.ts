@@ -156,11 +156,11 @@ export class AgentRuntime {
     // and to keep it tightly coupled with the user's request.
     let attachmentContext = '';
     if (attachments && attachments.length > 0) {
-        const resourceList = attachments.map(a => `- ${a.name} (Path: ${a.path})`).join('\n');
-        const toolHint = `\n\n[To analyze these files, use the 'convert_to_markdown' tool with file:// URIs. Example: convert_to_markdown(uri="file:///absolute/path")]`;
-        
-        attachmentContext = `\n\n[System Note: User attached the following files. Use absolute paths to access them.]\n${resourceList}${toolHint}`;
-        console.log('[AgentRuntime] Prepared attachment context:', resourceList);
+      const resourceList = attachments.map(a => `- ${a.name} (Path: ${a.path})`).join('\n');
+      const toolHint = `\n\n[To analyze these files, use the 'convert_to_markdown' tool with file:// URIs. Example: convert_to_markdown(uri="file:///absolute/path")]`;
+
+      attachmentContext = `\n\n[System Note: User attached the following files. Use absolute paths to access them.]\n${resourceList}${toolHint}`;
+      console.log('[AgentRuntime] Prepared attachment context:', resourceList);
     }
 
     // Initialize State (Idempotent)
@@ -215,6 +215,9 @@ Continue from where the previous agent left off.`
       }
     }
 
+    // PHASE 0: Task Analysis (for complexity detection and optional confirmation)
+    let taskComplexity: 'simple' | 'moderate' | 'complex' = 'moderate'; // Default to moderate
+    
     if (this.options.requireConfirmation && this.options.onConfirmationNeeded) {
       try {
         // Check if this is a simple reply to a previous agent question
@@ -226,6 +229,7 @@ Continue from where the previous agent left off.`
         // Skip confirmation if user is just replying to the agent's question
         if (isSimpleReply && isReplyToQuestion) {
           console.log('[AgentRuntime] Simple reply to agent question. Skipping confirmation.');
+          taskComplexity = 'simple';
         } else {
           console.log('[AgentRuntime] Analyzing task for ambiguity...');
           // Pass attachments to analysis - this ensures "convert this" with an attachment is NOT marked ambiguous
@@ -235,6 +239,12 @@ Continue from where the previous agent left off.`
           if (analysis.category) {
             this.taskCategory = analysis.category;
             console.log(`[AgentRuntime] Identified task category: ${this.taskCategory}`);
+          }
+
+          // Capture complexity level to skip decomposition for simple tasks
+          if (analysis.complexity) {
+            taskComplexity = analysis.complexity.level;
+            console.log(`[AgentRuntime] Task complexity: ${taskComplexity}`);
           }
 
           if (analysis.shouldConfirm) {
@@ -260,6 +270,14 @@ Continue from where the previous agent left off.`
         // Continue with original prompt if analysis fails
       }
     }
+    // Note: When confirmation is disabled (requireConfirmation === false), this agent is typically:
+    // 1. A sub-agent spawned by the main agent with a specific task instruction
+    // 2. A background process (e.g., Memory Reflector)
+    // 
+    // Sub-agents NEVER receive simple greetings like "hi" or "thanks" - they receive task-specific
+    // instructions from the parent agent (e.g., "Search Amazon for laptops under $500").
+    // Therefore, we don't need to check for simple prompts when confirmation is disabled.
+    // The taskComplexity remains at its default value ('moderate').
 
     // PHASE 0.1: Check for Dynamic Handoff Confirmation
     const lastMsg = this.messages[this.messages.length - 1];
@@ -280,8 +298,15 @@ Continue from where the previous agent left off.`
 
       return this.triggerSubAgentHandoff(originalGoal);
     }
-    if (!this.options.isSubAgent) {
-      const decomposition = analyzeTaskForDecomposition(finalPrompt);
+    // PHASE 1: Task Decomposition (only for moderate/complex tasks)
+    if (!this.options.isSubAgent && taskComplexity !== 'simple') {
+      // Async task decomposition with LLM-based independence verification
+      // Skip this for simple prompts (greetings, basic questions) to reduce latency
+      console.log('[AgentRuntime] Running task decomposition analysis...');
+      const decomposition = await analyzeTaskForDecomposition(
+        finalPrompt,
+        this.options.settings
+      );
       console.log('[AgentRuntime] Task decomposition:', decomposition);
 
       if (decomposition.shouldFork && decomposition.type === 'multi_context') {
@@ -296,6 +321,8 @@ Continue from where the previous agent left off.`
         console.log(`[AgentRuntime] Complex single-context task: ${decomposition.estimatedActions} actions - using sequential sub-agents`);
         return this.executeSequentialSubAgents(finalPrompt, decomposition);
       }
+    } else if (!this.options.isSubAgent && taskComplexity === 'simple') {
+      console.log('[AgentRuntime] Simple task detected - skipping decomposition for faster response');
     }
 
     // Handle User Message Addition & Context Injection
@@ -303,14 +330,14 @@ Continue from where the previous agent left off.`
     const alreadyHasMessage = lastMessage?.role === 'user' && lastMessage?.content === finalPrompt;
 
     if (alreadyHasMessage && lastMessage) {
-        // User message exists in history (from UI). Update it with attachment context.
-        // We modify the message in place to include the hidden system note
-        lastMessage.content = finalPrompt + attachmentContext;
-        console.log('[AgentRuntime] Updated existing user message with attachment context');
+      // User message exists in history (from UI). Update it with attachment context.
+      // We modify the message in place to include the hidden system note
+      lastMessage.content = finalPrompt + attachmentContext;
+      console.log('[AgentRuntime] Updated existing user message with attachment context');
     } else {
-        // User message not in history (new session or sub-agent). Add it with context.
-        const userMsg: LLMMessage = { role: "user", content: finalPrompt + attachmentContext };
-        this.addMessage(userMsg);
+      // User message not in history (new session or sub-agent). Add it with context.
+      const userMsg: LLMMessage = { role: "user", content: finalPrompt + attachmentContext };
+      this.addMessage(userMsg);
     }
 
     let iterationCount = 0;
@@ -469,7 +496,7 @@ Please send your next message to continue with a fresh agent.`
       let response: LLMResponse;
 
       // Get task-specific rules if category is available from analysis
-      let dynamicRules = undefined;
+      let dynamicRules: string | undefined = undefined;
 
       // Import helper dynamically to avoid circular deps
       const { getPromptForCategory, getComposedPrompts, PROMPTS } = await import('./prompt-library');
@@ -480,25 +507,12 @@ Please send your next message to continue with a fresh agent.`
         promptsToLoad.push(this.taskCategory);
       }
 
-      // 2. PARALLEL EXECUTION DETECTION (Dynamic Injection)
-      // Inject parallel execution prompt if user request suggests multiple independent tasks
-      // Regex patterns to detect parallel intent: "Research X and Y", "Check 3 websites"
-      const parallelIndicators = [
-        /\band\b/i,          // "Research X and Y"
-        /,/,                 // "Check A, B, C"
-        /\bmultiple\b/i,
-        /\beach\b/i,
-        /\ball\b/i,
-        /\d+\s+(websites|pages|items|products|companies)/i  // "5 websites"
-      ];
 
-      const hasParallelIntent = parallelIndicators.some(pattern => pattern.test(finalPrompt));
+      // 2. PARALLEL EXECUTION DETECTION - DISABLED (Issue #1 Fix)
+      // This was causing false parallels for research tasks like "Research X and Y"
+      // Now handled by LLM-based verification in task-decomposer.ts
+      // The old keyword-based detection was too broad and has been removed.
 
-      // Only inject if detected AND not already a sub-agent (sub-agents should focus on their specific task)
-      if (hasParallelIntent && !this.options.isSubAgent) {
-        promptsToLoad.push('PARALLEL_EXECUTION');
-        console.log('[AgentRuntime] Parallel execution detected. Injecting PARALLEL_EXECUTION prompt.');
-      }
 
       // 3. Compose the final dynamic rules
       if (promptsToLoad.length > 0) {
@@ -603,8 +617,14 @@ Then extract the answer from the results. DO NOT refuse again.`
         };
         this.addMessage(assistantMsg);
 
+        // DISABLED: Memory analysis on every turn causes unwanted delays
+        // Memory analysis should only happen:
+        // 1. When sub-agents complete (line 294) - for context preservation
+        // 2. When user explicitly wants to store preferences (via tool call)
+        // 
         // Fire-and-forget memory analysis (Standard Turn Complete)
-        MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+        // MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+
 
         // GAP FIX 4: Production Cleanup
         // Requirement: Keep for debugging in dev mode, clear on completed status in prod
