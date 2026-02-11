@@ -47,6 +47,9 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
 
     const agentPlan = toolPlanData;
 
+    // Check if we're in dev mode
+    const isDev = import.meta.env.DEV;
+
     // Filter out internal tools from the standard checklist view
     const visibleToolCalls = message.toolCalls?.filter(tc =>
         tc.name !== 'create_execution_plan' &&
@@ -230,6 +233,8 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                                     else if (tool.name.startsWith('fs_') || tool.name.startsWith('file_')) agentName = 'FilesystemAgent';
                                     else if (tool.name.startsWith('mcp_')) agentName = 'MCPAgent';
                                     else if (tool.name === 'create_execution_plan') agentName = 'PlannerAgent';
+                                    if (!isDev && agentName === 'SystemAgent') return acc;
+                                    
                                     if (!acc[agentName]) acc[agentName] = [];
                                     acc[agentName].push(tool);
                                     return acc;
