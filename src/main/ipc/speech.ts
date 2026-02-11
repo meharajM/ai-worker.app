@@ -26,6 +26,17 @@ export function registerSpeechHandlers(): void {
     ipcMain.handle('speech:stop-listening', async () => ({ success: true }))
 
     ipcMain.handle('speech:download-model', async (event, options: { modelId: string, url: string, modelName: string }) => {
+        // Validate download URL to prevent arbitrary file downloads
+        const ALLOWED_MODEL_HOSTS = ['alphacephei.com', 'huggingface.co', 'github.com']
+        try {
+            const url = new URL(options.url)
+            if (!['https:'].includes(url.protocol) || !ALLOWED_MODEL_HOSTS.some(h => url.hostname.endsWith(h))) {
+                return { success: false, error: `Download blocked: untrusted host ${url.hostname}` }
+            }
+        } catch {
+            return { success: false, error: 'Invalid download URL' }
+        }
+        
         return await modelManager!.downloadModel(
             options.modelName,
             options.url, // Pass dynamic URL
