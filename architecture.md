@@ -176,6 +176,7 @@ graph TB
     subgraph "Hooks"
          UseSpeech[useSpeechRecognition]
          UseVisualizer[useAudioVisualizer]
+         UseDragDrop[useFileDragDrop]
     end
 
     ReactApp --> Components
@@ -184,6 +185,7 @@ graph TB
     Components --> Hooks
     Hooks --> VoskLib
     Hooks --> UseVisualizer
+    Hooks --> UseDragDrop
     Stores --> Lib
     Lib --> ElectronLib
     
@@ -229,6 +231,7 @@ graph TD
 
     VoiceInput --> SpeechRecognition[useSpeechRecognition<br/>STT Hook]
     VoiceInput --> SpeechSynthesis[useSpeechSynthesis<br/>TTS Hook with Dynamic Controls]
+    ChatView --> UseFileDragDrop[useFileDragDrop<br/>Attachment Handling]
 ```
 
 ### State Management Architecture
@@ -279,6 +282,31 @@ sequenceDiagram
     App->>ChatStore: addMessage(assistant)
     App->>TTS: speak(response)
     TTS-->>User: Audio Output
+```
+
+### Attachment Processing Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant DragDrop as useFileDragDrop
+    participant ChatStore
+    participant MarkItDown as MarkItDown MCP
+    participant LLMLib
+
+    User->>DragDrop: Drop File (PDF/Image)
+    DragDrop->>ChatStore: addMessage(user + attachments)
+    Note over ChatStore: Attachments stored with path & type
+    
+    ChatStore->>LLMLib: prepareContext()
+    
+    alt Needs Conversion
+        LLMLib->>MarkItDown: convert(file_path)
+        MarkItDown-->>LLMLib: Return Markdown Content
+    end
+
+    LLMLib->>LLMLib: Inject Content into Context
+    LLMLib->>LLM Provider: Send Prompt + File Content
 ```
 
 ### MCP Connection Flow
@@ -521,6 +549,13 @@ graph LR
   - Args: `-y @modelcontextprotocol/server-sequential-thinking`
   - Description: Enables step-by-step reasoning for complex tasks
 
+- **MarkItDown** (`markitdown`)
+  - Type: `stdio`
+  - Command: `uvx`
+  - Args: `markitdown-mcp`
+  - Description: Convert documents (PDF, Word, Excel, Images) to Markdown
+  - **Auto-Connect**: Enabled by default
+
 **Initialization Logic:**
 
 - Default servers are automatically created on first run (when localStorage is empty)
@@ -732,41 +767,49 @@ If a sub-agent enters an unproductive loop (3+ turns with no progress), it trigg
 
 The system includes **automatic task decomposition** that intelligently spawns sub-agents based on context boundaries. This prevents "context drowning" where the main loop becomes overwhelmed by tool noise.
 
-#### Decision Logic
+#### Decision Logic (LLM-Based)
+
+The system now utilizes an **LLM-based analysis step** (`analyzeTaskWithLLM`) to determine the optimal execution strategy, replacing the previous regex-only approach.
 
 | Scenario | Strategy | Implementation |
 |----------|----------|----------------|
-| **Multiple websites** | Parallel sub-agents | 1 sub-agent per website |
-| **Single website, 3+ actions** | Sub-agent | Protects main context |
-| **Single website, 1-2 actions** | Direct execution | No fork needed |
+| **Independent Contexts** (e.g., compare Amazon & eBay) | Parallel Sub-Agents | LLM identifies contexts + parallel safety |
+| **Complex Single Context** (4+ steps) | Sequential Sub-Agent | Protects main context history |
+| **Simple Task** | Direct Execution | Runs in main loop |
 
 #### Implementation
 
-Located in [task-decomposer.ts](file:///Users/suhail/ai-worker-app/src/renderer/src/lib/task-decomposer.ts):
+Located in [`task-decomposer.ts`](src/renderer/src/lib/task-decomposer.ts):
 
 ```typescript
 interface TaskDecomposition {
   type: 'single_context' | 'multi_context';
-  contexts: string[];           // URLs or app names
-  estimatedActions: number;     // Estimated action count
-  shouldFork: boolean;          // Whether to spawn sub-agents
+  contexts: string[];           // URLs or app names detected by LLM
+  estimatedActions: number;     // Heuristic count
+  shouldFork: boolean;          // Decision
   forkStrategy?: 'parallel' | 'sequential';
 }
 ```
+
+**Key Features:**
+- **LLM Analysis**: Prompts the model to extract contexts and verify independence.
+- **Caching**: Analysis results are cached (5m TTL) to prevent redundant calls.
+- **Fallbacks**: Defaults to sequential execution if LLM analysis fails.
 
 #### Auto-Fork Flow
 
 ```mermaid
 flowchart TD
-    A[User Request] --> B{Multiple websites?}
-    B -->|Yes| C[Parallel Sub-Agents]
-    B -->|No| D{3+ actions?}
-    D -->|Yes| E[Single Sub-Agent]
-    D -->|No| F[Direct Execution]
-    C --> G[Combine Results]
-    E --> G
-    F --> H[Response]
-    G --> H
+    A[User Request] --> B[LLM Analysis]
+    B --> C{Parallelizable?}
+    C -->|Yes| D[Parallel Sub-Agents]
+    C -->|No| E{Complex Task?}
+    E -->|Yes| F[Sequential Sub-Agent]
+    E -->|No| G[Direct Execution]
+    D --> H[Combine Results]
+    F --> H
+    G --> I[Response]
+    H --> I
 ```
 
 ### Strategic Result Extraction
