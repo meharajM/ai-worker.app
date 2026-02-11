@@ -2,10 +2,12 @@
  * Task Decomposer Module
  * 
  * Analyzes user requests to determine the optimal decomposition strategy:
- * - Multiple websites/apps → Parallel sub-agents (1 per context)
- * - Single context, 3+ actions → Sub-agent to protect main context
- * - Single context, 1-2 actions → Direct execution
+ * - Sequential by default (fixes Issue 1)
+ * - Parallel only when: (a) parallel keywords detected AND (b) LLM verifies independence
+ * - Single context, complex tasks → Sequential sub-agent
  */
+
+import { chat } from './llm';
 
 export interface TaskDecomposition {
   type: 'single_context' | 'multi_context';
@@ -16,38 +18,6 @@ export interface TaskDecomposition {
   forkStrategy?: 'parallel' | 'sequential'; // How to execute sub-agents
 }
 
-// Common website patterns to detect
-const WEBSITE_PATTERNS = [
-  /amazon\.com/i,
-  /ebay\.com/i,
-  /google\.com/i,
-  /youtube\.com/i,
-  /facebook\.com/i,
-  /twitter\.com|x\.com/i,
-  /linkedin\.com/i,
-  /instagram\.com/i,
-  /reddit\.com/i,
-  /github\.com/i,
-  /netflix\.com/i,
-  /spotify\.com/i,
-  /bestbuy\.com/i,
-  /walmart\.com/i,
-  /target\.com/i,
-  /newegg\.com/i,
-  /booking\.com/i,
-  /airbnb\.com/i,
-  /expedia\.com/i,
-  /kayak\.com/i,
-  /tripadvisor\.com/i,
-  /yelp\.com/i,
-  /zillow\.com/i,
-  /craigslist\.org/i,
-  /indeed\.com/i,
-  /glassdoor\.com/i,
-];
-
-// Generic URL pattern
-const URL_PATTERN = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9-]+(?:\.[a-zA-Z]{2,})+)/gi;
 
 // Action keywords that indicate browser/UI actions
 const ACTION_KEYWORDS = [
@@ -80,48 +50,38 @@ const MULTI_STEP_INDICATORS = [
   'compare', 'multiple', 'several', 'all', 'each',
 ];
 
-/**
- * Extract unique website/domain mentions from text
- */
-function extractWebsites(text: string): string[] {
-  const websites = new Set<string>();
+// Simple cache for LLM analysis results (avoid redundant calls)
+const analysisCache = new Map<string, {
+  result: { shouldParallelize: boolean; contexts: string[]; reasoning: string };
+  timestamp: number;
+}>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const MAX_CACHE_SIZE = 100;
 
-  // Check for known website patterns
-  for (const pattern of WEBSITE_PATTERNS) {
-    const match = text.match(pattern);
-    if (match) {
-      websites.add(match[0].toLowerCase().replace('www.', ''));
-    }
+function getCachedAnalysis(userRequest: string) {
+  const cached = analysisCache.get(userRequest);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    console.log('[TaskDecomposer] Using cached analysis');
+    return cached.result;
   }
-
-  // Also check for generic URLs
-  const urlMatches = text.match(URL_PATTERN);
-  if (urlMatches) {
-    for (const url of urlMatches) {
-      const domain = url.replace(/https?:\/\//i, '').replace('www.', '').split('/')[0];
-      websites.add(domain.toLowerCase());
-    }
-  }
-
-  // Check for website mentions without full URLs (e.g., "on Amazon", "at BestBuy")
-  const textLower = text.toLowerCase();
-  const siteKeywords = [
-    'amazon', 'ebay', 'google', 'youtube', 'facebook', 'twitter',
-    'linkedin', 'instagram', 'reddit', 'github', 'netflix', 'spotify',
-    'bestbuy', 'best buy', 'walmart', 'target', 'newegg', 'booking',
-    'airbnb', 'expedia', 'kayak', 'tripadvisor', 'yelp', 'zillow',
-    'craigslist', 'indeed', 'glassdoor'
-  ];
-
-  for (const site of siteKeywords) {
-    if (textLower.includes(site)) {
-      // Normalize "best buy" to "bestbuy"
-      websites.add(site.replace(' ', ''));
-    }
-  }
-
-  return Array.from(websites);
+  return null;
 }
+
+function setCachedAnalysis(
+  userRequest: string,
+  result: { shouldParallelize: boolean; contexts: string[]; reasoning: string }
+) {
+  // Simple LRU: if cache is full, remove oldest entry
+  if (analysisCache.size >= MAX_CACHE_SIZE) {
+    const firstKey = analysisCache.keys().next().value;
+    if (firstKey !== undefined) {
+      analysisCache.delete(firstKey);
+    }
+  }
+  analysisCache.set(userRequest, { result, timestamp: Date.now() });
+}
+
+
 
 /**
  * Count estimated actions in a request
@@ -151,46 +111,180 @@ function countActions(text: string): number {
 }
 
 /**
- * Main function to analyze a task and determine decomposition strategy
+ * Use LLM to analyze task and detect contexts + dependencies
+ * Returns execution strategy with detected contexts
  */
-export function analyzeTaskForDecomposition(
+async function analyzeTaskWithLLM(
   userRequest: string,
+  settings: any
+): Promise<{
+  shouldParallelize: boolean;
+  contexts: string[];
+  reasoning: string;
+}> {
+  // Check cache first to avoid redundant LLM calls
+  const cached = getCachedAnalysis(userRequest);
+  if (cached) {
+    return cached;
+  }
+
+  const prompt = `Analyze this workflow automation request and determine the optimal execution strategy.
+
+User Request: "${userRequest}"
+
+TASK:
+1. Identify if there are multiple INDEPENDENT contexts that can be processed in PARALLEL
+2. Extract the contexts (e.g., websites, files, APIs, applications, data sources, locations)
+3. Determine if tasks have dependencies between them
+
+CONTEXT TYPES TO CONSIDER:
+- Websites/URLs (amazon.com, google.com)
+- Files/Directories (multiple files to process)
+- Applications (Excel, Word, different browser tabs)
+- APIs/Services (different API endpoints)
+- Data sources (databases, spreadsheets, documents)
+- Locations (cities, regions for data collection)
+- Entities (companies, products, people to research)
+
+CRITICAL RULES FOR PARALLELIZATION:
+✅ PARALLEL: Only if multiple contexts exist AND they have ZERO dependencies
+  - Each context can be processed independently
+  - No task needs output from another
+  - Can run simultaneously without conflicts
+
+❌ SEQUENTIAL: Use in these cases:
+  - One task needs output from another (dependency chain)
+  - Single context/workflow
+  - Conditional logic (if X then Y)
+  - Multi-step workflow on same context
+  - Verbs like "google" (action) vs "google.com" (website)
+
+EXAMPLES:
+
+PARALLEL (Multiple Independent Contexts):
+✅ "Compare laptop prices on Amazon, eBay, and BestBuy" → 3 websites, independent
+✅ "Extract data from file1.csv, file2.csv, and file3.csv" → 3 files, independent
+✅ "Get weather for NYC, LA, and Chicago" → 3 locations, independent
+✅ "Check order status on Amazon and track package on FedEx" → 2 platforms, independent
+✅ "Fetch user data from API1 and API2" → 2 APIs, independent
+
+SEQUENTIAL (Single Context or Dependent Tasks):
+❌ "google flipkart.com and give me details" → "google" is a verb, 1 context: flipkart.com
+❌ "Search Amazon for laptops, then compare top result with eBay" → Dependent (eBay needs Amazon)
+❌ "Research Apple and Microsoft trends" → Single research task, 2 topics
+❌ "Process file1.csv, then use results to update file2.csv" → Dependent workflow
+❌ "Check price on Amazon, if over $500 check eBay" → Conditional dependency
+❌ "Fill form on website1, submit, then download confirmation" → Sequential workflow
+
+Return JSON:
+{
+  "should_parallelize": true/false,
+  "contexts": ["context1", "context2", ...],
+  "reasoning": "Brief explanation of decision"
+}`;
+
+  try {
+    // Add timeout to prevent hanging (max 5 seconds for analysis)
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('LLM analysis timeout')), 5000)
+    );
+
+    const llmPromise = chat(
+      [{ role: 'user', content: prompt }],
+      undefined,
+      settings
+    );
+
+    const response = await Promise.race([llmPromise, timeoutPromise]) as any;
+
+    // Parse and validate response
+    const result = JSON.parse(response.content || '{}');
+
+    // Validate required fields
+    if (typeof result.should_parallelize !== 'boolean') {
+      throw new Error('Invalid LLM response: missing should_parallelize');
+    }
+    if (!Array.isArray(result.contexts)) {
+      throw new Error('Invalid LLM response: contexts must be array');
+    }
+
+    // Normalize contexts (lowercase, trim)
+    const normalizedContexts = result.contexts
+      .map((ctx: string) => ctx.toLowerCase().trim())
+      .filter((ctx: string) => ctx.length > 0);
+
+    const analysisResult = {
+      shouldParallelize: result.should_parallelize || false,
+      contexts: normalizedContexts.length > 0 ? normalizedContexts : ['current_page'],
+      reasoning: result.reasoning || 'LLM analysis completed'
+    };
+
+    // Cache the result for future use
+    setCachedAnalysis(userRequest, analysisResult);
+
+    return analysisResult;
+  } catch (e) {
+    const errorMsg = e instanceof Error ? e.message : 'Unknown error';
+    console.error('[TaskDecomposer] LLM analysis failed:', errorMsg);
+
+    // Default to sequential if parsing fails (safer option)
+    // This handles: network errors, timeouts, malformed JSON, invalid responses
+    return {
+      shouldParallelize: false,
+      contexts: ['current_page'],
+      reasoning: `LLM analysis failed (${errorMsg}), defaulting to sequential`
+    };
+  }
+}
+
+/**
+ * Main function to analyze a task and determine decomposition strategy
+ * Now uses LLM for complete context detection and dependency analysis
+ */
+export async function analyzeTaskForDecomposition(
+  userRequest: string,
+  settings: any,
   currentUrl?: string
-): TaskDecomposition {
-  const websites = extractWebsites(userRequest);
+): Promise<TaskDecomposition> {
   const estimatedActions = countActions(userRequest);
 
+  // Use LLM to analyze task for contexts and dependencies
+  console.log('[TaskDecomposer] Analyzing task with LLM...');
+  const analysis = await analyzeTaskWithLLM(userRequest, settings);
 
-
-  // Decision logic
-  if (websites.length > 1) {
-    // Multiple websites = parallel sub-agents
+  // If LLM recommends parallel execution
+  if (analysis.shouldParallelize && analysis.contexts.length > 1) {
+    console.log(`[TaskDecomposer] LLM detected ${analysis.contexts.length} independent contexts: ${analysis.contexts.join(', ')}`);
     return {
       type: 'multi_context',
-      contexts: websites,
+      contexts: analysis.contexts,
       estimatedActions,
       shouldFork: true,
-      forkReason: `Task involves ${websites.length} websites: ${websites.join(', ')}`,
-      forkStrategy: 'parallel'
+      forkStrategy: 'parallel',
+      forkReason: `LLM-verified independent tasks: ${analysis.reasoning}`
     };
   }
 
-  if (websites.length === 1 && estimatedActions >= 4) {
+  console.log(`[TaskDecomposer] Sequential execution: ${analysis.reasoning}`);
+
+  // For backward compatibility, still check if this is a complex single-context task
+  // that might benefit from a sequential sub-agent
+  const hasMultiStepLanguage = MULTI_STEP_INDICATORS.some(indicator =>
+    userRequest.toLowerCase().includes(indicator)
+  );
+
+  if (analysis.contexts.length === 1 && estimatedActions >= 4) {
     return {
       type: 'single_context',
-      contexts: websites,
+      contexts: analysis.contexts,
       estimatedActions,
       shouldFork: true,
-      forkReason: `Task involves ${estimatedActions} actions on ${websites[0]} - using sub-agent to protect context`,
+      forkReason: `Task involves ${estimatedActions} actions - using sub-agent to protect context`,
       forkStrategy: 'sequential'
     };
   }
 
-  // No website mentioned but many actions - still might benefit from orchestration       
-  const hasMultiStepLanguage = MULTI_STEP_INDICATORS.some(indicator =>
-    userRequest.toLowerCase().includes(indicator)
-  );
-  if (websites.length === 0 && estimatedActions >= 5 && hasMultiStepLanguage) {
+  if (analysis.contexts.length === 0 && estimatedActions >= 5 && hasMultiStepLanguage) {
     return {
       type: 'single_context',
       contexts: ['current_page'],
@@ -201,13 +295,13 @@ export function analyzeTaskForDecomposition(
     };
   }
 
-  // Simple task - direct execution
+  // DEFAULT: Sequential/direct execution
   return {
     type: 'single_context',
-    contexts: websites.length > 0 ? websites : ['current_page'],
+    contexts: analysis.contexts.length > 0 ? analysis.contexts : ['current_page'],
     estimatedActions,
     shouldFork: false,
-    forkReason: 'Simple task - direct execution'
+    forkReason: analysis.reasoning
   };
 }
 
