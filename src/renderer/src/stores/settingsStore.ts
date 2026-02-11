@@ -69,11 +69,11 @@ interface SettingsState {
     setPlaywrightBrowser: (browser: PlaywrightBrowserType) => void
     setPlaywrightHeadless: (headless: boolean) => void
     setFileSystemSafeMode: (enabled: boolean) => void
-    
+
     // Memory Settings
     memoryBackend: 'server-memory' | 'memento-mcp'
     setMemoryBackend: (backend: 'server-memory' | 'memento-mcp') => void
-    
+
     resetToDefaults: () => void
 
     // Sync Actions
@@ -167,8 +167,9 @@ export const useSettingsStore = create<SettingsState>()(
             setPlaywrightBrowser: async (browser) => {
                 set({ playwrightBrowser: browser })
                 // Also save to main process store for PlaywrightService to read
-                const browserValue = browser === 'auto' ? undefined : browser
-                await electron.store.set('mcpPlaywright', { browser: browserValue })
+                // Save the actual selection (including 'auto') and merge with existing settings
+                const current = await electron.store.get<any>('mcpPlaywright') || {}
+                await electron.store.set('mcpPlaywright', { ...current, browser: browser })
             },
             setPlaywrightHeadless: async (headless) => {
                 set({ playwrightHeadless: headless })

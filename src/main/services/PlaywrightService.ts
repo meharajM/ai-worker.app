@@ -16,7 +16,7 @@ interface ToolSchema {
 
 // Define the shape of our settings
 interface PlaywrightSettings {
-    browser?: 'chromium' | 'firefox' | 'webkit' | 'chrome' | 'msedge'
+    browser?: 'auto' | 'chromium' | 'firefox' | 'webkit' | 'chrome' | 'msedge'
     headless?: boolean
     blockAds?: boolean
 }
@@ -65,6 +65,7 @@ export class PlaywrightService {
                 }
 
                 const settings = ((this.store as any).get?.('mcpPlaywright') || {}) as PlaywrightSettings
+                console.log('[PlaywrightService] Raw settings from store:', JSON.stringify(settings))
 
                 // OS-specific default browser selection
                 const getDefaultBrowser = (): PlaywrightSettings['browser'] => {
@@ -77,8 +78,11 @@ export class PlaywrightService {
                     }
                 }
 
-                const browserType = settings.browser || getDefaultBrowser()
-                console.log(`[PlaywrightService] OS: ${process.platform}, Default browser: ${browserType}`)
+                // Handle 'auto' selection explicitly
+                const browserType = (settings.browser === 'auto' || !settings.browser)
+                    ? getDefaultBrowser()
+                    : settings.browser
+                console.log(`[PlaywrightService] Browser selection - OS: ${process.platform}, Setting: ${settings.browser}, Selected: ${browserType}`)
                 const headless = settings.headless !== undefined ? settings.headless : false // Default to headed as per stealth strategy
                 const blockAds = settings.blockAds !== undefined ? settings.blockAds : true
 
@@ -104,7 +108,22 @@ export class PlaywrightService {
                 // Note: The fallback loop below handles browser selection dynamically
 
                 // Launch persistent context for state preservation
-                // Smart fallback order based on OS
+                /**
+                 * Cross-Platform Browser Selection
+                 * 
+                 * Behavior:
+                 * - 'auto' mode: Uses OS default with smart fallbacks if not available
+                 * - Explicit selection (Firefox, Chrome, etc.): ONLY tries that browser
+                 * 
+                 * OS Defaults (auto mode only):
+                 * - Windows: Edge → Chrome → Firefox (Edge pre-installed)
+                 * - macOS: Chrome → Safari → Firefox (Chrome most common)
+                 * - Linux: Chrome → Firefox → Chromium (most available)
+                 * 
+                 * Examples:
+                 * - User selects Firefox → Only tries Firefox (error if not found)
+                 * - User selects 'auto' on Linux → Tries Chrome, then Firefox, then Chromium
+                 */
                 const getFallbackOrder = (): string[] => {
                     const platform = process.platform
                     switch (platform) {
@@ -114,10 +133,18 @@ export class PlaywrightService {
                         default: return ['chrome', 'msedge', 'firefox']
                     }
                 }
-                const fallbackBrowsers = getFallbackOrder()
+                // Determine if we should use fallback logic
+                const useAutoMode = settings.browser === 'auto' || !settings.browser
+
+                // Build browser list: if auto mode, use fallbacks; otherwise, only the selected browser
+                const browsersToTry = useAutoMode
+                    ? [browserType, ...getFallbackOrder().filter(b => b !== browserType)]
+                    : [browserType]
+
+                console.log(`[PlaywrightService] Auto-mode: ${useAutoMode}, Browsers to try: ${browsersToTry.join(', ')}`)
                 let lastError: Error | null = null
 
-                for (const tryBrowser of [browserType, ...fallbackBrowsers.filter(b => b !== browserType)]) {
+                for (const tryBrowser of browsersToTry) {
                     try {
                         let tryLauncher = chromium
                         const tryOptions = { ...launchOptions }
@@ -151,20 +178,39 @@ export class PlaywrightService {
                         break // Success!
                     } catch (error) {
                         lastError = error as Error
-                        const isMissingExecutable = String(error).includes('Executable doesn\'t exist') ||
-                            String(error).includes('No executable path')
-                        if (isMissingExecutable) {
-                            console.warn(`[PlaywrightService] ${tryBrowser} not found, trying next...`)
+                        const errorStr = String(error)
+
+                        // Detect browser unavailability OR crash
+                        const isMissingExecutable = errorStr.includes('Executable doesn\'t exist') ||
+                            errorStr.includes('No executable path') ||
+                            errorStr.includes('isn\'t found') ||
+                            errorStr.includes('distribution') ||
+                            errorStr.includes('not found')
+
+                        const isBrowserCrash = errorStr.includes('has been closed') ||
+                            errorStr.includes('SIGKILL') ||
+                            errorStr.includes('crashed')
+
+                        // In auto mode, try next browser on crash. In explicit mode, report the error.
+                        const shouldTryNext = isMissingExecutable || (useAutoMode && isBrowserCrash)
+
+                        if (shouldTryNext) {
+                            const reason = isMissingExecutable ? 'not found' : 'crashed during launch'
+                            console.warn(`[PlaywrightService] ${tryBrowser} ${reason}, trying next...`)
                             continue
                         } else {
-                            // Non-executable error, don't try more browsers
+                            // Non-recoverable error or crash in explicit mode
+                            console.error(`[PlaywrightService] Non-recoverable error launching ${tryBrowser}:`, errorStr)
                             throw error
                         }
                     }
                 }
 
                 if (!this.context) {
-                    throw lastError || new Error('No browser available. Please install Chrome, Edge, or Firefox.')
+                    const errorMessage = useAutoMode
+                        ? `No browser available. Please install Chrome, Firefox, or Edge for your ${process.platform} system.`
+                        : `Browser '${settings.browser}' is not installed. Please install it or select a different browser in Settings → Browser Automation.`
+                    throw lastError || new Error(errorMessage)
                 }
 
                 // Stealth: Remove navigator.webdriver
