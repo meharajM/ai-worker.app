@@ -1,6 +1,32 @@
 
 import { STATEFUL_BROWSER_TOOLS, STATEFUL_FILE_TOOLS } from './client-tools';
 
+// ── Timeout Configuration ──────────────────────────────────────────────────────
+// Per-tool-type timeout limits (milliseconds)
+export const LANE_TIMEOUTS = {
+    DEFAULT: 60_000,              // 60s - general fallback
+    BROWSER_NAVIGATION: 120_000,  // 120s - navigate, goto (network-dependent)
+    BROWSER_ACTION: 30_000,       // 30s  - click, type, select, hover, etc.
+    BROWSER_SNAPSHOT: 15_000,     // 15s  - screenshot, snapshot (fast)
+    FILE_SYSTEM: 30_000,          // 30s  - file read/write
+} as const;
+
+/**
+ * Thrown when a lane task exceeds its allowed execution time.
+ * Distinguished from generic errors so self-healing can handle it appropriately.
+ */
+export class LaneTimeoutError extends Error {
+    public readonly timeoutMs: number;
+    public readonly laneId: string;
+
+    constructor(laneId: string, timeoutMs: number) {
+        super(`Lane timeout: operation in lane "${laneId}" exceeded ${timeoutMs}ms`);
+        this.name = 'LaneTimeoutError';
+        this.timeoutMs = timeoutMs;
+        this.laneId = laneId;
+    }
+}
+
 /**
  * Thrown when an operation is cancelled via an AbortSignal.
  */
@@ -30,13 +56,11 @@ export class LaneQueue {
      * Execute a task in this lane.
      * If concurrency limit is reached, it waits in queue.
      *
-     * @param task   The async work to execute.
-     * @param signal Optional AbortSignal.  If the signal fires while the task
-     *               is waiting in queue it is removed and rejected immediately.
-     *               If the signal is already aborted on entry, the task is
-     *               never enqueued.
+     * @param task      The async work to execute.
+     * @param timeoutMs Optional timeout in milliseconds.
+     * @param signal    Optional AbortSignal.
      */
-    async run<T>(task: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    async run<T>(task: () => Promise<T>, timeoutMs?: number, signal?: AbortSignal): Promise<T> {
         // Fast path: already aborted before we even start
         if (signal?.aborted) {
             throw new LaneAbortError(this.id);
@@ -46,7 +70,28 @@ export class LaneQueue {
             const wrappedTask = async () => {
                 this.activeCount++;
                 try {
-                    const result = await task();
+                    let result: T;
+
+                    if (timeoutMs !== undefined && timeoutMs > 0) {
+                        // Race the real task against a timeout promise
+                        let timer: ReturnType<typeof setTimeout> | undefined;
+
+                        const timeoutPromise = new Promise<never>((_resolve, _reject) => {
+                            timer = setTimeout(() => {
+                                _reject(new LaneTimeoutError(this.id, timeoutMs));
+                            }, timeoutMs);
+                        });
+
+                        try {
+                            result = await Promise.race([task(), timeoutPromise]);
+                        } finally {
+                            // Always clear the timer to avoid leaks
+                            if (timer !== undefined) clearTimeout(timer);
+                        }
+                    } else {
+                        result = await task();
+                    }
+
                     resolve(result);
                 } catch (error) {
                     reject(error);
@@ -175,6 +220,41 @@ export class LaneManager {
             stats[id] = lane.stats;
         }
         return stats;
+    }
+
+    /**
+     * Returns the appropriate timeout (ms) for a given tool name.
+     * Navigation-style tools get a longer window; fast browser actions get a
+     * shorter one; file tools get their own bucket; everything else uses the
+     * default.
+     */
+    getTimeoutForTool(toolName: string): number {
+        // Navigation tools – network-dependent, need more time
+        const NAVIGATION_TOOLS = ['navigate', 'browser_navigate', 'playwright_navigate', 'goto'];
+        if (NAVIGATION_TOOLS.some(n => toolName.includes(n))) {
+            return LANE_TIMEOUTS.BROWSER_NAVIGATION;
+        }
+
+        // Snapshot / screenshot – should be fast
+        const SNAPSHOT_TOOLS = ['screenshot', 'browser_screenshot', 'browser_snapshot', 'snapshot'];
+        if (SNAPSHOT_TOOLS.some(n => toolName.includes(n))) {
+            return LANE_TIMEOUTS.BROWSER_SNAPSHOT;
+        }
+
+        // Other browser actions (click, type, hover, select, etc.)
+        const isBrowserTool = STATEFUL_BROWSER_TOOLS.includes(toolName) ||
+            toolName.startsWith('playwright_') ||
+            toolName.startsWith('browser_');
+        if (isBrowserTool) {
+            return LANE_TIMEOUTS.BROWSER_ACTION;
+        }
+
+        // File system tools
+        if (STATEFUL_FILE_TOOLS.includes(toolName)) {
+            return LANE_TIMEOUTS.FILE_SYSTEM;
+        }
+
+        return LANE_TIMEOUTS.DEFAULT;
     }
 }
 
