@@ -1014,19 +1014,30 @@ Return key findings only. End with "✓ Done".`;
               // It handles routing (Browser Serial vs Tab Serial vs API Parallel)
               result = await laneManager.getLane(name, { tabId: this.options.tabId }).run(async () => {
                 return await executeToolCall(name, args);
-              });
+              }, this.options.signal);
 
               return result;
 
             } catch (error: any) {
               const errorStr = String(error);
 
+              // Abort errors should not be retried — exit immediately
+              if (errorStr.includes('Aborted') || errorStr.includes('LaneAbortError') || this.options.signal?.aborted) {
+                return { result: null, error: 'Aborted by user' };
+              }
+
               // RECOVERY STRATEGIES (Max 2 Attempts)
               if (attempt <= 2) {
+                // Early exit: don't retry if user already aborted
+                if (this.options.signal?.aborted) {
+                  return { result: null, error: 'Aborted by user' };
+                }
+
                 // Strategy 1: Context Destroyed (Navigation Race Condition)
                 if (errorStr.includes('Execution context was destroyed')) {
                   console.log(`[Self-Healing] Context destroyed during ${name}. Waiting 1s and retrying...`);
                   await new Promise(r => setTimeout(r, 1000));
+                  if (this.options.signal?.aborted) return { result: null, error: 'Aborted by user' };
                   return executeCallWithSelfHealing(name, args, attempt + 1);
                 }
 
@@ -1047,6 +1058,7 @@ Return key findings only. End with "✓ Done".`;
                 if (errorStr.includes('net::ERR_') || errorStr.includes('ECONNREFUSED') || errorStr.includes('fetch failed')) {
                   console.log(`[Self-Healing] Network error in ${name}. Retrying in 2s...`);
                   await new Promise(r => setTimeout(r, 2000));
+                  if (this.options.signal?.aborted) return { result: null, error: 'Aborted by user' };
                   return executeCallWithSelfHealing(name, args, attempt + 1);
                 }
 
@@ -1054,6 +1066,7 @@ Return key findings only. End with "✓ Done".`;
                 if (errorStr.includes('Target closed') || errorStr.includes('Session closed') || errorStr.includes('Browser has been closed')) {
                   console.log(`[Self-Healing] Browser context lost in ${name}. Retrying in 1s...`);
                   await new Promise(r => setTimeout(r, 1000));
+                  if (this.options.signal?.aborted) return { result: null, error: 'Aborted by user' };
                   return executeCallWithSelfHealing(name, args, attempt + 1);
                 }
 
@@ -1455,6 +1468,7 @@ Use tools immediately. End with "✓ Done".`;
         parentAgentId: this.agentInstanceId,
         isSubAgent: true,
         taskCategory: this.taskCategory, // Inherit category from parent
+        signal: this.options.signal,     // Propagate abort signal to sub-agent
         requireConfirmation: false,
         onMessage: (msg: LLMMessage) => {
           // Update status based on sub-agent activity
@@ -1715,6 +1729,7 @@ End with "✓ Done" and a brief result.`;
           parentAgentId: this.agentInstanceId,
           isSubAgent: true,
           taskCategory: this.taskCategory,
+          signal: this.options.signal,     // Propagate abort signal to sub-agent
           requireConfirmation: false,
           onMessage: (msg) => {
             const contentStr = typeof msg.content === 'string'
