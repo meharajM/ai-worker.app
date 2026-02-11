@@ -989,7 +989,19 @@ Return key findings only. End with "✓ Done".`;
 
         } else {
           // Standard MCP tool with SELF-HEALING Wrapper
-          const executeCallWithSelfHealing = async (name: string, args: Record<string, unknown>, attempt = 1): Promise<any> => {
+          // Cumulative timeout: all retry attempts for a single tool call must
+          // complete within this window (prevents 180s+ total from 3 × 60s).
+          const CUMULATIVE_TIMEOUT_MS = 120_000; // 120 seconds
+          const MIN_REMAINING_FOR_RETRY_MS = 5_000; // Don't retry if < 5s left
+
+          const executeCallWithSelfHealing = async (name: string, args: Record<string, unknown>, attempt = 1, startTime: number = Date.now()): Promise<any> => {
+            // ── Cumulative timeout guard ────────────────────────────────────
+            const elapsed = Date.now() - startTime;
+            if (elapsed >= CUMULATIVE_TIMEOUT_MS) {
+              console.warn(`[Self-Healing] Cumulative timeout exceeded for ${name} after ${Math.round(elapsed / 1000)}s (limit: ${CUMULATIVE_TIMEOUT_MS / 1000}s)`);
+              return { result: null, error: `Cumulative timeout: ${name} exceeded ${CUMULATIVE_TIMEOUT_MS / 1000}s across all retry attempts` };
+            }
+
             try {
               // DYNAMIC RESOURCE LOCKING
               // We lock based on tool type to prevent race conditions during parallel execution
@@ -1035,71 +1047,11 @@ Return key findings only. End with "✓ Done".`;
                   return { result: null, error: 'Aborted by user' };
                 }
 
-                // Strategy 1: Context Destroyed (Navigation Race Condition)
-                if (errorStr.includes('Execution context was destroyed')) {
-                  console.log(`[Self-Healing] Context destroyed during ${name}. Waiting 1s and retrying...`);
-                  await new Promise(r => setTimeout(r, 1000));
-                  if (this.options.signal?.aborted) return { result: null, error: 'Aborted by user' };
-                  return executeCallWithSelfHealing(name, args, attempt + 1);
-                }
-
-                // Strategy 2: Stale Element (DOM Update)
-                if (errorStr.includes('Element is not attached') || errorStr.includes('Node is detached')) {
-                  console.log(`[Self-Healing] Stale element in ${name}. Retrying immediately...`);
-                  return executeCallWithSelfHealing(name, args, attempt + 1);
-                }
-
-                // Strategy 3: Lane Timeout (operation exceeded lane time limit)
-                if (errorStr.includes('Lane timeout')) {
-                  console.log(`[Self-Healing] Lane timeout for ${name} (attempt ${attempt}). Retrying in 2s...`);
-                  await new Promise(r => setTimeout(r, 2000));
-                  if (this.options.signal?.aborted) return { result: null, error: 'Aborted by user' };
-                  return executeCallWithSelfHealing(name, args, attempt + 1);
-                }
-
-                // Strategy 4: Tool-level Timeout (Increase Timeout)
-                if (errorStr.includes('Timeout') && args.timeout && typeof args.timeout === 'number') {
-                  console.log(`[Self-Healing] Timeout in ${name}. Retrying with double timeout...`);
-                  const newArgs = { ...args, timeout: args.timeout * 2 };
-                  return executeCallWithSelfHealing(name, newArgs, attempt + 1);
-                }
-
-                // Strategy 5: Network Errors (Transient)
-                if (errorStr.includes('net::ERR_') || errorStr.includes('ECONNREFUSED') || errorStr.includes('fetch failed')) {
-                  console.log(`[Self-Healing] Network error in ${name}. Retrying in 2s...`);
-                  await new Promise(r => setTimeout(r, 2000));
-                  if (this.options.signal?.aborted) return { result: null, error: 'Aborted by user' };
-                  return executeCallWithSelfHealing(name, args, attempt + 1);
-                }
-
-                // Strategy 6: Browser Context Lost (Transient)
-                if (errorStr.includes('Target closed') || errorStr.includes('Session closed') || errorStr.includes('Browser has been closed')) {
-                  console.log(`[Self-Healing] Browser context lost in ${name}. Retrying in 1s...`);
-                  await new Promise(r => setTimeout(r, 1000));
-                  if (this.options.signal?.aborted) return { result: null, error: 'Aborted by user' };
-                  return executeCallWithSelfHealing(name, args, attempt + 1);
-                }
-
-                // Strategy 7: Element Not Found (Retry with longer wait - page might be loading)
-                if (errorStr.includes('Element not found') || errorStr.includes('waiting for selector') || errorStr.includes('No element matches')) {
-                  console.log(`[Self-Healing] Element not found in ${name}. Retrying with longer wait...`);
-                  const newArgs = { ...args, timeout: (args.timeout as number || 5000) * 1.5 };
-                  return executeCallWithSelfHealing(name, newArgs, attempt + 1);
-                }
-
-                // Strategy 8: Navigation Timeout (Retry with longer timeout)
-                if (errorStr.includes('Navigation timeout') || errorStr.includes('page.goto')) {
-                  console.log(`[Self-Healing] Navigation timeout in ${name}. Retrying with extended timeout...`);
-                  const newArgs = { ...args, timeout: (args.timeout as number || 30000) * 1.5 };
-                  return executeCallWithSelfHealing(name, newArgs, attempt + 1);
-                }
-              }
-
-              // RECOVERY STRATEGIES (Max 2 Attempts)
-              if (attempt <= 2) {
-                // Early exit: don't retry if user already aborted
-                if (this.options.signal?.aborted) {
-                  return { result: null, error: 'Aborted by user' };
+                // Check cumulative timeout before attempting retry
+                const retryElapsed = Date.now() - startTime;
+                if (retryElapsed + MIN_REMAINING_FOR_RETRY_MS >= CUMULATIVE_TIMEOUT_MS) {
+                  console.warn(`[Self-Healing] Insufficient time remaining for retry of ${name} (${Math.round(retryElapsed / 1000)}s elapsed, ${CUMULATIVE_TIMEOUT_MS / 1000}s limit)`);
+                  return { result: null, error: `${errorStr} (no retry: cumulative timeout would be exceeded)` };
                 }
 
                 // Strategy 1: Context Destroyed (Navigation Race Condition)
@@ -1107,27 +1059,28 @@ Return key findings only. End with "✓ Done".`;
                   console.log(`[Self-Healing] Context destroyed during ${name}. Waiting 1s and retrying...`);
                   await new Promise(r => setTimeout(r, 1000));
                   if (this.options.signal?.aborted) return { result: null, error: 'Aborted by user' };
-                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                  return executeCallWithSelfHealing(name, args, attempt + 1, startTime);
                 }
 
                 // Strategy 2: Stale Element (DOM Update)
                 if (errorStr.includes('Element is not attached') || errorStr.includes('Node is detached')) {
                   console.log(`[Self-Healing] Stale element in ${name}. Retrying immediately...`);
-                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                  return executeCallWithSelfHealing(name, args, attempt + 1, startTime);
                 }
 
                 // Strategy 3: Lane Timeout (operation exceeded lane time limit)
                 if (errorStr.includes('Lane timeout')) {
                   console.log(`[Self-Healing] Lane timeout for ${name} (attempt ${attempt}). Retrying in 2s...`);
                   await new Promise(r => setTimeout(r, 2000));
-                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                  if (this.options.signal?.aborted) return { result: null, error: 'Aborted by user' };
+                  return executeCallWithSelfHealing(name, args, attempt + 1, startTime);
                 }
 
                 // Strategy 4: Tool-level Timeout (Increase Timeout)
                 if (errorStr.includes('Timeout') && args.timeout && typeof args.timeout === 'number') {
                   console.log(`[Self-Healing] Timeout in ${name}. Retrying with double timeout...`);
                   const newArgs = { ...args, timeout: args.timeout * 2 };
-                  return executeCallWithSelfHealing(name, newArgs, attempt + 1);
+                  return executeCallWithSelfHealing(name, newArgs, attempt + 1, startTime);
                 }
 
                 // Strategy 5: Network Errors (Transient)
@@ -1135,7 +1088,7 @@ Return key findings only. End with "✓ Done".`;
                   console.log(`[Self-Healing] Network error in ${name}. Retrying in 2s...`);
                   await new Promise(r => setTimeout(r, 2000));
                   if (this.options.signal?.aborted) return { result: null, error: 'Aborted by user' };
-                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                  return executeCallWithSelfHealing(name, args, attempt + 1, startTime);
                 }
 
                 // Strategy 6: Browser Context Lost (Transient)
@@ -1143,21 +1096,21 @@ Return key findings only. End with "✓ Done".`;
                   console.log(`[Self-Healing] Browser context lost in ${name}. Retrying in 1s...`);
                   await new Promise(r => setTimeout(r, 1000));
                   if (this.options.signal?.aborted) return { result: null, error: 'Aborted by user' };
-                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                  return executeCallWithSelfHealing(name, args, attempt + 1, startTime);
                 }
 
                 // Strategy 7: Element Not Found (Retry with longer wait - page might be loading)
                 if (errorStr.includes('Element not found') || errorStr.includes('waiting for selector') || errorStr.includes('No element matches')) {
                   console.log(`[Self-Healing] Element not found in ${name}. Retrying with longer wait...`);
                   const newArgs = { ...args, timeout: (args.timeout as number || 5000) * 1.5 };
-                  return executeCallWithSelfHealing(name, newArgs, attempt + 1);
+                  return executeCallWithSelfHealing(name, newArgs, attempt + 1, startTime);
                 }
 
                 // Strategy 8: Navigation Timeout (Retry with longer timeout)
                 if (errorStr.includes('Navigation timeout') || errorStr.includes('page.goto')) {
                   console.log(`[Self-Healing] Navigation timeout in ${name}. Retrying with extended timeout...`);
                   const newArgs = { ...args, timeout: (args.timeout as number || 30000) * 1.5 };
-                  return executeCallWithSelfHealing(name, newArgs, attempt + 1);
+                  return executeCallWithSelfHealing(name, newArgs, attempt + 1, startTime);
                 }
               }
 
