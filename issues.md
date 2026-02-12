@@ -671,6 +671,161 @@ Implement "Stop on First Failure" approach: add `failed` flag to results, detect
 
 ---
 
+## 🟢 ENHANCEMENTS (From arch/full-feature-split)
+
+The following features are implemented in `arch/full-feature-split` branch and should be evaluated for merging into `main`:
+
+### ISSUE #17: Pre-Allocated Tabs for Orchestration
+
+**Status:** IMPLEMENTED (arch/full-feature-split)
+**Impact:** Reduces latency in parallel task execution
+
+#### Description
+When executing orchestrated tasks with multiple steps, tab allocation happens on-demand (one per step). This causes delays as each step waits for tab creation.
+
+#### Implementation (arch/full-feature-split)
+- Allocates ALL tabs upfront before execution begins
+- Stores tab IDs in a Map keyed by step ID
+- Reuses pre-allocated tabs for each step
+- Dramatically reduces orchestration latency
+
+#### Files
+- `src/renderer/src/lib/agent-runtime.ts:executeOrchestratedTask()`
+
+---
+
+### ISSUE #18: Parallel Cluster Execution
+
+**Status:** IMPLEMENTED (arch/full-feature-split)
+**Impact:** Improved parallel task efficiency
+
+#### Description
+Orchestrated tasks can contain parallel clusters (steps marked with `parallel_cluster`). These steps execute simultaneously instead of sequentially.
+
+#### Implementation (arch/full-feature-split)
+- Added `getNextCluster()` method to extract parallel steps
+- Uses `Promise.all()` for parallel cluster execution
+- Sequential steps execute one at a time
+- Reduces total execution time for parallelizable tasks
+
+#### Files
+- `src/renderer/src/lib/agent-runtime.ts:getNextCluster()`
+- `src/renderer/src/lib/agent-runtime.ts:executeOrchestratedTask()`
+
+---
+
+### ISSUE #19: Orchestration Planner
+
+**Status:** IMPLEMENTED (arch/full-feature-split)
+**Impact:** Better task decomposition for complex workflows
+
+#### Description
+Complex tasks are now analyzed by a dedicated LLM-based planner that generates structured step-by-step plans with parallel clusters.
+
+#### Implementation (arch/full-feature-split)
+- Dedicated `PROMPTS.ORCHESTRATION_PLANNER` prompt
+- Generates JSON with `steps[]` and `parallel_cluster` hints
+- Fallback to simple sequential plan if planner fails
+- Results synthesized into final summary
+
+#### Files
+- `src/renderer/src/lib/prompt-library.ts`
+- `src/renderer/src/lib/agent-runtime.ts:executeOrchestratedTask()`
+
+---
+
+### ISSUE #20: Result Synthesis for Orchestrated Tasks
+
+**Status:** IMPLEMENTED (arch/full-feature-split)
+**Impact:** Better user experience with clear task summaries
+
+#### Description
+Orchestrated task results are synthesized into a coherent summary with success/failure counts, step-by-step breakdown, and suggested alternatives for failed steps.
+
+#### Implementation (arch/full-feature-split)
+- Generates "## Task Summary" with completion stats
+- Separates successful and failed steps
+- Extracts "Alternative" suggestions from failed step responses
+- Adds "## Suggested Alternatives" section
+
+#### Files
+- `src/renderer/src/lib/agent-runtime.ts:executeOrchestratedTask()`
+
+---
+
+### ISSUE #21: Repeatable Tools Whitelist
+
+**Status:** IMPLEMENTED (arch/full-feature-split)
+**Impact:** Fixes false positive loop detection
+
+#### Description
+The loop detection system was flagging legitimate repeated tool calls (screenshot, scroll, wait) as infinite loops. A whitelist of safe repeatable tools was added.
+
+#### Implementation (arch/full-feature-split)
+```typescript
+const REPEATABLE_TOOLS = [
+  'memory_create_entity', 'memory_search', 'sequential_thinking',
+  'create_execution_plan', 'get_state', 'screenshot',
+  'scroll', 'wait_for_element', ...
+];
+```
+
+- Loop detection checks: `!REPEATABLE_TOOLS.includes(toolNameOnly)`
+- Prevents false bailout for legitimate repeated operations
+
+#### Files
+- `src/renderer/src/lib/agent-runtime.ts`
+
+---
+
+### ISSUE #22: Parallel Intent Detection
+
+**Status:** IMPLEMENTED (arch/full-feature-split)
+**Impact:** Automatic parallel execution for complex tasks
+
+#### Description
+Detects when a user request implies parallel execution using regex patterns ("and", ",", "multiple", numbers + "websites").
+
+#### Implementation (arch/full-feature-split)
+```typescript
+const parallelIndicators = [
+  /\band\b/i, /,/, /\bmultiple\b/i, /\beach\b/i,
+  /\d+\s+(websites|pages|items)/i
+];
+```
+
+- Injects `PARALLEL_EXECUTION` prompt when detected
+- Automatically triggers orchestration mode
+- Falls back to standard execution for simple tasks
+
+#### Files
+- `src/renderer/src/lib/agent-runtime.ts`
+
+---
+
+### ISSUE #23: Memory Schema Update (entityType/observations)
+
+**Status:** IMPLEMENTED (arch/full-feature-split)
+**Impact:** Aligned with Memento/Memory MCP schema
+
+#### Description
+Memory entity creation switched from `type`/`description` to `entityType`/`observations` format, aligning with the Memory MCP specification.
+
+#### Changes
+```typescript
+// Old
+memory.create({ type: 'agent_execution_state', description: '...', metadata: {...} })
+
+// New
+memory.create({ entityType: 'agent_execution_state', observations: ['...'], Metadata: {...} })
+```
+
+#### Files
+- `src/renderer/src/lib/agent-runtime.ts`
+- `src/main/services/FileSystemService.ts`
+
+---
+
 ## Summary Table
 
 | Issue # | Title | Severity | Impact | Estimated Effort | Priority |
@@ -691,10 +846,17 @@ Implement "Stop on First Failure" approach: add `failed` flag to results, detect
 | #14 | Parallel Summary Missing Status | MEDIUM | Unclear outcome | Low (25 lines) | 🟢 Medium |
 | #15 | Sequential No Progress Reporting | LOW | Poor UX | Medium (30 lines) | 🟢 Low |
 | #16 | No Rollback for Failed Steps | LOW | Inconsistent state | High (80 lines) | 🟢 Low |
+| #17 | Pre-Allocated Tabs | ENHANCEMENT | Reduced latency | Medium | 🟢 Future |
+| #18 | Parallel Clusters | ENHANCEMENT | Parallel efficiency | Medium | 🟢 Future |
+| #19 | Orchestration Planner | ENHANCEMENT | Better decomposition | Medium | 🟢 Future |
+| #20 | Result Synthesis | ENHANCEMENT | Better summaries | Low | 🟢 Future |
+| #21 | Repeatable Tools Whitelist | ENHANCEMENT | Fixes loop detection | Low | 🟢 Future |
+| #22 | Parallel Intent Detection | ENHANCEMENT | Auto-parallel | Low | 🟢 Future |
+| #23 | Memory Schema Update | ENHANCEMENT | MCP alignment | Low | 🟢 Future |
 
-**Total Issues:** 16  
-**Total Estimated Effort:** ~590 lines of code  
-**Recommended Implementation Order:** #1 → #2 → #3 → #6 → #5 → #13 → #14 → #4 → #9 → #15 → #8 → #7 → #10 → #11 → #12 → #16
+**Total Issues:** 23 (16 Issues + 7 Enhancements)
+**Total Estimated Effort:** ~590 lines of code (issues) + ~500 lines (enhancements)
+**Recommended Implementation Order:** #1 → #2 → #3 → #6 → #5 → #13 → #14 → #4 → #9 → #15 → #8 → #7 → #10 → #11 → #12 → #16 → Merge Enhancements #17-23
 
 ---
 

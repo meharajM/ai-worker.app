@@ -13,6 +13,62 @@ import {
 import { MemoryReflector } from "./memory-reflector";
 import { validateUserInput } from "./prompt-guard";
 
+// ============================================================================
+// REPEATABLE TOOLS WHITELIST (Issue #21 Enhancement)
+// =========================================================================
+// Tools that are safe to call repeatedly without indicating an infinite loop.
+// These tools perform passive observation or state checks that are commonly
+// repeated in legitimate workflows (e.g., monitoring, extraction, waiting).
+//
+// Without this whitelist, the loop detector falsely triggers on tools like
+// screenshot, scroll, or memory operations that are legitimately repeated.
+
+const REPEATABLE_TOOLS = [
+  // Memory Tools (High frequency during reflection)
+  'memory_create_entity',
+  'memory_update_entity', 
+  'memory_search',
+  'memory_create_relation',
+  'memory_delete_entity',
+  'memory_read_entity',
+
+  // Thinking & Orchestration
+  'sequential_thinking',
+  'create_execution_plan',
+  'update_progress_summary',
+  'delegate_sub_task',
+
+  // Informational / State Retrieval
+  'get_state',
+  'get_interactive_elements',
+  'get_page_content',
+  'scan_page_accessibility',
+  'screenshot',
+  'browser_evaluate',
+  'browser_run_code',
+  'get_tabs',
+
+  // Research & Filesystem (Read-only)
+  'read_file',
+  'fs_read_file',
+  'list_dir',
+  'fs_list_directory',
+  'grep_search',
+  'find_by_name',
+  'search_web',
+  'read_url_content',
+
+  // Browser Passive Interaction
+  'scroll',
+  'wait_for_element',
+  'wait_for_navigation',
+  'wait',
+  
+  // LLM & Analysis
+  'llm_chat',
+  'analyze_task'
+];
+
 export type AgentStatusCallback = (message: LLMMessage) => string | void;
 
 interface AgentRuntimeOptions {
@@ -710,7 +766,11 @@ Then extract the answer from the results. DO NOT refuse again.`
           const toolNames = lastN.map(sig => sig.split(':')[0]);
           const sameToolRepeated = toolNames.every(name => name === toolNames[0]);
 
-          if (allSame || sameToolRepeated) {
+          // ENHANCEMENT #21: Repeatable Tools Whitelist
+          // Skip loop detection for tools that are safe to call repeatedly
+          const isRepeatableTool = REPEATABLE_TOOLS.includes(call.name);
+
+          if (!isRepeatableTool && (allSame || sameToolRepeated)) {
             const loopType = allSame ? 'identical arguments' : 'similar pattern (same tool)';
             console.error(`[AgentRuntime] Infinite loop detected: ${call.name} called ${MAX_IDENTICAL_CALLS}+ times with ${loopType}`);
 
