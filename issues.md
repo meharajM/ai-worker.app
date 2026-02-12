@@ -3,7 +3,7 @@
 This document tracks all identified issues in the agent self-healing and execution robustness systems. Each issue is independently fixable and prioritized by severity.
 
 **Last Updated:** 2026-02-12  
-**Status:** 17 Total Issues (3 Critical, 3 High, 10 Medium/Low, 4 Completed)
+**Status:** 17 Issues + 6 Enhancements (3 Critical, 3 High, 10 Medium/Low, 4 Issues Completed, 6 Enhancements Resolved)
 
 ---
 
@@ -705,6 +705,73 @@ Added `REPEATABLE_TOOLS` whitelist containing ~30 tools that are exempt from loo
 
 ---
 
+## ✅ RESOLVED ENHANCEMENTS (from arch/full-feature-split)
+
+These refinements were implemented in the `arch/full-feature-split` branch and merged to main.
+
+### ENHANCEMENT #1: Orchestration - Misidentification of Parallel Tasks
+
+**Status:** ✅ RESOLVED  
+**Problem:** Sequential research tasks were incorrectly flagged as parallel, causing redundant sub-agents.
+
+**Solution:**
+- Simplified `task-decomposer.ts` to "Complexity-First" analysis
+- Unified entry point in `AgentRuntime.ts` to trigger LLM-based planning for complex tasks
+- Planner LLM now dynamically determines parallelization using `parallel_clusters`
+
+---
+
+### ENHANCEMENT #2: Memory Service - JSON Parsing Errors
+
+**Status:** ✅ RESOLVED  
+**Problem:** `ServerMemoryAdapter.ts` crashed due to trailing noise/logging from backend subprocess.
+
+**Solution:** Implemented robust `extractJson` utility using bracket-counting algorithm to isolate valid JSON.
+
+---
+
+### ENHANCEMENT #3: Architecture - Unified Orchestration & System Prompts
+
+**Status:** ✅ RESOLVED  
+**Problem:** Fragile parallel/sequential logic splits and hardcoded prompts.
+
+**Solution:**
+- Unified orchestration logic in `AgentRuntime.ts`
+- Centralized `ORCHESTRATION_PLANNER` protocol in `prompt-library.ts`
+- Refined `RESEARCH` and `GENERAL` protocols for persistent findings and planning-first flows
+- Updated `create_execution_plan` tool to support dynamic parallelism
+
+---
+
+### ENHANCEMENT #4: Orchestration - High-Fidelity Instructions & Traceability
+
+**Status:** ✅ RESOLVED  
+**Problem:** Sub-agents received generic instructions, causing poor formatting. Execution lineage missing in memory.
+
+**Solution:**
+- Restored specialized sub-agent instruction templates in `task-decomposer.ts`
+- Enriched memory entities with `Parent Goal`, `Initialized at`, and `stepDescription`
+
+---
+
+### ENHANCEMENT #5: Orchestration - Resource Overload (Tab Bloat)
+
+**Status:** ✅ RESOLVED  
+**Problem:** Opening all planned tabs upfront consumed excessive system memory.
+
+**Solution:** Implemented **Just-In-Time (JIT) Tab Allocation** - tabs provisioned only at start of each execution cluster.
+
+---
+
+### ENHANCEMENT #6: Orchestration - Non-Deterministic Result Ordering
+
+**Status:** ✅ RESOLVED  
+**Problem:** Parallel sub-agents pushed results to summary out-of-order.
+
+**Solution:** Implemented deterministic sorting by `stepId` before final synthesis.
+
+---
+
 ## Summary Table
 
 | Issue # | Title | Severity | Impact | Estimated Effort | Priority |
@@ -728,7 +795,7 @@ Added `REPEATABLE_TOOLS` whitelist containing ~30 tools that are exempt from loo
 | #21 | Repeatable Tools Whitelist | MEDIUM | False bailout | Low (35 lines) | ✅ Completed |
 
 **Total Issues:** 17 (13 active, 4 completed)  
-**Total Estimated Effort:** ~590 lines of code  
+**Total Enhancements:** 6 (all resolved from arch/full-feature-split)  
 **Recommended Implementation Order:** #1 → #2 → #3 → #6 → #5 → #13 → #14 → #4 → #9 → #15 → #8 → #7 → #10 → #11 → #12 → #16
 
 ---
