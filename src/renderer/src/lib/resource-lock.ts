@@ -1,5 +1,5 @@
 
-import { laneManager } from './execution-lanes';
+import { laneManager, LANE_TIMEOUTS } from './execution-lanes';
 
 /**
  * SHIM: Redirects old lock calls to the new LaneManager.
@@ -9,7 +9,7 @@ import { laneManager } from './execution-lanes';
 export class Mutex {
     async runExclusive<T>(task: () => Promise<T> | T): Promise<T> {
         // Default to global browser lane for unidentified locks
-        return laneManager.getLane('navigate').run(async () => await task());
+        return laneManager.getLane('navigate').run(async () => await task(), LANE_TIMEOUTS.BROWSER_NAVIGATION);
     }
 
     // Legacy support - no-op or auto-release
@@ -20,14 +20,14 @@ export class Mutex {
 
 export const browserLock = {
     runExclusive: <T>(task: () => Promise<T> | T) => {
-        return laneManager.getLane('navigate').run(async () => await task());
+        return laneManager.getLane('navigate').run(async () => await task(), LANE_TIMEOUTS.BROWSER_NAVIGATION);
     }
 };
 
 export class KeyedMutex {
     async runExclusive<T>(key: string, task: () => Promise<T> | T): Promise<T> {
         // Redirect all file keys to the single FILESYSTEM lane
-        return laneManager.getLane('file_read').run(async () => await task());
+        return laneManager.getLane('file_read').run(async () => await task(), LANE_TIMEOUTS.FILE_SYSTEM);
     }
 }
 
