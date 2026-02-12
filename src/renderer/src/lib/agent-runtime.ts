@@ -11,6 +11,7 @@ import {
   type TaskDecomposition
 } from "./task-decomposer";
 import { MemoryReflector } from "./memory-reflector";
+import { validateUserInput } from "./prompt-guard";
 
 export type AgentStatusCallback = (message: LLMMessage) => string | void;
 
@@ -148,7 +149,23 @@ export class AgentRuntime {
    * Main entry point to run the agent loop.
    */
   async chat(userContent: string, attachments?: { name: string; path: string; type: string }[]): Promise<LLMMessage> {
-    // PHASE 0: Smart Confirmation (if enabled)
+    // PHASE 0: Prompt Injection Defense (M-01 Enhanced)
+    const validation = await validateUserInput(
+      userContent,
+      true // Enable LLM guard for maximum security
+    );
+
+    if (!validation.allowed) {
+      console.warn('[AgentRuntime] Prompt injection detected:', validation.reason);
+      
+      // Return error message to user (without timestamp - not in LLMMessage interface)
+      return {
+        role: 'assistant',
+        content: validation.reason || 'I cannot process this request due to security concerns. Please rephrase your question.'
+      };
+    }
+
+    // PHASE 1: Smart Confirmation (if enabled)
     let finalPrompt = userContent;
 
     // INJECT ATTACHMENTS CONTEXT
