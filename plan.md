@@ -491,6 +491,56 @@ ai-worker-app/
 - [x] General purpose tasks execute without bias
 - [x] Safety protocols trigger correctly on sensitive tasks
 
+### ✅ Phase 20: Resilience & Hardening [COMPLETED]
+
+**Goal:** Prevent agent hangs and infinite loops through robust timeout and error tracking strategies.
+
+**Implementation:**
+- [x] **Cumulative Timeout (Issue #3)**: Prevent infinite tool retries (120s limit).
+- [x] **Iteration Timeout (Issue #4)**: Prevent overall agent hangs (180s limit per turn).
+- [x] **Consecutive Error Fix (Issue #5)**: Track errors at *iteration* level instead of *tool* level to prevent premature bailouts.
+- [x] **Modular Error Architecture**: Created `timeout-utils.ts`, `errors.ts`, and `iteration-error-tracker.ts` for cleaner logic.
+
+**Validation:** ✅
+- [x] Agent recovers from hung LLM calls.
+- [x] Agent retries tools up to cumulative limit.
+- [x] Agent only bails out after 3 full failed *iterations*, not just 3 failed tools.
+
+---
+
+### ✅ Phase 21: Security & Defense Architecture [COMPLETED]
+
+**Goal:** Implement comprehensive protection against prompt injection and ensure safe execution.
+
+**Implementation:**
+- [x] **3-Layer Prompt Defense** (`prompt-guard.ts`):
+  - **Regex Filter**: Blocks obvious attacks instantly.
+  - **LLM Guard**: Semantic analysis for subtle social engineering.
+  - **Output Sanitization**: Prevents system prompt leakage.
+- [x] **LLM-Based Task Decomposition** (`task-decomposer.ts`): Replaced regex logic with intelligent context/dependency analysis.
+- [x] **MarkItDown Security**: Enforced absolute path and workspace constraints for file operations.
+- [x] **Audit & Protocols**: Added `CODING` and `ADMIN` protocols to `prompt-library.ts` for safe form handling and code generation.
+
+**Validation:** ✅
+- [x] Attacks like "ignore previous instructions" blocked.
+- [x] Complex multi-context tasks correctly identified and parallelized.
+- [x] Relative path file operations prevented.
+
+---
+
+### ✅ Phase 22: Architecture Audit [COMPLETED]
+
+**Goal:** Ensure documentation matches the actual codebase implementation.
+
+**Implementation:**
+- [x] Verified Project Structure & Component Hierarchy.
+- [x] Detected & Documented missing IPC channels (`logs`, `secure`, `fs`, `memory`).
+- [x] Detected & Documented missing Stores (`mcpStore`, `logStore`).
+- [x] Documented missing `MemoryReflector` background agent.
+- [x] **Discrepancy Found**: `timeout-utils.ts` and `iteration-error-tracker.ts` referenced in editor but missing from disk.
+
+---
+
 ### 🚀 Phase 16: App Launch Preparation [IN PROGRESS]
 
 **Goal:** Finalize distribution, assets, and production stability.
@@ -580,5 +630,5 @@ ai-worker-app/
 
 ---
 
-**Current Status:** Phases 1-18 complete. RPI Workflow + Sub-Agent Auto-Fork system implemented. App Launch Preparation (Phase 16) is now the primary focus.
+**Current Status:** Phases 1-21 complete. App Launch Preparation (Phase 16) is ongoing. Robust security architecture (Prompt Defense, Task Decomposition) successfully implemented.
 

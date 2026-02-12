@@ -242,6 +242,8 @@ graph LR
         ChatStore[chatStore<br/>Messages & Processing]
         SettingsStore[settingsStore<br/>User Preferences]
         AuthStore[authStore<br/>Authentication]
+        McpStore[mcpStore<br/>Server Management]
+        LogStore[logStore<br/>System Logs]
     end
 
     subgraph "Persistence"
@@ -418,6 +420,11 @@ graph TB
 | `electron.speech.checkSupport()`| `speech:check-support`| `speech.ts`    | Check/Verify Model     |
 | `electron.speech.downloadModel()`| `speech:download-model`| `speech.ts`  | Download logic         |
 | `electron.speech.getModelPath()`| `speech:get-model-path`| `speech.ts`   | Get model server URL   |
+| `electron.logs.add()`         | `logs:add`            | `index.ts`     | Log system events      |
+| `electron.secure.set()`       | `secure:set`          | `secure.ts`    | Encrypted storage      |
+| `electron.fs.approveChange()` | `fs:approve-change`   | `index.ts`     | Safe Mode filesystem   |
+| `electron.memory.migrate()`   | `memory:migrate`      | `index.ts`     | Knowledge Graph ops    |
+| `electron.clipboard.read()`   | `clipboard:read`      | `index.ts`     | Clip processing        |
 
 ---
 
@@ -586,6 +593,15 @@ graph TD
     DCP2 --> Step2[Next Actions]
 ```
 
+### Memory Reflector (Background Agent)
+
+The `MemoryReflector` is a specialized, lightweight agent that runs in the background to extract long-term memories from conversations.
+
+- **Role**: Silent observer.
+- **Trigger**: Runs after every few turns of conversation.
+- **Output**: Updates the `Knowledge Graph` (via `memory` tools) with user preferences, project facts, and established workflows.
+- **Isolation**: Uses a separate `AgentRuntime` instance with a restricted "Fact Extraction" system prompt to avoid polluting the main chat context.
+
 ### Specialized Sub-agents
 
 The system dynamically context-aware agent roles based on connected MCP servers. These are injected into the system prompt:
@@ -605,23 +621,49 @@ The system dynamically context-aware agent roles based on connected MCP servers.
 The `AgentRuntime` implements a **Dynamic Prompt Injection** mechanism to adapt the agent's behavior based on the task type.
 
 **Flow:**
-1.  **Task Analysis**: The user request is analyzed by `confirmation-message.ts` to identify the intent category (`SHOPPING`, `RESEARCH`, `ADMIN`, `GENERAL`).
+1.  **Task Analysis**: The user request is analyzed by `confirmation-message.ts` to identify the intent category (`SHOPPING`, `RESEARCH`, `ADMIN`, `GENERAL`, `CODING`).
 2.  **Prompt Selection**: The runtime selects the appropriate instruction set from the `Prompt Library` (`prompt-library.ts`).
-3.  **Injection**: `buildSystemPrompt` injects these rules *after* the tool definitions but *before* the core instructions. this ensures high priority context.
+3.  **Injection**: `buildSystemPrompt` injects these rules *after* the tool definitions but *before* the core instructions, ensuring high priority context.
 
 **Categories:**
 - **SHOPPING**: Enforces "Speaking Money Protocol", "Size Checks", and stops at checkout.
-- **RESEARCH**: Enforces citation rules and balanced sourcing.
-- **ADMIN/FORMS**: Enforces double-checking inputs and privacy.
+- **RESEARCH**: Enforces citation rules and balanced sourcing (Broad -> Specific -> Verification).
+- **ADMIN/FORMS**: Enforces double-checking inputs and privacy. Uses `browser_evaluate` for complex frameworks.
 - **GENERAL**: Optimized for speed and direct navigation.
+- **CODING**: Enforces context maximization (trace symbols), autonomous problem solving, and premium design aesthetics.
 
-#### Composed Prompts & Parallelism
-The system utilizes a **Composable Prompt Engine** (`getComposedPrompts`) that allows multiple behavioral protocols to be active simultaneously. For instance, a task can be categorized as both `RESEARCH` and `PARALLEL_EXECUTION`.
+### Prompt Injection Defense (Security Layer)
 
-**Parallel Execution Protocol**:
-- Detects independent sub-tasks (e.g., comparing multiple websites).
-- Enforces simultaneous `delegate_sub_task` calls in a single turn.
-- Reduces total execution time by running independent operations in dedicated worker tabs.
+AI-Worker implements a robust, 3-layer defense system (`prompt-guard.ts`) to prevent prompt injection attacks:
+
+1.  **Layer 1: Regex-Based Filter (Fast)**
+    *   Instantly blocks obvious attacks (e.g., "ignore previous instructions", "print system prompt").
+    *   Catches ~50% of low-effort attempts.
+
+2.  **Layer 2: LLM-Based Semantic Analysis (Smart)**
+    *   Uses a separate, isolated "Guard LLM" to analyze the intent of the user's message.
+    *   Determines if the message is attempting to manipulate the AI or extract sensitive info.
+    *   Catches subtle social engineering attacks.
+
+3.  **Layer 3: Output Sanitization (Fail-Safe)**
+    *   Scans the final model response for leakage of internal system instructions.
+    *   Blocks the response if it contains specific system tokens or protected phrases.
+
+### Task Decomposition & Execution Logic
+
+The system utilizes an **LLM-based analysis step** (`analyzeTaskWithLLM` in `task-decomposer.ts`) to determine the optimal execution strategy, moving away from simple keyword matching.
+
+| Scenario | Strategy | Implementation |
+|----------|----------|----------------|
+| **Independent Contexts** (e.g., compare Amazon & eBay) | **Parallel Sub-Agents** | LLM verifies contexts have ZERO dependencies. |
+| **Complex Single Context** (4+ steps) | **Sequential Sub-Agent** | Protects main context history from token bloat. |
+| **Simple/Dependent Task** | **Direct Execution** | Runs in main loop (default behavior). |
+
+**Auto-Fork Decision Logic:**
+1.  **Analyze**: LLM determines if tasks are truly independent.
+2.  **Sequential Default**: If any dependency exists (e.g., "Search X then Compare with Y"), it defaults to sequential/direct execution to preserve context.
+3.  **Parallel**: Only triggers if contexts are distinct and independent.
+
 
 ### Refusal Detection & Safety Layer
 
@@ -782,12 +824,13 @@ The system now utilizes an **LLM-based analysis step** (`analyzeTaskWithLLM`) to
 Located in [`task-decomposer.ts`](src/renderer/src/lib/task-decomposer.ts):
 
 ```typescript
-interface TaskDecomposition {
+export interface TaskDecomposition {
   type: 'single_context' | 'multi_context';
   contexts: string[];           // URLs or app names detected by LLM
   estimatedActions: number;     // Heuristic count
   shouldFork: boolean;          // Decision
   forkStrategy?: 'parallel' | 'sequential';
+  forkReason?: string;
 }
 ```
 
@@ -1681,6 +1724,54 @@ ai-worker-app/
 
 - **Decision:** Handle MCP connections in main process
 - **Rationale:** System-level access needed, better security, proper process management
+
+---
+
+---
+
+## Resilience & Error Handling
+
+AI-Worker implements a comprehensive resilience strategy to ensure the agent remains responsive and autonomous even during failures.
+
+### Timeout Architecture
+
+The system uses a **multi-layered timeout strategy** to prevent indefinite hangs at different levels of execution.
+
+```mermaid
+graph TD
+    Iteration[Iteration Timeout<br/>180s] --> Cumulative[Cumulative Tool Timeout<br/>120s]
+    Cumulative --> Lane[Lane Timeout<br/>15-120s]
+    
+    style Iteration fill:#f9f,stroke:#333,stroke-width:2px
+    style Cumulative fill:#bbf,stroke:#333,stroke-width:2px
+    style Lane fill:#dfd,stroke:#333,stroke-width:2px
+```
+
+1.  **Lane Timeout (Innermost)**:
+    -   **Scope**: Single tool execution attempt.
+    -   **Duration**: Variable (15s for snapshots, 120s for navigation).
+    -   **Purpose**: Prevents individual low-level operations from hanging.
+
+2.  **Cumulative Timeout (Middle)**:
+    -   **Scope**: Single tool call across all retry attempts.
+    -   **Duration**: 120 seconds.
+    -   **Purpose**: Prevents infinite retry loops for a single failing tool.
+
+3.  **Iteration Timeout (Outermost)**:
+    -   **Scope**: Entire agent iteration (LLM inference + parallel tool execution).
+    -   **Duration**: 180 seconds.
+    -   **Purpose**: Prevents the entire agent loop from freezing (e.g., if LLM provider hangs).
+    -   **Behavior**: triggers a user-facing interaction ("Retry", "Continue", "Stop").
+
+### Iteration Error Tracking
+
+To prevent premature bailouts while maintaining safety against infinite failure loops, the system tracks errors at the **Iteration Level**.
+
+-   **Logic**: A "Failed Iteration" is defined as an iteration where **all** attempted tool calls failed.
+-   **Reset**: Any successful tool execution in an iteration resets the consecutive error counter to 0.
+-   **Threshold**: The agent bails out only after **3 consecutive failed iterations**.
+
+This ensures that partial failures (e.g., 1 out of 3 parallel tools failing) do not stop the agent, while persistent systemic failures do.
 
 ---
 
