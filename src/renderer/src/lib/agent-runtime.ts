@@ -368,7 +368,7 @@ Continue from where the previous agent left off.`
     }
 
     let iterationCount = 0;
-    let consecutiveErrors = 0; // Track consecutive tool failures
+    let consecutiveIterationErrors = 0; // Track consecutive failed iterations (Issue #5: renamed from consecutiveErrors)
     const recentToolCalls: string[] = []; // Track recent tool signatures to detect loops
     const MAX_IDENTICAL_CALLS = 3; // Bail out if same tool called 3+ times in a row
 
@@ -684,6 +684,10 @@ Then extract the answer from the results. DO NOT refuse again.`
       this.addMessage(assistantMsg);
 
       // Execute tools
+      // Issue #5: Track iteration-level success/failure instead of per-tool
+      let iterationHadSuccess = false;
+      let iterationHadError = false;
+
       // Execute tools in PARALLEL
       const toolPromises = response.toolCalls.map(async (call) => {
         if (this.options.signal?.aborted) return null;
@@ -1166,28 +1170,19 @@ Return key findings only. End with "✓ Done".`;
               }
 
               resultStr = JSON.stringify({ error: errorMsg + recoveryHint });
-              consecutiveErrors++;
+              iterationHadError = true; // Issue #5: Set flag instead of incrementing counter
             } else {
               resultStr = typeof typedResult.result === 'string'
                 ? typedResult.result
                 : JSON.stringify(typedResult.result);
-              consecutiveErrors = 0; // Reset on success
+              iterationHadSuccess = true; // Issue #5: Set flag on success
             }
           } catch (err: any) {
             resultStr = JSON.stringify({ error: err.message || "Unknown error" });
-            consecutiveErrors++;
+            iterationHadError = true; // Issue #5: Set flag instead of incrementing counter
           }
 
-          // Bailout check: stop if too many consecutive errors
-          if (consecutiveErrors >= this.maxConsecutiveErrors) {
-            console.error(`[AgentRuntime] Bailing out after ${consecutiveErrors} consecutive errors`);
-            const bailoutMsg: LLMMessage = {
-              role: 'assistant',
-              content: `I encountered ${consecutiveErrors} consecutive errors and am stopping to prevent an infinite loop. The last error was: ${resultStr}\n\nPlease try a different approach or simplify the task.`
-            };
-            this.addMessage(bailoutMsg);
-            return bailoutMsg;
-          }
+
         }
 
         // CRITICAL: Truncate tool outputs to prevent context bloat
@@ -1239,6 +1234,34 @@ Return key findings only. End with "✓ Done".`;
       if (bailout) return bailout;
 
       iterationCount++;
+
+      // Issue #5: Update iteration error counter based on iteration-level success/failure
+      if (iterationHadSuccess) {
+        // At least one tool succeeded - reset counter
+        if (consecutiveIterationErrors > 0) {
+          console.log(`[AgentRuntime] Iteration ${iterationCount} had success, resetting error counter (was ${consecutiveIterationErrors})`);
+        }
+        consecutiveIterationErrors = 0;
+      } else if (iterationHadError) {
+        // All tools failed - increment counter
+        consecutiveIterationErrors++;
+        console.warn(`[AgentRuntime] Iteration ${iterationCount} had no successes (consecutive failed iterations: ${consecutiveIterationErrors})`);
+        
+        if (consecutiveIterationErrors >= this.maxConsecutiveErrors) {
+          console.error(`[AgentRuntime] Bailing out after ${consecutiveIterationErrors} consecutive failed iterations`);
+          const bailoutMsg: LLMMessage = {
+            role: 'assistant',
+            content: `I've encountered ${consecutiveIterationErrors} consecutive failed iterations and cannot make progress. This usually means:
+- The task requires capabilities I don't have
+- There's a persistent error in the environment
+- The goal may not be achievable with available tools
+
+Please try rephrasing your request or check if there are any issues with the environment.`
+          };
+          this.addMessage(bailoutMsg);
+          return bailoutMsg;
+        }
+      }
 
       // CHECKPOINT: Request progress summary at iterations 15, 30, 45...
       // Relaxed enforcement to prevent infinite loops
