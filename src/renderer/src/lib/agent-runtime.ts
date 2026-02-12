@@ -12,17 +12,8 @@ import {
 } from "./task-decomposer";
 import { MemoryReflector } from "./memory-reflector";
 import { validateUserInput } from "./prompt-guard";
-
-/**
- * Thrown when an agent iteration exceeds the maximum allowed time.
- * Issue #4: Per-Iteration Timeout
- */
-class IterationTimeoutError extends Error {
-  constructor(public iterationNumber: number, public timeoutMs: number) {
-    super(`Iteration ${iterationNumber} exceeded ${timeoutMs}ms timeout`);
-    this.name = 'IterationTimeoutError';
-  }
-}
+import { IterationTimeoutError } from "./errors";
+import { withIterationTimeout, TIMEOUT_CONFIG } from "./timeout-utils";
 
 export type AgentStatusCallback = (message: LLMMessage) => string | void;
 
@@ -51,7 +42,6 @@ export class AgentRuntime {
   private taskCategory?: string; // Store identified task category
   private totalIterations = 0; // Track total iterations across all continuations
   private readonly ABSOLUTE_MAX_ITERATIONS = 150; // Hard cap to prevent runaway costs
-  private readonly ITERATION_TIMEOUT_MS = 120_000; // 2 minutes per iteration (Issue #4)
   private toolCallHistory = new Set<string>(); // Track unique tool signatures for progress detection
   private agentInstanceId: string;
   private lastCheckpoint: { step: number; summary: string; timestamp: number } | null = null;
@@ -570,31 +560,20 @@ Please send your next message to continue with a fresh agent.`
 
       try {
         // Wrap LLM call with timeout to prevent indefinite hangs (Issue #4)
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => {
-            reject(new IterationTimeoutError(iterationCount + 1, this.ITERATION_TIMEOUT_MS));
-          }, this.ITERATION_TIMEOUT_MS);
-        });
-
-        try {
-          response = await Promise.race([
-            chat(
-              contextMessages,
-              allTools.length > 0 ? allTools : undefined,
-              this.options.settings,
-              serverInfo.length > 0 ? serverInfo : undefined,
-              this.options.signal,
-              dynamicRules,
-              this.options.isSubAgent, // NEW: Enable lightweight prompt for sub-agents
-              this.options.workspacePath // Inject workspace path
-            ),
-            timeoutPromise
-          ]);
-        } finally {
-          // Always clear timeout to prevent memory leaks
-          if (timeoutId !== undefined) clearTimeout(timeoutId);
-        }
+        response = await withIterationTimeout(
+          () => chat(
+            contextMessages,
+            allTools.length > 0 ? allTools : undefined,
+            this.options.settings,
+            serverInfo.length > 0 ? serverInfo : undefined,
+            this.options.signal,
+            dynamicRules,
+            this.options.isSubAgent, // NEW: Enable lightweight prompt for sub-agents
+            this.options.workspacePath // Inject workspace path
+          ),
+          iterationCount + 1,
+          TIMEOUT_CONFIG.ITERATION_TIMEOUT_MS
+        );
       } catch (error) {
         // Handle iteration timeout (Issue #4)
         if (error instanceof IterationTimeoutError) {
