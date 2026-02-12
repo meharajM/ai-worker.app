@@ -325,6 +325,25 @@ Continue from where the previous agent left off.`
 
       return this.triggerSubAgentHandoff(originalGoal);
     }
+    // ============================================================================
+    // ENHANCEMENT #22: Parallel Intent Detection
+    // =========================================================================
+    // Regex patterns to detect parallel intent: "Research X and Y", "Check 3 websites"
+    // This enables faster parallel execution by hinting the LLM early in the process.
+    const PARALLEL_INDICATORS = [
+      /\band\b/i,          // "Research X and Y"
+      /,/,                 // "Check A, B, C"
+      /\bmultiple\b/i,
+      /\beach\b/i,
+      /\ball\b/i,
+      /\d+\s+(websites|pages|items|products|companies)/i  // "5 websites"
+    ];
+
+    const hasParallelIntent = PARALLEL_INDICATORS.some(pattern => pattern.test(finalPrompt));
+    if (hasParallelIntent) {
+      console.log('[AgentRuntime] Parallel intent detected in user prompt. This will be considered during task decomposition.');
+    }
+
     // PHASE 1: Task Decomposition (only for moderate/complex tasks)
     if (!this.options.isSubAgent && taskComplexity !== 'simple') {
       // Async task decomposition with LLM-based independence verification
