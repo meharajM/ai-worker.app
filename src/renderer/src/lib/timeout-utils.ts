@@ -9,8 +9,8 @@ import { IterationTimeoutError } from './errors';
  * Timeout configuration constants
  */
 export const TIMEOUT_CONFIG = {
-  /** Default iteration timeout: 2 minutes */
-  ITERATION_TIMEOUT_MS: 120_000,
+  /** Default iteration timeout: 3 minutes (accounts for 120s cumulative tool timeout + LLM call) */
+  ITERATION_TIMEOUT_MS: 180_000,
 } as const;
 
 /**
