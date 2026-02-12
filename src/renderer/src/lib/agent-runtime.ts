@@ -11,6 +11,7 @@ import {
   type TaskDecomposition
 } from "./task-decomposer";
 import { MemoryReflector } from "./memory-reflector";
+import { validateUserInput } from "./prompt-guard";
 
 export type AgentStatusCallback = (message: LLMMessage) => string | void;
 
@@ -148,19 +149,45 @@ export class AgentRuntime {
    * Main entry point to run the agent loop.
    */
   async chat(userContent: string, attachments?: { name: string; path: string; type: string }[]): Promise<LLMMessage> {
-    // PHASE 0: Smart Confirmation (if enabled)
+    // PHASE 0: Prompt Injection Defense (M-01 Enhanced)
+    const validation = await validateUserInput(
+      userContent,
+      true // Enable LLM guard for maximum security
+    );
+
+    if (!validation.allowed) {
+      console.warn('[AgentRuntime] Prompt injection detected:', validation.reason);
+      
+      // Return error message to user (without timestamp - not in LLMMessage interface)
+      return {
+        role: 'assistant',
+        content: validation.reason || 'I cannot process this request due to security concerns. Please rephrase your question.'
+      };
+    }
+
+    // PHASE 1: Smart Confirmation (if enabled)
     let finalPrompt = userContent;
 
     // INJECT ATTACHMENTS CONTEXT
     // We append this to the user message to ensure it survives system prompt replacement in llm.ts
     // and to keep it tightly coupled with the user's request.
+    
+    // M-01 Security Fix: Use unique, tamper-evident delimiters
+    const ATTACHMENT_DELIMITER_START = '<<<ATTACHMENT_BLOCK_a8f3>>>';
+    const ATTACHMENT_DELIMITER_END = '<<<END_ATTACHMENT_BLOCK_a8f3>>>';
+    
+    // Sanitize filename to prevent control character injection
+    function sanitizeFilename(filename: string): string {
+      return filename.replace(/[\r\n\x00-\x1f\x7f]/g, '_');
+    }
+    
     let attachmentContext = '';
     if (attachments && attachments.length > 0) {
-      const resourceList = attachments.map(a => `- ${a.name} (Path: ${a.path})`).join('\n');
-      const toolHint = `\n\n[To analyze these files, use the 'convert_to_markdown' tool with file:// URIs. Example: convert_to_markdown(uri="file:///absolute/path")]`;
-
-      attachmentContext = `\n\n[System Note: User attached the following files. Use absolute paths to access them.]\n${resourceList}${toolHint}`;
-      console.log('[AgentRuntime] Prepared attachment context:', resourceList);
+        const resourceList = attachments.map(a => `- ${sanitizeFilename(a.name)} (Path: ${a.path})`).join('\n');
+        const toolHint = `\n\n[To analyze these files, use the 'convert_to_markdown' tool with file:// URIs. Example: convert_to_markdown(uri="file:///absolute/path")]`;
+        
+        attachmentContext = `\n\n${ATTACHMENT_DELIMITER_START}\nUser attached the following files. Use absolute paths to access them.\n${resourceList}${toolHint}\n${ATTACHMENT_DELIMITER_END}`;
+        console.log('[AgentRuntime] Prepared attachment context:', resourceList);
     }
 
     // Initialize State (Idempotent)
@@ -805,18 +832,8 @@ ${recentResults.length > 0 ? recentResults.map((r, i) => `**Result ${i + 1}:**\n
              `;
 
           try {
-            // Try browser_evaluate first
-            let result;
-            try {
-              result = await executeToolCall("browser_evaluate", { script });
-            } catch (e) {
-              console.warn("[AgentRuntime] browser_evaluate failed, trying browser_run_code...");
-            }
-
-            // Fallback to browser_run_code if needed
-            if (!result || result.error) {
-              result = await executeToolCall("browser_run_code", { code: script });
-            }
+            // Execute accessibility scan using browser_evaluate
+            const result = await executeToolCall("browser_evaluate", { script });
 
             if (result.error) {
               resultStr = `Error scanning page: ${result.error}. Try using browser_snapshot instead if this persists.`;

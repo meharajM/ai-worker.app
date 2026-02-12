@@ -154,7 +154,12 @@ export function registerMcpHandlers(): void {
 
                 try {
                     const playwrightService = PlaywrightService.getInstance()
-                    await playwrightService.initialize()
+                    try {
+                        await playwrightService.initialize()
+                    } catch (initError) {
+                        console.error('[MCP] Failed to initialize PlaywrightService:', initError)
+                        throw initError
+                    }
 
                     // Track this as an in-process connection
                     inProcessPlaywrightConnections.add(id)
@@ -234,7 +239,45 @@ export function registerMcpHandlers(): void {
 
             if (type === 'stdio') {
                 let finalCommand = command
-                const finalEnv = { ...process.env, ...(env || {}) } as Record<string, string>
+                
+                // Validate MCP command (warn about non-standard commands)
+                const KNOWN_MCP_COMMANDS = ['node', 'node.exe', 'npx', 'npx.exe', 'python', 'python3',
+                    'python.exe', 'uvx', 'uv', 'deno', 'bun', 'docker']
+                const basename = require('path').basename(command)
+                if (!KNOWN_MCP_COMMANDS.includes(basename)) {
+                    logMcpOperation('warn', `Non-standard MCP command: "${command}". If this is intentional, consider adding it to the known commands list.`, {
+                        operation: 'connect',
+                        serverId: id,
+                        command: basename,
+                    })
+                }
+                
+                // C-04 Security Fix: Only pass safe environment variables to MCP servers
+                // This prevents leakage of sensitive credentials (API keys, tokens, secrets)
+                // that may be stored in environment variables like:
+                // - AWS_SECRET_ACCESS_KEY, AWS_ACCESS_KEY_ID
+                // - OPENAI_API_KEY, ANTHROPIC_API_KEY
+                // - DATABASE_URL, DATABASE_PASSWORD
+                // - SSH keys, auth tokens, etc.
+                // 
+                // We only pass system-level variables needed for basic functionality.
+                // User-provided env vars from MCP config are still passed via the 'env' parameter.
+                const SAFE_ENV_KEYS = [
+                    'PATH',              // Required for command execution
+                    'HOME', 'USER',      // User context
+                    'LANG', 'LC_ALL',    // Locale settings
+                    'NODE_ENV',          // Development/production flag
+                    'TMPDIR', 'TEMP', 'TMP',  // Temporary directories
+                    'SHELL',             // Shell executable
+                    'ELECTRON_RUN_AS_NODE',   // Electron internal
+                    'XDG_DATA_HOME', 'XDG_CONFIG_HOME'  // Linux config paths
+                ]
+                
+                const safeEnv: Record<string, string> = {}
+                for (const key of SAFE_ENV_KEYS) {
+                    if (process.env[key]) safeEnv[key] = process.env[key]!
+                }
+                const finalEnv = { ...safeEnv, ...(env || {}) } as Record<string, string>
 
                 // Fallback to internal Node.js if 'node' is requested
                 if (command === 'node' || command === 'node.exe') {

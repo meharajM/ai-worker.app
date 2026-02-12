@@ -137,6 +137,7 @@ export class FileSystemService {
     private shadowDir: string
     private pendingChanges: Map<string, FileChange> = new Map()
     private sessionChanges: Map<string, string[]> = new Map()
+    private workspacePath: string | null = null
 
     private constructor() {
         // Shadow directory in app user data
@@ -152,6 +153,67 @@ export class FileSystemService {
             FileSystemService.instance = new FileSystemService()
         }
         return FileSystemService.instance
+    }
+
+    /**
+     * Set the workspace path for filesystem operations
+     */
+    public setWorkspace(workspacePath: string | null): void {
+        this.workspacePath = workspacePath
+    }
+
+    /**
+     * Validate that a path is within the workspace
+     * Resolves relative paths, symlinks, and prevents path traversal
+     * 
+     * C-03 Security Fix: Enhanced to resolve symlinks and prevent escapes
+     */
+    private async validatePath(targetPath: string): Promise<string> {
+        if (!this.workspacePath) {
+            throw new Error('No workspace configured. Please select a workspace folder in the UI.')
+        }
+
+        // Resolve workspace to real path (follow symlinks)
+        let realWorkspace: string
+        try {
+            realWorkspace = await fs.realpath(this.workspacePath)
+        } catch (error) {
+            // Workspace path doesn't exist or can't be resolved
+            throw new Error(`Workspace path ${this.workspacePath} is invalid or inaccessible`)
+        }
+
+        // Resolve target path (handles relative paths and .. segments)
+        const resolvedPath = path.resolve(this.workspacePath, targetPath)
+
+        // Try to resolve symlinks in the target path
+        let realPath: string
+        try {
+            realPath = await fs.realpath(resolvedPath)
+        } catch (error) {
+            // File doesn't exist yet (e.g., for write operations)
+            // Validate the parent directory instead
+            const parentDir = path.dirname(resolvedPath)
+            try {
+                const realParent = await fs.realpath(parentDir)
+                // Check if parent is within workspace
+                if (!realParent.startsWith(realWorkspace + path.sep) && realParent !== realWorkspace) {
+                    throw new Error(`Access denied: ${targetPath} is outside workspace. All file operations must be within the selected workspace.`)
+                }
+            } catch {
+                // Parent doesn't exist either, validate the resolved path
+                if (!resolvedPath.startsWith(realWorkspace + path.sep) && resolvedPath !== realWorkspace) {
+                    throw new Error(`Access denied: ${targetPath} is outside workspace. All file operations must be within the selected workspace.`)
+                }
+            }
+            return resolvedPath
+        }
+
+        // Validate real path (after following symlinks) is within workspace
+        if (!realPath.startsWith(realWorkspace + path.sep) && realPath !== realWorkspace) {
+            throw new Error(`Access denied: ${targetPath} resolves to ${realPath} which is outside workspace. Symlinks pointing outside workspace are not allowed.`)
+        }
+
+        return resolvedPath
     }
 
     /**
@@ -312,11 +374,12 @@ export class FileSystemService {
         try {
             switch (name) {
                 case 'fs_write_file': {
+                    const validatedPath = await this.validatePath(args.path)
                     const isSafeMode = await this.isSafeModeEnabled()
 
                     if (isSafeMode) {
                         // Safe Mode: Stage for user review
-                        const change = await this.stageWrite(args.path, args.content)
+                        const change = await this.stageWrite(validatedPath, args.content)
                         return {
                             result: {
                                 status: 'staged',
@@ -326,25 +389,27 @@ export class FileSystemService {
                         }
                     } else {
                         // Direct write (Safe Mode disabled)
-                        await fs.mkdir(path.dirname(args.path), { recursive: true })
-                        await fs.writeFile(args.path, args.content, 'utf8')
+                        await fs.mkdir(path.dirname(validatedPath), { recursive: true })
+                        await fs.writeFile(validatedPath, args.content, 'utf8')
                         return {
                             result: {
                                 status: 'written',
-                                path: args.path,
-                                message: `File written to ${args.path}`
+                                path: validatedPath,
+                                message: `File written to ${validatedPath}`
                             }
                         }
                     }
                 }
 
                 case 'fs_read_file': {
-                    const content = await fs.readFile(args.path, 'utf8')
+                    const validatedPath = await this.validatePath(args.path)
+                    const content = await fs.readFile(validatedPath, 'utf8')
                     return { result: content }
                 }
 
                 case 'fs_list_directory': {
-                    const files = await fs.readdir(args.path)
+                    const validatedPath = await this.validatePath(args.path)
+                    const files = await fs.readdir(validatedPath)
                     return { result: files }
                 }
 
