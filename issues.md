@@ -3,7 +3,7 @@
 This document tracks all identified issues in the agent self-healing and execution robustness systems. Each issue is independently fixable and prioritized by severity.
 
 **Last Updated:** 2026-02-12  
-**Status:** 16 Total Issues (3 Critical, 3 High, 10 Medium/Low)
+**Status:** 17 Total Issues (3 Critical, 3 High, 11 Medium/Low, 1 Completed)
 
 ---
 
@@ -671,6 +671,37 @@ Implement "Stop on First Failure" approach: add `failed` flag to results, detect
 
 ---
 
+### ISSUE #21: Repeatable Tools Whitelist (COMPLETED)
+
+**Status:** ✅ COMPLETED  
+**Severity:** MEDIUM  
+**Impact:** False bailout on legitimate repeated tool calls  
+**File:** `src/renderer/src/lib/agent-runtime.ts:14-45, 745`
+
+#### Problem Description
+The loop detection logic incorrectly flags legitimate repeated tool calls as infinite loops and bails out. Tools like screenshot, scroll, wait, and memory operations are designed to be called multiple times intentionally, but the current implementation treats them as potential infinite loops.
+
+#### Implementation
+Added `REPEATABLE_TOOLS` whitelist containing ~30 tools that are exempt from loop detection:
+- Browser interaction tools: scroll, scroll_to, click, double_click, hover, drag
+- Navigation tools: goto, navigate, go_back, go_forward, refresh
+- Memory tools: memory_create, memory_update, memory_delete, memory_search
+- Utility tools: screenshot, wait_for, delay, get_url, get_title
+- And others designed for repeated invocation
+
+#### Changes Made
+1. Added `REPEATABLE_TOOLS` constant with whitelisted tool names
+2. Modified loop detection to skip whitelisted tools when counting consecutive calls
+3. Only non-whitelisted tools count toward the loop bailout threshold
+
+#### Test Cases
+- [x] Screenshot called 3 times → no false bailout
+- [x] Scroll called repeatedly → no false bailout
+- [x] Non-whitelisted tool still triggers bailout on excessive calls
+- [x] Mixed whitelisted/non-whitelisted → only non-whitelisted count
+
+---
+
 ## Summary Table
 
 | Issue # | Title | Severity | Impact | Estimated Effort | Priority |
@@ -691,8 +722,9 @@ Implement "Stop on First Failure" approach: add `failed` flag to results, detect
 | #14 | Parallel Summary Missing Status | MEDIUM | Unclear outcome | Low (25 lines) | 🟢 Medium |
 | #15 | Sequential No Progress Reporting | LOW | Poor UX | Medium (30 lines) | 🟢 Low |
 | #16 | No Rollback for Failed Steps | LOW | Inconsistent state | High (80 lines) | 🟢 Low |
+| #21 | Repeatable Tools Whitelist | MEDIUM | False bailout | Low (35 lines) | ✅ Completed |
 
-**Total Issues:** 16  
+**Total Issues:** 17 (16 active, 1 completed)  
 **Total Estimated Effort:** ~590 lines of code  
 **Recommended Implementation Order:** #1 → #2 → #3 → #6 → #5 → #13 → #14 → #4 → #9 → #15 → #8 → #7 → #10 → #11 → #12 → #16
 
