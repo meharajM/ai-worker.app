@@ -2,6 +2,16 @@
 import { STATEFUL_BROWSER_TOOLS, STATEFUL_FILE_TOOLS } from './client-tools';
 
 /**
+ * Thrown when an operation is cancelled via an AbortSignal.
+ */
+export class LaneAbortError extends Error {
+    constructor(laneId: string) {
+        super(`Aborted: operation in lane "${laneId}" was cancelled`);
+        this.name = 'LaneAbortError';
+    }
+}
+
+/**
  * A queue that enforces concurrency limits.
  * OpenClaw-style execution lane.
  */
@@ -19,8 +29,19 @@ export class LaneQueue {
     /**
      * Execute a task in this lane.
      * If concurrency limit is reached, it waits in queue.
+     *
+     * @param task   The async work to execute.
+     * @param signal Optional AbortSignal.  If the signal fires while the task
+     *               is waiting in queue it is removed and rejected immediately.
+     *               If the signal is already aborted on entry, the task is
+     *               never enqueued.
      */
-    async run<T>(task: () => Promise<T>): Promise<T> {
+    async run<T>(task: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+        // Fast path: already aborted before we even start
+        if (signal?.aborted) {
+            throw new LaneAbortError(this.id);
+        }
+
         return new Promise<T>((resolve, reject) => {
             const wrappedTask = async () => {
                 this.activeCount++;
@@ -39,6 +60,18 @@ export class LaneQueue {
                 wrappedTask();
             } else {
                 this.queue.push(wrappedTask);
+
+                // If signal fires while we're waiting in queue, dequeue and reject
+                if (signal) {
+                    const onAbort = () => {
+                        const idx = this.queue.indexOf(wrappedTask);
+                        if (idx !== -1) {
+                            this.queue.splice(idx, 1);
+                            reject(new LaneAbortError(this.id));
+                        }
+                    };
+                    signal.addEventListener('abort', onAbort, { once: true });
+                }
             }
         });
     }
