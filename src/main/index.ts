@@ -52,7 +52,7 @@ function createWindow(): void {
         backgroundColor: '#0f1115',
         webPreferences: {
             preload: join(__dirname, '../preload/index.mjs'),
-            sandbox: false,
+            sandbox: true,
             contextIsolation: true,
             nodeIntegration: false,
             webSecurity: true, // ModelServer serves models over HTTP
