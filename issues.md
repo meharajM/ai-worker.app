@@ -3,14 +3,15 @@
 This document tracks all identified issues in the agent self-healing and execution robustness systems. Each issue is independently fixable and prioritized by severity.
 
 **Last Updated:** 2026-02-12  
-**Status:** 17 Total Issues (3 Critical, 3 High, 11 Medium/Low, 1 Completed)
+**Status:** 17 Total Issues (3 Critical, 3 High, 10 Medium/Low, 4 Completed)
 
 ---
 
 ## 🔥 CRITICAL PRIORITY
 
-### ISSUE #1: No Timeout on Lane Execution
+### ISSUE #1: No Timeout on Lane Execution (COMPLETED)
 
+**Status:** ✅ COMPLETED (PR #44 merged)  
 **Severity:** CRITICAL  
 **Impact:** Hung operation blocks entire queue indefinitely  
 **File:** `src/renderer/src/lib/execution-lanes.ts:23-43`
@@ -50,8 +51,9 @@ Use Promise.race pattern with timeout promise. Add timeout parameter to `run()` 
 
 ---
 
-### ISSUE #2: Abort Signal Not Propagated to Async Operations
+### ISSUE #2: Abort Signal Not Propagated to Async Operations (COMPLETED)
 
+**Status:** ✅ COMPLETED (PR #45 merged)  
 **Severity:** CRITICAL  
 **Impact:** User "Stop" doesn't cancel in-flight operations, causing delays  
 **Files:** `src/renderer/src/lib/agent-runtime.ts` (multiple locations)
@@ -94,8 +96,9 @@ Add `signal?: AbortSignal` parameter to LaneQueue.run(), add abort event listene
 
 ---
 
-### ISSUE #3: Cumulative Retry Timeout Not Enforced
+### ISSUE #3: Cumulative Retry Timeout Not Enforced (COMPLETED)
 
+**Status:** ✅ COMPLETED (PR #46 merged)  
 **Severity:** HIGH  
 **Impact:** Retries can run far longer than intended  
 **File:** `src/renderer/src/lib/agent-runtime.ts:992-1084`
@@ -706,9 +709,9 @@ Added `REPEATABLE_TOOLS` whitelist containing ~30 tools that are exempt from loo
 
 | Issue # | Title | Severity | Impact | Estimated Effort | Priority |
 |---------|-------|----------|--------|------------------|----------|
-| #1 | No Timeout on Lane Execution | CRITICAL | Indefinite hangs | Low (20 lines) | 🔥 Immediate |
-| #2 | Abort Signal Not Propagated | CRITICAL | Stop doesn't work | Medium (50 lines) | 🔥 Immediate |
-| #3 | Cumulative Retry Timeout | HIGH | Retries too long | Low (30 lines) | 🔥 Immediate |
+| #1 | No Timeout on Lane Execution | CRITICAL | Indefinite hangs | Low (20 lines) | ✅ Completed |
+| #2 | Abort Signal Not Propagated | CRITICAL | Stop doesn't work | Medium (50 lines) | ✅ Completed |
+| #3 | Cumulative Retry Timeout | HIGH | Retries too long | Low (30 lines) | ✅ Completed |
 | #4 | No Per-Iteration Timeout | HIGH | Iteration hangs | Medium (40 lines) | ⚠️ High |
 | #5 | Consecutive Error Counter Bug | MEDIUM | False bailouts | Low (10 lines) | ⚠️ High |
 | #6 | Sub-Agent Abort Propagation | MEDIUM | Zombie sub-agents | Low (5 lines) | ⚠️ High |
@@ -724,7 +727,7 @@ Added `REPEATABLE_TOOLS` whitelist containing ~30 tools that are exempt from loo
 | #16 | No Rollback for Failed Steps | LOW | Inconsistent state | High (80 lines) | 🟢 Low |
 | #21 | Repeatable Tools Whitelist | MEDIUM | False bailout | Low (35 lines) | ✅ Completed |
 
-**Total Issues:** 17 (16 active, 1 completed)  
+**Total Issues:** 17 (13 active, 4 completed)  
 **Total Estimated Effort:** ~590 lines of code  
 **Recommended Implementation Order:** #1 → #2 → #3 → #6 → #5 → #13 → #14 → #4 → #9 → #15 → #8 → #7 → #10 → #11 → #12 → #16
 
