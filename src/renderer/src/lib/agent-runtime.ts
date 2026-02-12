@@ -13,6 +13,38 @@ import {
 import { MemoryReflector } from "./memory-reflector";
 import { validateUserInput } from "./prompt-guard";
 
+// ============================================================================
+// REPEATABLE TOOLS WHITELIST (Issue #21 Enhancement)
+// =========================================================================
+// Tools that are safe to call repeatedly without indicating an infinite loop.
+// Prevents false loop detection on legitimate repeated operations like screenshot,
+// scroll, wait, and memory tools.
+
+const REPEATABLE_TOOLS = [
+  // Memory Tools
+  'memory_create_entity', 'memory_update_entity', 'memory_search',
+  'memory_create_relation', 'memory_delete_entity', 'memory_read_entity',
+
+  // Thinking & Orchestration
+  'sequential_thinking', 'create_execution_plan', 'update_progress_summary',
+  'delegate_sub_task',
+
+  // Informational / State Retrieval
+  'get_state', 'get_interactive_elements', 'get_page_content',
+  'scan_page_accessibility', 'screenshot', 'browser_evaluate',
+  'browser_run_code', 'get_tabs',
+
+  // Research & Filesystem (Read-only)
+  'read_file', 'fs_read_file', 'list_dir', 'fs_list_directory',
+  'grep_search', 'find_by_name', 'search_web', 'read_url_content',
+
+  // Browser Passive Interaction
+  'scroll', 'wait_for_element', 'wait_for_navigation', 'wait',
+
+  // LLM & Analysis
+  'llm_chat', 'analyze_task'
+];
+
 export type AgentStatusCallback = (message: LLMMessage) => string | void;
 
 interface AgentRuntimeOptions {
@@ -325,6 +357,24 @@ Continue from where the previous agent left off.`
 
       return this.triggerSubAgentHandoff(originalGoal);
     }
+
+    // ============================================================================
+    // ENHANCEMENT #22: Parallel Intent Detection
+    // =========================================================================
+    // Detect parallel intent patterns in user prompts for faster orchestration
+    const PARALLEL_INDICATORS = [
+      /\band\b/i,          // "Research X and Y"
+      /,/,                 // "Check A, B, C"
+      /\bmultiple\b/i,
+      /\beach\b/i,
+      /\ball\b/i,
+      /\d+\s+(websites|pages|items|products|companies)/i  // "5 websites"
+    ];
+    const hasParallelIntent = PARALLEL_INDICATORS.some(pattern => pattern.test(finalPrompt));
+    if (hasParallelIntent) {
+      console.log('[AgentRuntime] Parallel intent detected in user prompt.');
+    }
+
     // PHASE 1: Task Decomposition (only for moderate/complex tasks)
     if (!this.options.isSubAgent && taskComplexity !== 'simple') {
       // Async task decomposition with LLM-based independence verification
@@ -710,7 +760,10 @@ Then extract the answer from the results. DO NOT refuse again.`
           const toolNames = lastN.map(sig => sig.split(':')[0]);
           const sameToolRepeated = toolNames.every(name => name === toolNames[0]);
 
-          if (allSame || sameToolRepeated) {
+          // ENHANCEMENT #21: Skip loop detection for repeatable/whitelisted tools
+          const isRepeatableTool = REPEATABLE_TOOLS.includes(call.name);
+
+          if (!isRepeatableTool && (allSame || sameToolRepeated)) {
             const loopType = allSame ? 'identical arguments' : 'similar pattern (same tool)';
             console.error(`[AgentRuntime] Infinite loop detected: ${call.name} called ${MAX_IDENTICAL_CALLS}+ times with ${loopType}`);
 
