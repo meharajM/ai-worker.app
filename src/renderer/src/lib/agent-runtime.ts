@@ -11,6 +11,7 @@ import {
   type TaskDecomposition
 } from "./task-decomposer";
 import { MemoryReflector } from "./memory-reflector";
+import { validateUserInput } from "./prompt-guard";
 
 export type AgentStatusCallback = (message: LLMMessage) => string | void;
 
@@ -85,9 +86,9 @@ export class AgentRuntime {
         // Create new state
         await executeToolCall('memory_create_entity', {
           name: entityName,
-          entityType: 'agent_execution_state',
-          observations: [`Agent initialized at ${new Date().toISOString()}`],
-          Metadata: {
+          type: 'agent_execution_state',
+          description: `Agent initialized at ${new Date().toISOString()}`,
+          metadata: {
             agentInstanceId: this.agentInstanceId,
             sessionId: this.options.activeSessionId || 'unknown',
             status: 'active',
@@ -147,9 +148,47 @@ export class AgentRuntime {
   /**
    * Main entry point to run the agent loop.
    */
-  async chat(userContent: string): Promise<LLMMessage> {
-    // PHASE 0: Smart Confirmation (if enabled)
+  async chat(userContent: string, attachments?: { name: string; path: string; type: string }[]): Promise<LLMMessage> {
+    // PHASE 0: Prompt Injection Defense (M-01 Enhanced)
+    const validation = await validateUserInput(
+      userContent,
+      true // Enable LLM guard for maximum security
+    );
+
+    if (!validation.allowed) {
+      console.warn('[AgentRuntime] Prompt injection detected:', validation.reason);
+      
+      // Return error message to user (without timestamp - not in LLMMessage interface)
+      return {
+        role: 'assistant',
+        content: validation.reason || 'I cannot process this request due to security concerns. Please rephrase your question.'
+      };
+    }
+
+    // PHASE 1: Smart Confirmation (if enabled)
     let finalPrompt = userContent;
+
+    // INJECT ATTACHMENTS CONTEXT
+    // We append this to the user message to ensure it survives system prompt replacement in llm.ts
+    // and to keep it tightly coupled with the user's request.
+    
+    // M-01 Security Fix: Use unique, tamper-evident delimiters
+    const ATTACHMENT_DELIMITER_START = '<<<ATTACHMENT_BLOCK_a8f3>>>';
+    const ATTACHMENT_DELIMITER_END = '<<<END_ATTACHMENT_BLOCK_a8f3>>>';
+    
+    // Sanitize filename to prevent control character injection
+    function sanitizeFilename(filename: string): string {
+      return filename.replace(/[\r\n\x00-\x1f\x7f]/g, '_');
+    }
+    
+    let attachmentContext = '';
+    if (attachments && attachments.length > 0) {
+        const resourceList = attachments.map(a => `- ${sanitizeFilename(a.name)} (Path: ${a.path})`).join('\n');
+        const toolHint = `\n\n[To analyze these files, use the 'convert_to_markdown' tool with file:// URIs. Example: convert_to_markdown(uri="file:///absolute/path")]`;
+        
+        attachmentContext = `\n\n${ATTACHMENT_DELIMITER_START}\nUser attached the following files. Use absolute paths to access them.\n${resourceList}${toolHint}\n${ATTACHMENT_DELIMITER_END}`;
+        console.log('[AgentRuntime] Prepared attachment context:', resourceList);
+    }
 
     // Initialize State (Idempotent)
     await this.initializeSessionState();
@@ -157,9 +196,8 @@ export class AgentRuntime {
     // GAP FIX 2B: Detect and resume from pending handoffs
     if (!this.options.isSubAgent) {
       try {
-        const handoffCheck = await executeToolCall('memory_search_entities', {
-          query: `handoff ${this.options.activeSessionId || ''}`,
-          entityType: 'agent_handoff'
+        const handoffCheck = await executeToolCall('memory_search', {
+          query: `handoff ${this.options.activeSessionId || ''}`
         });
 
         if (handoffCheck.result && typeof handoffCheck.result === 'object') {
@@ -204,6 +242,9 @@ Continue from where the previous agent left off.`
       }
     }
 
+    // PHASE 0: Task Analysis (for complexity detection and optional confirmation)
+    let taskComplexity: 'simple' | 'moderate' | 'complex' = 'moderate'; // Default to moderate
+    
     if (this.options.requireConfirmation && this.options.onConfirmationNeeded) {
       try {
         // Check if this is a simple reply to a previous agent question
@@ -215,14 +256,22 @@ Continue from where the previous agent left off.`
         // Skip confirmation if user is just replying to the agent's question
         if (isSimpleReply && isReplyToQuestion) {
           console.log('[AgentRuntime] Simple reply to agent question. Skipping confirmation.');
+          taskComplexity = 'simple';
         } else {
           console.log('[AgentRuntime] Analyzing task for ambiguity...');
-          const analysis = await analyzeTask(userContent, this.options.settings);
+          // Pass attachments to analysis - this ensures "convert this" with an attachment is NOT marked ambiguous
+          const analysis = await analyzeTask(userContent, this.options.settings, attachments);
 
           // Capture category from analysis
           if (analysis.category) {
             this.taskCategory = analysis.category;
             console.log(`[AgentRuntime] Identified task category: ${this.taskCategory}`);
+          }
+
+          // Capture complexity level to skip decomposition for simple tasks
+          if (analysis.complexity) {
+            taskComplexity = analysis.complexity.level;
+            console.log(`[AgentRuntime] Task complexity: ${taskComplexity}`);
           }
 
           if (analysis.shouldConfirm) {
@@ -248,6 +297,14 @@ Continue from where the previous agent left off.`
         // Continue with original prompt if analysis fails
       }
     }
+    // Note: When confirmation is disabled (requireConfirmation === false), this agent is typically:
+    // 1. A sub-agent spawned by the main agent with a specific task instruction
+    // 2. A background process (e.g., Memory Reflector)
+    // 
+    // Sub-agents NEVER receive simple greetings like "hi" or "thanks" - they receive task-specific
+    // instructions from the parent agent (e.g., "Search Amazon for laptops under $500").
+    // Therefore, we don't need to check for simple prompts when confirmation is disabled.
+    // The taskComplexity remains at its default value ('moderate').
 
     // PHASE 0.1: Check for Dynamic Handoff Confirmation
     const lastMsg = this.messages[this.messages.length - 1];
@@ -268,8 +325,15 @@ Continue from where the previous agent left off.`
 
       return this.triggerSubAgentHandoff(originalGoal);
     }
-    if (!this.options.isSubAgent) {
-      const decomposition = analyzeTaskForDecomposition(finalPrompt);
+    // PHASE 1: Task Decomposition (only for moderate/complex tasks)
+    if (!this.options.isSubAgent && taskComplexity !== 'simple') {
+      // Async task decomposition with LLM-based independence verification
+      // Skip this for simple prompts (greetings, basic questions) to reduce latency
+      console.log('[AgentRuntime] Running task decomposition analysis...');
+      const decomposition = await analyzeTaskForDecomposition(
+        finalPrompt,
+        this.options.settings
+      );
       console.log('[AgentRuntime] Task decomposition:', decomposition);
 
       if (decomposition.shouldFork && decomposition.type === 'multi_context') {
@@ -284,17 +348,23 @@ Continue from where the previous agent left off.`
         console.log(`[AgentRuntime] Complex single-context task: ${decomposition.estimatedActions} actions - using sequential sub-agents`);
         return this.executeSequentialSubAgents(finalPrompt, decomposition);
       }
+    } else if (!this.options.isSubAgent && taskComplexity === 'simple') {
+      console.log('[AgentRuntime] Simple task detected - skipping decomposition for faster response');
     }
 
-    // Add user message (only if not already in history - prevents duplicates)
+    // Handle User Message Addition & Context Injection
     const lastMessage = this.messages[this.messages.length - 1];
     const alreadyHasMessage = lastMessage?.role === 'user' && lastMessage?.content === finalPrompt;
 
-    if (!alreadyHasMessage) {
-      const userMsg: LLMMessage = { role: "user", content: finalPrompt };
-      this.addMessage(userMsg);
+    if (alreadyHasMessage && lastMessage) {
+      // User message exists in history (from UI). Update it with attachment context.
+      // We modify the message in place to include the hidden system note
+      lastMessage.content = finalPrompt + attachmentContext;
+      console.log('[AgentRuntime] Updated existing user message with attachment context');
     } else {
-      console.log('[AgentRuntime] User message already in history, skipping duplicate add');
+      // User message not in history (new session or sub-agent). Add it with context.
+      const userMsg: LLMMessage = { role: "user", content: finalPrompt + attachmentContext };
+      this.addMessage(userMsg);
     }
 
     let iterationCount = 0;
@@ -331,13 +401,13 @@ Continue from where the previous agent left off.`
           try {
             await executeToolCall('memory_create_entity', {
               name: handoffId,
-              entityType: 'agent_handoff',
-              observations: [
+              type: 'agent_handoff',
+              description: [
                 `Agent ${this.agentInstanceId} approaching context limit (${estimatedTokens} tokens)`,
                 `Handing off at checkpoint: ${this.lastCheckpoint?.summary || 'No checkpoint'}`,
                 `Original goal: ${originalGoal.substring(0, 200)}`
-              ],
-              Metadata: {
+              ].join('\n'),
+              metadata: {
                 fromAgentId: this.agentInstanceId,
                 sessionId: this.options.activeSessionId,
                 reason: 'context_limit',
@@ -453,7 +523,7 @@ Please send your next message to continue with a fresh agent.`
       let response: LLMResponse;
 
       // Get task-specific rules if category is available from analysis
-      let dynamicRules = undefined;
+      let dynamicRules: string | undefined = undefined;
 
       // Import helper dynamically to avoid circular deps
       const { getPromptForCategory, getComposedPrompts, PROMPTS } = await import('./prompt-library');
@@ -464,25 +534,12 @@ Please send your next message to continue with a fresh agent.`
         promptsToLoad.push(this.taskCategory);
       }
 
-      // 2. PARALLEL EXECUTION DETECTION (Dynamic Injection)
-      // Inject parallel execution prompt if user request suggests multiple independent tasks
-      // Regex patterns to detect parallel intent: "Research X and Y", "Check 3 websites"
-      const parallelIndicators = [
-        /\band\b/i,          // "Research X and Y"
-        /,/,                 // "Check A, B, C"
-        /\bmultiple\b/i,
-        /\beach\b/i,
-        /\ball\b/i,
-        /\d+\s+(websites|pages|items|products|companies)/i  // "5 websites"
-      ];
 
-      const hasParallelIntent = parallelIndicators.some(pattern => pattern.test(finalPrompt));
+      // 2. PARALLEL EXECUTION DETECTION - DISABLED (Issue #1 Fix)
+      // This was causing false parallels for research tasks like "Research X and Y"
+      // Now handled by LLM-based verification in task-decomposer.ts
+      // The old keyword-based detection was too broad and has been removed.
 
-      // Only inject if detected AND not already a sub-agent (sub-agents should focus on their specific task)
-      if (hasParallelIntent && !this.options.isSubAgent) {
-        promptsToLoad.push('PARALLEL_EXECUTION');
-        console.log('[AgentRuntime] Parallel execution detected. Injecting PARALLEL_EXECUTION prompt.');
-      }
 
       // 3. Compose the final dynamic rules
       if (promptsToLoad.length > 0) {
@@ -493,6 +550,11 @@ Please send your next message to continue with a fresh agent.`
       if (this.options.isSubAgent) {
         console.log(`[SubAgent] LLM call with ${contextMessages.length} messages (should be 1-3 for fresh sub-agent)`);
       }
+
+      if (this.options.signal?.aborted) {
+        throw new Error("Aborted by user");
+      }
+
 
       try {
         response = await chat(
@@ -582,8 +644,14 @@ Then extract the answer from the results. DO NOT refuse again.`
         };
         this.addMessage(assistantMsg);
 
+        // DISABLED: Memory analysis on every turn causes unwanted delays
+        // Memory analysis should only happen:
+        // 1. When sub-agents complete (line 294) - for context preservation
+        // 2. When user explicitly wants to store preferences (via tool call)
+        // 
         // Fire-and-forget memory analysis (Standard Turn Complete)
-        MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+        // MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+
 
         // GAP FIX 4: Production Cleanup
         // Requirement: Keep for debugging in dev mode, clear on completed status in prod
@@ -764,18 +832,8 @@ ${recentResults.length > 0 ? recentResults.map((r, i) => `**Result ${i + 1}:**\n
              `;
 
           try {
-            // Try browser_evaluate first
-            let result;
-            try {
-              result = await executeToolCall("browser_evaluate", { script });
-            } catch (e) {
-              console.warn("[AgentRuntime] browser_evaluate failed, trying browser_run_code...");
-            }
-
-            // Fallback to browser_run_code if needed
-            if (!result || result.error) {
-              result = await executeToolCall("browser_run_code", { code: script });
-            }
+            // Execute accessibility scan using browser_evaluate
+            const result = await executeToolCall("browser_evaluate", { script });
 
             if (result.error) {
               resultStr = `Error scanning page: ${result.error}. Try using browser_snapshot instead if this persists.`;
@@ -841,12 +899,12 @@ ${recentResults.length > 0 ? recentResults.map((r, i) => `**Result ${i + 1}:**\n
             const contextEntityName = `AgentState_${subAgentId}`;
             await executeToolCall('memory_create_entity', {
               name: contextEntityName,
-              entityType: 'agent_execution_state',
-              observations: [
+              type: 'agent_execution_state',
+              description: [
                 `Sub-agent initialized for task: ${instruction}`,
                 `Context Summary: ${context}`
-              ],
-              Metadata: {
+              ].join('\n'),
+              metadata: {
                 agentInstanceId: subAgentId,
                 sessionId: this.options.activeSessionId || 'unknown',
                 status: 'active',
@@ -948,7 +1006,19 @@ Return key findings only. End with "✓ Done".`;
 
         } else {
           // Standard MCP tool with SELF-HEALING Wrapper
-          const executeCallWithSelfHealing = async (name: string, args: Record<string, unknown>, attempt = 1): Promise<any> => {
+          // Cumulative timeout: all retry attempts for a single tool call must
+          // complete within this window (prevents 180s+ total from 3 × 60s).
+          const CUMULATIVE_TIMEOUT_MS = 120_000; // 120 seconds
+          const MIN_REMAINING_FOR_RETRY_MS = 5_000; // Don't retry if < 5s left
+
+          const executeCallWithSelfHealing = async (name: string, args: Record<string, unknown>, attempt = 1, startTime: number = Date.now()): Promise<any> => {
+            // ── Cumulative timeout guard ────────────────────────────────────
+            const elapsed = Date.now() - startTime;
+            if (elapsed >= CUMULATIVE_TIMEOUT_MS) {
+              console.warn(`[Self-Healing] Cumulative timeout exceeded for ${name} after ${Math.round(elapsed / 1000)}s (limit: ${CUMULATIVE_TIMEOUT_MS / 1000}s)`);
+              return { result: null, error: `Cumulative timeout: ${name} exceeded ${CUMULATIVE_TIMEOUT_MS / 1000}s across all retry attempts` };
+            }
+
             try {
               // DYNAMIC RESOURCE LOCKING
               // We lock based on tool type to prevent race conditions during parallel execution
@@ -971,63 +1041,93 @@ Return key findings only. End with "✓ Done".`;
 
               // EXECUTE via Lane Manager
               // It handles routing (Browser Serial vs Tab Serial vs API Parallel)
-              result = await laneManager.getLane(name, { tabId: this.options.tabId }).run(async () => {
+              const lane = laneManager.getLane(name, { tabId: this.options.tabId });
+              const timeoutMs = laneManager.getTimeoutForTool(name);
+              result = await lane.run(async () => {
                 return await executeToolCall(name, args);
-              });
+              }, timeoutMs, this.options.signal);
 
               return result;
 
             } catch (error: any) {
               const errorStr = String(error);
 
+              // Abort errors should not be retried — exit immediately
+              if (errorStr.includes('Aborted') || errorStr.includes('LaneAbortError') || this.options.signal?.aborted) {
+                return { result: null, error: 'Aborted by user' };
+              }
+
               // RECOVERY STRATEGIES (Max 2 Attempts)
               if (attempt <= 2) {
+                // Early exit: don't retry if user already aborted
+                if (this.options.signal?.aborted) {
+                  return { result: null, error: 'Aborted by user' };
+                }
+
+                // Check cumulative timeout before attempting retry
+                const retryElapsed = Date.now() - startTime;
+                if (retryElapsed + MIN_REMAINING_FOR_RETRY_MS >= CUMULATIVE_TIMEOUT_MS) {
+                  console.warn(`[Self-Healing] Insufficient time remaining for retry of ${name} (${Math.round(retryElapsed / 1000)}s elapsed, ${CUMULATIVE_TIMEOUT_MS / 1000}s limit)`);
+                  return { result: null, error: `${errorStr} (no retry: cumulative timeout would be exceeded)` };
+                }
+
                 // Strategy 1: Context Destroyed (Navigation Race Condition)
                 if (errorStr.includes('Execution context was destroyed')) {
                   console.log(`[Self-Healing] Context destroyed during ${name}. Waiting 1s and retrying...`);
                   await new Promise(r => setTimeout(r, 1000));
-                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                  if (this.options.signal?.aborted) return { result: null, error: 'Aborted by user' };
+                  return executeCallWithSelfHealing(name, args, attempt + 1, startTime);
                 }
 
                 // Strategy 2: Stale Element (DOM Update)
                 if (errorStr.includes('Element is not attached') || errorStr.includes('Node is detached')) {
                   console.log(`[Self-Healing] Stale element in ${name}. Retrying immediately...`);
-                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                  return executeCallWithSelfHealing(name, args, attempt + 1, startTime);
                 }
 
-                // Strategy 3: Timeout (Increase Timeout)
+                // Strategy 3: Lane Timeout (operation exceeded lane time limit)
+                if (errorStr.includes('Lane timeout')) {
+                  console.log(`[Self-Healing] Lane timeout for ${name} (attempt ${attempt}). Retrying in 2s...`);
+                  await new Promise(r => setTimeout(r, 2000));
+                  if (this.options.signal?.aborted) return { result: null, error: 'Aborted by user' };
+                  return executeCallWithSelfHealing(name, args, attempt + 1, startTime);
+                }
+
+                // Strategy 4: Tool-level Timeout (Increase Timeout)
                 if (errorStr.includes('Timeout') && args.timeout && typeof args.timeout === 'number') {
                   console.log(`[Self-Healing] Timeout in ${name}. Retrying with double timeout...`);
                   const newArgs = { ...args, timeout: args.timeout * 2 };
-                  return executeCallWithSelfHealing(name, newArgs, attempt + 1);
+                  return executeCallWithSelfHealing(name, newArgs, attempt + 1, startTime);
                 }
 
-                // Strategy 4: Network Errors (Transient)
+                // Strategy 5: Network Errors (Transient)
                 if (errorStr.includes('net::ERR_') || errorStr.includes('ECONNREFUSED') || errorStr.includes('fetch failed')) {
                   console.log(`[Self-Healing] Network error in ${name}. Retrying in 2s...`);
                   await new Promise(r => setTimeout(r, 2000));
-                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                  if (this.options.signal?.aborted) return { result: null, error: 'Aborted by user' };
+                  return executeCallWithSelfHealing(name, args, attempt + 1, startTime);
                 }
 
-                // Strategy 5: Browser Context Lost (Transient)
+                // Strategy 6: Browser Context Lost (Transient)
                 if (errorStr.includes('Target closed') || errorStr.includes('Session closed') || errorStr.includes('Browser has been closed')) {
                   console.log(`[Self-Healing] Browser context lost in ${name}. Retrying in 1s...`);
                   await new Promise(r => setTimeout(r, 1000));
-                  return executeCallWithSelfHealing(name, args, attempt + 1);
+                  if (this.options.signal?.aborted) return { result: null, error: 'Aborted by user' };
+                  return executeCallWithSelfHealing(name, args, attempt + 1, startTime);
                 }
 
-                // Strategy 6: Element Not Found (Retry with longer wait - page might be loading)
+                // Strategy 7: Element Not Found (Retry with longer wait - page might be loading)
                 if (errorStr.includes('Element not found') || errorStr.includes('waiting for selector') || errorStr.includes('No element matches')) {
                   console.log(`[Self-Healing] Element not found in ${name}. Retrying with longer wait...`);
                   const newArgs = { ...args, timeout: (args.timeout as number || 5000) * 1.5 };
-                  return executeCallWithSelfHealing(name, newArgs, attempt + 1);
+                  return executeCallWithSelfHealing(name, newArgs, attempt + 1, startTime);
                 }
 
-                // Strategy 7: Navigation Timeout (Retry with longer timeout)
+                // Strategy 8: Navigation Timeout (Retry with longer timeout)
                 if (errorStr.includes('Navigation timeout') || errorStr.includes('page.goto')) {
                   console.log(`[Self-Healing] Navigation timeout in ${name}. Retrying with extended timeout...`);
                   const newArgs = { ...args, timeout: (args.timeout as number || 30000) * 1.5 };
-                  return executeCallWithSelfHealing(name, newArgs, attempt + 1);
+                  return executeCallWithSelfHealing(name, newArgs, attempt + 1, startTime);
                 }
               }
 
@@ -1350,7 +1450,7 @@ Use tools immediately. End with "✓ Done".`;
 
     // Helper to render the live status message
     const renderStatus = () => {
-      let content = `## � Parallel Execution\n\n`;
+      let content = `## ⚡ Parallel Execution\n\n`;
 
       for (const s of agentStatuses) {
         const icon = s.isRunning ? '⟳' : (s.result?.startsWith('Error') ? '⚠️' : '✓');
@@ -1387,13 +1487,13 @@ Use tools immediately. End with "✓ Done".`;
       try {
         await executeToolCall('memory_create_entity', {
           name: `AgentState_${subAgentId}`,
-          entityType: 'agent_execution_state',
-          observations: [
+          type: 'agent_execution_state',
+          description: [
             `Parallel sub-agent for context: ${context}`,
             `Task: ${originalRequest}`,
             `Initialized at ${new Date().toISOString()}`
-          ],
-          Metadata: {
+          ].join('\n'),
+          metadata: {
             agentInstanceId: subAgentId,
             sessionId: this.options.activeSessionId || 'unknown',
             parentAgentId: this.agentInstanceId,
@@ -1414,6 +1514,7 @@ Use tools immediately. End with "✓ Done".`;
         parentAgentId: this.agentInstanceId,
         isSubAgent: true,
         taskCategory: this.taskCategory, // Inherit category from parent
+        signal: this.options.signal,     // Propagate abort signal to sub-agent
         requireConfirmation: false,
         onMessage: (msg: LLMMessage) => {
           // Update status based on sub-agent activity
@@ -1645,14 +1746,14 @@ End with "✓ Done" and a brief result.`;
         try {
           await executeToolCall('memory_create_entity', {
             name: `AgentState_${subAgentId}`,
-            entityType: 'agent_execution_state',
-            observations: [
+            type: 'agent_execution_state',
+            description: [
               `Sequential sub-agent for step ${step.id}/${steps.length}`,
               `Task: ${step.description}`,
               `Parent task: ${originalRequest}`,
               `Initialized at ${new Date().toISOString()}`
-            ],
-            Metadata: {
+            ].join('\n'),
+            metadata: {
               agentInstanceId: subAgentId,
               sessionId: this.options.activeSessionId || 'unknown',
               parentAgentId: this.agentInstanceId,
@@ -1674,6 +1775,7 @@ End with "✓ Done" and a brief result.`;
           parentAgentId: this.agentInstanceId,
           isSubAgent: true,
           taskCategory: this.taskCategory,
+          signal: this.options.signal,     // Propagate abort signal to sub-agent
           requireConfirmation: false,
           onMessage: (msg) => {
             const contentStr = typeof msg.content === 'string'

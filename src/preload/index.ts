@@ -105,6 +105,31 @@ const electronAPI = {
         checkMigration: () => ipcRenderer.invoke('memory:check-migration'),
         openFileLocation: () => ipcRenderer.invoke('memory:open-file-location'),
     },
+    // Clipboard operations
+    clipboard: {
+        readFilePaths: () => {
+            const { clipboard } = require('electron')
+            const paths: string[] = []
+            
+            if (process.platform === 'darwin') {
+                const fileUrl = clipboard.read('public.file-url')
+                if (fileUrl) {
+                    try {
+                        // Decode URI and remove file:// prefix
+                        const p = decodeURIComponent(fileUrl).replace(/^file:\/\//, '')
+                        paths.push(p)
+                    } catch (e) {
+                        console.error('Error parsing file url from clipboard:', e)
+                    }
+                }
+            } else {
+                // Windows/Linux fallback or implementation
+                // For now, on Windows, dragging generic files usually works via web API better than mac paste
+                // We can add more robust logic later if needed
+            }
+            return paths
+        }
+    },
 }
 
 // Expose APIs to renderer

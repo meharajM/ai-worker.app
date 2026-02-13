@@ -44,7 +44,13 @@ export function registerSecureHandlers(): void {
         }
 
         if (!safeStorage.isEncryptionAvailable()) {
-            console.warn('[Secure] Encryption not available, falling back to plain storage')
+            // M-04 Security Fix: Strong warning when encryption unavailable
+            const configPath = require('electron').app.getPath('userData')
+            console.error('⚠️  SECURITY WARNING: OS encryption unavailable. Secrets will be stored in PLAINTEXT.')
+            console.error('⚠️  Location:', `${configPath}/ai-worker-secrets.json`)
+            console.error('⚠️  This is a security risk. Please ensure your system supports encryption.')
+            console.error('⚠️  Affected keys:', ALLOWED_SECRET_KEYS.join(', '))
+            
             // Fallback: store without encryption (better than nothing)
             const storeKey = getUserSecretKey(key, userId)
             secretStore.set(storeKey, value)

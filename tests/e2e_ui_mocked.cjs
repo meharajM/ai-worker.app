@@ -283,8 +283,11 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         const chatInput = window.locator('[data-testid="chat-textarea"]');
         await chatInput.waitFor({ state: 'attached' });
 
+        await window.setViewportSize({ width: 1280, height: 900 });
+
         // Helper to send message
         const sendMessage = async (text) => {
+            await chatInput.scrollIntoViewIfNeeded();
             await chatInput.click({ force: true });
             await chatInput.fill(text);
             await window.locator('button:has(svg.lucide-send)').click({ force: true });

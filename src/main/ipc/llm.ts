@@ -1,6 +1,20 @@
 import { ipcMain } from 'electron'
 
 export function registerLlmHandlers(): void {
+    // SSRF prevention helper
+    function isUnsafeUrl(urlStr: string): boolean {
+        try {
+            const url = new URL(urlStr)
+            const host = url.hostname
+            // Allow localhost for Ollama
+            if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') return false
+            // Block cloud metadata endpoints and internal networks
+            if (host === '169.254.169.254' || host.endsWith('.internal')) return true
+            if (/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(host)) return true
+            return false
+        } catch { return true }
+    }
+
     // LLM operations (placeholder - renderer handles this via fetch for now)
     ipcMain.handle('llm:chat', async (_event, messages, tools) => {
         console.log('LLM chat requested via IPC:', { messageCount: messages?.length, toolCount: tools?.length })
@@ -17,6 +31,9 @@ export function registerLlmHandlers(): void {
 
     // Fetch OpenAI models from main process (bypasses CORS)
     ipcMain.handle('llm:fetch-openai-models', async (_event, baseUrl: string, apiKey: string) => {
+        if (isUnsafeUrl(baseUrl)) {
+            return { success: false, error: 'URL blocked: targets internal network', models: [] }
+        }
         try {
             const response = await fetch(`${baseUrl}/models`, {
                 method: 'GET',
@@ -52,6 +69,9 @@ export function registerLlmHandlers(): void {
 
     // Fetch Ollama models from main process (bypasses potential CORS issues)
     ipcMain.handle('llm:fetch-ollama-models', async (_event, baseUrl: string) => {
+        if (isUnsafeUrl(baseUrl)) {
+            return { success: false, error: 'URL blocked: targets internal network', models: [] }
+        }
         try {
             const response = await fetch(`${baseUrl}/api/tags`, {
                 method: 'GET',

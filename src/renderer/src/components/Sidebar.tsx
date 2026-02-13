@@ -1,5 +1,6 @@
 import React from 'react'
 import { Settings, MessageSquare, Database } from 'lucide-react'
+import { useChatStore } from '../stores/chatStore'
 
 export type View = 'chat' | 'connections' | 'settings'
 
@@ -9,6 +10,10 @@ interface SidebarProps {
 }
 
 export function Sidebar({ currentView, onViewChange }: SidebarProps) {
+    const { sidebarOpen } = useChatStore()
+    
+    if (!sidebarOpen) return null
+
     return (
         <div className="w-16 flex-shrink-0 bg-[#1a1d23] flex flex-col items-center py-6 border-r border-white/5">
             <div className="flex-1 flex flex-col gap-4">

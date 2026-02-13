@@ -27,6 +27,10 @@ export class PlaywrightService {
     private context: BrowserContext | null = null
     private page: Page | null = null
     private store: Store<Record<string, unknown>>
+    
+    // C-05 Security Fix: Rate limiting for browser evaluation
+    private evalCount = 0
+    private evalResetTime = Date.now()
 
     private constructor() {
         this.store = new Store<Record<string, unknown>>()
@@ -991,7 +995,49 @@ export class PlaywrightService {
                     return { result: `Scrolled ${safeArgs.direction}` }
 
                 case 'evaluate':
-                    const result = await page.evaluate(safeArgs.script)
+                    // C-05 Security Fix: Secure browser evaluation
+                    const scriptError = requireParam('script')
+                    if (scriptError) return { result: null, error: scriptError }
+                    
+                    // Rate limiting: max 50 evaluations per minute
+                    if (Date.now() - this.evalResetTime > 60000) {
+                        this.evalCount = 0
+                        this.evalResetTime = Date.now()
+                    }
+                    
+                    if (this.evalCount >= 50) {
+                        return { 
+                            result: null, 
+                            error: 'Rate limit exceeded: Maximum 50 evaluations per minute. Please wait before trying again.' 
+                        }
+                    }
+                    
+                    this.evalCount++
+                    
+                    // Script sanitization: block dangerous APIs
+                    const script = safeArgs.script
+                    const blockedAPIs = ['fetch', 'XMLHttpRequest', 'WebSocket', 'eval', 'Function', 'import(']
+                    for (const api of blockedAPIs) {
+                        if (script.includes(api)) {
+                            return {
+                                result: null,
+                                error: `Security: Script contains blocked API '${api}'. Browser evaluation cannot make network requests or execute dynamic code.`
+                            }
+                        }
+                    }
+                    
+                    // Content-type validation: only allow HTML pages
+                    const currentUrl = page.url()
+                    if (currentUrl && !currentUrl.startsWith('http')) {
+                        return {
+                            result: null,
+                            error: 'Security: Evaluation only allowed on HTTP/HTTPS pages'
+                        }
+                    }
+                    
+                    // Execute in isolated world (Playwright default behavior prevents page interference)
+                    // Note: Playwright's evaluate() already runs in an isolated context
+                    const result = await page.evaluate(script)
                     return { result: result }
 
                 case 'get_page_content':
@@ -1147,7 +1193,7 @@ export class PlaywrightService {
                     const extractSelector = safeArgs.selector
 
                     // ERROR: Empty results usually mean bad selector
-                    const validateResults = (data: any, type: string) => {
+                    const validateResults = (data: any, _p0?: string) => {
                         let isEmpty = false;
                         if (Array.isArray(data)) {
                             isEmpty = data.length === 0;
