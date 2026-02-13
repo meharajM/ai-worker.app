@@ -184,9 +184,9 @@ Return JSON:
 }`;
 
   try {
-    // Add timeout to prevent hanging (max 5 seconds for analysis)
+    // Add timeout to prevent hanging (max 20 seconds for analysis)
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('LLM analysis timeout')), 5000)
+      setTimeout(() => reject(new Error('LLM analysis timeout')), 20000)
     );
 
     const llmPromise = chat(

@@ -341,17 +341,8 @@ export async function checkOpenAI(
       if (response.ok) {
         const data = await response.json();
         const models = (data.data || [])
-          .filter((m: { id: string }) => {
-            const id = m.id.toLowerCase();
-            return (
-              id.includes("gpt") ||
-              id.includes("chat") ||
-              id.includes("claude") ||
-              id.includes("llama") ||
-              id.includes("perplexity")
-            );
-          })
           .map((m: { id: string }) => m.id)
+          .filter(Boolean)
           .sort();
 
         const preferredModel = model;
@@ -551,6 +542,32 @@ export async function testOpenAIConnection(
           success: true,
           modelsEndpointAvailable: false,
         };
+      }
+    } else {
+      // Fallback to direct fetch if IPC not available
+      try {
+        const response = await fetch(`${baseUrl}/models`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const models = (data.data || [])
+            .map((m: { id: string }) => m.id)
+            .filter(Boolean)
+            .sort();
+
+          return {
+            success: true,
+            models: models,
+            modelsEndpointAvailable: true,
+          };
+        }
+      } catch (e) {
+        // Ignore errors during fallback model fetch
       }
     }
 
