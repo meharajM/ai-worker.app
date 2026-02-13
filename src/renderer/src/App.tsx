@@ -85,6 +85,11 @@ function App() {
       try {
         const settingsForLLM = {
           preferredProvider: settings.preferredProvider,
+          isOllamaEnabled: settings.isOllamaEnabled,
+          isOpenAIEnabled: settings.isOpenAIEnabled,
+          isGeminiEnabled: settings.isGeminiEnabled,
+          isOpenRouterEnabled: settings.isOpenRouterEnabled,
+          isBrowserEnabled: settings.isBrowserEnabled,
           ollamaModel: settings.ollamaModel,
           ollamaBaseUrl: settings.ollamaBaseUrl,
           openaiApiKey: settings.openaiApiKey,
@@ -96,63 +101,57 @@ function App() {
           openrouterModel: settings.openrouterModel,
         };
         const providers = await getAvailableProviders(settingsForLLM);
-        if (providers.browser.available) {
-          if (providers.browser.isLoaded) {
-            setLlmStatus({
-              provider: `On-Device (${providers.browser.model})`,
-              available: true,
-            });
-          } else if (providers.browser.isLoading) {
-            setLlmStatus({
-              provider: `On-Device (Loading...)`,
-              available: false,
-            });
+
+        // Determine which provider to show as active based on preference and availability
+        // This should mirror the selection logic in llm.ts:chat()
+        let activeProvider: string | null = null;
+        let isAvailable = false;
+
+        const pref = settings.preferredProvider || 'auto';
+
+        if (pref === 'openrouter' && providers.openrouter.available) {
+          activeProvider = `OpenRouter (${providers.openrouter.model})`;
+          isAvailable = true;
+        } else if (pref === 'browser' && providers.browser.available) {
+          activeProvider = providers.browser.isLoaded
+            ? `On-Device (${providers.browser.model})`
+            : providers.browser.isLoading ? 'On-Device (Loading...)' : 'On-Device (Ready)';
+          isAvailable = providers.browser.available;
+        } else if (pref === 'ollama' && providers.ollama.available) {
+          activeProvider = `Ollama (${providers.ollama.model})`;
+          isAvailable = true;
+        } else if (pref === 'openai' && providers.openai.available) {
+          activeProvider = `OpenAI (${providers.openai.model})`;
+          isAvailable = true;
+        } else if (pref === 'gemini' && providers.gemini.available) {
+          activeProvider = `Gemini (${providers.gemini.model})`;
+          isAvailable = true;
+        } else if (pref === 'auto') {
+          // Priority order for auto: OpenRouter -> Browser -> Ollama -> OpenAI -> Gemini
+          if (providers.openrouter.available) {
+            activeProvider = `OpenRouter (${providers.openrouter.model})`;
+            isAvailable = true;
+          } else if (providers.browser.available) {
+            activeProvider = providers.browser.isLoaded
+              ? `On-Device (${providers.browser.model})`
+              : providers.browser.isLoading ? 'On-Device (Loading...)' : 'On-Device (Ready)';
+            isAvailable = providers.browser.available;
           } else if (providers.ollama.available) {
-            setLlmStatus({
-              provider: `Ollama (${providers.ollama.model})`,
-              available: true,
-            });
-          } else if (providers.gemini.available) {
-            setLlmStatus({
-              provider: `Gemini (${providers.gemini.model})`,
-              available: true,
-            });
-          } else if (providers.openrouter.available) {
-            setLlmStatus({
-              provider: `OpenRouter (${providers.openrouter.model})`,
-              available: true,
-            });
+            activeProvider = `Ollama (${providers.ollama.model})`;
+            isAvailable = true;
           } else if (providers.openai.available) {
-            setLlmStatus({
-              provider: `OpenAI (${providers.openai.model})`,
-              available: true,
-            });
-          } else {
-            setLlmStatus({ provider: null, available: false });
+            activeProvider = `OpenAI (${providers.openai.model})`;
+            isAvailable = true;
+          } else if (providers.gemini.available) {
+            activeProvider = `Gemini (${providers.gemini.model})`;
+            isAvailable = true;
           }
-        } else if (providers.ollama.available) {
-          setLlmStatus({
-            provider: `Ollama (${providers.ollama.model})`,
-            available: true,
-          });
-        } else if (providers.gemini.available) {
-          setLlmStatus({
-            provider: `Gemini (${providers.gemini.model})`,
-            available: true,
-          });
-        } else if (providers.openrouter.available) {
-          setLlmStatus({
-            provider: `OpenRouter (${providers.openrouter.model})`,
-            available: true,
-          });
-        } else if (providers.openai.available) {
-          setLlmStatus({
-            provider: `OpenAI (${providers.openai.model})`,
-            available: true,
-          });
-        } else {
-          setLlmStatus({ provider: null, available: false });
         }
+
+        setLlmStatus({
+          provider: activeProvider,
+          available: isAvailable
+        });
       } catch (error) {
         console.error("Error checking LLM:", error);
         setLlmStatus({ provider: null, available: false });
@@ -174,6 +173,11 @@ function App() {
     settings.geminiModel,
     settings.openrouterApiKey,
     settings.openrouterModel,
+    settings.isOllamaEnabled,
+    settings.isOpenAIEnabled,
+    settings.isGeminiEnabled,
+    settings.isOpenRouterEnabled,
+    settings.isBrowserEnabled,
     currentView,
   ]);
 
@@ -224,12 +228,12 @@ function App() {
       if (!content.trim() && (!attachments || attachments.length === 0)) return;
 
       setProcessing(true);
-      
+
       // Map File objects to attachment metadata
       const attachmentData = attachments?.map(file => ({
-          name: file.name,
-          path: (file as any).path || '', // Electron exposes path
-          type: file.type
+        name: file.name,
+        path: (file as any).path || '', // Electron exposes path
+        type: file.type
       }));
 
       addMessage({ role: 'user', content, attachments: attachmentData });
@@ -474,36 +478,36 @@ function App() {
   useEffect(() => {
     const handleAgentAction = (e: CustomEvent) => {
       const { type, content, messageId } = e.detail;
-      
+
       if (type === 'continue' && !isProcessing) {
         handleSubmit(content);
       }
-      
+
       if (type === 'regenerate' && !isProcessing) {
-         // Logic: Remove last assistant message, then remove last user message, then re-submit user content.
-         // This effectively "re-runs" the turn.
-         const { sessions, activeSessionId, removeMessage } = useChatStore.getState();
-         const session = sessions.find(s => s.id === activeSessionId);
-         if (!session || session.messages.length === 0) return;
+        // Logic: Remove last assistant message, then remove last user message, then re-submit user content.
+        // This effectively "re-runs" the turn.
+        const { sessions, activeSessionId, removeMessage } = useChatStore.getState();
+        const session = sessions.find(s => s.id === activeSessionId);
+        if (!session || session.messages.length === 0) return;
 
-         const messages = session.messages;
-         const lastMsg = messages[messages.length - 1];
+        const messages = session.messages;
+        const lastMsg = messages[messages.length - 1];
 
-         // Only proceed if the last message is indeed the one we want to regenerate (or close to it)
-         // For now, simpler implementation: Always regenerate the LAST interaction.
-         if (lastMsg.role === 'assistant') {
-             const userMsg = messages[messages.length - 2];
-             if (userMsg && userMsg.role === 'user') {
-                 const textToResubmit = userMsg.content;
-                 
-                 // Remove both
-                 removeMessage(lastMsg.id);
-                 removeMessage(userMsg.id);
-                 
-                 // Re-submit
-                 handleSubmit(textToResubmit);
-             }
-         }
+        // Only proceed if the last message is indeed the one we want to regenerate (or close to it)
+        // For now, simpler implementation: Always regenerate the LAST interaction.
+        if (lastMsg.role === 'assistant') {
+          const userMsg = messages[messages.length - 2];
+          if (userMsg && userMsg.role === 'user') {
+            const textToResubmit = userMsg.content;
+
+            // Remove both
+            removeMessage(lastMsg.id);
+            removeMessage(userMsg.id);
+
+            // Re-submit
+            handleSubmit(textToResubmit);
+          }
+        }
       }
     };
 
@@ -513,7 +517,7 @@ function App() {
 
   return (
     <div className="flex h-screen bg-[#0f1115] text-white font-sans overflow-hidden">
-      
+
       <CommandPalette />
       <Sidebar currentView={currentView} onViewChange={setCurrentView} />
 
@@ -539,23 +543,23 @@ function App() {
             open={!!pendingConfirmation}
             analysis={pendingConfirmation?.analysis || null}
             onConfirm={(enrichedPrompt) => {
-                if (pendingConfirmation) {
-                    pendingConfirmation.resolve(enrichedPrompt);
-                    setPendingConfirmation(null);
-                }
+              if (pendingConfirmation) {
+                pendingConfirmation.resolve(enrichedPrompt);
+                setPendingConfirmation(null);
+              }
             }}
             onCancel={() => {
-                if (pendingConfirmation) {
-                    pendingConfirmation.resolve(null);
-                    setPendingConfirmation(null);
-                    setProcessing(false);
-                }
+              if (pendingConfirmation) {
+                pendingConfirmation.resolve(null);
+                setPendingConfirmation(null);
+                setProcessing(false);
+              }
             }}
             onBypass={() => {
-                if (pendingConfirmation) {
-                    pendingConfirmation.resolve(pendingConfirmation.analysis.detectedIntent);
-                    setPendingConfirmation(null);
-                }
+              if (pendingConfirmation) {
+                pendingConfirmation.resolve(pendingConfirmation.analysis.detectedIntent);
+                setPendingConfirmation(null);
+              }
             }}
           />
 

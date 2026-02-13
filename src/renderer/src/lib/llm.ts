@@ -123,7 +123,7 @@ async function getOpenRouterSettings(
 export async function checkOllama(
   settings?: LLMSettings
 ): Promise<ProviderStatus> {
-  if (!FEATURE_FLAGS.OLLAMA_ENABLED) {
+  if (!FEATURE_FLAGS.OLLAMA_ENABLED || (settings && settings.isOllamaEnabled === false)) {
     return { available: false, error: "Ollama disabled" };
   }
 
@@ -204,8 +204,8 @@ export async function testOllamaConnection(
 }
 
 // Check if WebLLM (On-Device AI via WebGPU) is available
-export async function checkBrowserLLM(): Promise<ProviderStatus> {
-  if (!FEATURE_FLAGS.BROWSER_LLM_ENABLED) {
+export async function checkBrowserLLM(settings?: LLMSettings): Promise<ProviderStatus> {
+  if (!FEATURE_FLAGS.BROWSER_LLM_ENABLED || (settings && settings.isBrowserEnabled === false)) {
     return { available: false, error: 'On-Device AI disabled' }
   }
 
@@ -277,6 +277,15 @@ export async function checkOpenAI(
 ): Promise<ProviderStatus> {
   if (!FEATURE_FLAGS.CLOUD_LLM_ENABLED) {
     return { available: false, error: "Cloud LLM disabled" };
+  }
+
+  if (settings) {
+    if (providerOverride === 'openrouter' && settings.isOpenRouterEnabled === false) {
+      return { available: false, error: "OpenRouter disabled" };
+    }
+    if (!providerOverride && settings.isOpenAIEnabled === false) {
+      return { available: false, error: "OpenAI disabled" };
+    }
   }
 
   const { apiKey, baseUrl, model } =
@@ -402,6 +411,9 @@ export async function checkOpenRouter(
 export async function checkGemini(
   settings?: LLMSettings
 ): Promise<ProviderStatus> {
+  if (settings && settings.isGeminiEnabled === false) {
+    return { available: false, error: "Gemini disabled" };
+  }
   const { apiKey, model } = await getGeminiSettings(settings);
   if (!apiKey) return { available: false, error: "Gemini API Key not set" };
 
@@ -584,19 +596,13 @@ export async function testOpenAIConnection(
 export async function getAvailableProviders(
   settings?: LLMSettings
 ): Promise<Record<LLMProvider, ProviderStatus>> {
-  const [webLLM, ollama, openai, gemini, openrouter] = await Promise.all([
-    getWebLLMStatus(),
+  const [browser, ollama, openai, gemini, openrouter] = await Promise.all([
+    checkBrowserLLM(settings),
     checkOllama(settings),
     checkOpenAI(settings, "openai"),
     checkGemini(settings),
     checkOpenRouter(settings),
   ]);
-
-  const browser: ProviderStatus = {
-    ...webLLM,
-    error: webLLM.error || undefined,
-    available: webLLM.isSupported,
-  };
 
   return {
     browser,
@@ -687,18 +693,31 @@ async function callBrowserLLM(
     // Check if model is loaded
     if (!status.isLoaded) {
       console.log('[WebLLM] Model not loaded, attempting to load...');
-      await loadWebLLMModel();
+      await loadWebLLMModel(settings?.browserModel);
     }
+
+    // Transform messages for WebLLM:
+    // 1. Keep system message (contains tool definitions)
+    // 2. Convert 'tool' messages to 'user' messages with clear context so the model knows the result
+    // 3. Keep 'user' and 'assistant' messages as is
+    const webLlmMessages = messages.map(m => {
+      if (m.role === 'tool') {
+        // Convert tool result to a user message explanation
+        return {
+          role: 'user' as const,
+          content: `Tool Execution Result (ID: ${m.tool_call_id}):\n${extractTextForLegacyProviders(m.content)}`
+        };
+      }
+      return {
+        role: m.role as 'user' | 'assistant' | 'system',
+        content: extractTextForLegacyProviders(m.content)
+      };
+    });
 
     // Don't pass tools to WebLLM - the system prompt already contains tool definitions
     // Models will output JSON tool calls in their response content
     const response = await chatWithWebLLM(
-      messages
-        .filter(m => m.role !== 'tool')
-        .map(m => ({
-          role: m.role as 'user' | 'assistant' | 'system',
-          content: extractTextForLegacyProviders(m.content)
-        }))
+      webLlmMessages
       // No tools passed - avoids "model doesn't support tools" error
     );
 
@@ -1351,8 +1370,10 @@ export async function chat(
   const preferredProvider = settings?.preferredProvider;
 
   if (preferredProvider === "auto" || !preferredProvider) {
-    // Auto-select: try browser first (if enabled), then ollama, then openai
-    if (providers.browser.available) {
+    // Auto-select: try openrouter first, then fallback to others
+    if (providers.openrouter.available) {
+      provider = "openrouter";
+    } else if (providers.browser.available) {
       provider = "browser";
     } else if (providers.ollama.available) {
       provider = "ollama";
@@ -1360,8 +1381,6 @@ export async function chat(
       provider = "openai";
     } else if (providers.gemini.available) {
       provider = "gemini";
-    } else if (providers.openrouter.available) {
-      provider = "openrouter";
     }
   } else if (preferredProvider === "browser" && providers.browser.available) {
     provider = "browser";
@@ -1382,9 +1401,8 @@ export async function chat(
   }
 
   // Try to detect if we need JSON fallback (will be handled in callOpenAI if error occurs)
-  // For browser (WebLLM), we always use JSON fallback for now to ensure compatibility
-  // across all models (Qwen, Llama, etc.) without native tool calling errors
-  let useJsonFallback = provider === 'browser';
+  // For browser (WebLLM), we handle message transformation inside callBrowserLLM, so we don't force it here
+  let useJsonFallback = false;
 
   // Add system message if not present, or replace existing one to ensure it has tools
   let messagesWithSystem = [...prunedMessages];
@@ -1414,8 +1432,9 @@ export async function chat(
   const allTools = Array.from(toolMap.values());
 
   // Re-build system prompt with current tools and correct fallback setting
-  // Sub-agents get a lightweight prompt (~80% smaller)
-  const systemPrompt = buildSystemPrompt(allTools, servers, useJsonFallback, dynamicRules, isSubAgent, workspacePath);
+  // We force JSON instructions for browser (WebLLM) because most models need it, 
+  // even if they claim tool support, to be safe.
+  const systemPrompt = buildSystemPrompt(allTools, servers, useJsonFallback || provider === 'browser', dynamicRules, isSubAgent, workspacePath);
 
   if (isSubAgent) {
     console.log(`[LLM] Using lightweight sub-agent prompt (${systemPrompt.length} chars vs ~4000+ main)`);
