@@ -72,6 +72,21 @@ export class AgentRuntime {
    * Initialize or Load Session State from Memory
    */
   private async initializeSessionState() {
+    // OPTIMIZATION: Skip session state persistence for standard short interactions
+    // Only initialize if:
+    // 1. It's a sub-agent (which might need heavy context tracking)
+    // 2. The conversation is long (>20 messages), warranting a checkpoint
+    // 3. We are explicitly asked to (future flag)
+
+    // For standard "Chat" messages (main agent, short history), we DO NOT need to write to DB every turn.
+    const isLongConversation = this.messages.length > 20;
+    const shouldPersistState = this.options.isSubAgent || isLongConversation;
+
+    if (!shouldPersistState) {
+      // console.log('[AgentRuntime] Skipping session state initialization for short task.');
+      return;
+    }
+
     const entityName = `AgentState_${this.agentInstanceId}`;
     try {
       // Try to read existing state
@@ -157,7 +172,7 @@ export class AgentRuntime {
 
     if (!validation.allowed) {
       console.warn('[AgentRuntime] Prompt injection detected:', validation.reason);
-      
+
       // Return error message to user (without timestamp - not in LLMMessage interface)
       return {
         role: 'assistant',
@@ -171,80 +186,36 @@ export class AgentRuntime {
     // INJECT ATTACHMENTS CONTEXT
     // We append this to the user message to ensure it survives system prompt replacement in llm.ts
     // and to keep it tightly coupled with the user's request.
-    
+
     // M-01 Security Fix: Use unique, tamper-evident delimiters
     const ATTACHMENT_DELIMITER_START = '<<<ATTACHMENT_BLOCK_a8f3>>>';
     const ATTACHMENT_DELIMITER_END = '<<<END_ATTACHMENT_BLOCK_a8f3>>>';
-    
+
     // Sanitize filename to prevent control character injection
     function sanitizeFilename(filename: string): string {
       return filename.replace(/[\r\n\x00-\x1f\x7f]/g, '_');
     }
-    
+
     let attachmentContext = '';
     if (attachments && attachments.length > 0) {
-        const resourceList = attachments.map(a => `- ${sanitizeFilename(a.name)} (Path: ${a.path})`).join('\n');
-        const toolHint = `\n\n[To analyze these files, use the 'convert_to_markdown' tool with file:// URIs. Example: convert_to_markdown(uri="file:///absolute/path")]`;
-        
-        attachmentContext = `\n\n${ATTACHMENT_DELIMITER_START}\nUser attached the following files. Use absolute paths to access them.\n${resourceList}${toolHint}\n${ATTACHMENT_DELIMITER_END}`;
-        console.log('[AgentRuntime] Prepared attachment context:', resourceList);
+      const resourceList = attachments.map(a => `- ${sanitizeFilename(a.name)} (Path: ${a.path})`).join('\n');
+      const toolHint = `\n\n[To analyze these files, use the 'convert_to_markdown' tool with file:// URIs. Example: convert_to_markdown(uri="file:///absolute/path")]`;
+
+      attachmentContext = `\n\n${ATTACHMENT_DELIMITER_START}\nUser attached the following files. Use absolute paths to access them.\n${resourceList}${toolHint}\n${ATTACHMENT_DELIMITER_END}`;
+      console.log('[AgentRuntime] Prepared attachment context:', resourceList);
     }
 
     // Initialize State (Idempotent)
     await this.initializeSessionState();
 
-    // GAP FIX 2B: Detect and resume from pending handoffs
-    if (!this.options.isSubAgent) {
-      try {
-        const handoffCheck = await executeToolCall('memory_search', {
-          query: `handoff ${this.options.activeSessionId || ''}`
-        });
-
-        if (handoffCheck.result && typeof handoffCheck.result === 'object') {
-          const resultData = handoffCheck.result as { entities?: any[] };
-          if (resultData.entities && Array.isArray(resultData.entities)) {
-            const pendingHandoffs = resultData.entities.filter((e: any) =>
-              e.Metadata?.sessionId === this.options.activeSessionId
-            );
-
-            if (pendingHandoffs.length > 0) {
-              const handoff = pendingHandoffs[0];
-              console.log(`[AgentRuntime] Resuming from handoff: ${handoff.name}`);
-
-              // Restore context from handoff
-              if (handoff.Metadata?.lastCheckpoint) {
-                this.lastCheckpoint = handoff.Metadata.lastCheckpoint;
-              }
-
-              // Add context message
-              const contextMsg: LLMMessage = {
-                role: 'system',
-                content: `[Resuming from previous agent session]
-Previous progress: ${handoff.Metadata?.lastCheckpoint?.summary || 'In progress...'}
-Original goal: ${handoff.Metadata?.originalGoal || userContent}
-
-Continue from where the previous agent left off.`
-              };
-              this.messages.push(contextMsg);
-
-              // Delete handoff entity (consumed)
-              try {
-                await executeToolCall('memory_delete_entity', { name: handoff.name });
-                console.log(`[AgentRuntime] Deleted consumed handoff: ${handoff.name}`);
-              } catch (e) {
-                console.warn(`[AgentRuntime] Failed to delete handoff: ${e}`);
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.warn(`[AgentRuntime] Failed to check for handoffs: ${err}`);
-      }
-    }
+    // INITIALIZATION COMPLETE
+    // OPTIMIZATION: Handoff check is now LAZY.
+    // The LLM System Prompt instructs the agent to check memory if the user asks to "continue" or "resume".
+    // This removes the synchronous penalty on startup.
 
     // PHASE 0: Task Analysis (for complexity detection and optional confirmation)
     let taskComplexity: 'simple' | 'moderate' | 'complex' = 'moderate'; // Default to moderate
-    
+
     if (this.options.requireConfirmation && this.options.onConfirmationNeeded) {
       try {
         // Check if this is a simple reply to a previous agent question
@@ -300,7 +271,7 @@ Continue from where the previous agent left off.`
     // Note: When confirmation is disabled (requireConfirmation === false), this agent is typically:
     // 1. A sub-agent spawned by the main agent with a specific task instruction
     // 2. A background process (e.g., Memory Reflector)
-    // 
+    //
     // Sub-agents NEVER receive simple greetings like "hi" or "thanks" - they receive task-specific
     // instructions from the parent agent (e.g., "Search Amazon for laptops under $500").
     // Therefore, we don't need to check for simple prompts when confirmation is disabled.

@@ -1263,10 +1263,14 @@ ${dynamicRules ? `\n# TASK-SPECIFIC PROTOCOLS\n${dynamicRules}\n` : ''}
 
 # EXECUTION FLOW
 0. **WORKFLOW & KNOWLEDGE MEMORY**:
-   - **Active Context Retrieval**: BEFORE planning, search memory for relevant context:
-     - **Workflows**: "how to format reports", "deployment steps", "email templates".
-     - **Projects**: "current sprint goals", "project X details", "active deadlines".
-     - **Preferences**: "coding style", "tools usage", "ui preferences".
+   - **Lazy Context Retrieval & Resumption**: 
+     - **Explicit Need**: Search memory IF AND ONLY IF you explicitly need user preferences, active project details, specific workflows, or **context from a previous session** (e.g., user says "continue", "resume", "retry", "what was I doing?").
+     - **Handoffs**: If the user asks to resume a task or you feel context is missing, use \`memory_search(query="handoff")\` to find saved checkpoints.
+     - **Examples**: 
+       - User: "Summarize this file" -> NO SEARCH.
+       - User: "Deploy to production" -> SEARCH "deployment workflow".
+       - User: "Find a gift for my mom" -> SEARCH "mom preferences".
+       - User: "Continue where we left off" -> SEARCH "handoff".
    - **Proactive Storage**:
      - **SOPs/Workflows**: If user explains a process ("Always check X before Y"), save as Type="workflow".
      - **Projects/Goals**: If a new project is mentioned, save as Type="project".
