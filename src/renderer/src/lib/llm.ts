@@ -123,6 +123,10 @@ async function getOpenRouterSettings(
 export async function checkOllama(
   settings?: LLMSettings
 ): Promise<ProviderStatus> {
+  if (settings?.isOllamaEnabled === false) {
+    return { available: false, error: "Ollama disabled" };
+  }
+
   if (!FEATURE_FLAGS.OLLAMA_ENABLED) {
     return { available: false, error: "Ollama disabled" };
   }
@@ -275,6 +279,13 @@ export async function checkOpenAI(
   settings?: LLMSettings,
   providerOverride?: "openai" | "openrouter"
 ): Promise<ProviderStatus> {
+  const isOpenRouter = providerOverride === "openrouter";
+  if (isOpenRouter) {
+    if (settings?.isOpenRouterEnabled === false) return { available: false, error: "OpenRouter disabled" };
+  } else {
+    if (settings?.isOpenAIEnabled === false) return { available: false, error: "OpenAI disabled" };
+  }
+
   if (!FEATURE_FLAGS.CLOUD_LLM_ENABLED) {
     return { available: false, error: "Cloud LLM disabled" };
   }
@@ -402,6 +413,8 @@ export async function checkOpenRouter(
 export async function checkGemini(
   settings?: LLMSettings
 ): Promise<ProviderStatus> {
+  if (settings?.isGeminiEnabled === false) return { available: false, error: "Gemini disabled" };
+
   const { apiKey, model } = await getGeminiSettings(settings);
   if (!apiKey) return { available: false, error: "Gemini API Key not set" };
 
@@ -594,8 +607,8 @@ export async function getAvailableProviders(
 
   const browser: ProviderStatus = {
     ...webLLM,
-    error: webLLM.error || undefined,
-    available: webLLM.isSupported,
+    error: settings?.isBrowserEnabled === false ? "Browser LLM disabled" : (webLLM.error || undefined),
+    available: (settings?.isBrowserEnabled !== false) && webLLM.isSupported,
   };
 
   return {

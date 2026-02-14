@@ -41,6 +41,13 @@ interface SettingsState {
     // MCP FileSystem settings
     fileSystemSafeMode: boolean
 
+    // Provider Enablement
+    isOllamaEnabled: boolean
+    isOpenAIEnabled: boolean
+    isGeminiEnabled: boolean
+    isOpenRouterEnabled: boolean
+    isBrowserEnabled: boolean
+
     // Sync State
     activeUserId: string | null
     isSyncing: boolean
@@ -69,11 +76,18 @@ interface SettingsState {
     setPlaywrightBrowser: (browser: PlaywrightBrowserType) => void
     setPlaywrightHeadless: (headless: boolean) => void
     setFileSystemSafeMode: (enabled: boolean) => void
-    
+
+    // Provider Enablement Actions
+    setOllamaEnabled: (enabled: boolean) => void
+    setOpenAIEnabled: (enabled: boolean) => void
+    setGeminiEnabled: (enabled: boolean) => void
+    setOpenRouterEnabled: (enabled: boolean) => void
+    setBrowserEnabled: (enabled: boolean) => void
+
     // Memory Settings
     memoryBackend: 'server-memory' | 'memento-mcp'
     setMemoryBackend: (backend: 'server-memory' | 'memento-mcp') => void
-    
+
     resetToDefaults: () => void
 
     // Sync Actions
@@ -105,7 +119,7 @@ const defaultSettings = {
     geminiModel: LLM_CONFIG.GEMINI.DEFAULT_MODEL,
     openrouterApiKey: '',
     openrouterModel: LLM_CONFIG.OPENROUTER.DEFAULT_MODEL,
-    browserModel: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', // Default small model
+    browserModel: 'Llama-3.2-3B-Instruct-q4f16_1-MLC', // Default recommended model
     theme: 'dark' as Theme,
     playwrightBrowser: 'auto' as PlaywrightBrowserType, // Auto-detect based on OS
     playwrightHeadless: false, // Default to headed for user visibility
@@ -114,6 +128,11 @@ const defaultSettings = {
     activeUserId: null,
     isSyncing: false,
     lastSyncTime: 0,
+    isOllamaEnabled: true,
+    isOpenAIEnabled: true,
+    isGeminiEnabled: true,
+    isOpenRouterEnabled: true,
+    isBrowserEnabled: true,
 }
 
 // ... existing migration code ...
@@ -184,11 +203,14 @@ export const useSettingsStore = create<SettingsState>()(
             },
             setMemoryBackend: async (backend) => {
                 set({ memoryBackend: backend })
-                // Update main process store (triggers migration check if changed via UI, though usually handled by IPC)
-                // We store complete config structure
                 const current = await electron.store.get<any>('memory') || {}
                 await electron.store.set('memory', { ...current, backend })
             },
+            setOllamaEnabled: (enabled) => set({ isOllamaEnabled: enabled }),
+            setOpenAIEnabled: (enabled) => set({ isOpenAIEnabled: enabled }),
+            setGeminiEnabled: (enabled) => set({ isGeminiEnabled: enabled }),
+            setOpenRouterEnabled: (enabled) => set({ isOpenRouterEnabled: enabled }),
+            setBrowserEnabled: (enabled) => set({ isBrowserEnabled: enabled }),
             resetToDefaults: () => set(defaultSettings),
 
             setActiveUserId: (uid) => set({ activeUserId: uid }),

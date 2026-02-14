@@ -46,6 +46,11 @@ export type LLMProvider = "browser" | "ollama" | "openai" | "gemini" | "openrout
 
 export interface LLMSettings {
   preferredProvider?: "auto" | "ollama" | "openai" | "browser" | "gemini" | "openrouter";
+  isOllamaEnabled?: boolean;
+  isOpenAIEnabled?: boolean;
+  isGeminiEnabled?: boolean;
+  isOpenRouterEnabled?: boolean;
+  isBrowserEnabled?: boolean;
   ollamaModel?: string;
   ollamaBaseUrl?: string;
   openaiApiKey?: string;
@@ -55,4 +60,5 @@ export interface LLMSettings {
   geminiModel?: string;
   openrouterApiKey?: string;
   openrouterModel?: string;
+  browserModel?: string;
 }
