@@ -2,10 +2,10 @@ name: CI/CD
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, prod ]
     tags: [ 'v*' ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, prod ]
     types: [opened, synchronize, labeled]
 
 jobs:
