@@ -15,31 +15,51 @@ declare global {
 // Available models - some support native tool calling, others use JSON fallback
 export const WEBLLM_MODELS = [
     {
-        id: 'Qwen2.5-Coder-7B-Instruct-q4f16_1-MLC',
-        name: 'Qwen 2.5 Coder 7B (Ultimate)',
-        description: 'Best for complex planning, reasoning, and coding. beats GPT-4o.',
-        size: '~4.5GB',
-        vram: '~5.5GB',
+        id: 'Hermes-2-Pro-Llama-3-8B-q4f16_1-MLC',
+        name: 'Hermes 2 Pro 8B (Recommended)',
+        description: 'Best for tool calling, good balance',
+        size: '~5GB',
+        vram: '~6GB',
         requiredRamGB: 8,
         requiredVramGB: 6,
         supportsTools: true,
     },
     {
-        id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC',
-        name: 'Llama 3.2 3B (Efficient)',
-        description: 'Reliable tool calling with low resource usage. Best for most laptops.',
-        size: '~2.0GB',
+        id: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC',
+        name: 'Qwen 2.5 1.5B (Fast)',
+        description: 'Fast responses, uses JSON for tools',
+        size: '~1.5GB',
+        vram: '~2GB',
+        requiredRamGB: 4,
+        requiredVramGB: 2,
+        supportsTools: false,
+    },
+    {
+        id: 'Llama-3.2-1B-Instruct-q4f16_1-MLC',
+        name: 'Llama 3.2 1B (Lightweight)',
+        description: 'Very fast, uses JSON for tools',
+        size: '~1GB',
+        vram: '~1.5GB',
+        requiredRamGB: 4,
+        requiredVramGB: 1.5,
+        supportsTools: false,
+    },
+    {
+        id: 'Phi-3.5-mini-instruct-q4f16_1-MLC',
+        name: 'Phi 3.5 Mini',
+        description: 'Microsoft, good reasoning',
+        size: '~2GB',
         vram: '~2.5GB',
         requiredRamGB: 4,
         requiredVramGB: 2.5,
-        supportsTools: true,
+        supportsTools: false,
     },
     {
         id: 'Hermes-3-Llama-3.1-8B-q4f16_1-MLC',
-        name: 'Hermes 3 8B (Creative)',
-        description: 'Uncensored, flexible, and excellent at following complex instructions.',
-        size: '~4.9GB',
-        vram: '~6.0GB',
+        name: 'Hermes 3 8B (Advanced)',
+        description: 'Best quality, native tool calling',
+        size: '~5GB',
+        vram: '~6GB',
         requiredRamGB: 8,
         requiredVramGB: 6,
         supportsTools: true,
@@ -433,12 +453,8 @@ class WebLLMManager {
             }
 
             // For models without native tool calling, try to parse JSON from content
-            // We do this even if 'tools' array was empty or undefined, because the system prompt might have instructed it.
-            if (!toolCalls && message.content) {
-                const parsed = this.parseToolCallsFromContent(message.content);
-                if (parsed) {
-                    toolCalls = parsed;
-                }
+            if (!toolCalls && !supportsNativeTools && tools && tools.length > 0 && message.content) {
+                toolCalls = this.parseToolCallsFromContent(message.content);
             }
 
             return {

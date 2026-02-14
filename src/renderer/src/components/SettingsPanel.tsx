@@ -19,8 +19,7 @@ import {
     Globe,
     FolderOpen,
     FileText,
-    Mic,
-    Save
+    Mic
 } from 'lucide-react'
 import { useLogStore } from '../stores/logStore'
 import { useSettingsStore, Theme, LLMProviderType } from '../stores/settingsStore'
@@ -120,11 +119,6 @@ export function SettingsPanel() {
             try {
                 const settingsForLLM = {
                     preferredProvider: settings.preferredProvider,
-                    isOllamaEnabled: settings.isOllamaEnabled,
-                    isOpenAIEnabled: settings.isOpenAIEnabled,
-                    isGeminiEnabled: settings.isGeminiEnabled,
-                    isOpenRouterEnabled: settings.isOpenRouterEnabled,
-                    isBrowserEnabled: settings.isBrowserEnabled,
                     ollamaModel: settings.ollamaModel,
                     ollamaBaseUrl: settings.ollamaBaseUrl,
                     openaiApiKey: settings.openaiApiKey,
@@ -135,15 +129,49 @@ export function SettingsPanel() {
                     openrouterApiKey: settings.openrouterApiKey,
                     openrouterModel: settings.openrouterModel,
                 }
-                const providers = await getAvailableProviders(settingsForLLM)
+                if (settings.preferredProvider === 'ollama') {
+                    const ollama = await checkOllama(settingsForLLM)
+                    setProviderStatus({
+                        ollama,
+                        openai: { available: false },
+                        gemini: { available: false },
+                        openrouter: { available: false },
+                    })
+                } else if (settings.preferredProvider === 'openai') {
+                    const openai = await checkOpenAI(settingsForLLM)
+                    setProviderStatus({
+                        ollama: { available: false },
+                        openai,
+                        gemini: { available: false },
+                        openrouter: { available: false },
+                    })
+                } else if (settings.preferredProvider === 'gemini') {
+                    const gemini = await checkGemini(settingsForLLM)
+                    setProviderStatus({
+                        ollama: { available: false },
+                        openai: { available: false },
+                        gemini,
+                        openrouter: { available: false },
+                    })
+                } else if (settings.preferredProvider === 'openrouter') {
+                    const openrouter = await checkOpenRouter(settingsForLLM)
+                    setProviderStatus({
+                        ollama: { available: false },
+                        openai: { available: false },
+                        gemini: { available: false },
+                        openrouter,
+                    })
+                } else {
+                    const providers = await getAvailableProviders(settingsForLLM)
 
-                setProviderStatus({
-                    ollama: providers.ollama,
-                    openai: providers.openai,
-                    gemini: providers.gemini,
-                    openrouter: providers.openrouter,
-                    browser: providers.browser,
-                })
+                    setProviderStatus({
+                        ollama: providers.ollama,
+                        openai: providers.openai,
+                        gemini: providers.gemini,
+                        openrouter: providers.openrouter,
+                        browser: providers.browser,
+                    })
+                }
             } catch (error) {
                 console.error('Error checking providers:', error)
             } finally {
@@ -213,13 +241,6 @@ export function SettingsPanel() {
         return () => unsubscribe();
     }, [settings.browserModel]);
 
-    // Force preferredProvider to auto on mount for the unified UI
-    useEffect(() => {
-        if (settings.preferredProvider !== 'auto') {
-            settings.setPreferredProvider('auto')
-        }
-    }, [settings.preferredProvider]);
-
     // Check providers on mount and when settings change (debounced)
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -279,63 +300,92 @@ export function SettingsPanel() {
                 {/* LLM Provider Section */}
                 {activeSection === 'llm' && (
                     <div>
-                        <div className="flex items-center justify-between mb-6">
-                            <h3 className="text-xl font-bold">LLM Provider</h3>
-                            <button
-                                onClick={async () => {
-                                    // Force sync to storage/cloud
-                                    await settings.forceSync()
-                                    // Re-check providers to ensure UI is in sync
-                                    await checkProviders()
-                                    // Show a quick visual confirmation (could be a toast in future)
-                                    // For now we change the button text momentarily via local state or just rely on the action
-                                }}
-                                className="px-4 py-2 bg-[#4fd1c5] text-black font-semibold rounded-lg hover:bg-[#3ec1b5] transition-colors flex items-center gap-2"
-                                title="Force save and apply settings immediately"
-                            >
-                                <Save size={16} />
-                                Save Settings
-                            </button>
-                        </div>
+                        <h3 className="text-xl font-bold mb-6">LLM Provider</h3>
 
                         <div className="space-y-4">
                             {/* Provider Selection */}
-                            {/* Provider Selection Guide */}
-                            <div className="bg-[#1a1d23]/50 border border-white/5 rounded-xl p-4">
-                                <p className="text-sm text-white/60">
-                                    Enable the providers you want to use. The app will automatically select the best available model from your enabled providers (OpenRouter &gt; On-Device &gt; Ollama &gt; OpenAI &gt; Gemini).
-                                </p>
+                            <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
+                                <label className="block text-sm text-white/60 mb-3">Preferred Provider</label>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => settings.setPreferredProvider('ollama')}
+                                        className={`flex-1 py-2 px-4 rounded-lg text-sm transition-colors ${settings.preferredProvider === 'ollama'
+                                            ? 'bg-[#4fd1c5] text-white'
+                                            : 'bg-white/5 text-white/60 hover:bg-white/10'
+                                            }`}
+                                        aria-label="Select Ollama provider"
+                                    >
+                                        Ollama
+                                    </button>
+                                    <button
+                                        onClick={() => settings.setPreferredProvider('openai')}
+                                        className={`flex-1 py-2 px-4 rounded-lg text-sm transition-colors ${settings.preferredProvider === 'openai'
+                                            ? 'bg-[#4fd1c5] text-white'
+                                            : 'bg-white/5 text-white/60 hover:bg-white/10'
+                                            }`}
+                                        aria-label="Select OpenAI compatible provider"
+                                    >
+                                        OpenAI / Compatible
+                                    </button>
+                                    <button
+                                        onClick={() => settings.setPreferredProvider('gemini')}
+                                        className={`flex-1 py-1 px-3 rounded-lg text-xs transition-colors ${settings.preferredProvider === 'gemini'
+                                            ? 'bg-[#4fd1c5] text-white'
+                                            : 'bg-white/5 text-white/60 hover:bg-white/10'
+                                            }`}
+                                        aria-label="Select Gemini provider"
+                                    >
+                                        Gemini
+                                    </button>
+                                    <button
+                                        onClick={() => settings.setPreferredProvider('openrouter')}
+                                        className={`flex-1 py-1 px-3 rounded-lg text-xs transition-colors ${settings.preferredProvider === 'openrouter'
+                                            ? 'bg-[#4fd1c5] text-white'
+                                            : 'bg-white/5 text-white/60 hover:bg-white/10'
+                                            }`}
+                                        aria-label="Select OpenRouter provider"
+                                    >
+                                        OpenRouter
+                                    </button>
+                                    <button
+                                        onClick={() => settings.setPreferredProvider('auto')}
+                                        className={`flex-1 py-1 px-3 rounded-lg text-xs transition-colors ${settings.preferredProvider === 'auto'
+                                            ? 'bg-[#4fd1c5] text-white'
+                                            : 'bg-white/5 text-white/60 hover:bg-white/10'
+                                            }`}
+                                        aria-label="Select auto provider"
+                                    >
+                                        Auto
+                                    </button>
+                                    <button
+                                        onClick={() => settings.setPreferredProvider('browser')}
+                                        className={`flex-1 py-1 px-3 rounded-lg text-xs transition-colors ${settings.preferredProvider === 'browser'
+                                            ? 'bg-[#4fd1c5] text-white'
+                                            : 'bg-white/5 text-white/60 hover:bg-white/10'
+                                            }`}
+                                        aria-label="Select Browser / On-Device provider"
+                                    >
+                                        On-Device
+                                    </button>
+                                </div>
                             </div>
 
                             {/* Ollama Config */}
-                            {true && (
-                                <div className={`bg-[#1a1d23] border ${settings.isOllamaEnabled ? 'border-white/10' : 'border-red-500/20 opacity-75'} rounded-xl p-4 transition-all`}>
+                            {(settings.preferredProvider === 'ollama' || settings.preferredProvider === 'auto') && (
+                                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
                                     <div className="flex items-center justify-between mb-3">
-                                        <div className="flex items-center gap-3">
-                                            <input
-                                                type="checkbox"
-                                                className="toggle toggle-primary toggle-sm"
-                                                checked={settings.isOllamaEnabled}
-                                                onChange={(e) => settings.setOllamaEnabled(e.target.checked)}
-                                                title="Enable/Disable Ollama"
-                                            />
-                                            <h4 className="font-medium">Ollama</h4>
-                                        </div>
+                                        <h4 className="font-medium">Ollama</h4>
                                         <div className="flex items-center gap-2">
-                                            {settings.isOllamaEnabled && (
-                                                <>
-                                                    {checkingProviders ? (
-                                                        <Loader2 size={16} className="animate-spin text-white/40" />
-                                                    ) : providerStatus?.ollama.available ? (
-                                                        <span className="flex items-center gap-1 text-xs text-green-400">
-                                                            <Check size={14} /> Connected
-                                                        </span>
-                                                    ) : (
-                                                        <span className="flex items-center gap-1 text-xs text-yellow-400">
-                                                            <AlertCircle size={14} /> Not Available
-                                                        </span>
-                                                    )}
-                                                </>
+                                            {checkingProviders ? (
+                                                <Loader2 size={16} className="animate-spin text-white/40" />
+                                            ) : providerStatus?.ollama.available ? (
+                                                <span className="flex items-center gap-1 text-xs text-green-400">
+                                                    <Check size={14} /> Connected
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center gap-1 text-xs text-yellow-400">
+                                                    <AlertCircle size={14} /> Not Available
+                                                </span>
                                             )}
                                             <a
                                                 href="https://ollama.com/"
@@ -424,32 +474,19 @@ export function SettingsPanel() {
                             )}
 
                             {/* OpenAI Config */}
-                            {true && (
-                                <div className={`bg-[#1a1d23] border ${settings.isOpenAIEnabled ? 'border-white/10' : 'border-red-500/20 opacity-75'} rounded-xl p-4 transition-all`}>
+                            {(settings.preferredProvider === 'openai' || settings.preferredProvider === 'auto') && (
+                                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
                                     <div className="flex items-center justify-between mb-3">
-                                        <div className="flex items-center gap-3">
-                                            <input
-                                                type="checkbox"
-                                                className="toggle toggle-primary toggle-sm"
-                                                checked={settings.isOpenAIEnabled}
-                                                onChange={(e) => settings.setOpenAIEnabled(e.target.checked)}
-                                                title="Enable/Disable OpenAI"
-                                            />
-                                            <h4 className="font-medium">OpenAI / Compatible API</h4>
-                                        </div>
+                                        <h4 className="font-medium">OpenAI / Compatible API</h4>
                                         <div className="flex items-center gap-2">
-                                            {settings.isOpenAIEnabled && (
-                                                <>
-                                                    {providerStatus?.openai.available ? (
-                                                        <span className="flex items-center gap-1 text-xs text-green-400">
-                                                            <Check size={14} /> Configured
-                                                        </span>
-                                                    ) : (
-                                                        <span className="flex items-center gap-1 text-xs text-white/40">
-                                                            No API Key
-                                                        </span>
-                                                    )}
-                                                </>
+                                            {providerStatus?.openai.available ? (
+                                                <span className="flex items-center gap-1 text-xs text-green-400">
+                                                    <Check size={14} /> Configured
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center gap-1 text-xs text-white/40">
+                                                    No API Key
+                                                </span>
                                             )}
                                             <a
                                                 href="https://platform.openai.com/api-keys"
@@ -595,32 +632,19 @@ export function SettingsPanel() {
                             )}
 
                             {/* Gemini Config */}
-                            {true && (
-                                <div className={`bg-[#1a1d23] border ${settings.isGeminiEnabled ? 'border-white/10' : 'border-red-500/20 opacity-75'} rounded-xl p-4 transition-all`}>
+                            {(settings.preferredProvider === 'gemini' || settings.preferredProvider === 'auto') && (
+                                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
                                     <div className="flex items-center justify-between mb-3">
-                                        <div className="flex items-center gap-3">
-                                            <input
-                                                type="checkbox"
-                                                className="toggle toggle-primary toggle-sm"
-                                                checked={settings.isGeminiEnabled}
-                                                onChange={(e) => settings.setGeminiEnabled(e.target.checked)}
-                                                title="Enable/Disable Gemini"
-                                            />
-                                            <h4 className="font-medium">Google Gemini</h4>
-                                        </div>
+                                        <h4 className="font-medium">Google Gemini</h4>
                                         <div className="flex items-center gap-2">
-                                            {settings.isGeminiEnabled && (
-                                                <>
-                                                    {providerStatus?.gemini.available ? (
-                                                        <span className="flex items-center gap-1 text-xs text-green-400">
-                                                            <Check size={14} /> Configured
-                                                        </span>
-                                                    ) : (
-                                                        <span className="flex items-center gap-1 text-xs text-white/40">
-                                                            No API Key
-                                                        </span>
-                                                    )}
-                                                </>
+                                            {providerStatus?.gemini.available ? (
+                                                <span className="flex items-center gap-1 text-xs text-green-400">
+                                                    <Check size={14} /> Configured
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center gap-1 text-xs text-white/40">
+                                                    No API Key
+                                                </span>
                                             )}
                                             <a
                                                 href="https://aistudio.google.com/app/apikey"
@@ -702,32 +726,19 @@ export function SettingsPanel() {
                             )}
 
                             {/* OpenRouter Config */}
-                            {true && (
-                                <div className={`bg-[#1a1d23] border ${settings.isOpenRouterEnabled ? 'border-white/10' : 'border-red-500/20 opacity-75'} rounded-xl p-4 transition-all`}>
+                            {(settings.preferredProvider === 'openrouter' || settings.preferredProvider === 'auto') && (
+                                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
                                     <div className="flex items-center justify-between mb-3">
-                                        <div className="flex items-center gap-3">
-                                            <input
-                                                type="checkbox"
-                                                className="toggle toggle-primary toggle-sm"
-                                                checked={settings.isOpenRouterEnabled}
-                                                onChange={(e) => settings.setOpenRouterEnabled(e.target.checked)}
-                                                title="Enable/Disable OpenRouter"
-                                            />
-                                            <h4 className="font-medium">OpenRouter</h4>
-                                        </div>
+                                        <h4 className="font-medium">OpenRouter</h4>
                                         <div className="flex items-center gap-2">
-                                            {settings.isOpenRouterEnabled && (
-                                                <>
-                                                    {providerStatus?.openrouter.available ? (
-                                                        <span className="flex items-center gap-1 text-xs text-green-400">
-                                                            <Check size={14} /> Configured
-                                                        </span>
-                                                    ) : (
-                                                        <span className="flex items-center gap-1 text-xs text-white/40">
-                                                            No API Key
-                                                        </span>
-                                                    )}
-                                                </>
+                                            {providerStatus?.openrouter.available ? (
+                                                <span className="flex items-center gap-1 text-xs text-green-400">
+                                                    <Check size={14} /> Configured
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center gap-1 text-xs text-white/40">
+                                                    No API Key
+                                                </span>
                                             )}
                                             <a
                                                 href="https://openrouter.ai/keys"
@@ -810,43 +821,30 @@ export function SettingsPanel() {
                             )}
 
                             {/* WebLLM / On-Device Config */}
-                            {true && (
-                                <div className={`bg-[#1a1d23] border ${settings.isBrowserEnabled ? 'border-white/10' : 'border-red-500/20 opacity-75'} rounded-xl p-4 transition-all`}>
+                            {(settings.preferredProvider === 'browser' || settings.preferredProvider === 'auto') && (
+                                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
                                     <div className="flex items-center justify-between mb-3">
-                                        <div className="flex items-center gap-3">
-                                            <input
-                                                type="checkbox"
-                                                className="toggle toggle-primary toggle-sm"
-                                                checked={settings.isBrowserEnabled}
-                                                onChange={(e) => settings.setBrowserEnabled(e.target.checked)}
-                                                title="Enable/Disable On-Device AI"
-                                            />
-                                            <h4 className="font-medium flex items-center gap-2">
-                                                <Cpu size={18} className="text-[#4fd1c5]" />
-                                                On-Device AI (WebLLM)
-                                            </h4>
-                                        </div>
+                                        <h4 className="font-medium flex items-center gap-2">
+                                            <Cpu size={18} className="text-[#4fd1c5]" />
+                                            On-Device AI (WebLLM)
+                                        </h4>
                                         <div className="flex items-center gap-2">
-                                            {settings.isBrowserEnabled && (
-                                                <>
-                                                    {providerStatus?.browser?.isLoaded ? (
-                                                        <span className="flex items-center gap-1 text-xs text-green-400">
-                                                            <Check size={14} /> Model Loaded
-                                                        </span>
-                                                    ) : providerStatus?.browser?.isLoading ? (
-                                                        <span className="flex items-center gap-1 text-xs text-yellow-400">
-                                                            <Loader2 size={14} className="animate-spin" /> Loading...
-                                                        </span>
-                                                    ) : providerStatus?.browser?.isWebGPUSupported ? (
-                                                        <span className="flex items-center gap-1 text-xs text-blue-400">
-                                                            <Download size={14} /> Ready to Download
-                                                        </span>
-                                                    ) : (
-                                                        <span className="flex items-center gap-1 text-xs text-red-400">
-                                                            <AlertCircle size={14} /> Not Supported
-                                                        </span>
-                                                    )}
-                                                </>
+                                            {providerStatus?.browser?.isLoaded ? (
+                                                <span className="flex items-center gap-1 text-xs text-green-400">
+                                                    <Check size={14} /> Model Loaded
+                                                </span>
+                                            ) : providerStatus?.browser?.isLoading ? (
+                                                <span className="flex items-center gap-1 text-xs text-yellow-400">
+                                                    <Loader2 size={14} className="animate-spin" /> Loading...
+                                                </span>
+                                            ) : providerStatus?.browser?.isWebGPUSupported ? (
+                                                <span className="flex items-center gap-1 text-xs text-blue-400">
+                                                    <Download size={14} /> Ready to Download
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center gap-1 text-xs text-red-400">
+                                                    <AlertCircle size={14} /> Not Supported
+                                                </span>
                                             )}
                                             <button
                                                 onClick={checkProviders}
@@ -909,7 +907,7 @@ export function SettingsPanel() {
                                                     <label className="block text-xs text-white/40 mb-2">Available Models</label>
                                                     <div className="space-y-2">
                                                         {WEBLLM_MODELS.map((model) => {
-                                                            const isCurrentModel = settings.browserModel === model.id;
+                                                            const isCurrentModel = providerStatus?.browser?.model === model.id;
                                                             const isLoaded = isCurrentModel && providerStatus?.browser?.isLoaded;
                                                             const isDownloaded = providerStatus?.browser?.downloadedModels?.includes(model.id);
 
@@ -1030,24 +1028,41 @@ export function SettingsPanel() {
                                                                                             setDownloadProgress(0);
                                                                                             setTestResults({ ...testResults, browser: undefined });
 
-                                                                                            // Save selection first
-                                                                                            settings.setBrowserModel(model.id);
-                                                                                            await settings.forceSync();
-
-                                                                                            try {
+                                                                                            if (isDownloaded) {
+                                                                                                // User wants to LOAD (switch to) this model
+                                                                                                settings.setBrowserModel(model.id);
                                                                                                 const result = await downloadBrowserModel(
                                                                                                     (p) => setDownloadProgress(p),
                                                                                                     model.id
                                                                                                 );
-                                                                                                if (result.success) {
-                                                                                                    await checkProviders();
-                                                                                                } else {
-                                                                                                    setTestResults({ ...testResults, browser: `Error: ${result.error}` });
-                                                                                                }
-                                                                                            } catch (e: any) {
-                                                                                                setTestResults({ ...testResults, browser: `Error: ${e.message}` });
-                                                                                            } finally {
+                                                                                                if (result.success) checkProviders();
+                                                                                                else setTestResults({ ...testResults, browser: `Error: ${result.error}` });
                                                                                                 setDownloadingModelId(null);
+                                                                                            } else {
+                                                                                                // User wants to DOWNLOAD this model
+                                                                                                if (providerStatus.browser?.isLoaded) {
+                                                                                                    // Background download
+                                                                                                    import('../lib/llm').then(async ({ downloadWebLLMModelOnly }) => {
+                                                                                                        try {
+                                                                                                            await downloadWebLLMModelOnly(model.id);
+                                                                                                            checkProviders();
+                                                                                                        } catch (e: any) {
+                                                                                                            setTestResults({ ...testResults, browser: `Error: ${e.message}` });
+                                                                                                        } finally {
+                                                                                                            setDownloadingModelId(null);
+                                                                                                        }
+                                                                                                    });
+                                                                                                } else {
+                                                                                                    // Normal load/download (will become active)
+                                                                                                    settings.setBrowserModel(model.id);
+                                                                                                    const result = await downloadBrowserModel(
+                                                                                                        (p) => setDownloadProgress(p),
+                                                                                                        model.id
+                                                                                                    );
+                                                                                                    if (result.success) checkProviders();
+                                                                                                    else setTestResults({ ...testResults, browser: `Error: ${result.error}` });
+                                                                                                    setDownloadingModelId(null);
+                                                                                                }
                                                                                             }
                                                                                         }}
                                                                                         disabled={isAnyModelDownloading}
@@ -1328,6 +1343,6 @@ export function SettingsPanel() {
                     </div>
                 )}
             </div>
-        </div >
+        </div>
     )
 }
