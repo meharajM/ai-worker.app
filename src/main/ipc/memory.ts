@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import { MemoryService } from '../services/MemoryService'
-import { sanitizeError } from '../utils/error-handler'
 
 /**
  * Memory IPC Handlers
@@ -16,10 +15,9 @@ export function registerMemoryHandlers(): void {
       const stats = await memoryService.getStats()
       return { success: true, stats }
     } catch (error) {
-      // L-01: Sanitize error messages
       return {
         success: false,
-        error: sanitizeError(error, 'memory:get-stats')
+        error: error instanceof Error ? error.message : String(error)
       }
     }
   })
@@ -31,10 +29,9 @@ export function registerMemoryHandlers(): void {
       const data = await memoryService.exportAll()
       return { success: true, data }
     } catch (error) {
-      // L-01: Sanitize error messages
       return {
         success: false,
-        error: sanitizeError(error, 'memory:export-all')
+        error: error instanceof Error ? error.message : String(error)
       }
     }
   })
@@ -45,10 +42,9 @@ export function registerMemoryHandlers(): void {
       const memoryService = MemoryService.getInstance()
       return await memoryService.callTool(name, args)
     } catch (error) {
-      // L-01: Sanitize error messages
       return {
         success: false,
-        error: sanitizeError(error, 'memory:call-tool')
+        error: error instanceof Error ? error.message : String(error)
       }
     }
   })
@@ -60,10 +56,9 @@ export function registerMemoryHandlers(): void {
         const result = await memoryService.migrateToMemento()
         return { success: true, result }
     } catch (error) {
-        // L-01: Sanitize error messages
         return {
             success: false,
-            error: sanitizeError(error, 'memory:migrate')
+            error: error instanceof Error ? error.message : String(error)
         }
     }
   })
@@ -75,10 +70,9 @@ export function registerMemoryHandlers(): void {
         const shouldMigrate = await memoryService.shouldSuggestMigration()
         return { success: true, shouldMigrate }
     } catch (error) {
-        // L-01: Sanitize error messages
         return {
             success: false,
-            error: sanitizeError(error, 'memory:check-migration')
+            error: error instanceof Error ? error.message : String(error)
         }
     }
   })
@@ -107,10 +101,9 @@ export function registerMemoryHandlers(): void {
           }
           return { success: true }
       } catch (error) {
-          // L-01: Sanitize error messages
           return { 
               success: false, 
-              error: sanitizeError(error, 'memory:open-file-location')
+              error: error instanceof Error ? error.message : String(error) 
           }
       }
   })
@@ -123,10 +116,9 @@ export function registerMemoryHandlers(): void {
       const result = await runner.runTests()
       return { success: true, result }
     } catch (error) {
-      // L-01: Sanitize error messages
       return {
         success: false,
-        error: sanitizeError(error, 'memory:run-tests')
+        error: error instanceof Error ? error.message : String(error)
       }
     }
   })

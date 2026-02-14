@@ -20,7 +20,7 @@ app.commandLine.appendSwitch('optimization-guide-on-device-model-execution', 'pe
 app.commandLine.appendSwitch('enable-speech-dispatcher')  // Linux speech support
 app.commandLine.appendSwitch('enable-speech-input')       // Enable speech input
 app.commandLine.appendSwitch('enable-experimental-web-platform-features')  // Web Speech API
-// ModelServer serves Vosk models over HTTP, no file:// access needed
+app.commandLine.appendSwitch('allow-file-access-from-files') // Allow fetch from file:// in Workers
 
 
 // Initialize environment (fix PATH, etc.)
@@ -52,10 +52,10 @@ function createWindow(): void {
         backgroundColor: '#0f1115',
         webPreferences: {
             preload: join(__dirname, '../preload/index.mjs'),
-            sandbox: true,
+            sandbox: false,
             contextIsolation: true,
             nodeIntegration: false,
-            webSecurity: true, // ModelServer serves models over HTTP
+            webSecurity: false, // Required for Vosk Worker to fetch local model files (file://)
         }
     })
 
@@ -93,11 +93,13 @@ function createWindow(): void {
     })
 
     // Enable audio permissions for TTS/STT
-    // M-06 Security Fix: Only allow media permissions, remove unnecessary permissions
     mainWindow.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
-        // Only allow media permissions needed for STT/TTS
-        const allowed = permission === 'media' || permission === 'mediaKeySystem'
-        callback(allowed)
+        const allowedPermissions = ['media', 'mediaKeySystem', 'geolocation', 'notifications', 'midi', 'midiSysex']
+        if (allowedPermissions.includes(permission)) {
+            callback(true)
+        } else {
+            callback(false)
+        }
     })
 
     if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -147,15 +149,11 @@ app.on('window-all-closed', () => {
 })
 
 // Handle certificate errors for local development
-// M-03 Security Fix: Ensure certificate errors are never bypassed in production
 app.on('certificate-error', (event, _webContents, _url, _error, _certificate, callback) => {
-    // Only bypass in development AND when NODE_ENV is not production
-    if (is.dev && process.env.NODE_ENV !== 'production') {
+    if (is.dev) {
         event.preventDefault()
         callback(true)
     } else {
-        // In production, never bypass certificate errors
         callback(false)
     }
 })
-

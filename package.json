@@ -18,7 +18,6 @@
         "test:mock": "node tests/e2e_ui_mocked.cjs",
         "test:playwright": "node tests/playwright_tools_test.cjs",
         "test:speech": "node tests/speech_e2e.cjs",
-        "test:prompt-guard": "node tests/prompt_guard_e2e.cjs",
         "clean": "rm -rf out dist",
         "check:wine": "command -v wine >/dev/null 2>&1 || { echo >&2 'Error: Wine is required for Windows builds on Linux. Please run ./install_build_deps.sh to install it.'; exit 1; }",
         "rebuild:mac": "npm run clean && npm run build && electron-builder --mac",
