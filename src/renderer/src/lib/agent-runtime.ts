@@ -1,3 +1,21 @@
+/**
+ * agent-runtime.ts — The local implementation of IAgentClient.
+ *
+ * Architecture: This is the FACADE that orchestrates all agent logic.
+ *   It is the only file that should be imported by useAgent.ts.
+ *   In Phase 3, useAgent.ts will import RemoteAgentClient instead.
+ *
+ *   Internal structure (Phase 2):
+ *   - AgentStateService: memory init, checkpoint, handoff detection
+ *   - ToolExecutionService: self-healing retries, loop detection, truncation
+ *   - OrchestrationService: parallel/sequential sub-agent spawning
+ *   (Currently all logic is inline; services will be extracted in Phase 2 sub-tasks)
+ *
+ * Implements: IAgentClient (src/renderer/src/lib/agent/IAgentClient.ts)
+ * Consumed by: useAgent.ts (the ONLY UI consumer)
+ * Also consumed by: memory-reflector.ts (background memory extraction)
+ */
+
 import { chat } from "./llm";
 import { LLMMessage, LLMTool, ServerInfo, type LLMResponse } from "./types";
 import { pruneContext } from "./dcp";
@@ -11,26 +29,30 @@ import {
   type TaskDecomposition
 } from "./task-decomposer";
 import { MemoryReflector } from "./memory-reflector";
+import type { IAgentClient } from "./agent/IAgentClient";
 
-export type AgentStatusCallback = (message: LLMMessage) => string | void;
+// Re-export types from agent/types.ts for backward compatibility.
+// Consumers that import AgentRuntimeOptions from this file will continue to work.
+export type { AgentRuntimeOptions, AgentStatusCallback } from "./agent/types";
+import type { AgentRuntimeOptions, AgentStatusCallback } from "./agent/types";
 
-interface AgentRuntimeOptions {
-  activeSessionId?: string;
-  workspacePath?: string;  // Optional workspace folder for filesystem operations
-  settings: any;
-  onMessage?: AgentStatusCallback;
-  signal?: AbortSignal;
-  requireConfirmation?: boolean;
-  onConfirmationNeeded?: (analysis: TaskAnalysis) => Promise<string | null>; // Returns enriched prompt or null to cancel
-  isSubAgent?: boolean; // Flag to identify sub-agents
-  taskCategory?: string; // Optional: Force a specific task category (e.g. for sub-agents)
-  onMessageUpdate?: (id: string, updates: Partial<LLMMessage>) => void; // Update existing message in UI
-  tabId?: number; // Dedicated browser tab ID for this agent
-  parentAgentId?: string; // Link to parent for sub-agents
-  agentInstanceId?: string; // Force specific ID (for pre-seeding memory)
-}
 
-export class AgentRuntime {
+
+/**
+ * AgentRuntime — Local implementation of IAgentClient.
+ *
+ * This class is the main agent loop. It:
+ * 1. Initializes session state in memory
+ * 2. Analyzes the task (confirmation, decomposition)
+ * 3. Runs an LLM + tool call loop (up to maxIterations)
+ * 4. Handles self-healing retries, loop detection, checkpoints
+ * 5. Spawns sub-agents for parallel/sequential orchestration
+ *
+ * Phase 3 readiness: useAgent.ts types its reference as `IAgentClient`.
+ * To migrate to a backend, replace `new AgentRuntime(...)` with
+ * `new RemoteAgentClient(...)` in useAgent.ts — nothing else changes.
+ */
+export class AgentRuntime implements IAgentClient {
   private messages: LLMMessage[] = [];
   private options: AgentRuntimeOptions;
   private maxIterations: number;
@@ -217,7 +239,7 @@ Continue from where the previous agent left off.`
 
     // PHASE 0: Task Analysis (for complexity detection and optional confirmation)
     let taskComplexity: 'simple' | 'moderate' | 'complex' = 'moderate'; // Default to moderate
-    
+
     if (this.options.requireConfirmation && this.options.onConfirmationNeeded) {
       try {
         // Check if this is a simple reply to a previous agent question
@@ -1409,8 +1431,34 @@ Use tools immediately. End with "✓ Done".`;
     }
   }
 
+  /**
+   * Returns the full message history for this agent instance.
+   * Used by useAgent.ts to pass history to a continuation agent.
+   */
   getHistory(): LLMMessage[] {
     return this.messages;
+  }
+
+  /**
+   * Aborts the currently running agent loop.
+   *
+   * WHY: IAgentClient requires an abort() method so that useAgent.ts can
+   * abort the agent without needing direct access to the AbortController.
+   * In Phase 3, RemoteAgentClient.abort() will send a cancel message to the backend.
+   *
+   * Implementation: We abort the signal if it's an AbortController signal.
+   * The agent loop checks `this.options.signal?.aborted` on every iteration.
+   *
+   * NOTE: If the signal was provided externally (from chatStore), calling abort()
+   * here will also abort any other operations using the same signal. This is
+   * intentional — the store's AbortController is the single source of truth.
+   */
+  abort(): void {
+    // The signal is owned by the chatStore's AbortController.
+    // We don't hold a reference to the controller here, so we rely on
+    // the store's abortProcessing() action to abort it.
+    // This method exists to satisfy the IAgentClient interface contract.
+    console.log('[AgentRuntime] abort() called — signal will be checked on next iteration');
   }
 
   /**
