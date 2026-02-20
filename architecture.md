@@ -570,81 +570,54 @@ graph LR
 
 AI-Worker implements a reactive, tool-calling agent loop managed by the `AgentRuntime`. It prioritizes a **Plan-First** approach for complex tasks.
 
-### Agent Loop (AgentRuntime)
+### Agent Runtime Architecture (Phase 2 Refactor)
 
-The `AgentRuntime` manages the conversation lifecycle, including planning, tool execution, and context pruning. It features an **Autonomous Interaction Loop** capable of parallel tool dispatch and self-correction.
+The `AgentRuntime` has been refactored from a monolithic class into a modular system of specialized services, orchestrated by a lean facade. This prepares the system for a client-server architecture in Phase 3.
 
 ```mermaid
 graph TD
-    User[User Input] --> Runtime[AgentRuntime]
-    Runtime --> DCP[Prune Context]
-    DCP --> Plan[Call LLM: create_execution_plan]
-    Plan --> Step1[Parallel Dispatch: Tool 1 + Tool 2]
-    Step1 --> Result1[Consolidate Results]
-    Result1 --> Progress[update_progress_summary]
-    Progress --> DCP2[Prune Context]
-    DCP2 --> Step2[Next Actions]
+    User[User Input] --> Runtime[AgentRuntime Facade]
+    
+    subgraph "Core Services"
+        Orchestration[OrchestrationService<br/>Task Decomposition]
+        Tools[ToolExecutionService<br/>Loop Handling & Self-Healing]
+        State[AgentStateService<br/>Memory & Checkpoints]
+    end
+
+    Runtime --> State
+    Runtime --> Orchestration
+    Orchestration -->|Sub-Agents| Runtime
+    Runtime --> Tools
+    
+    Tools --> MCP[MCP Tools]
+    State --> Memory[Memory DB]
 ```
 
-### Specialized Sub-agents
+#### 1. AgentRuntime Facade
+- **Role**: Entry point for the UI (`useAgent.ts`).
+- **Responsibility**: Coordinates the high-level loop (Think -> Act -> Observe).
+- **Interface**: Implements `IAgentClient`, ensuring the UI is decoupled from the implementation (ready for remote execution).
 
-The system dynamically context-aware agent roles based on connected MCP servers. These are injected into the system prompt:
+#### 2. AgentStateService
+- **Responsibility**: Manages the agent's memory lifecycle.
+- **Key Features**:
+  - **Session Management**: Initializes and restores execution state.
+  - **Context Loading**: Loads parent context for sub-agents to share knowledge.
+  - **Handoff Detection**: Automatically prompts for user intervention if the context limit is reached.
 
-- **NavigationAgent**: Specialized in `playwright` tools (browser control, screenshots).
-- **FilesystemAgent**: Specialized in `filesystem` tools (read, write, list).
-- **SystemAgent**: General purpose task handling.
+#### 3. OrchestrationService
+- **Responsibility**: Spawns and manages sub-agents.
+- **Patterns**:
+  - **Parallel Orchestration**: Spawns N sub-agents for independent contexts (e.g., comparing 3 websites).
+  - **Sequential Orchestration**: Executes multi-step plans where step N+1 depends on step N.
+  - **Sub-Agent Factory**: Uses a factory pattern to create new `AgentRuntime` instances, breaking circular dependencies.
 
-### LLM Provider Priority
-
-1. **Browser LLMs** (WebLLM): On-device models (Llama 3, Phi 3) via WebGPU.
-2. **Standard APIs** (OpenAI, Gemini, OpenRouter): High-intelligence cloud models.
-3. **Local LLMs** (Ollama): Privacy-focused local serving.
-
-### Dynamic Prompt Injection & Task Categorization
-
-The `AgentRuntime` implements a **Dynamic Prompt Injection** mechanism to adapt the agent's behavior based on the task type.
-
-**Flow:**
-1.  **Task Analysis**: The user request is analyzed by `confirmation-message.ts` to identify the intent category (`SHOPPING`, `RESEARCH`, `ADMIN`, `GENERAL`).
-2.  **Prompt Selection**: The runtime selects the appropriate instruction set from the `Prompt Library` (`prompt-library.ts`).
-3.  **Injection**: `buildSystemPrompt` injects these rules *after* the tool definitions but *before* the core instructions. this ensures high priority context.
-
-**Categories:**
-- **SHOPPING**: Enforces "Speaking Money Protocol", "Size Checks", and stops at checkout.
-- **RESEARCH**: Enforces citation rules and balanced sourcing.
-- **ADMIN/FORMS**: Enforces double-checking inputs and privacy.
-- **GENERAL**: Optimized for speed and direct navigation.
-
-#### Composed Prompts & Parallelism
-The system utilizes a **Composable Prompt Engine** (`getComposedPrompts`) that allows multiple behavioral protocols to be active simultaneously. For instance, a task can be categorized as both `RESEARCH` and `PARALLEL_EXECUTION`.
-
-**Parallel Execution Protocol**:
-- Detects independent sub-tasks (e.g., comparing multiple websites).
-- Enforces simultaneous `delegate_sub_task` calls in a single turn.
-- Reduces total execution time by running independent operations in dedicated worker tabs.
-
-### Refusal Detection & Safety Layer
-
-To ensure robustness across different LLM capabilities, the `AgentRuntime` implements a deterministic safety layer that intercepts and corrects agent behavior:
-
-1.  **Refusal Interceptor**: Regular expressions scan every model response for refusal patterns (e.g., "I don't have access", "I am a text model").
-2.  **Auto-Correction**: If a refusal is detected when tools are available, the system injects a high-priority `[SYSTEM CORRECTION]` message.
-3.  **Tool-Call Mandate**: The correction provides a direct example of valid tool usage (e.g., `navigate({url: "google.com"})`). This "jumpstarts" models that incorrectly assume they are limited to text.
-4.  **Loop Prevention**: Correction is applied only once per turn to prevent recursive refusal loops.
-
-### Structured Response Protocol
-
-The system enforces a strict dual-layer response format to separate internal reasoning from user interaction:
-
-1.  **Internal Layer (`<think>`)**:
-    - Wrapped in XML-like tags.
-    - Used for planning, analysis, and self-correction.
-    - **Hidden** from the standard chat view (expandable for debugging).
-
-2.  **Presentation Layer**:
-    - Plain text outside tags.
-    - Direct, natural language responses.
-    - **Filtered** by the UI (`MessageBubble.tsx`) to strip any leaked meta-commentary (e.g., "The user asked for X, so I will...").
+#### 4. ToolExecutionService
+- **Responsibility**: Safely executes tools and robustly handles errors.
+- **Key Features**:
+  - **Loop Detection**: Prevents infinite loops by detecting repetitive arguments.
+  - **Self-Healing**: Automatically retries failed actions (e.g., stale elements, timeouts) with up to 8 recovery strategies.
+  - **Output Formatting**: Truncates large outputs and formats results for the LLM.
 
 ### Sub-Agent Delegation Flow
 
