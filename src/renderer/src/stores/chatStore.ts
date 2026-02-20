@@ -94,12 +94,19 @@ export const useChatStore = create<ChatState>()(
                 set((state) => ({
                     sessions: [newSession, ...state.sessions],
                     activeSessionId: newSession.id,
+                    isProcessing: false,
+                    processingSessionId: null
                 }))
                 return newSession.id
             },
 
             deleteSession: (id) => {
                 set((state) => {
+                    if (state.activeSessionId === id && state.isProcessing) {
+                        const { abortProcessing } = get()
+                        abortProcessing()
+                    }
+
                     const newSessions = state.sessions.filter((s) => s.id !== id)
                     let newActiveId = state.activeSessionId
                     if (state.activeSessionId === id) {
@@ -108,6 +115,7 @@ export const useChatStore = create<ChatState>()(
                     return {
                         sessions: newSessions,
                         activeSessionId: newActiveId,
+                        ...(state.activeSessionId === id && state.isProcessing ? { isProcessing: false, processingSessionId: null } : {})
                     }
                 })
             },
@@ -262,6 +270,9 @@ export const useChatStore = create<ChatState>()(
             },
 
             clearMessages: () => {
+                const { abortProcessing } = get()
+                abortProcessing() // Modular: cleanly abort any active LLM calls on this session
+
                 set((state) => {
                     if (!state.activeSessionId) return state
                     return {
@@ -270,6 +281,8 @@ export const useChatStore = create<ChatState>()(
                                 ? { ...s, messages: [], updatedAt: Date.now() }
                                 : s
                         ),
+                        isProcessing: false, // Ensure UI resets
+                        processingSessionId: null
                     }
                 })
             },

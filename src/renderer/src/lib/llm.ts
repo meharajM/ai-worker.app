@@ -1046,6 +1046,27 @@ function filterRelevantTools(tools?: LLMTool[], taskHint?: string): LLMTool[] {
 }
 
 /**
+ * Helper to generate the dynamic user environment context
+ * automatically injected into all LLM prompts.
+ */
+function getUserEnvironmentContext(): string {
+  const currentTime = new Date().toString();
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : 'Unknown';
+  const language = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+  
+  return `
+# USER CONTEXT (Auto-Injected)
+- **Current Time:** ${currentTime}
+- **Timezone:** ${timeZone}
+- **Language:** ${language}
+- **System OS:** ${userAgent}
+
+**CRITICAL RULE**: ALWAYS use the appropriate regional domain for websites (e.g. amazon.in, google.in, amazon.co.uk) based on the user's Timezone and Language instead of defaulting to .com.
+`;
+}
+
+/**
  * Build a compact system prompt for sub-agents (~70% smaller than main prompt)
  * Includes essential rules (think tags, autonomous behavior) but removes verbose examples
  */
@@ -1064,7 +1085,11 @@ function buildSubAgentSystemPrompt(
     return `- **${t.name}**: ${desc}${(t.description || '').length > 60 ? '...' : ''}`;
   }).join('\n') || 'No tools';
 
+  const userContext = getUserEnvironmentContext();
+
   return `You are a focused sub-agent executing a delegated task.
+
+${userContext}
 
 ${workspacePath ? `ACTIVE WORKSPACE: ${workspacePath}
 All filesystem operations (fs_*) MUST be performed within this directory.` : `WORKSPACE NOT SELECTED: 
@@ -1195,7 +1220,11 @@ Example: "search for nike shoes on Google" requires:
 DO NOT stop after just navigating - complete the entire workflow!`;
   }
 
+  const userContext = getUserEnvironmentContext();
+
   return `You are AI-Worker, an autonomous agent with ${toolCount} tools for browser automation, web navigation, and task execution.${jsonFormatNote}
+
+${userContext}
 
 ${workspacePath ? `ACTIVE WORKSPACE: ${workspacePath}
 All filesystem operations (fs_*) MUST be performed within this directory.
