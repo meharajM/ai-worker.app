@@ -1435,51 +1435,45 @@ export class PlaywrightService {
                 case 'web_search': {
                     const query = safeArgs.query
                     if (!query) return { result: null, error: 'web_search: query is required' }
-                    const numResults = Math.min(safeArgs.num_results || 5, 10)
-                    // Navigate directly via search URL — faster than typing in the box
-                    await page.goto(`https://www.google.com/search?q=${encodeURIComponent(query)}&hl=en`, { waitUntil: 'domcontentloaded' })
-                    // Wait a moment for JS-rendered results
-                    await page.waitForTimeout(800)
-                    const searchResults = await page.evaluate((maxResults: number) => {
-                        const results: { title: string; url: string; snippet: string }[] = []
-                        // Standard result anchors (g class), also handle featured snippets
-                        const anchors = Array.from(document.querySelectorAll('a[jsname], h3'))
-                        const seen = new Set<string>()
-                        for (const el of anchors) {
-                            if (results.length >= maxResults) break
-                            // Walk up to the result container to find the link
-                            let anchor: HTMLAnchorElement | null = null
-                            if (el.tagName === 'A') {
-                                anchor = el as HTMLAnchorElement
-                            } else {
-                                // h3 → parent a
-                                anchor = el.closest('a') as HTMLAnchorElement
-                            }
-                            if (!anchor) continue
-                            const href = anchor.href
-                            if (!href || href.startsWith('https://www.google.com') || seen.has(href)) continue
-                            if (href.includes('google.com/search') || href.includes('#')) continue
-                            seen.add(href)
-                            const heading = anchor.querySelector('h3')
-                            const title = heading?.innerText || anchor.innerText || anchor.title || ''
-                            if (!title.trim()) continue
-                            // Snippet: look for nearby description
-                            const container = anchor.closest('[data-sokoban-container], [data-hveid], .g')
-                            const snippetEl = container?.querySelector('[data-sncf], .VwiC3b, .IsZvec')
-                            const snippet = snippetEl?.textContent?.trim() || ''
-                            results.push({ title: title.trim(), url: href, snippet: snippet.substring(0, 200) })
-                        }
-                        return results
-                    }, numResults)
-                    if (searchResults.length === 0) {
-                        // Fallback: return plain page text
-                        const text = await page.evaluate(() => document.body.innerText.substring(0, 2000))
-                        return { result: `Search completed but could not parse results. Page content:\n${text}` }
+
+                    // ── Engine-agnostic search : to provide users option to select search engine────────────────────────────────────
+                    // Configurable search engine URL templates.
+                    // {q} is replaced with the encoded query.
+                    // In future, this can be driven by user preferences.
+                    const SEARCH_ENGINES: Record<string, string> = {
+                        google: 'https://www.google.com/search?q={q}&hl=en',
+                        bing: 'https://www.bing.com/search?q={q}',
+                        duckduckgo: 'https://duckduckgo.com/?q={q}',
+                        brave: 'https://search.brave.com/search?q={q}',
                     }
-                    const formatted = searchResults.map((r, i) =>
-                        `${i + 1}. **${r.title}**\n   URL: ${r.url}${r.snippet ? `\n   ${r.snippet}` : ''}`
-                    ).join('\n\n')
-                    return { result: `Search results for "${query}":\n\n${formatted}` }
+
+                    // TODO: read from user preferences once settings UI is built
+                    const engine = ((this.store as any).get?.('searchEngine') as string) || 'google'
+                    const urlTemplate = SEARCH_ENGINES[engine] || SEARCH_ENGINES.bing
+                    const searchUrl = urlTemplate.replace('{q}', encodeURIComponent(query))
+
+                    await page.goto(searchUrl, { waitUntil: 'domcontentloaded' })
+                    await page.waitForTimeout(1000)
+
+                    // Grab all visible text from the page — no DOM parsing, no selectors.
+                    // The LLM is smart enough to interpret raw search result text.
+                    const pageText = await page.evaluate(() => {
+                        return document.body.innerText
+                    })
+
+                    // Trim page text to a reasonable size
+                    const MAX_CHARS = 3000
+                    const trimmedText = pageText.length > MAX_CHARS
+                        ? pageText.substring(0, MAX_CHARS) + '\n\n... (truncated)'
+                        : pageText
+
+                    const pageTitle = await page.title()
+                    return {
+                        result: `Search results for "${query}" (via ${engine}):\n` +
+                            `Page: ${pageTitle}\n` +
+                            `URL: ${page.url()}\n\n` +
+                            trimmedText
+                    }
                 }
 
                 case 'fill_form': {

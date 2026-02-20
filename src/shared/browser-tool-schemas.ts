@@ -26,11 +26,10 @@ export const BROWSER_ACTION_SEQUENCE_SCHEMA: ToolSchema = {
     name: 'browser_action_sequence',
     description:
         "TURBO: Execute multiple browser actions in a single call. " +
-        "PRECONDITIONS: (1) You MUST have called get_interactive_elements or get_state first to know the real selectors — NEVER guess selectors. " +
-        "(2) Prefer click_text over click when possible (resilient to DOM changes). " +
-        "(3) Use this only when ALL steps and selectors are confirmed from prior observation. " +
-        "If any selector is uncertain, use individual tool calls instead for self-correction. " +
-        "Each step runs in order; if one fails the sequence halts. " +
+        "Prefer click_text over click (resilient to DOM changes). " +
+        "TIP: If you already know the selectors (from get_interactive_elements), bundle all steps here for speed. " +
+        "If selectors are uncertain, the tool will auto-validate and tell you if any are wrong. " +
+        "Each step runs in order; if one fails the sequence halts with a clear error. " +
         "Actions: navigate, click, click_text, fill, type, press, scroll, wait_for_element, wait_for_navigation, hover, screenshot.",
     inputSchema: {
         type: 'object',
@@ -66,15 +65,16 @@ export const BROWSER_ACTION_SEQUENCE_SCHEMA: ToolSchema = {
 export const WEB_SEARCH_SCHEMA: ToolSchema = {
     name: 'web_search',
     description:
-        "RECIPE: Search the web and return formatted top results in one shot. " +
+        "RECIPE: Search the web and return results in one shot. " +
         "NO preconditions — this tool handles everything internally (navigation, waiting, extraction). " +
-        "Use this as the DEFAULT for any web search instead of manually navigating to Google. " +
-        "Returns titles, URLs, and snippets.",
+        "Use this as the DEFAULT for any web search instead of manually navigating to a search engine. " +
+        "Returns the full search results page text including any instant answers. " +
+        "For simple facts (time, weather), the returned text is usually enough. " +
+        "For detailed tasks (shopping, research), this tool leaves the browser ON the search results page. Call 'get_interactive_elements' next to find the actual links to click/navigate.",
     inputSchema: {
         type: 'object',
         properties: {
-            query: { type: 'string', description: 'Search query to look up' },
-            num_results: { type: 'number', description: 'Number of top results to return (default: 5, max: 10)' }
+            query: { type: 'string', description: 'Search query to look up' }
         },
         required: ['query']
     }
@@ -86,10 +86,10 @@ export const FILL_FORM_SCHEMA: ToolSchema = {
     name: 'fill_form',
     description:
         "RECIPE: Fill and submit a web form in one shot. " +
-        "PRECONDITIONS: (1) You MUST have called get_interactive_elements on the target page FIRST to obtain real CSS selectors for each field — NEVER guess selectors. " +
-        "(2) Prefer submit_text over submit_selector (finds button by visible text, more resilient). " +
-        "(3) If you don't know the exact selectors, use individual fill + click calls instead. " +
-        "This tool saves roundtrips ONLY when all selectors are confirmed.",
+        "Provide a url to navigate first, or call this on the current page. " +
+        "Prefer submit_text over submit_selector (finds button by visible text, more resilient). " +
+        "TIP: Use get_interactive_elements first to get accurate selectors. NEVER guess selectors " +
+        "The tool validates all selectors before filling and will report any that are wrong.",
     inputSchema: {
         type: 'object',
         properties: {
