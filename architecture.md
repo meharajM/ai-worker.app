@@ -751,11 +751,17 @@ sequenceDiagram
 | **Context Destroyed** | 1s wait + retry. | Navigation race conditions |
 | **Timeout** | Double the timeout + retry. | Slow loading pages |
 
-#### 2. Navigation & Recovery Fallbacks
-- **Auto-Google**: If a URL navigation fails (DNS or typo), the agent automatically converts the URL into a Google search query.
-- **Fuzzy Selector Fallback**: If a strict CSS selector (ID/Class) fails, the system automatically tries "fuzzy" matching or text-based selectors.
+#### 2. Runtime Preconditions (Pre-Validation & Auto-Fallback)
+The `PlaywrightService` implements proactive validation for multi-step tools (`browser_action_sequence` and `fill_form`) to prevent hallucinated selectors from causing partial executions or long timeouts.
+- **Auto-Observation Guard**: Automatically checks `page.$(selector)` implicitly before executing any step.
+- **Fail-Fast Sequence Validation**: Validates all selectors in a sequence *before* running. If a selector is missing, the sequence aborts instantly (~50ms) instead of waiting for a 30s timeout, saving tokens and time. 
+- **Smart Auto-Fallback**: If a `click` selector is invalid but acts like or is accompanied by valid `text`, the runtime automatically upgrades the action to `click_text` on the fly.
 
-#### 3. Sub-Agent Panic Mode
+#### 3. Navigation & Recovery Fallbacks
+- **Auto-Google**: If a URL navigation fails (DNS or typo), the agent automatically converts the URL into a Google search query.
+- **Fuzzy Selector Fallback**: If a strict CSS selector (ID/Class) fails during execution, the system automatically tries "fuzzy" matching or text-based selectors.
+
+#### 4. Sub-Agent Panic Mode
 If a sub-agent enters an unproductive loop (3+ turns with no progress), it triggers **Panic Mode**:
 1. It stops searching/clicking blindly.
 2. It takes a visual snapshot of the page.

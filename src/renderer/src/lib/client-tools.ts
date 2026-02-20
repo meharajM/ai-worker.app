@@ -111,7 +111,11 @@ export const STATEFUL_BROWSER_TOOLS = [
   'new_tab',
   'switch_tab',
   'close_tab',
-  'get_tabs'
+  'get_tabs',
+  // Compound / recipe tools — also browser-stateful
+  'browser_action_sequence',
+  'web_search',
+  'fill_form',
 ];
 
 // Tools that modify file system state (using fileLock)
@@ -183,6 +187,22 @@ export const MEMORY_UPDATE_ENTITY_TOOL: MCPTool = {
   }
 };
 
+// ============================================================
+// Browser Turbo / Recipe Tools
+// Imported from shared schema (single source of truth).
+// The actual execution happens in PlaywrightService.callTool().
+// ============================================================
+
+import {
+  BROWSER_ACTION_SEQUENCE_SCHEMA,
+  WEB_SEARCH_SCHEMA,
+  FILL_FORM_SCHEMA,
+} from '../../../shared/browser-tool-schemas';
+
+export const BROWSER_ACTION_SEQUENCE_TOOL: MCPTool = BROWSER_ACTION_SEQUENCE_SCHEMA as MCPTool;
+export const WEB_SEARCH_TOOL: MCPTool = WEB_SEARCH_SCHEMA as MCPTool;
+export const FILL_FORM_TOOL: MCPTool = FILL_FORM_SCHEMA as MCPTool;
+
 export const CLIENT_TOOLS = [
   PLANNING_TOOL,
   SUB_AGENT_TOOL,
@@ -191,5 +211,10 @@ export const CLIENT_TOOLS = [
   MEMORY_CREATE_ENTITY_TOOL,
   MEMORY_CREATE_RELATION_TOOL,
   MEMORY_SEARCH_TOOL,
-  MEMORY_UPDATE_ENTITY_TOOL
+  MEMORY_UPDATE_ENTITY_TOOL,
+  // Browser turbo / recipe tools
+  BROWSER_ACTION_SEQUENCE_TOOL,
+  WEB_SEARCH_TOOL,
+  FILL_FORM_TOOL,
 ];
+
