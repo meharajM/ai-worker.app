@@ -1062,7 +1062,7 @@ function getUserEnvironmentContext(): string {
 - **Language:** ${language}
 - **System OS:** ${userAgent}
 
-**CRITICAL RULE**: ALWAYS use the appropriate regional domain for websites (e.g. amazon.in, google.in, amazon.co.uk) based on the user's Timezone and Language instead of defaulting to .com.
+**CRITICAL RULE**: Do NOT blindly append regional Top Level Domains (like .in or .co.uk) to brand names (e.g., guessing amazon.in instead of amazon.com). If you need to navigate to a specific brand or service's website, YOU MUST perform a web search first (e.g., searching for "Croma" on Google or DuckDuckGo) to find their correct official website for the user's region, then navigate to that exact URL.
 `;
 }
 
