@@ -674,3 +674,43 @@ echo "# Sample Document\n\nThis is a test file for MarkItDown.\n\n## Features\n-
 **3. Test Prompt:**
 > "Convert ~/Desktop/test.pdf to markdown and show me the result"
 
+---
+
+## 20. Browser Automation: Runtime Preconditions & Auto-Healing
+
+The agent's browser tools feature built-in protective layers to prevent hallucinated selectors from causing timeouts or corrupted states. Test these with the following prompts:
+
+**Test A: Fail-Fast Selector Pre-Validation (browser_action_sequence)**
+**Prompt:** 
+> "Go to wikipedia.com and use the browser_action_sequence tool. Make the first step click on the selector '#made-up-hallucinated-button-123' and the second step scroll down."
+
+**Expected Behavior:**
+- 🚫 Agent receives an **immediate** failure instead of waiting 30 seconds for a timeout.
+- ⚡ Error explicitly states "Sequence Aborted by Runtime Guard: Step 1 PRECONDITION FAILED".
+- 💡 Agent self-corrects by calling `get_interactive_elements` to find real selectors.
+
+**Test B: Smart Auto-Fallback (Heuristic Text Conversion)**
+**Prompt:**
+> "Go to news.ycombinator.com using browser_action_sequence. In the sequence, try to click the login button by providing the exact string 'login' into the `selector` field (do NOT use the text field or click_text action)."
+
+**Expected Behavior:**
+- ✅ The tool execution **succeeds** despite the invalid CSS selector.
+- 🔄 The Runtime Guard detects the selector 'login' is actually plain text, verifies the text exists on the page, and automatically converts the action to `click_text('login')`.
+- *(Verify in Terminal: `[PlaywrightService] Auto-correcting step... click('login') -> click_text('login')`)*
+
+**Test C: Form Field Protection (fill_form)**
+**Prompt:**
+> "Go to https://news.ycombinator.com/login and use the fill_form tool. Provide the correct selector for the password, but intentionally use `#wrong-username-box` for the username field."
+
+**Expected Behavior:**
+- 🛡️ The form fill aborts immediately after navigation, before typing anything.
+- ❌ Protects the form state by refusing to partially fill a form with invalid selectors.
+
+**Test D: Form Submit Auto-Correction**
+**Prompt:**
+> "Go to https://news.ycombinator.com/login and use the fill_form tool. Provide correct field selectors. For the `submit_selector`, use `#fake-submit`, but provide `login` for the `submit_text` field."
+
+**Expected Behavior:**
+- ✅ The form submission **succeeds**.
+- 🔄 The guard abandons the bad `submit_selector` and seamlessly falls back to the `submit_text` to complete the form.
+
