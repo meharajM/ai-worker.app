@@ -3,16 +3,7 @@ import { app } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
 import Store from 'electron-store'
-
-interface ToolSchema {
-    name: string
-    description: string
-    inputSchema: {
-        type: string
-        properties: Record<string, unknown>
-        required?: string[]
-    }
-}
+import { ToolSchema, BROWSER_TURBO_SCHEMAS } from '../../shared/browser-tool-schemas'
 
 // Define the shape of our settings
 interface PlaywrightSettings {
@@ -649,7 +640,9 @@ export class PlaywrightService {
                             timeout: { type: 'number', description: 'Max wait in ms (default: 30000)' }
                         }
                     }
-                }
+                },
+                // Browser turbo/recipe tools — imported from shared schema
+                ...BROWSER_TURBO_SCHEMAS
             ]
         }
     }
@@ -1361,6 +1354,202 @@ export class PlaywrightService {
                     await page.waitForLoadState('networkidle', { timeout: safeArgs.timeout || 30000 })
                     return { result: 'Navigation completed' }
 
+                case 'browser_action_sequence': {
+                    const steps: any[] = safeArgs.steps
+                    if (!Array.isArray(steps) || steps.length === 0) {
+                        return { result: null, error: 'browser_action_sequence: steps must be a non-empty array' }
+                    }
+                    // (A) & (B) RUNTIME PRECONDITION & (C) AUTO-CORRECTION
+                    // Validate selectors before executing ANY step to prevent partial failures.
+                    const validationErrors: string[] = []
+                    for (let i = 0; i < steps.length; i++) {
+                        const step = steps[i]
+
+                        // CRITICAL: Stop validation if we hit a navigation step, 
+                        // as subsequent selectors will be on a new page we can't see yet.
+                        if (step.action === 'navigate' || step.action === 'reload') {
+                            break;
+                        }
+
+                        // Validate 'click' with selector
+                        if (step.action === 'click' && step.selector) {
+                            const check = await this.validateAndCorrectSelector(step.selector, step.text)
+                            if (!check.valid) {
+                                if (check.correction === 'click_text') {
+                                    // (C) AUTO-FAILOVER: Upgrade to click_text
+                                    console.log(`[PlaywrightService] Auto-correcting step ${i + 1}: click('${step.selector}') -> click_text('${step.text || step.selector}')`)
+                                    step.action = 'click_text'
+                                    step.text = step.text || step.selector // Fallback: try selector as text if text missing
+                                    delete step.selector
+                                } else {
+                                    validationErrors.push(`Step ${i + 1} (${step.action}) PRECONDITION FAILED: ${check.error}`)
+                                }
+                            }
+                        }
+
+                        // Validate 'fill', 'hover', 'wait_for_element' with selector
+                        if (['fill', 'hover', 'wait_for_element', 'type'].includes(step.action) && step.selector) {
+                            const check = await this.validateAndCorrectSelector(step.selector)
+                            if (!check.valid) {
+                                validationErrors.push(`Step ${i + 1} (${step.action}) PRECONDITION FAILED: ${check.error} (Did you forget to call get_interactive_elements?)`)
+                            }
+                        }
+                    }
+
+                    if (validationErrors.length > 0) {
+                        return {
+                            result: null,
+                            error: `Sequence Aborted by Runtime Guard:\n${validationErrors.join('\n')}\n\n💡 RECOVERY: Call get_interactive_elements() to find the correct valid selectors.`
+                        }
+                    }
+
+                    const results: string[] = []
+                    for (let i = 0; i < steps.length; i++) {
+                        const step = steps[i]
+                        const { action, ...stepArgs } = step
+                        try {
+                            const stepResult = await this.callTool(action, { ...stepArgs, tabId: safeArgs.tabId })
+                            if (stepResult.error) {
+                                results.push(`Step ${i + 1} (${action}): FAILED — ${stepResult.error}`)
+                                return {
+                                    result: `Sequence halted at step ${i + 1}/${steps.length}.\n${results.join('\n')}`,
+                                    error: `Step ${i + 1} (${action}) failed: ${stepResult.error}`
+                                }
+                            }
+                            const summary = typeof stepResult.result === 'string'
+                                ? stepResult.result
+                                : JSON.stringify(stepResult.result)
+                            results.push(`Step ${i + 1} (${action}): OK — ${summary.substring(0, 120)}`)
+                        } catch (e) {
+                            const msg = e instanceof Error ? e.message : String(e)
+                            results.push(`Step ${i + 1} (${action}): FAILED — ${msg}`)
+                            return {
+                                result: `Sequence halted at step ${i + 1}/${steps.length}.\n${results.join('\n')}`,
+                                error: `Step ${i + 1} (${action}) threw: ${msg}`
+                            }
+                        }
+                    }
+                    return { result: `All ${steps.length} steps completed.\n${results.join('\n')}` }
+                }
+
+                case 'web_search': {
+                    const query = safeArgs.query
+                    if (!query) return { result: null, error: 'web_search: query is required' }
+
+                    // ── Engine-agnostic search : to provide users option to select search engine────────────────────────────────────
+                    // Configurable search engine URL templates.
+                    // {q} is replaced with the encoded query.
+                    // In future, this can be driven by user preferences.
+                    const SEARCH_ENGINES: Record<string, string> = {
+                        google: 'https://www.google.com/search?q={q}&hl=en',
+                        bing: 'https://www.bing.com/search?q={q}',
+                        duckduckgo: 'https://duckduckgo.com/?q={q}',
+                        brave: 'https://search.brave.com/search?q={q}',
+                    }
+
+                    // TODO: read from user preferences once settings UI is built
+                    const engine = ((this.store as any).get?.('searchEngine') as string) || 'google'
+                    const urlTemplate = SEARCH_ENGINES[engine] || SEARCH_ENGINES.bing
+                    const searchUrl = urlTemplate.replace('{q}', encodeURIComponent(query))
+
+                    await page.goto(searchUrl, { waitUntil: 'domcontentloaded' })
+                    await page.waitForTimeout(1000)
+
+                    // Grab all visible text from the page — no DOM parsing, no selectors.
+                    // The LLM is smart enough to interpret raw search result text.
+                    const pageText = await page.evaluate(() => {
+                        return document.body.innerText
+                    })
+
+                    // Trim page text to a reasonable size
+                    const MAX_CHARS = 3000
+                    const trimmedText = pageText.length > MAX_CHARS
+                        ? pageText.substring(0, MAX_CHARS) + '\n\n... (truncated)'
+                        : pageText
+
+                    const pageTitle = await page.title()
+                    return {
+                        result: `Search results for "${query}" (via ${engine}):\n` +
+                            `Page: ${pageTitle}\n` +
+                            `URL: ${page.url()}\n\n` +
+                            trimmedText
+                    }
+                }
+
+                case 'fill_form': {
+                    const { url: formUrl, fields, submit_selector, submit_text, wait_after_submit = true } = safeArgs
+                    if (!Array.isArray(fields) || fields.length === 0) {
+                        return { result: null, error: 'fill_form: fields array is required and must not be empty' }
+                    }
+                    // Navigate if URL provided
+                    if (formUrl) {
+                        await page.goto(formUrl, { waitUntil: 'domcontentloaded' })
+                    }
+
+                    // (A) & (B) RUNTIME PRECONDITION & (C) AUTO-CORRECTION
+                    const formErrors: string[] = []
+                    for (const field of fields) {
+                        const check = await this.validateAndCorrectSelector(field.selector)
+                        if (!check.valid) {
+                            formErrors.push(`Field '${field.selector}' PRECONDITION FAILED: ${check.error}`)
+                        }
+                    }
+
+                    let effectiveSubmitSelector = submit_selector
+                    let effectiveSubmitText = submit_text
+
+                    if (submit_selector) {
+                        const check = await this.validateAndCorrectSelector(submit_selector, submit_text)
+                        if (!check.valid) {
+                            if (check.correction === 'click_text') {
+                                console.log(`[PlaywrightService] Auto-correcting submit_selector -> submit_text('${submit_text || submit_selector}')`)
+                                effectiveSubmitText = submit_text || submit_selector
+                                effectiveSubmitSelector = undefined
+                            } else {
+                                formErrors.push(`Submit button '${submit_selector}' PRECONDITION FAILED: ${check.error}`)
+                            }
+                        }
+                    }
+
+                    if (formErrors.length > 0) {
+                        return {
+                            result: null,
+                            error: `Form Fill Aborted by Runtime Guard:\n${formErrors.join('\n')}\n\n💡 RECOVERY: Call get_interactive_elements() to find the correct valid selectors.`
+                        }
+                    }
+
+                    // Fill each field
+                    for (const field of fields) {
+                        const { selector, value, type: fillType = 'fill' } = field
+                        await page.waitForSelector(selector, { timeout: 5000 }).catch(() => null)
+                        if (fillType === 'type') {
+                            await page.click(selector).catch(() => null)
+                            await page.type(selector, value, { delay: 30 })
+                        } else if (fillType === 'select') {
+                            await page.selectOption(selector, value)
+                        } else {
+                            await page.fill(selector, value)
+                        }
+                    }
+                    // Submit
+                    if (effectiveSubmitSelector) {
+                        await page.click(effectiveSubmitSelector)
+                    } else if (effectiveSubmitText) {
+                        await page.getByText(effectiveSubmitText, { exact: false }).first().click()
+                    } else {
+                        // Press Enter on the last field
+                        const lastSelector = fields[fields.length - 1].selector
+                        await page.press(lastSelector, 'Enter')
+                    }
+                    // Wait for navigation if requested
+                    if (wait_after_submit) {
+                        await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => null)
+                    }
+                    const resultUrl = page.url()
+                    const resultTitle = await page.title()
+                    return { result: `Form submitted. Now at: ${resultTitle} (${resultUrl})` }
+                }
+
                 default:
                     return { result: null, error: `Tool ${name} not implemented` }
             }
@@ -1383,6 +1572,43 @@ export class PlaywrightService {
                 result: null,
                 error: errorMessage
             }
+        }
+    }
+
+    /**
+     * Runtime validation helper: Checks if a selector exists and offers corrections if not.
+     */
+    private async validateAndCorrectSelector(selector: string, text?: string): Promise<{ valid: boolean; correction?: string; error?: string }> {
+        if (!this.page) return { valid: false, error: 'Page not initialized' };
+
+        try {
+            // 1. Check if selector exists interactively
+            const exists = await this.page.$(selector).then(res => !!res).catch(() => false);
+            if (exists) return { valid: true };
+
+            // 2. If text is provided, suggest using text instead (fallback to click_text)
+            if (text) {
+                const textExists = await this.page.getByText(text, { exact: false }).isVisible().catch(() => false);
+                if (textExists) {
+                    return { valid: false, correction: `click_text`, error: `Selector '${selector}' not found, but text '${text}' is visible.` };
+                }
+            }
+
+            // 3. Heuristic: Is the selector actually plain text? (Common LLM error: click("Submit"))
+            const isTextLike = !selector.includes('#') && !selector.includes('.') &&
+                !selector.includes('[') && !selector.includes('>') &&
+                selector.match(/^[a-zA-Z0-9\s]+$/);
+
+            if (isTextLike) {
+                const textExists = await this.page.getByText(selector, { exact: false }).isVisible().catch(() => false);
+                if (textExists) {
+                    return { valid: false, correction: `click_text`, error: `Selector '${selector}' looks like text, not CSS.` };
+                }
+            }
+
+            return { valid: false, error: `Selector '${selector}' not found in DOM.` };
+        } catch (e) {
+            return { valid: false, error: `Invalid selector '${selector}': ${String(e)}` };
         }
     }
 }
