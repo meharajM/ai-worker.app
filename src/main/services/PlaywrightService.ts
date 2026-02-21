@@ -63,8 +63,8 @@ export class PlaywrightService {
                     switch (platform) {
                         case 'win32': return 'msedge'   // Windows: Edge is pre-installed
                         case 'darwin': return 'chrome'  // macOS: Chrome is most common
-                        case 'linux': return 'chrome'   // Linux: Chrome or Firefox
-                        default: return 'chrome'
+                        case 'linux': return 'chromium' // Linux: Chromium (bundled) is most reliable
+                        default: return 'chromium'
                     }
                 }
 
@@ -101,8 +101,8 @@ export class PlaywrightService {
                     switch (platform) {
                         case 'win32': return ['msedge', 'chrome', 'firefox']  // Windows: Edge -> Chrome -> Firefox
                         case 'darwin': return ['chrome', 'webkit', 'firefox'] // macOS: Chrome -> Safari -> Firefox
-                        case 'linux': return ['chrome', 'firefox', 'chromium'] // Linux: Chrome -> Firefox -> Chromium
-                        default: return ['chrome', 'msedge', 'firefox']
+                        case 'linux': return ['chromium', 'firefox', 'msedge'] // Linux: Chromium (bundled) -> Firefox -> Edge
+                        default: return ['chromium', 'chrome', 'msedge', 'firefox']
                     }
                 }
                 const fallbackBrowsers = getFallbackOrder()
@@ -142,8 +142,10 @@ export class PlaywrightService {
                         break // Success!
                     } catch (error) {
                         lastError = error as Error
-                        const isMissingExecutable = String(error).includes('Executable doesn\'t exist') ||
-                            String(error).includes('No executable path')
+                        const errorStr = String(error)
+                        const isMissingExecutable = errorStr.includes('Executable doesn\'t exist') ||
+                            errorStr.includes('No executable path') ||
+                            errorStr.includes('distribution') || errorStr.includes('is not found')
                         if (isMissingExecutable) {
                             console.warn(`[PlaywrightService] ${tryBrowser} not found, trying next...`)
                             continue
