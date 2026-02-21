@@ -98,6 +98,29 @@ interface ElectronAPI {
     clipboard: {
         readFilePaths: () => string[]
     }
+
+    browser: {
+        checkStatus: (browser: 'chrome' | 'msedge' | 'firefox' | 'webkit' | 'chromium') => Promise<{
+            browser: string
+            installed: boolean
+            version?: string
+            error?: string
+        }>
+        checkAllStatuses: () => Promise<Array<{
+            browser: string
+            installed: boolean
+            version?: string
+            error?: string
+        }>>
+        install: (browser: 'chrome' | 'msedge' | 'firefox' | 'webkit' | 'chromium') => Promise<{
+            success: boolean
+            output: string
+            error?: string
+        }>
+        getInstallCommand: (browser: 'chrome' | 'msedge' | 'firefox' | 'webkit' | 'chromium') => Promise<{
+            command: string
+        }>
+    }
 }
 
 // Web Speech API types - placed inside declare global to be available everywhere

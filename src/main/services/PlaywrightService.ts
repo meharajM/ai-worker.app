@@ -79,7 +79,8 @@ export class PlaywrightService {
 
                 console.log(`[PlaywrightService] Launching ${browserType} (Headless: ${headless})`)
 
-                const launchOptions = {
+                // Browser-specific launch options
+                const getChromiumOptions = () => ({
                     headless: headless,
                     viewport: { width: 1280, height: 800 },
                     args: [
@@ -90,15 +91,25 @@ export class PlaywrightService {
                         '--window-position=0,0',
                         '--ignore-certificate-errors',
                         '--ignore-certificate-errors-spki-list',
-                        // Additional stealth args
                         '--disable-accelerated-2d-canvas',
                         '--disable-gpu',
                     ]
-                }
+                })
 
-                // Note: The fallback loop below handles browser selection dynamically
+                const getFirefoxOptions = () => ({
+                    headless: headless,
+                    viewport: { width: 1280, height: 800 },
+                    args: [
+                        '--no-sandbox',
+                        '--window-position=0,0',
+                    ]
+                })
 
-                // Launch persistent context for state preservation
+                const getWebkitOptions = () => ({
+                    headless: headless,
+                    viewport: { width: 1280, height: 800 }
+                })
+
                 // Smart fallback order based on OS
                 const getFallbackOrder = (): string[] => {
                     const platform = process.platform
@@ -115,21 +126,21 @@ export class PlaywrightService {
                 for (const tryBrowser of [browserType, ...fallbackBrowsers.filter(b => b !== browserType)]) {
                     try {
                         let tryLauncher = chromium
-                        const tryOptions = { ...launchOptions }
+                        let tryOptions: any
 
                         if (tryBrowser === 'firefox') {
                             tryLauncher = firefox
-                            delete (tryOptions as any).channel
+                            tryOptions = getFirefoxOptions()
                         } else if (tryBrowser === 'webkit') {
                             tryLauncher = webkit
-                            delete (tryOptions as any).channel
+                            tryOptions = getWebkitOptions()
                         } else if (tryBrowser === 'chromium') {
-                            // Bundled Chromium - no channel needed
                             tryLauncher = chromium
-                            delete (tryOptions as any).channel
+                            tryOptions = getChromiumOptions()
                         } else {
-                            // Chrome or Edge - use channel
-                            (tryOptions as any).channel = tryBrowser
+                            // Chrome or Edge - use channel with Chromium options
+                            tryOptions = getChromiumOptions()
+                            tryOptions.channel = tryBrowser
                         }
 
                         console.log(`[PlaywrightService] Trying to launch: ${tryBrowser}...`)

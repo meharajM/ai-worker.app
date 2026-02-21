@@ -7,6 +7,7 @@ import { registerSpeechHandlers } from './speech'
 import { registerSecureHandlers } from './secure'
 import { registerFsHandlers } from './fs'
 import { registerMemoryHandlers } from './memory'
+import { registerBrowserManagerHandlers } from './browserManager'
 
 export function setupIpcHandlers(): void {
     registerAppHandlers()
@@ -18,4 +19,5 @@ export function setupIpcHandlers(): void {
     registerSpeechHandlers()
     registerSecureHandlers()
     registerFsHandlers()
+    registerBrowserManagerHandlers()
 }

@@ -130,6 +130,17 @@ const electronAPI = {
             return paths
         }
     },
+    // Browser manager operations
+    browser: {
+        checkStatus: (browser: 'chrome' | 'msedge' | 'firefox' | 'webkit' | 'chromium') =>
+            ipcRenderer.invoke('browser:check-status', browser),
+        checkAllStatuses: () =>
+            ipcRenderer.invoke('browser:check-all-statuses'),
+        install: (browser: 'chrome' | 'msedge' | 'firefox' | 'webkit' | 'chromium') =>
+            ipcRenderer.invoke('browser:install', browser),
+        getInstallCommand: (browser: 'chrome' | 'msedge' | 'firefox' | 'webkit' | 'chromium') =>
+            ipcRenderer.invoke('browser:get-install-command', browser),
+    },
 }
 
 // Expose APIs to renderer

@@ -27,6 +27,7 @@ import { FileChangeReview } from "./components/FileChangeReview";
 import { CommandPalette } from "./components/CommandPalette";
 import { Sidebar, View } from "./components/Sidebar";
 import { Header } from "./components/Header";
+import { InitialSetup } from "./components/InitialSetup";
 
 import { useChatStore } from "./stores/chatStore";
 import { useMcpStore } from "./stores/mcpStore";
@@ -34,9 +35,45 @@ import { useAuthPersistence } from "./hooks/useAuthPersistence";
 import { useSettingsSync } from "./hooks/useSettingsSync";
 import { useAgent } from "./hooks/useAgent";
 import { useLLMStatus } from "./hooks/useLLMStatus";
+import { electron, isElectron } from "./lib/electron";
+import { Loader2 } from "lucide-react";
+
+// Dedicated store key, separate from the zustand settings blob
+const SETUP_STORE_KEY = 'ai-worker-setup-completed'
 
 function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
+
+  // Track setup completion with local state + direct electron-store reads
+  // We do NOT use zustand persist for this — async rehydration causes races
+  const [setupChecked, setSetupChecked] = useState(false);
+  const [hasCompletedSetup, setHasCompletedSetup] = useState(false);
+
+  // On mount: read setup flag directly from electron-store (synchronous IPC)
+  useEffect(() => {
+    const checkSetup = async () => {
+      if (!isElectron()) {
+        // Browser mode: skip setup
+        setHasCompletedSetup(true);
+        setSetupChecked(true);
+        return;
+      }
+      try {
+        const completed = await electron.store.get<boolean>(SETUP_STORE_KEY);
+        setHasCompletedSetup(!!completed);
+      } catch {
+        setHasCompletedSetup(false);
+      } finally {
+        setSetupChecked(true);
+      }
+    };
+    checkSetup();
+  }, []);
+
+  const completeSetup = async () => {
+    await electron.store.set(SETUP_STORE_KEY, true);
+    setHasCompletedSetup(true);
+  };
 
   // ── Store subscriptions ───────────────────────────────────────────────────
   const {
@@ -70,6 +107,26 @@ function App() {
   const { llmStatus } = useLLMStatus(currentView);
 
   // ── Render ────────────────────────────────────────────────────────────────
+  
+  // Show loading while we check electron-store for setup flag
+  if (!setupChecked) {
+    return (
+      <div className="flex h-screen bg-[#0f1115] text-white items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+  
+  // Show initial setup on first run
+  if (!hasCompletedSetup) {
+    return (
+      <InitialSetup onComplete={completeSetup} />
+    );
+  }
+  
   return (
     <div className="flex h-screen bg-[#0f1115] text-white font-sans overflow-hidden">
       <CommandPalette />

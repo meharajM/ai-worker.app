@@ -208,6 +208,33 @@ export const electron = {
             }
             return []
         }
+    },
+    // Browser manager operations
+    browser: {
+        checkStatus: async (browser: 'chrome' | 'msedge' | 'firefox' | 'webkit' | 'chromium') => {
+            if (isElectron() && window.electron?.browser) {
+                return await window.electron.browser.checkStatus(browser)
+            }
+            return { browser, installed: false, error: 'Not in Electron environment' }
+        },
+        checkAllStatuses: async () => {
+            if (isElectron() && window.electron?.browser) {
+                return await window.electron.browser.checkAllStatuses()
+            }
+            return []
+        },
+        install: async (browser: 'chrome' | 'msedge' | 'firefox' | 'webkit' | 'chromium') => {
+            if (isElectron() && window.electron?.browser) {
+                return await window.electron.browser.install(browser)
+            }
+            return { success: false, output: '', error: 'Not in Electron environment' }
+        },
+        getInstallCommand: async (browser: 'chrome' | 'msedge' | 'firefox' | 'webkit' | 'chromium') => {
+            if (isElectron() && window.electron?.browser) {
+                return await window.electron.browser.getInstallCommand(browser)
+            }
+            return { command: 'npx playwright install' }
+        }
     }
 }
 
