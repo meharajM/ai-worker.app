@@ -322,7 +322,7 @@ YOUR EXCLUSIVE TARGET: **${targetContext}**
 
 You have ONE job: Extract data ONLY for ${targetContext}.
 DO NOT perform generalized searches. DO NOT click links to other websites. 
-If you need to search, append "${targetContext}" to your search query (e.g. "Sony headphones ${targetContext}").
+If you need to search, append "${targetContext}" to your search query to keep results scoped to your target.
 
 BACKGROUND CONTEXT (Why you are doing this):
 The main agent is trying to: "${originalRequest}"

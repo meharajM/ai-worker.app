@@ -27,7 +27,29 @@ export class PlaywrightService {
         }
         const id = this.nextTabId++
         this.pagesMap.set(id, page)
+
+        // Auto-cleanup on close
         page.on('close', () => this.pagesMap.delete(id))
+
+        // Per-page popup isolation: when a page spawns a popup (e.g. target="_blank"),
+        // redirect the originating page to that URL instead of letting an unmanaged
+        // popup tab accumulate. This is scoped per-tab so the main browsing context
+        // (OAuth flows, payment pages, etc.) is NOT affected — only the page that
+        // triggered the popup gets redirected, not all pages globally.
+        page.on('popup', async (popup) => {
+            try {
+                const url = popup.url()
+                // Close the unmanaged popup immediately
+                await popup.close().catch(() => { })
+                // Navigate the originating page to the popup URL (same-tab redirect)
+                if (url && url !== 'about:blank') {
+                    await page.goto(url, { waitUntil: 'domcontentloaded' }).catch(() => { })
+                }
+            } catch {
+                // Silently ignore — popup may already be closed or not navigable
+            }
+        })
+
         return id
     }
 
@@ -175,24 +197,17 @@ export class PlaywrightService {
                     throw lastError || new Error('No browser available. Please install Chrome, Edge, or Firefox.')
                 }
 
-                // Stealth & Tab Isolation: 
-                // 1. Remove navigator.webdriver for stealth.
-                // 2. Remove target="_blank" from links so parallel sub-agents don't spawn unmanaged popups.
+                // Stealth: Remove navigator.webdriver fingerprint so automation-detection
+                // scripts don't flag the browser. Applied globally via addInitScript so it
+                // runs on every new page before any JS executes.
+                // NOTE: Popup isolation (target=_blank handling) is done per-page inside
+                // registerPage() via the 'popup' event — NOT here — to avoid breaking
+                // legitimate new-tab flows (OAuth, payment redirects, download links).
                 if (this.context) {
                     await this.context.addInitScript(() => {
                         Object.defineProperty(navigator, 'webdriver', {
                             get: () => undefined,
                         });
-                        
-                        // Intercept clicks to force same-tab navigation
-                        document.addEventListener('click', (e) => {
-                            const target = e.target as Element | null;
-                            if (!target) return;
-                            const a = target.closest('a');
-                            if (a && a.getAttribute('target') === '_blank') {
-                                a.removeAttribute('target');
-                            }
-                        }, true);
                     });
                 }
 
