@@ -18,6 +18,7 @@ import {
 } from "./webllm";
 import { CREATE_PLAN_TOOL } from "./plan_manager";
 import { EXECUTION_PLAN_SCHEMA } from "./agent-protocol";
+import { getUserEnvironmentContext } from "./user-environment";
 import {
   LLMMessage,
   LLMTool,
@@ -780,7 +781,7 @@ async function callOpenAI(
     const systemMsgIndex = requestMessages.findIndex(
       (m) => m.role === "system"
     );
-    const systemPrompt = buildSystemPrompt(tools, servers, true);
+    const systemPrompt = await buildSystemPrompt(tools, servers, true);
     if (systemMsgIndex >= 0) {
       requestMessages[systemMsgIndex] = {
         role: "system" as const,
@@ -840,7 +841,7 @@ async function callOpenAI(
       const systemMsgIndex = retryMessages.findIndex(
         (m) => m.role === "system"
       );
-      const systemPrompt = buildSystemPrompt(tools, servers, true);
+      const systemPrompt = await buildSystemPrompt(tools, servers, true);
       if (systemMsgIndex >= 0) {
         retryMessages[systemMsgIndex] = {
           role: "system" as const,
@@ -1046,35 +1047,14 @@ function filterRelevantTools(tools?: LLMTool[], taskHint?: string): LLMTool[] {
 }
 
 /**
- * Helper to generate the dynamic user environment context
- * automatically injected into all LLM prompts.
- */
-function getUserEnvironmentContext(): string {
-  const currentTime = new Date().toString();
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const userAgent = typeof navigator !== 'undefined' ? navigator.userAgent : 'Unknown';
-  const language = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
-  
-  return `
-# USER CONTEXT (Auto-Injected)
-- **Current Time:** ${currentTime}
-- **Timezone:** ${timeZone}
-- **Language:** ${language}
-- **System OS:** ${userAgent}
-
-**CRITICAL RULE**: Do NOT blindly append regional Top Level Domains (like .in or .co.uk) to brand names (e.g., guessing amazon.in instead of amazon.com). If you need to navigate to a specific brand or service's website, YOU MUST perform a web search first (e.g., searching for "Croma" on Google or DuckDuckGo) to find their correct official website for the user's region, then navigate to that exact URL.
-`;
-}
-
-/**
  * Build a compact system prompt for sub-agents (~70% smaller than main prompt)
  * Includes essential rules (think tags, autonomous behavior) but removes verbose examples
  */
-function buildSubAgentSystemPrompt(
+async function buildSubAgentSystemPrompt(
   tools?: LLMTool[],
   dynamicRules?: string,
   workspacePath?: string
-): string {
+): Promise<string> {
   // Filter to most relevant tools
   const relevantTools = filterRelevantTools(tools, dynamicRules);
   const toolCount = relevantTools?.length || 0;
@@ -1085,7 +1065,7 @@ function buildSubAgentSystemPrompt(
     return `- **${t.name}**: ${desc}${(t.description || '').length > 60 ? '...' : ''}`;
   }).join('\n') || 'No tools';
 
-  const userContext = getUserEnvironmentContext();
+  const userContext = await getUserEnvironmentContext();
 
   return `You are a focused sub-agent executing a delegated task.
 
@@ -1113,14 +1093,14 @@ ${dynamicRules ? `\n# TASK-SPECIFIC\n${dynamicRules}` : ''}`;
 }
 
 // Build robust but token-efficient system prompt
-function buildSystemPrompt(
+async function buildSystemPrompt(
   tools?: LLMTool[],
   servers?: ServerInfo[],
   useJsonFallback = false,
   dynamicRules?: string,
   isSubAgent = false, // NEW: Flag for lightweight prompt
   workspacePath?: string // Injected workspace path for filesystem scoping
-): string {
+): Promise<string> {
   // Use compact prompt for sub-agents
   if (isSubAgent) {
     return buildSubAgentSystemPrompt(tools, dynamicRules, workspacePath);
@@ -1220,7 +1200,7 @@ Example: "search for nike shoes on Google" requires:
 DO NOT stop after just navigating - complete the entire workflow!`;
   }
 
-  const userContext = getUserEnvironmentContext();
+  const userContext = await getUserEnvironmentContext();
 
   return `You are AI-Worker, an autonomous agent with ${toolCount} tools for browser automation, web navigation, and task execution.${jsonFormatNote}
 
@@ -1423,7 +1403,7 @@ export async function chat(
 
   // Re-build system prompt with current tools and correct fallback setting
   // Sub-agents get a lightweight prompt (~80% smaller)
-  const systemPrompt = buildSystemPrompt(allTools, servers, useJsonFallback, dynamicRules, isSubAgent, workspacePath);
+  const systemPrompt = await buildSystemPrompt(allTools, servers, useJsonFallback, dynamicRules, isSubAgent, workspacePath);
 
   if (isSubAgent) {
     console.log(`[LLM] Using lightweight sub-agent prompt (${systemPrompt.length} chars vs ~4000+ main)`);
