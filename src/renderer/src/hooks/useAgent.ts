@@ -216,9 +216,10 @@ export function useAgent(): UseAgentReturn {
                         },
 
                         // Called by AgentRuntime for every new message (user, assistant, tool).
-                        // We write each message to the store so it appears in the chat UI.
+                        // We write each message to the session so it appears in the chat UI
+                        // even if the user has navigated to another tab.
                         onMessage: (msg: LLMMessage) => {
-                            const { addMessage: storeAddMessage } = useChatStore.getState();
+                            const { addSessionMessage } = useChatStore.getState();
 
                             // Map LLMMessage → store message shape
                             const storeMsg: any = {
@@ -239,12 +240,12 @@ export function useAgent(): UseAgentReturn {
                                 }));
                             }
 
-                            // addMessage returns the new message's ID so we can update it later
-                            const newId = storeAddMessage(storeMsg);
+                            // addSessionMessage returns the new Message object
+                            const newMsg = addSessionMessage(activeSessionId || "default", storeMsg);
                             if (msg.role === "assistant") {
-                                activeAssistantMessageId = newId as string;
+                                activeAssistantMessageId = newMsg.id;
                             }
-                            return newId as string;
+                            return newMsg.id;
                         },
 
                         // Called by AgentRuntime to update an existing message in-place
@@ -263,7 +264,7 @@ export function useAgent(): UseAgentReturn {
                             // The store doesn't have a "tool" role concept — skip role updates
                             if (storeUpdates.role === "tool") delete storeUpdates.role;
 
-                            updateSessionMessage(id, storeUpdates);
+                            updateSessionMessage(activeSessionId || "default", id, storeUpdates);
                         },
                     },
                     reconstructedHistory // Pass reconstructed history as initial context
@@ -289,8 +290,8 @@ export function useAgent(): UseAgentReturn {
                 await runtime.chat(content, attachmentData);
             } catch (error) {
                 console.error("[useAgent] Handler error:", error);
-                const { addMessage: storeAddMessage } = useChatStore.getState();
-                storeAddMessage({
+                const { activeSessionId, addSessionMessage } = useChatStore.getState();
+                addSessionMessage(activeSessionId || "default", {
                     role: "assistant",
                     content: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
                 });
