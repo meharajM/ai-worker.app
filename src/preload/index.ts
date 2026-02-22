@@ -42,6 +42,9 @@ const electronAPI = {
         getVersion: () => ipcRenderer.invoke('app:get-version'),
         getName: () => ipcRenderer.invoke('app:get-name'),
         selectFolder: () => ipcRenderer.invoke('app:select-folder'),
+        getMissingDependencies: () => ipcRenderer.invoke('app:get-missing-dependencies'),
+        getAllDependencies: () => ipcRenderer.invoke('app:get-all-dependencies'),
+        runSetupScript: () => ipcRenderer.invoke('app:run-setup-script'),
     },
 
     // Logging operations
@@ -110,7 +113,7 @@ const electronAPI = {
         readFilePaths: () => {
             const { clipboard } = require('electron')
             const paths: string[] = []
-            
+
             if (process.platform === 'darwin') {
                 const fileUrl = clipboard.read('public.file-url')
                 if (fileUrl) {

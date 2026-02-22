@@ -62,6 +62,13 @@ install_mac() {
     else
         echo "✅ uv already installed ($(uv --version))"
     fi
+    # Install ffmpeg
+    if ! command_exists ffmpeg; then
+        echo "📦 Installing ffmpeg (required for audio processing)..."
+        brew install ffmpeg
+    else
+        echo "✅ ffmpeg already installed"
+    fi
 }
 
 # Function to install on Linux
@@ -118,6 +125,14 @@ install_linux() {
     else
         echo "✅ uv already installed ($(uv --version))"
     fi
+    
+    # Install ffmpeg
+    if ! command_exists ffmpeg; then
+        echo "📦 Installing ffmpeg (required for audio processing)..."
+        $INSTALL_CMD ffmpeg
+    else
+        echo "✅ ffmpeg already installed"
+    fi
 }
 
 # Main installation logic
@@ -140,10 +155,10 @@ esac
 
 echo ""
 echo "✅ All dependencies installed successfully!"
+echo "================================================================"
+echo "🎉 YOU'RE ALL SET! "
 echo ""
-echo "📝 Next steps:"
-echo "  1. Restart your terminal (or run: source ~/.bashrc or source ~/.zshrc)"
-echo "  2. Restart the AI Worker app"
-echo "  3. Enable MarkItDown in Settings → MCP Servers"
-echo ""
-echo "🎉 You're all set!"
+echo "🛑 PLEASE CLOSE THIS TERMINAL WINDOW TO CONTINUE."
+echo "   The AI-Worker app will automatically detect these changes"
+echo "   and dismiss the setup screen."
+echo "================================================================"

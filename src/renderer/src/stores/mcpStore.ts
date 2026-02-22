@@ -323,19 +323,25 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                         } : s
                     )
                 }))
-            } else {
-                throw new Error(result.error || 'Connection failed')
             }
         } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+
             set(state => ({
                 servers: state.servers.map(s =>
                     s.id === id ? {
                         ...s,
                         connected: false,
-                        error: error instanceof Error ? error.message : String(error)
+                        error: errorMessage
                     } : s
                 )
             }))
+
+            // If the process failed to spawn due to missing system tools (e.g. uv, python, node), surface the setup screen
+            if (errorMessage.includes('Environment Setup Needed') || errorMessage.includes('ENOENT')) {
+                window.dispatchEvent(new Event('app:check-dependencies'))
+            }
+
             // Re-throw so UI can catch if needed, but state is already updated
             throw error
         }
