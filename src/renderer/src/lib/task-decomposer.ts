@@ -317,22 +317,33 @@ export function generateSubAgentInstruction(
 
   if (isComparison) {
     return `SUB-AGENT TASK: ${targetContext}
+CRITICAL ROLE: You are a highly specialized sub-agent.
+YOUR EXCLUSIVE TARGET: **${targetContext}**
 
-OBJECTIVE: ${originalRequest}
+You have ONE job: Extract data ONLY for ${targetContext}.
+DO NOT perform generalized searches. DO NOT click links to other websites. 
+If you need to search, append "${targetContext}" to your search query (e.g. "Sony headphones ${targetContext}").
 
-YOUR SCOPE: Focus ONLY on ${targetContext}. Other agents handle: ${allContexts.filter(c => c !== targetContext).join(', ')}
+BACKGROUND CONTEXT (Why you are doing this):
+The main agent is trying to: "${originalRequest}"
+Other agents are already handling: ${allContexts.filter(c => c !== targetContext).join(', ')}. Do not duplicate their work!
+
+EXECUTION RULES:
+1. Navigate directly to ${targetContext} (if it's a website) OR search specifically for your target.
+2. Extract the specifically requested info for ${targetContext}.
+3. Ignore all other websites/retailers in the search results.
 
 OUTPUT REQUIREMENTS:
 - **Structured Bullet Points**: Use a list format for clarity.
 - **Bold Key Terms**: Bold the main item name or key feature (e.g., **Price:** $99).
 - **Concise**: Max 150 words.
 - NO navigation steps or process descriptions.
-- End with: "✓ ${targetContext} complete"
+- End your final message with exactly: "✓ ${targetContext} complete"
 
 Example:
 "- **Dell XPS 13**: $1299, 16GB RAM, ships in 2 days.
 - **Rating**: 4.5/5 stars (2k reviews).
-- ✓ Amazon complete"`;
+- ✓ ${targetContext} complete"`;
   }
 
   return `SUB-AGENT TASK

@@ -739,12 +739,12 @@ export class AgentRuntime implements IAgentClient {
     try {
       let result;
       try {
-        result = await executeToolCall("browser_evaluate", { script });
+        result = await executeToolCall("browser_evaluate", { script, tabId: this.options.tabId });
       } catch (e) {
         console.warn("[AgentRuntime] browser_evaluate failed, trying browser_run_code...");
       }
       if (!result || result.error) {
-        result = await executeToolCall("browser_run_code", { code: script });
+        result = await executeToolCall("browser_run_code", { code: script, tabId: this.options.tabId });
       }
       if (result.error) {
         return `Error scanning page: ${result.error}. Try using browser_snapshot instead if this persists.`;
@@ -813,10 +813,22 @@ export class AgentRuntime implements IAgentClient {
       const tabResult = await browserLock.runExclusive(async () =>
         executeToolCall("new_tab", { url: "about:blank" })
       );
+      // Extract from MCP format: { result: { content: [{ type: 'text', text: '{"tabId": 1}' }] } }
       const resAny = tabResult.result as any;
-      if (resAny?.tabId !== undefined) {
+      if (resAny?.content && Array.isArray(resAny.content) && resAny.content[0]?.text) {
+        try {
+          const parsed = JSON.parse(resAny.content[0].text);
+          if (parsed.tabId !== undefined) {
+            subAgentTabId = parsed.tabId;
+            console.log(`[AgentRuntime] Provisioned tab ${subAgentTabId} for sub-agent`);
+          }
+        } catch (parseErr) {
+          console.warn("[AgentRuntime] Failed to parse new_tab response:", resAny.content[0].text);
+        }
+      } else if (resAny?.tabId !== undefined) {
+        // Fallback in case tool returns raw object instead of standard MCP content array
         subAgentTabId = resAny.tabId;
-        console.log(`[AgentRuntime] Provisioned tab ${subAgentTabId} for sub-agent`);
+        console.log(`[AgentRuntime] Provisioned tab ${subAgentTabId} for sub-agent (raw)`);
       }
     } catch (e) {
       console.warn("[AgentRuntime] Failed to provision tab for sub-agent", e);
