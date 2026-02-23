@@ -11,7 +11,9 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
     }
 
-    const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+    const macPath = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+    const linuxPath = path.join(__dirname, '../node_modules/electron/dist/electron');
+    const electronExecutable = fs.existsSync(macPath) ? macPath : linuxPath;
     const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
 
     const electronApp = await electron.launch({

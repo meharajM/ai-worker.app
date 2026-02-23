@@ -17,8 +17,9 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         }
     }
 
-    const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'); // Mac specific
-    // Add fallback logic if needed, similar to other tests
+    const macPath = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+    const linuxPath = path.join(__dirname, '../node_modules/electron/dist/electron');
+    const electronExecutable = fs.existsSync(macPath) ? macPath : linuxPath;
     const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
 
     console.log('Using electron execPath:', execPath);
