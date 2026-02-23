@@ -18,6 +18,7 @@ import {
 } from "./webllm";
 import { CREATE_PLAN_TOOL } from "./plan_manager";
 import { EXECUTION_PLAN_SCHEMA } from "./agent-protocol";
+import { getUserEnvironmentContext } from "./user-environment";
 import {
   LLMMessage,
   LLMTool,
@@ -780,7 +781,7 @@ async function callOpenAI(
     const systemMsgIndex = requestMessages.findIndex(
       (m) => m.role === "system"
     );
-    const systemPrompt = buildSystemPrompt(tools, servers, true);
+    const systemPrompt = await buildSystemPrompt(tools, servers, true);
     if (systemMsgIndex >= 0) {
       requestMessages[systemMsgIndex] = {
         role: "system" as const,
@@ -840,7 +841,7 @@ async function callOpenAI(
       const systemMsgIndex = retryMessages.findIndex(
         (m) => m.role === "system"
       );
-      const systemPrompt = buildSystemPrompt(tools, servers, true);
+      const systemPrompt = await buildSystemPrompt(tools, servers, true);
       if (systemMsgIndex >= 0) {
         retryMessages[systemMsgIndex] = {
           role: "system" as const,
@@ -1049,11 +1050,11 @@ function filterRelevantTools(tools?: LLMTool[], taskHint?: string): LLMTool[] {
  * Build a compact system prompt for sub-agents (~70% smaller than main prompt)
  * Includes essential rules (think tags, autonomous behavior) but removes verbose examples
  */
-function buildSubAgentSystemPrompt(
+async function buildSubAgentSystemPrompt(
   tools?: LLMTool[],
   dynamicRules?: string,
   workspacePath?: string
-): string {
+): Promise<string> {
   // Filter to most relevant tools
   const relevantTools = filterRelevantTools(tools, dynamicRules);
   const toolCount = relevantTools?.length || 0;
@@ -1064,7 +1065,11 @@ function buildSubAgentSystemPrompt(
     return `- **${t.name}**: ${desc}${(t.description || '').length > 60 ? '...' : ''}`;
   }).join('\n') || 'No tools';
 
+  const userContext = await getUserEnvironmentContext();
+
   return `You are a focused sub-agent executing a delegated task.
+
+${userContext}
 
 ${workspacePath ? `ACTIVE WORKSPACE: ${workspacePath}
 All filesystem operations (fs_*) MUST be performed within this directory.` : `WORKSPACE NOT SELECTED: 
@@ -1088,14 +1093,14 @@ ${dynamicRules ? `\n# TASK-SPECIFIC\n${dynamicRules}` : ''}`;
 }
 
 // Build robust but token-efficient system prompt
-function buildSystemPrompt(
+async function buildSystemPrompt(
   tools?: LLMTool[],
   servers?: ServerInfo[],
   useJsonFallback = false,
   dynamicRules?: string,
   isSubAgent = false, // NEW: Flag for lightweight prompt
   workspacePath?: string // Injected workspace path for filesystem scoping
-): string {
+): Promise<string> {
   // Use compact prompt for sub-agents
   if (isSubAgent) {
     return buildSubAgentSystemPrompt(tools, dynamicRules, workspacePath);
@@ -1195,7 +1200,11 @@ Example: "search for nike shoes on Google" requires:
 DO NOT stop after just navigating - complete the entire workflow!`;
   }
 
+  const userContext = await getUserEnvironmentContext();
+
   return `You are AI-Worker, an autonomous agent with ${toolCount} tools for browser automation, web navigation, and task execution.${jsonFormatNote}
+
+${userContext}
 
 ${workspacePath ? `ACTIVE WORKSPACE: ${workspacePath}
 All filesystem operations (fs_*) MUST be performed within this directory.
@@ -1271,17 +1280,17 @@ ${dynamicRules ? `\n# TASK-SPECIFIC PROTOCOLS\n${dynamicRules}\n` : ''}
 
 # EFFICIENT DISCOVERY & SELECTOR PROTOCOL (CRITICAL)
 - **NO GUESSING**: Never invent selectors like ".product-item" or "#results".
-- **DISCOVERY HIERARCHY**:
-  1. \`get_interactive_elements\` (LOWEST TOKENS): Use this FIRST to see what is clickable (buttons, inputs, links).
-  2. \`scan_page_accessibility\` (LOW TOKENS): Use to read content structure and find text.
-  3. \`get_state(mode="fast")\` (MEDIUM TOKENS): Use if you need a broader text overview.
-  4. \`get_state(mode="vision")\` (HIGH TOKENS): Use *only* if visual layout is confusing or standard tools fail.
+- **NAVIGATE & WEB_SEARCH RETURN CONTENT**: These tools already return page text + interactive elements.
+  Use that output FIRST before calling any additional discovery tools.
+- **READ-ONLY FAST PATH**: For tasks that ONLY require reading a webpage (research, summarizing articles),
+  use \`convert_to_markdown(uri="https://...")\` instead of browser navigation — it's 10x faster, no browser needed.
+  Use Playwright navigate only when you need to INTERACT with the page (click, fill, scroll).
+- **ESCALATION** (only if navigate output isn't enough):
+  1. \`get_interactive_elements\` (LOW TOKENS): More elements beyond the top 15 from navigate.
+  2. \`get_state(mode="fast")\` (MEDIUM TOKENS): Broader element overview.
+  3. \`get_state(mode="vision")\` (HIGH TOKENS): Use *only* as last resort when visual layout is confusing.
 
-- **DYNAMIC SITES**: Amazon, Google, etc. use randomized classes (e.g. "s-result-item-XyZ"). You cannot guess these. You MUST inspect them.
-- **INSPECT BEFORE INTERACT**: 
-  1. Navigate
-  2. Inspect (get_interactive_elements)
-  3. Interact (using discovered selectors)
+- **DYNAMIC SITES**: Amazon, Google, etc. use randomized classes. You MUST use the selectors from navigate output or get_interactive_elements — never guess.
 
 # ERROR HANDLING
 - Element not found? → screenshot() to see actual page, then use correct selector
@@ -1394,7 +1403,7 @@ export async function chat(
 
   // Re-build system prompt with current tools and correct fallback setting
   // Sub-agents get a lightweight prompt (~80% smaller)
-  const systemPrompt = buildSystemPrompt(allTools, servers, useJsonFallback, dynamicRules, isSubAgent, workspacePath);
+  const systemPrompt = await buildSystemPrompt(allTools, servers, useJsonFallback, dynamicRules, isSubAgent, workspacePath);
 
   if (isSubAgent) {
     console.log(`[LLM] Using lightweight sub-agent prompt (${systemPrompt.length} chars vs ~4000+ main)`);

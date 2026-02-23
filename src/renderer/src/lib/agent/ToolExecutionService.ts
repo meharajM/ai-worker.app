@@ -365,7 +365,7 @@ export function formatToolResult(
 
         if (errorMsg.includes("not found") || errorMsg.includes("Timeout")) {
             recoveryHint =
-                "\n\n💡 **Recovery Tip**: The element was not found. Try:\n1. Take a screenshot to see the current page state.\n2. Use `get_state` to list available elements.\n3. Use a different, more general selector (e.g., text-based like `text=\"Submit\"`).\n4. The page might have changed—verify the URL is correct.";
+                "\n\n💡 **Recovery Tip**: Try:\n1. `convert_to_markdown(uri=\"current_page_url\")` for fast content reading (no browser needed)\n2. `get_interactive_elements()` to find clickable elements\n3. `screenshot()` to see the current page state\n4. Use a text-based selector like `text=\"Submit\"` instead";
         } else if (errorMsg.includes("not visible") || errorMsg.includes("hidden")) {
             recoveryHint =
                 "\n\n💡 **Recovery Tip**: The element exists but is hidden. Try:\n1. Scroll the page first (`scroll`).\n2. Wait for animations to complete (`wait`).\n3. Check if a modal or popup is blocking.";
