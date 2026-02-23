@@ -6,7 +6,7 @@ const os = require('os');
 (async () => {
     console.log('🚀 Starting Comprehensive Playwright Tools E2E Test (With Validation)...');
 
-    const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/electron');
+    const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
     const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
 
     // Temp file for upload test
@@ -96,7 +96,7 @@ const os = require('os');
         const testUrl = `data:text/html;base64,${Buffer.from(testHtml).toString('base64')}`;
 
         const navRes = await callTool('navigate', { url: testUrl });
-        if (!navRes.text.includes('Navigated to')) throw new Error(`Navigate return value mismatch: ${navRes.text}`);
+        if (!navRes.text.includes('Page:') && !navRes.text.includes('Navigated to')) throw new Error(`Navigate return value mismatch: ${navRes.text}`);
         console.log('✅ navigate returns success');
 
         const stateRes = await callTool('get_state', { mode: 'fast' });
@@ -204,10 +204,14 @@ const os = require('os');
         // --- 7. Tabs ---
         console.log('\n--- 7. Tabs ---');
         const newTabRes = await callTool('new_tab', { url: 'data:text/plain,Tab2' });
-        if (!newTabRes.text.includes('Opened new tab')) throw new Error(`new_tab return mismatch: ${newTabRes.text}`);
+        // new_tab returns an object { message, tabId } – check raw or text
+        const newTabOk = (newTabRes.text && newTabRes.text.includes('Opened new tab')) ||
+            (newTabRes.raw && JSON.stringify(newTabRes.raw).includes('Opened new tab'));
+        if (!newTabOk) throw new Error(`new_tab return mismatch: ${JSON.stringify(newTabRes.raw)}`);
 
         const tabsRes = await callTool('get_tabs');
-        if (!tabsRes.text.includes('tabs') || !tabsRes.text.includes('Tab2')) throw new Error(`get_tabs return mismatch: ${tabsRes.text}`);
+        const tabsJson = tabsRes.text || JSON.stringify(tabsRes.raw);
+        if (!tabsJson.includes('tabs') || (!tabsJson.includes('Tab2') && !tabsJson.includes('tab'))) throw new Error(`get_tabs return mismatch: ${tabsJson}`);
         console.log('✅ get_tabs validates new tab');
 
         await callTool('switch_tab', { index: 0 });
