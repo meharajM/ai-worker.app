@@ -682,7 +682,39 @@ export class PlaywrightService {
                     if (navError) return { result: null, error: navError }
                     try {
                         await page.goto(safeArgs.url, { waitUntil: 'domcontentloaded' })
-                        return { result: `Navigated to ${safeArgs.url}` }
+
+                        // ── AUTO-EXTRACT: Return page context inline ──────────────
+                        // Eliminates the need for separate get_state/get_interactive_elements calls.
+                        // The LLM gets page content + CTAs in one shot.
+                        const navTitle = await page.title()
+                        const navPageText = await page.evaluate(() => {
+                            return document.body?.innerText?.substring(0, 2000) || ''
+                        }).catch(() => '')
+                        const navElements = await page.evaluate(() => {
+                            const sels = 'a[href],button,input,textarea,select,[role="button"],[role="link"]'
+                            const els = document.querySelectorAll(sels)
+                            const list: string[] = []
+                            let i = 1
+                            els.forEach(el => {
+                                const r = el.getBoundingClientRect()
+                                if (r.width > 0 && r.height > 0 && i <= 15) {
+                                    const t = ((el as HTMLElement).innerText ||
+                                        (el as HTMLInputElement).placeholder || '').substring(0, 40).trim()
+                                    const tag = el.tagName.toLowerCase()
+                                    let sel = tag
+                                    if (el.id) sel = `#${el.id}`
+                                    else if (el.className && typeof el.className === 'string') sel = `.${el.className.split(' ')[0]}`
+                                    list.push(`[${i++}] ${tag}: "${t || '(empty)'}" → ${sel}`)
+                                }
+                            })
+                            return list
+                        }).catch(() => [] as string[])
+
+                        return {
+                            result: `Page: ${navTitle}\nURL: ${page.url()}\n\n` +
+                                `--- Page Content (preview) ---\n${navPageText}\n\n` +
+                                `--- Interactive Elements (${navElements.length}) ---\n${navElements.join('\n')}`
+                        }
                     } catch (e) {
                         // AUTO-FALLBACK: Google Search
                         // If we failed to resolve the name, it might be a typo or a non-url search query
@@ -1467,12 +1499,35 @@ export class PlaywrightService {
                         ? pageText.substring(0, MAX_CHARS) + '\n\n... (truncated)'
                         : pageText
 
+                    // ── Extract clickable result links ──────────────────────
+                    // Gives the LLM direct hrefs to click without needing get_interactive_elements
+                    const searchLinks = await page.evaluate(() => {
+                        const links = document.querySelectorAll('a[href]')
+                        const list: string[] = []
+                        let i = 1
+                        links.forEach(link => {
+                            const r = link.getBoundingClientRect()
+                            const t = (link as HTMLElement).innerText?.substring(0, 60).trim()
+                            const href = (link as HTMLAnchorElement).href
+                            // Filter to meaningful result links (skip nav, ads footers)
+                            if (r.width > 0 && r.height > 0 && t && t.length > 5 && i <= 10 &&
+                                href.startsWith('http') && !href.includes('google.com/search') &&
+                                !href.includes('accounts.google') && !href.includes('support.google')) {
+                                list.push(`[${i++}] "${t}" → ${href}`)
+                            }
+                        })
+                        return list
+                    }).catch(() => [] as string[])
+
                     const pageTitle = await page.title()
                     return {
                         result: `Search results for "${query}" (via ${engine}):\n` +
                             `Page: ${pageTitle}\n` +
                             `URL: ${page.url()}\n\n` +
-                            trimmedText
+                            trimmedText +
+                            (searchLinks.length > 0
+                                ? `\n\n--- Clickable Result Links (${searchLinks.length}) ---\n${searchLinks.join('\n')}`
+                                : '')
                     }
                 }
 
