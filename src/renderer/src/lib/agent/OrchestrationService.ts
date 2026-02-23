@@ -23,7 +23,7 @@
  */
 
 import { chat } from "../llm";
-import { executeToolCall } from "../mcp";
+import { executeToolCall, parseTabIdFromResult } from "../mcp";
 import { generateSubAgentInstruction, type TaskDecomposition } from "../task-decomposer";
 import { type LLMMessage } from "../types";
 import { type AgentRuntimeOptions } from "./types";
@@ -119,17 +119,20 @@ export async function executeParallelSubAgents(
             { context }
         );
 
-        // Provision a dedicated browser tab for isolation
         let subAgentTabId: number | undefined;
         try {
             const { browserLock } = await import("../resource-lock");
             const tabResult = await browserLock.runExclusive(async () =>
                 executeToolCall("new_tab", { url: "about:blank" })
             );
-            const resAny = tabResult.result as any;
-            if (resAny?.tabId !== undefined) {
-                subAgentTabId = resAny.tabId;
+
+            // Extract tabId from the MCP content envelope (or raw fallback)
+            const parsedTabId = parseTabIdFromResult(tabResult);
+            if (parsedTabId !== undefined) {
+                subAgentTabId = parsedTabId;
                 console.log(`[OrchestrationService] Provisioned tab ${subAgentTabId} for sub-agent`);
+            } else {
+                console.warn("[OrchestrationService] new_tab result did not contain a tabId:", tabResult.result);
             }
         } catch (e) {
             console.warn("[OrchestrationService] Failed to provision tab for sub-agent", e);

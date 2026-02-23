@@ -18,6 +18,40 @@ export class PlaywrightService {
     private context: BrowserContext | null = null
     private page: Page | null = null
     private store: Store<Record<string, unknown>>
+    private nextTabId = 1
+    private pagesMap = new Map<number, Page>()
+
+    private registerPage(page: Page): number {
+        for (const [id, p] of this.pagesMap.entries()) {
+            if (p === page) return id
+        }
+        const id = this.nextTabId++
+        this.pagesMap.set(id, page)
+
+        // Auto-cleanup on close
+        page.on('close', () => this.pagesMap.delete(id))
+
+        // Per-page popup isolation: when a page spawns a popup (e.g. target="_blank"),
+        // redirect the originating page to that URL instead of letting an unmanaged
+        // popup tab accumulate. This is scoped per-tab so the main browsing context
+        // (OAuth flows, payment pages, etc.) is NOT affected — only the page that
+        // triggered the popup gets redirected, not all pages globally.
+        page.on('popup', async (popup) => {
+            try {
+                const url = popup.url()
+                // Close the unmanaged popup immediately
+                await popup.close().catch(() => { })
+                // Navigate the originating page to the popup URL (same-tab redirect)
+                if (url && url !== 'about:blank') {
+                    await page.goto(url, { waitUntil: 'domcontentloaded' }).catch(() => { })
+                }
+            } catch {
+                // Silently ignore — popup may already be closed or not navigable
+            }
+        })
+
+        return id
+    }
 
     private constructor() {
         this.store = new Store<Record<string, unknown>>()
@@ -131,11 +165,16 @@ export class PlaywrightService {
                         console.log(`[PlaywrightService] Trying to launch: ${tryBrowser}...`)
                         this.context = await tryLauncher.launchPersistentContext(userDataDir, tryOptions)
 
+                        // Register all existing pages and listen for new ones
+                        this.context.pages().forEach(p => this.registerPage(p))
+                        this.context.on('page', p => this.registerPage(p))
+
                         // Handle unexpected closure
                         this.context.on('close', () => {
                             console.log('[PlaywrightService] Browser context closed')
                             this.context = null
                             this.page = null
+                            this.pagesMap.clear()
                         })
 
                         console.log(`[PlaywrightService] Successfully launched: ${tryBrowser}`)
@@ -158,13 +197,18 @@ export class PlaywrightService {
                     throw lastError || new Error('No browser available. Please install Chrome, Edge, or Firefox.')
                 }
 
-                // Stealth: Remove navigator.webdriver
+                // Stealth: Remove navigator.webdriver fingerprint so automation-detection
+                // scripts don't flag the browser. Applied globally via addInitScript so it
+                // runs on every new page before any JS executes.
+                // NOTE: Popup isolation (target=_blank handling) is done per-page inside
+                // registerPage() via the 'popup' event — NOT here — to avoid breaking
+                // legitimate new-tab flows (OAuth, payment redirects, download links).
                 if (this.context) {
                     await this.context.addInitScript(() => {
                         Object.defineProperty(navigator, 'webdriver', {
                             get: () => undefined,
-                        })
-                    })
+                        });
+                    });
                 }
 
                 // Get the default page or create one
@@ -281,13 +325,15 @@ export class PlaywrightService {
             if (!this.context) await this.ensureBrowser();
             if (!this.context) throw new Error('Browser context not initialized');
 
-            const pages = this.context.pages();
-            if (args.tabId >= 0 && args.tabId < pages.length) {
-                const targetPage = pages[args.tabId];
-                if (targetPage.isClosed()) throw new Error(`Tab ${args.tabId} is closed`);
-                return targetPage;
+            const targetPage = this.pagesMap.get(args.tabId);
+            if (!targetPage) {
+                throw new Error(`Tab ID ${args.tabId} not found (Open tabs: ${this.pagesMap.size})`);
             }
-            throw new Error(`Tab index ${args.tabId} not found (Open tabs: ${pages.length})`);
+            if (targetPage.isClosed()) {
+                this.pagesMap.delete(args.tabId);
+                throw new Error(`Tab ${args.tabId} is closed`);
+            }
+            return targetPage;
         }
 
         // Fallback to default "active" page logic
@@ -1072,17 +1118,16 @@ export class PlaywrightService {
                         await newPage.goto(safeArgs.url, { waitUntil: 'domcontentloaded' })
                     }
                     this.page = newPage // Switch to new tab
-                    const newPages = this.context.pages()
-                    const newTabIndex = newPages.indexOf(newPage)
+                    const newTabIndex = this.registerPage(newPage)
                     return { result: { message: `Opened new tab${safeArgs.url ? ` at ${safeArgs.url}` : ''}`, tabId: newTabIndex } }
 
                 case 'switch_tab':
                     if (!this.context) throw new Error('No browser context')
-                    const pages = this.context.pages()
-                    if (safeArgs.index < 0 || safeArgs.index >= pages.length) {
-                        return { result: null, error: `Tab index ${safeArgs.index} out of range (0-${pages.length - 1})` }
+                    const targetTab = this.pagesMap.get(safeArgs.index)
+                    if (!targetTab) {
+                        return { result: null, error: `Tab ID ${safeArgs.index} not found` }
                     }
-                    this.page = pages[safeArgs.index]
+                    this.page = targetTab
                     await this.page.bringToFront()
                     return { result: `Switched to tab ${safeArgs.index}: ${await this.page.title()}` }
 
@@ -1108,8 +1153,8 @@ export class PlaywrightService {
                 case 'get_tabs':
                     if (!this.context) throw new Error('No browser context')
                     const tabList = await Promise.all(
-                        this.context.pages().map(async (p, i) => ({
-                            index: i,
+                        Array.from(this.pagesMap.entries()).map(async ([id, p]) => ({
+                            index: id,
                             title: await p.title().catch(() => 'Unknown'),
                             url: p.url(),
                             active: p === this.page
@@ -1373,7 +1418,7 @@ export class PlaywrightService {
 
                         // Validate 'click' with selector
                         if (step.action === 'click' && step.selector) {
-                            const check = await this.validateAndCorrectSelector(step.selector, step.text)
+                            const check = await this.validateAndCorrectSelector(step.selector, step.text, page)
                             if (!check.valid) {
                                 if (check.correction === 'click_text') {
                                     // (C) AUTO-FAILOVER: Upgrade to click_text
@@ -1387,9 +1432,9 @@ export class PlaywrightService {
                             }
                         }
 
-                        // Validate 'fill', 'hover', 'wait_for_element' with selector
+                        // Validate 'fill', 'hover', 'wait_for_element', 'type' with selector
                         if (['fill', 'hover', 'wait_for_element', 'type'].includes(step.action) && step.selector) {
-                            const check = await this.validateAndCorrectSelector(step.selector)
+                            const check = await this.validateAndCorrectSelector(step.selector, undefined, page)
                             if (!check.valid) {
                                 validationErrors.push(`Step ${i + 1} (${step.action}) PRECONDITION FAILED: ${check.error} (Did you forget to call get_interactive_elements?)`)
                             }
@@ -1578,17 +1623,18 @@ export class PlaywrightService {
     /**
      * Runtime validation helper: Checks if a selector exists and offers corrections if not.
      */
-    private async validateAndCorrectSelector(selector: string, text?: string): Promise<{ valid: boolean; correction?: string; error?: string }> {
-        if (!this.page) return { valid: false, error: 'Page not initialized' };
+    private async validateAndCorrectSelector(selector: string, text?: string, page?: Page): Promise<{ valid: boolean; correction?: string; error?: string }> {
+        const targetPage = page || this.page;
+        if (!targetPage) return { valid: false, error: 'Page not initialized' };
 
         try {
             // 1. Check if selector exists interactively
-            const exists = await this.page.$(selector).then(res => !!res).catch(() => false);
+            const exists = await targetPage.$(selector).then(res => !!res).catch(() => false);
             if (exists) return { valid: true };
 
             // 2. If text is provided, suggest using text instead (fallback to click_text)
             if (text) {
-                const textExists = await this.page.getByText(text, { exact: false }).isVisible().catch(() => false);
+                const textExists = await targetPage.getByText(text, { exact: false }).isVisible().catch(() => false);
                 if (textExists) {
                     return { valid: false, correction: `click_text`, error: `Selector '${selector}' not found, but text '${text}' is visible.` };
                 }
@@ -1600,7 +1646,7 @@ export class PlaywrightService {
                 selector.match(/^[a-zA-Z0-9\s]+$/);
 
             if (isTextLike) {
-                const textExists = await this.page.getByText(selector, { exact: false }).isVisible().catch(() => false);
+                const textExists = await targetPage.getByText(selector, { exact: false }).isVisible().catch(() => false);
                 if (textExists) {
                     return { valid: false, correction: `click_text`, error: `Selector '${selector}' looks like text, not CSS.` };
                 }
