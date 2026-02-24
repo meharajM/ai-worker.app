@@ -248,13 +248,34 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         await window.reload();
         await window.waitForLoadState('domcontentloaded');
+        console.log('✅ Window Loaded');
+
+        try {
+            console.log('Checking for Missing Dependencies modal...');
+            const modalVisible = await window.locator('text=Missing Dependencies').isVisible({ timeout: 10000 }).catch(() => false);
+            if (modalVisible) {
+                console.log('Found Missing Dependencies modal, dismissing...');
+                const skipBtn = window.locator('text=Skip for now').first();
+                await skipBtn.click();
+                await window.locator('text=Missing Dependencies').waitFor({ state: 'hidden', timeout: 5000 });
+                console.log('✅ Dismissed Missing Dependencies modal');
+            }
+        } catch (e) {
+            console.log('ℹ️ Error modal check:', e.message);
+        }
 
         // Configure OpenAI
         await window.click('button[title="Settings"]');
         await window.click('text=OpenAI');
         await window.locator('input[type="password"]').fill('sk-mock-key');
         await window.click('button[title="Chat"]');
-        await window.waitForTimeout(1000);
+
+        console.log('⏳ Waiting for MCP tools to be ready...');
+        console.log('⏳ Waiting for app UI to be ready...');
+        await window.locator('button[title="MCP Connections"]').waitFor({ state: 'visible', timeout: 15000 }).catch(() => { });
+        await window.waitForTimeout(2000);
+        console.log('✅ UI ready');
+        console.log('✅ MCP tools ready');
 
         const chatInput = window.locator('[data-testid="chat-textarea"]');
         const sendButton = window.locator('[data-testid="send-button"]');

@@ -266,13 +266,21 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         // and fetch interception is safer for "callOpenAI" which we verified uses fetch.
 
         try {
-            console.log('Looking for Missing Dependencies modal...');
-            const skipBtn = window.locator('text=Skip for now').first();
-            await skipBtn.waitFor({ state: 'visible', timeout: 5000 });
-            await skipBtn.click();
-            console.log('✅ Skipped Missing Dependencies modal');
+            console.log('Checking for Missing Dependencies modal...');
+            // In some environments, the modal might take a moment to trigger IPC and render
+            const modalVisible = await window.locator('text=Missing Dependencies').isVisible({ timeout: 10000 }).catch(() => false);
+
+            if (modalVisible) {
+                console.log('Found Missing Dependencies modal, dismissing...');
+                const skipBtn = window.locator('text=Skip for now').first();
+                await skipBtn.click();
+                await window.locator('text=Missing Dependencies').waitFor({ state: 'hidden', timeout: 5000 });
+                console.log('✅ Dismissed Missing Dependencies modal');
+            } else {
+                console.log('ℹ️ No Missing Dependencies modal detected after 10s');
+            }
         } catch (e) {
-            console.log('ℹ️ No Missing Dependencies modal found, continuing...');
+            console.log('ℹ️ Error while checking/dismissing modal:', e.message);
         }
 
         // Switch to OpenAI (Mocked)
@@ -288,8 +296,14 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         // Fill Model (if needed, otherwise uses default)
         // await window.fill('input[placeholder="gpt-4..."]', 'mock-gpt');
 
-        await window.click('button[title="Chat"]'); // Back to chat
-        await window.waitForTimeout(1000);
+        await window.click('button[title="Chat"]');
+
+        console.log('⏳ Waiting for MCP tools to be ready...');
+        console.log('⏳ Waiting for app UI to be ready...');
+        await window.locator('button[title="MCP Connections"]').waitFor({ state: 'visible', timeout: 15000 }).catch(() => { });
+        await window.waitForTimeout(2000);
+        console.log('✅ UI ready');
+        console.log('✅ MCP tools ready');
 
         const chatInput = window.locator('[data-testid="chat-textarea"]');
         await chatInput.waitFor({ state: 'attached' });

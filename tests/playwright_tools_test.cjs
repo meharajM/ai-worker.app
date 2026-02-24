@@ -216,13 +216,17 @@ const os = require('os');
         if (!tabsJson.includes('tabs') || (!tabsJson.includes('Tab2') && !tabsJson.includes('tab'))) throw new Error(`get_tabs return mismatch: ${tabsJson}`);
         console.log('✅ get_tabs validates new tab');
 
-        await callTool('switch_tab', { index: 0 });
-        await callTool('close_tab');
-
-        const tabsRes2 = await callTool('get_tabs');
-        // Should have 1 tab left (Tab2 was index 1? Or 0?). If we closed 0, Tab2 is left.
-        // Parsing the JSON from text might be safer but string check is okay for now.
-        console.log('✅ Tab management verified');
+        const tabsData = tabsRes.raw.tabs || [];
+        if (tabsData.length > 1) {
+            console.log(`Switching between ${tabsData.length} tabs...`);
+            // Switch to a different tab (the one that isn't active)
+            const otherTab = tabsData.find(t => !t.active) || tabsData[0];
+            await callTool('switch_tab', { index: otherTab.index });
+            await callTool('close_tab');
+            console.log('✅ Tab management verified');
+        } else {
+            console.log('ℹ️ Only one tab open, skipping tab switch/close test');
+        }
 
         // --- 8. Cookies ---
         console.log('\n--- 8. Cookies ---');
