@@ -68,17 +68,25 @@ if (-not (Test-CommandExists uv)) {
     Write-Host "✅ uv already installed ($uvVersion)" -ForegroundColor Green
 }
 
+# Install ffmpeg
+if (-not (Test-CommandExists ffmpeg)) {
+    Write-Host "📦 Installing ffmpeg (required for audio processing)..." -ForegroundColor Yellow
+    choco install ffmpeg -y
+} else {
+    Write-Host "✅ ffmpeg already installed" -ForegroundColor Green
+}
+
 # Refresh environment variables
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
 Write-Host ""
 Write-Host "✅ All dependencies installed successfully!" -ForegroundColor Green
+Write-Host "================================================================" -ForegroundColor Cyan
+Write-Host "🎉 YOU'RE ALL SET! " -ForegroundColor Green
 Write-Host ""
-Write-Host "📝 Next steps:" -ForegroundColor Cyan
-Write-Host "  1. Close and reopen PowerShell/Terminal"
-Write-Host "  2. Restart the AI Worker app"
-Write-Host "  3. Enable MarkItDown in Settings → MCP Servers"
-Write-Host ""
-Write-Host "🎉 You're all set!" -ForegroundColor Green
+Write-Host "🛑 PLEASE CLOSE THIS TERMINAL WINDOW TO CONTINUE." -ForegroundColor Yellow
+Write-Host "   The AI-Worker app will automatically detect these changes" -ForegroundColor Yellow
+Write-Host "   and dismiss the setup screen." -ForegroundColor Yellow
+Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host ""
 Read-Host "Press Enter to exit"

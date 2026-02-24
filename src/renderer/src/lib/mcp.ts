@@ -128,23 +128,23 @@ export async function executeToolCall(
 
   // SECURITY: Require workspace for ALL filesystem operations
   if (toolName === 'convert_to_markdown') {
-     const uri = (args?.uri || args?.path) as string;
-     if (uri && typeof uri === 'string') {
-        const isAbsolute = uri.startsWith('/') || uri.match(/^[a-zA-Z]:[\\/]/) || uri.startsWith('file:///');
-        // Check for "file:filename" relative pattern which is problematic
-        const isRelativeFileUri = uri.startsWith('file:') && !uri.startsWith('file:///');
-        
-        if (!isAbsolute || isRelativeFileUri) {
-             return {
-                result: null,
-                error: `CRITICAL ERROR: Relative path detected: '${uri}'. You provided a file name without its full location.
+    const uri = (args?.uri || args?.path) as string;
+    if (uri && typeof uri === 'string') {
+      const isAbsolute = uri.startsWith('/') || uri.match(/^[a-zA-Z]:[\\/]/) || uri.startsWith('file:///');
+      // Check for "file:filename" relative pattern which is problematic
+      const isRelativeFileUri = uri.startsWith('file:') && !uri.startsWith('file:///');
+
+      if (!isAbsolute || isRelativeFileUri) {
+        return {
+          result: null,
+          error: `CRITICAL ERROR: Relative path detected: '${uri}'. You provided a file name without its full location.
 1. The file is NOT in the current working directory.
 2. You MUST search for it in common user folders like 'Documents', 'Downloads', or 'Desktop'.
 3. Use 'search_files' with path: '/Users/suhail/Documents' (or similar) first.
 4. Once found, call this tool again with the ABSOLUTE path.`
-            };
-        }
-     }
+        };
+      }
+    }
   }
 
   if (toolName.startsWith('fs_')) {
@@ -282,6 +282,35 @@ export async function executeToolCall(
 }
 
 
+
+/**
+ * Parses a tabId from a `new_tab` tool result.
+ *
+ * The MCP IPC layer wraps all in-process tool results in the standard MCP
+ * content envelope: `{ result: { content: [{ type: 'text', text: '{"tabId":1}' }] } }`
+ * This utility handles that format plus a raw-object fallback for robustness.
+ *
+ * @param toolResult - The raw result returned by `executeToolCall('new_tab', ...)`
+ * @returns The numeric tabId, or undefined if it cannot be parsed.
+ */
+export function parseTabIdFromResult(toolResult: { result: unknown }): number | undefined {
+  const resAny = toolResult.result as any;
+
+  // Primary path: standard MCP content envelope
+  if (resAny?.content && Array.isArray(resAny.content) && resAny.content[0]?.text) {
+    try {
+      const parsed = JSON.parse(resAny.content[0].text);
+      if (typeof parsed.tabId === 'number') return parsed.tabId;
+    } catch {
+      console.warn('[MCP] parseTabIdFromResult: failed to JSON-parse content[0].text:', resAny.content[0].text);
+    }
+  }
+
+  // Fallback: tool returned raw object (e.g. in tests or non-wrapped contexts)
+  if (typeof resAny?.tabId === 'number') return resAny.tabId;
+
+  return undefined;
+}
 
 export async function setAutoConnect(serverId: string, enabled: boolean): Promise<void> {
   return useMcpStore.getState().setAutoConnect(serverId, enabled);

@@ -27,6 +27,7 @@ import { useAuthStore } from '../stores/authStore'
 import { FEATURE_FLAGS, APP_INFO, VOICE_CONFIG } from '../lib/constants'
 import { isDevelopmentMode } from '../lib/featureFlags'
 import { EnhancedFeatureFlagsPanel } from './EnhancedFeatureFlagsPanel'
+import { SystemDependenciesSettings } from './SystemDependenciesSettings'
 import { AccountSettings } from './settings/AccountSettings'
 import {
     chat,
@@ -1320,8 +1321,8 @@ export function SettingsPanel() {
 
                 {/* About Section */}
                 {activeSection === 'about' && (
-                    <div>
-                        <h3 className="text-xl font-bold mb-6">About</h3>
+                    <div className="space-y-6">
+                        <h3 className="text-xl font-bold">About</h3>
 
                         <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-6 text-center">
                             <div className="w-16 h-16 bg-[#00a896] rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -1340,6 +1341,8 @@ export function SettingsPanel() {
                                 </p>
                             </div>
                         </div>
+
+                        <SystemDependenciesSettings />
                     </div>
                 )}
             </div>
