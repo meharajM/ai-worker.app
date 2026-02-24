@@ -3,138 +3,7 @@
 This document tracks all identified issues in the agent self-healing and execution robustness systems. Each issue is independently fixable and prioritized by severity.
 
 **Last Updated:** 2026-02-12  
-**Status:** 16 Total Issues (3 Critical, 3 High, 10 Medium/Low)
-
----
-
-## 🔥 CRITICAL PRIORITY
-
-### ISSUE #1: No Timeout on Lane Execution
-
-**Severity:** CRITICAL  
-**Impact:** Hung operation blocks entire queue indefinitely  
-**File:** `src/renderer/src/lib/execution-lanes.ts:23-43`
-
-#### Problem Description
-The `LaneQueue.run()` method has no timeout protection. If a single task hangs (e.g., browser navigation to unresponsive site, frozen page), it blocks all subsequent operations in that lane forever.
-
-#### Failure Scenario
-1. Agent calls navigate("https://slow-site.com") → enters BROWSER_SERIAL lane
-2. Navigation hangs indefinitely (network issue, infinite redirect, frozen page)
-3. Lane activeCount = 1, concurrency = 1 → blocks all subsequent browser tools
-4. Agent tries screenshot() → queued forever
-5. Agent tries click() → queued forever
-6. Entire agent frozen, waiting for hung navigation
-
-#### Expected Behavior
-- Default timeout: 60 seconds per operation
-- Configurable timeout per tool type (navigation: 120s, click: 30s, etc.)
-- Timeout error bubbles up to self-healing wrapper
-- Queue processes next task after timeout
-
-#### Implementation Approach
-Use Promise.race pattern with timeout promise. Add timeout parameter to `run()` method, race the task against a timeout promise, and clean up timeout on completion.
-
-#### Implementation Steps
-1. Add `timeout` parameter to `LaneQueue.run()` method
-2. Implement Promise.race pattern with timeout
-3. Update `LaneManager.getLane()` to pass tool-specific timeouts
-4. Add timeout configuration constants (BROWSER_TIMEOUT, FILE_TIMEOUT, etc.)
-5. Test with deliberately slow operations
-
-#### Test Cases
-- [ ] Navigate to slow site → times out after 60s
-- [ ] Click on frozen page → times out after 30s
-- [ ] File read of large file → completes within timeout
-- [ ] Subsequent operations in queue execute after timeout
-
----
-
-### ISSUE #2: Abort Signal Not Propagated to Async Operations
-
-**Severity:** CRITICAL  
-**Impact:** User "Stop" doesn't cancel in-flight operations, causing delays  
-**Files:** `src/renderer/src/lib/agent-runtime.ts` (multiple locations)
-
-#### Problem Description
-The abort signal is checked at specific points in the agent loop but not passed to underlying async operations (LLM calls, tool calls, lane execution). When a user clicks "Stop", operations already in progress continue to completion before the abort is detected.
-
-#### Failure Scenario
-- 0s: User requests task
-- 1s: Agent starts LLM call
-- 5s: User clicks "Stop" → abort signal set
-- 6s: Agent checks signal (Line 415) → not aborted yet, continues
-- 7s: LLM call started (Line 533) → takes 30 seconds
-- 37s: LLM returns
-- 38s: Agent checks signal (Line 527) → NOW detects abort
-- Result: 33 seconds delay after user clicked "Stop"
-
-#### Expected Behavior
-- Abort signal passed to all async operations
-- LLM provider cancels request when signal aborted
-- Tool execution checks signal before/during execution
-- Lane operations cancel when signal aborted
-- Max 1-2 second delay from user click to full stop
-
-#### Implementation Approach
-Add `signal?: AbortSignal` parameter to LaneQueue.run(), add abort event listener in lane execution, pass signal from agent-runtime to lane.run(), add signal checks in all retry loops.
-
-#### Implementation Steps
-1. Add `signal?: AbortSignal` parameter to `LaneQueue.run()`
-2. Add abort event listener in lane execution
-3. Pass signal from agent-runtime to lane.run()
-4. Add signal checks in all retry loops (before and after waits)
-5. Add signal checks before expensive operations
-
-#### Test Cases
-- [ ] User clicks "Stop" during LLM call → cancels within 2s
-- [ ] User clicks "Stop" during navigation → cancels within 2s
-- [ ] User clicks "Stop" during retry wait → cancels immediately
-- [ ] Queued operations are skipped when aborted
-
----
-
-### ISSUE #3: Cumulative Retry Timeout Not Enforced
-
-**Severity:** HIGH  
-**Impact:** Retries can run far longer than intended  
-**File:** `src/renderer/src/lib/agent-runtime.ts:992-1084`
-
-#### Problem Description
-The self-healing wrapper retries operations up to 2 times with delays, but there's no cumulative timeout. A single tool call with lane timeout of 60s can actually take 180s+ with retries (60s + 2s + 60s + 2s + 60s = 184s).
-
-#### Failure Scenario
-- 0s: Attempt 1 starts
-- 60s: Attempt 1 times out (lane timeout)
-- 62s: Wait 2 seconds
-- 64s: Attempt 2 starts
-- 124s: Attempt 2 times out
-- 126s: Wait 2 seconds
-- 128s: Attempt 3 starts
-- 188s: Attempt 3 times out
-- Total: 188 seconds (3 minutes!) for a single tool call
-
-#### Expected Behavior
-- Max total time: 120 seconds across all retry attempts
-- If cumulative time exceeded, fail immediately
-- Adjust individual timeouts to fit within cumulative limit
-
-#### Implementation Approach
-Add `startTime` parameter to track when first attempt started, calculate elapsed time before each retry, adjust timeout based on remaining time, fail fast if insufficient time remaining.
-
-#### Implementation Steps
-1. Add `startTime` parameter to `executeCallWithSelfHealing`
-2. Calculate elapsed time at start of each attempt
-3. Check cumulative timeout before retry
-4. Adjust lane timeout based on remaining time
-5. Log cumulative timeout warnings
-6. Update all retry strategy calls to pass `startTime`
-
-#### Test Cases
-- [ ] Operation fails 3 times → total time ≤ 120s
-- [ ] Remaining time < 5s → fails without retry
-- [ ] Successful retry within time limit → completes
-- [ ] Cumulative timeout logged correctly
+**Status:** 12 Active Issues (0 Critical, 3 High, 9 Medium/Low)
 
 ---
 
@@ -218,52 +87,6 @@ Track `iterationHadSuccess` and `iterationHadError` flags per iteration, update 
 - [ ] 2 tools fail, 1 succeeds → counter resets to 0
 - [ ] 3 consecutive iterations with all failures → bailout triggers
 - [ ] Bailout message mentions iterations, not individual tools
-
----
-
-### ISSUE #6: Abort Signal Not Propagated to Sub-Agents
-
-**Severity:** MEDIUM  
-**Impact:** Sub-agents continue running after user clicks "Stop"  
-**Files:** 
-- `src/renderer/src/lib/agent-runtime.ts:1452` (parallel)
-- `src/renderer/src/lib/agent-runtime.ts:1712` (sequential)
-
-#### Problem Description
-When creating sub-agents (both parallel and sequential), the abort signal from the main agent is not propagated. When a user clicks "Stop", the main agent stops but sub-agents continue executing in the background.
-
-#### Failure Scenario
-- 0s: User starts "Compare prices on Amazon, eBay, Walmart"
-- 1s: Main agent spawns 3 parallel sub-agents
-- 2s: Sub-agents start navigating to each site
-- 5s: User clicks "Stop" → abort signal set
-- 6s: Main agent detects abort → stops immediately
-- 7-30s: Sub-agents still running in background (unwanted work)
-
-#### Expected Behavior
-- Abort signal propagated to all sub-agents
-- When main agent aborts, sub-agents abort within 1-2 seconds
-- Browser tabs closed
-- Resources cleaned up
-
-#### Implementation Approach
-Add `signal: this.options.signal` to sub-agent creation options for both parallel and sequential sub-agents. Add abort checks before and after sub-agent execution.
-
-#### Implementation Steps
-1. Add `signal: this.options.signal` to parallel sub-agent creation (Line 1452)
-2. Add `signal: this.options.signal` to sequential sub-agent creation (Line 1712)
-3. Add abort check before sub-agent execution
-4. Add abort check after sub-agent completion
-5. Update error messages to distinguish abort from failure
-6. Ensure browser tabs are closed on abort
-
-#### Test Cases
-- [ ] User aborts during parallel sub-agent execution → all stop within 2s
-- [ ] User aborts during sequential sub-agent execution → current step stops
-- [ ] Sub-agent browser tabs are closed on abort
-- [ ] Memory entities cleaned up on abort
-
----
 
 ## 🟢 MEDIUM PRIORITY
 
@@ -675,12 +498,8 @@ Implement "Stop on First Failure" approach: add `failed` flag to results, detect
 
 | Issue # | Title | Severity | Impact | Estimated Effort | Priority |
 |---------|-------|----------|--------|------------------|----------|
-| #1 | No Timeout on Lane Execution | CRITICAL | Indefinite hangs | Low (20 lines) | 🔥 Immediate |
-| #2 | Abort Signal Not Propagated | CRITICAL | Stop doesn't work | Medium (50 lines) | 🔥 Immediate |
-| #3 | Cumulative Retry Timeout | HIGH | Retries too long | Low (30 lines) | 🔥 Immediate |
 | #4 | No Per-Iteration Timeout | HIGH | Iteration hangs | Medium (40 lines) | ⚠️ High |
 | #5 | Consecutive Error Counter Bug | MEDIUM | False bailouts | Low (10 lines) | ⚠️ High |
-| #6 | Sub-Agent Abort Propagation | MEDIUM | Zombie sub-agents | Low (5 lines) | ⚠️ High |
 | #7 | Tab Lane Memory Leak | LOW | Memory accumulation | Low (15 lines) | 🟢 Medium |
 | #8 | No Circuit Breaker | MEDIUM | Cascade failures | High (150 lines) | 🟢 Medium |
 | #9 | No Exponential Backoff | MEDIUM | Poor retry strategy | Low (20 lines) | 🟢 Medium |
@@ -692,19 +511,19 @@ Implement "Stop on First Failure" approach: add `failed` flag to results, detect
 | #15 | Sequential No Progress Reporting | LOW | Poor UX | Medium (30 lines) | 🟢 Low |
 | #16 | No Rollback for Failed Steps | LOW | Inconsistent state | High (80 lines) | 🟢 Low |
 
-**Total Issues:** 16  
-**Total Estimated Effort:** ~590 lines of code  
-**Recommended Implementation Order:** #1 → #2 → #3 → #6 → #5 → #13 → #14 → #4 → #9 → #15 → #8 → #7 → #10 → #11 → #12 → #16
+**Total Issues:** 12 Active
+**Total Estimated Effort:** ~490 lines of code remaining  
+**Recommended Implementation Order:** #5 → #13 → #14 → #4 → #9 → #15 → #8 → #7 → #10 → #11 → #12 → #16
 
 ---
 
 ## Next Steps
 
 1. **Review this document** and confirm priorities
-2. **Select issues to fix** (recommend starting with #1, #2, #3)
+2. **Select issues to fix** (recommend starting with #4, #5)
 3. **Create feature branch** for fixes
 4. **Implement fixes** one issue at a time
 5. **Test each fix** with provided test cases
 6. **Submit PR** with references to issue numbers
 
-**Ready to start implementation! Recommend beginning with the 3 critical issues.**
+**Ready to start implementation! Recommend beginning with the high priority issues.**
