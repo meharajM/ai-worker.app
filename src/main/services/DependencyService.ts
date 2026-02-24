@@ -1,6 +1,6 @@
 import { exec } from 'child_process'
 import { promisify } from 'util'
-import { app, dialog, shell } from 'electron'
+import { app, shell } from 'electron'
 
 const execAsync = promisify(exec)
 
@@ -16,7 +16,7 @@ interface DependencyCheckResult {
 export class DependencyService {
     private static instance: DependencyService
 
-    private constructor() {}
+    private constructor() { }
 
     static getInstance(): DependencyService {
         if (!DependencyService.instance) {
@@ -28,12 +28,17 @@ export class DependencyService {
     async checkDependencies(): Promise<DependencyCheckResult[]> {
         const results: DependencyCheckResult[] = []
 
+        // Check Node.js ecosystem (Required for Playwright and other npx-based MCPs)
+        results.push(await this.checkCommand('node', '--version', true))
+        results.push(await this.checkCommand('npm', '--version', true))
+        results.push(await this.checkCommand('npx', '--version', true))
+
         // Check ffmpeg (Critical for MarkItDown audio)
         results.push(await this.checkCommand('ffmpeg', '-version', true))
-        
+
         // Check Python (Required for local MCPs)
         results.push(await this.checkCommand('python3', '--version', true))
-        
+
         // Check uv (Required for uvx)
         results.push(await this.checkCommand('uv', '--version', true))
 
@@ -46,7 +51,7 @@ export class DependencyService {
             // Parse version simplistically
             const version = stdout.split('\n')[0].trim()
             const { stdout: path } = await execAsync(`which ${cmd}`)
-            
+
             return {
                 name: cmd,
                 installed: true,
@@ -64,39 +69,29 @@ export class DependencyService {
         }
     }
 
-    async showMissingDependencyDialog(missing: DependencyCheckResult[]) {
-        if (missing.length === 0) return
+    async getMissingDependencies(): Promise<DependencyCheckResult[]> {
+        const deps = await this.checkDependencies()
+        return deps.filter(d => !d.installed && d.required)
+    }
 
-        const missingNames = missing.map(d => d.name).join(', ')
-        const { response } = await dialog.showMessageBox({
-            type: 'warning',
-            title: 'Missing Dependencies',
-            message: `Some required tools are missing: ${missingNames}`,
-            detail: 'These are needed for full functionality (e.g. converting audio, running local AI tools).\n\nWe have a setup script that can install them for you automatically.',
-            buttons: ['Run Setup Script', 'Ignore'],
-            defaultId: 0,
-            cancelId: 1
-        })
+    async getAllDependencies(): Promise<DependencyCheckResult[]> {
+        return await this.checkDependencies()
+    }
 
-        if (response === 0) {
-            // Determine script path
-            // In dev: scripts/setup-dependencies.sh
-            // In prod: likely bundled or need to instruct user to download
-            const scriptPath = app.isPackaged 
-                ? path.join(process.resourcesPath, 'scripts', 'setup-dependencies.sh')
-                : path.join(app.getAppPath(), 'scripts', 'setup-dependencies.sh')
+    async runSetupScript() {
+        const scriptPath = app.isPackaged
+            ? path.join(process.resourcesPath, 'scripts', 'setup-dependencies.sh')
+            : path.join(app.getAppPath(), 'scripts', 'setup-dependencies.sh')
 
-            
-            // Open terminal with command
-            // macOS
-            if (process.platform === 'darwin') {
-                shell.openExternal(`file://${scriptPath}`) // Simple way to open .sh but might not run it.
-                // Better: Use AppleScript or Terminal.app
-                 require('child_process').exec(`open -a Terminal "${scriptPath}"`)
-            } else {
-                 // Linux/Windows fallback - just open file location
-                 shell.showItemInFolder(scriptPath)
-            }
+        // Open terminal with command
+        if (process.platform === 'darwin') {
+            require('child_process').exec(`open -a Terminal "${scriptPath}"`)
+        } else if (process.platform === 'win32') {
+            const psScriptPath = scriptPath.replace('.sh', '.ps1')
+            require('child_process').exec(`start powershell.exe -ExecutionPolicy Bypass -File "${psScriptPath}"`)
+        } else {
+            // Linux fallback 
+            shell.showItemInFolder(scriptPath)
         }
     }
 }

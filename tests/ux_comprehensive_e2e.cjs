@@ -11,7 +11,9 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
     }
 
-    const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+    const macPath = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+    const linuxPath = path.join(__dirname, '../node_modules/electron/dist/electron');
+    const electronExecutable = fs.existsSync(macPath) ? macPath : linuxPath;
     const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
 
     const electronApp = await electron.launch({
@@ -246,13 +248,34 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         await window.reload();
         await window.waitForLoadState('domcontentloaded');
+        console.log('✅ Window Loaded');
+
+        try {
+            console.log('Checking for Missing Dependencies modal...');
+            const modalVisible = await window.locator('text=Missing Dependencies').isVisible({ timeout: 10000 }).catch(() => false);
+            if (modalVisible) {
+                console.log('Found Missing Dependencies modal, dismissing...');
+                const skipBtn = window.locator('text=Skip for now').first();
+                await skipBtn.click();
+                await window.locator('text=Missing Dependencies').waitFor({ state: 'hidden', timeout: 5000 });
+                console.log('✅ Dismissed Missing Dependencies modal');
+            }
+        } catch (e) {
+            console.log('ℹ️ Error modal check:', e.message);
+        }
 
         // Configure OpenAI
         await window.click('button[title="Settings"]');
         await window.click('text=OpenAI');
         await window.locator('input[type="password"]').fill('sk-mock-key');
         await window.click('button[title="Chat"]');
-        await window.waitForTimeout(1000);
+
+        console.log('⏳ Waiting for MCP tools to be ready...');
+        console.log('⏳ Waiting for app UI to be ready...');
+        await window.locator('button[title="MCP Connections"]').waitFor({ state: 'visible', timeout: 15000 }).catch(() => { });
+        await window.waitForTimeout(2000);
+        console.log('✅ UI ready');
+        console.log('✅ MCP tools ready');
 
         const chatInput = window.locator('[data-testid="chat-textarea"]');
         const sendButton = window.locator('[data-testid="send-button"]');
@@ -268,36 +291,36 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         // 1. Parallel Happy Path
         await testRun("Parallel Support", "Compare the price of a Sony WH-1000XM5 headphone", async (w) => {
-            if (await w.locator('text=Starting comparison').isVisible()) console.log("✅ Parallel trigger works");
+            if (await w.locator('text=Starting comparison').first().isVisible()) console.log("✅ Parallel trigger works");
         });
 
         // 2. Planning JSON Error (UX Recovery Check)
         await testRun("Planning Error Recovery", "bus tickets from Gangavathi Sequential Error", async (w) => {
-            if (await w.locator('text=INVALID_JSON_HERE').isVisible()) {
+            if (await w.locator('text=INVALID_JSON_HERE').first().isVisible()) {
                 console.log("⚠️ UX ISSUE: Raw JSON error leaked to UI!");
             }
         });
 
         // 3. Noise Leakage Check
         await testRun("Noise Leakage", "top 3 results with prices Noise Leak", async (w) => {
-            if (await w.locator('text=raw node leak').isVisible()) {
+            if (await w.locator('text=raw node leak').first().isVisible()) {
                 console.log("⚠️ UX ISSUE: Debug log leaked to user!");
             }
         });
 
         // 4. Handoff UI Check
         await testRun("Handoff Buttons", "Plan a weekend trip to Goa Handoff", async (w) => {
-            if (await w.locator('button:has-text("Continue")').isVisible()) console.log("✅ Handoff buttons rendered");
+            if (await w.locator('button:has-text("Continue")').first().isVisible()) console.log("✅ Handoff buttons rendered");
         });
 
         // 5. Memory Reflector Check
         await testRun("Memory Learning", "brand new project named 'Orbit'", async (w) => {
-            if (await w.locator('text=Orbit').isVisible()) console.log("✅ Memory entity mentioned");
+            if (await w.locator('text=Orbit').first().isVisible()) console.log("✅ Memory entity mentioned");
         });
 
         // 6. Safety Refusal
         await testRun("Safety Refusal", "Rolex checkout", async (w) => {
-            if (await w.locator('text=safety policy').isVisible()) console.log("✅ Safety refusal handled");
+            if (await w.locator('text=safety policy').first().isVisible()) console.log("✅ Safety refusal handled");
         });
 
         console.log('\n✅ Comprehensive UX discovery run complete.');

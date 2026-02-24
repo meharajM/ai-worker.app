@@ -34,9 +34,17 @@ import { useAuthPersistence } from "./hooks/useAuthPersistence";
 import { useSettingsSync } from "./hooks/useSettingsSync";
 import { useAgent } from "./hooks/useAgent";
 import { useLLMStatus } from "./hooks/useLLMStatus";
+import { MissingDependenciesScreen } from "./components/MissingDependenciesScreen";
 
 function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
+  const [dependenciesResolved, setDependenciesResolved] = useState(false);
+
+  useEffect(() => {
+    const triggerCheck = () => setDependenciesResolved(false);
+    window.addEventListener('app:check-dependencies', triggerCheck);
+    return () => window.removeEventListener('app:check-dependencies', triggerCheck);
+  }, []);
 
   // ── Store subscriptions ───────────────────────────────────────────────────
   const {
@@ -73,6 +81,7 @@ function App() {
   return (
     <div className="flex h-screen bg-[#0f1115] text-white font-sans overflow-hidden">
       <CommandPalette />
+      {!dependenciesResolved && <MissingDependenciesScreen onResolved={() => setDependenciesResolved(true)} />}
       <Sidebar currentView={currentView} onViewChange={setCurrentView} />
 
       <div className="flex-1 flex flex-col relative min-w-0">

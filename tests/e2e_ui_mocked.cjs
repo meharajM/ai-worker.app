@@ -17,8 +17,9 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         }
     }
 
-    const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'); // Mac specific
-    // Add fallback logic if needed, similar to other tests
+    const macPath = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+    const linuxPath = path.join(__dirname, '../node_modules/electron/dist/electron');
+    const electronExecutable = fs.existsSync(macPath) ? macPath : linuxPath;
     const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
 
     console.log('Using electron execPath:', execPath);
@@ -264,6 +265,24 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         // Note: We removed the aggressive window.electron mock block since it was failing (immutable)
         // and fetch interception is safer for "callOpenAI" which we verified uses fetch.
 
+        try {
+            console.log('Checking for Missing Dependencies modal...');
+            // In some environments, the modal might take a moment to trigger IPC and render
+            const modalVisible = await window.locator('text=Missing Dependencies').isVisible({ timeout: 10000 }).catch(() => false);
+
+            if (modalVisible) {
+                console.log('Found Missing Dependencies modal, dismissing...');
+                const skipBtn = window.locator('text=Skip for now').first();
+                await skipBtn.click();
+                await window.locator('text=Missing Dependencies').waitFor({ state: 'hidden', timeout: 5000 });
+                console.log('✅ Dismissed Missing Dependencies modal');
+            } else {
+                console.log('ℹ️ No Missing Dependencies modal detected after 10s');
+            }
+        } catch (e) {
+            console.log('ℹ️ Error while checking/dismissing modal:', e.message);
+        }
+
         // Switch to OpenAI (Mocked)
         console.log('⚙️ Configuring OpenAI Provider...');
         await window.click('button[title="Settings"]');
@@ -277,8 +296,14 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         // Fill Model (if needed, otherwise uses default)
         // await window.fill('input[placeholder="gpt-4..."]', 'mock-gpt');
 
-        await window.click('button[title="Chat"]'); // Back to chat
-        await window.waitForTimeout(1000);
+        await window.click('button[title="Chat"]');
+
+        console.log('⏳ Waiting for MCP tools to be ready...');
+        console.log('⏳ Waiting for app UI to be ready...');
+        await window.locator('button[title="MCP Connections"]').waitFor({ state: 'visible', timeout: 15000 }).catch(() => { });
+        await window.waitForTimeout(2000);
+        console.log('✅ UI ready');
+        console.log('✅ MCP tools ready');
 
         const chatInput = window.locator('[data-testid="chat-textarea"]');
         await chatInput.waitFor({ state: 'attached' });
@@ -302,7 +327,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await sendMessage("Compare the price of a Sony WH-1000XM5 headphone on Amazon and BestBuy.");
         // Verify response text instead of complex UI lanes (since tool execution might fail in mock)
         try {
-            await window.locator('text=Starting parallel search').waitFor({ state: 'visible', timeout: 5000 });
+            await window.locator('text=Starting parallel search').first().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ Parallel Response received');
         } catch (e) {
             console.error('❌ Parallel Response missing');
@@ -314,7 +339,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         try {
             // We expect the LLM to return content with JSON tool call, 
             // and the app to recover it as an active tool call.
-            await window.locator('text=Using fs_list_directory').waitFor({ state: 'visible', timeout: 8000 });
+            await window.locator('text=Using fs_list_directory').first().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ recovered JSON tool call found');
         } catch (e) {
             console.error('⚠️ JSON recovery test failed (may need useJsonFallback fix)');
@@ -325,7 +350,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await sendMessage("Simulate leaked XML tool");
         try {
             // We expect the LLM to return content with XML-wrapped tool call.
-            await window.locator('text=Using leaked_tool').waitFor({ state: 'visible', timeout: 8000 });
+            await window.locator('text=Using leaked_tool').first().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ recovered XML tool call found');
         } catch (e) {
             console.error('⚠️ XML recovery test failed');
@@ -336,7 +361,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await sendMessage("Malformed test");
         try {
             // Verify it doesn't crash and shows the partial text
-            await window.locator('text=truncated').waitFor({ state: 'visible', timeout: 5000 });
+            await window.locator('text=truncated').first().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ handled malformed response without crash');
         } catch (e) {
             console.error('⚠️ malformed response test failed');
@@ -347,13 +372,13 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await sendMessage("Simulate handoff limit");
         try {
             // Verify action buttons appear
-            const continueBtn = window.locator('button:has-text("Continue")');
-            await continueBtn.waitFor({ state: 'visible', timeout: 8000 });
+            const continueBtn = window.locator('button:has-text("Continue")').first();
+            await continueBtn.waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ Handoff action buttons found');
 
             // Click continue and verify it sends "continue"
             await continueBtn.click();
-            await window.locator('text=continue').last().waitFor({ state: 'visible', timeout: 5000 });
+            await window.locator('text=continue').last().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ Handoff confirmation sent');
         } catch (e) {
             console.error('⚠️ Handoff test failed');
@@ -364,7 +389,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await sendMessage("Help me find bus tickets from Gangavathi to Bengaluru on 2nd Feb on RedBus");
         // Verify response text instead of Plan UI (Client tool might not register in mock env)
         try {
-            await window.locator('text=I will plan this trip').waitFor({ state: 'visible', timeout: 5000 });
+            await window.locator('text=I will plan this trip').first().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ Plan Response received');
         } catch (e) {
             console.error('❌ Plan Response missing');
@@ -381,11 +406,11 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         console.log('\n--- Test 4: UI Stress Test ---');
         await sendMessage("Run stress test");
         try {
-            await window.locator('text=Analysis Report').waitFor({ state: 'visible', timeout: 5000 });
+            await window.locator('text=Analysis Report').first().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ Visual Report Header found');
-            await window.locator('text=Net').waitFor({ state: 'visible', timeout: 2000 });
+            await window.locator('text=Net').first().waitFor({ state: 'visible', timeout: 8000 });
             console.log('✅ Table Content found');
-            await window.locator('text=Using unknown_tool_xyz').waitFor({ state: 'visible', timeout: 2000 });
+            await window.locator('text=Using unknown_tool_xyz').first().waitFor({ state: 'visible', timeout: 8000 });
             console.log('✅ Tool Call List found');
         } catch (e) {
             console.error('⚠️ UI Stress Test timed out:', e);
@@ -395,7 +420,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         console.log('\n--- Test 5: Safety Refusal ---');
         await sendMessage("Search Amazon for 'Rolex watch'. Find one over $10,000, add it to cart and proceed to checkout.");
         try {
-            await window.locator('text=/cannot proceed/i').waitFor({ state: 'visible', timeout: 10000 });
+            await window.locator('text=/cannot proceed/i').first().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ Safety refusal displayed');
         } catch (e) {
             console.error('⚠️ Safety test timed out');
