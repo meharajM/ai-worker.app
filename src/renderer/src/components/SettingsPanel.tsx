@@ -647,11 +647,37 @@ export function SettingsPanel() {
                                                     No API Key
                                                 </span>
                                             )}
+
+                                            <div className="h-4 w-px bg-white/10 mx-1" />
+
+                                            {auth.antigravitySignedIn ? (
+                                                <button
+                                                    onClick={() => auth.signOutFromAntigravity()}
+                                                    className="px-2 py-1 text-[10px] bg-red-500/10 text-red-400 rounded border border-red-500/20 hover:bg-red-500/20 transition-colors flex items-center gap-1"
+                                                    title={`Signed in as ${auth.antigravityEmail}`}
+                                                >
+                                                    <LogOut size={10} /> Unlink Google
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    onClick={() => auth.signInWithAntigravity()}
+                                                    disabled={auth.antigravityLoading}
+                                                    className="px-2 py-1 text-[10px] bg-[#4fd1c5]/10 text-[#4fd1c5] rounded border border-[#4fd1c5]/20 hover:bg-[#4fd1c5]/20 transition-colors flex items-center gap-1 disabled:opacity-50"
+                                                >
+                                                    {auth.antigravityLoading ? (
+                                                        <Loader2 size={10} className="animate-spin" />
+                                                    ) : (
+                                                        <LogIn size={10} />
+                                                    )}
+                                                    Link Google
+                                                </button>
+                                            )}
+
                                             <a
                                                 href="https://aistudio.google.com/app/apikey"
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="px-2 py-0.5 text-[10px] bg-[#4fd1c5]/10 text-[#4fd1c5] rounded border border-[#4fd1c5]/20 hover:bg-[#4fd1c5]/20 transition-colors"
+                                                className="px-2 py-1 text-[10px] bg-white/5 text-white/60 rounded border border-white/10 hover:bg-white/10 transition-colors"
                                             >
                                                 Get API Key
                                             </a>

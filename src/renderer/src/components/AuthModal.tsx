@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { X, Mail, Lock, User, Github, AlertCircle, Loader2 } from 'lucide-react'
+import { X, Mail, Lock, User, AlertCircle, Loader2, Sparkles, Check } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { AnimatePresence, motion } from 'framer-motion'
 
@@ -15,8 +15,12 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
     const [name, setName] = useState('')
     const [confirmPassword, setConfirmPassword] = useState('')
     const [localError, setLocalError] = useState<string | null>(null)
-    
-    const { signInWithGoogle, signInWithEmail, signUpWithEmail, loading, error: storeError } = useAuthStore()
+
+    const {
+        signInWithGoogle, signInWithEmail, signUpWithEmail,
+        signInWithAntigravity, antigravitySignedIn, antigravityEmail, antigravityLoading,
+        loading, error: storeError
+    } = useAuthStore()
 
     // Reset state when mode changes
     React.useEffect(() => {
@@ -60,10 +64,18 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
         }
     }
 
+    const handleAntigravitySignIn = async () => {
+        try {
+            await signInWithAntigravity()
+        } catch (err) {
+            console.error(err)
+        }
+    }
+
     return (
         <AnimatePresence>
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-                <motion.div 
+                <motion.div
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}
@@ -71,7 +83,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                 >
                     {/* Header */}
                     <div className="relative p-6 border-b border-white/5 bg-gradient-to-r from-[#4fd1c5]/5 to-transparent">
-                        <button 
+                        <button
                             onClick={onClose}
                             className="absolute top-4 right-4 text-white/40 hover:text-white transition-colors"
                         >
@@ -81,8 +93,8 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                             {mode === 'signin' ? 'Welcome Back' : 'Create Account'}
                         </h2>
                         <p className="text-sm text-white/40 mt-1">
-                            {mode === 'signin' 
-                                ? 'Sign in to sync your preferences across devices' 
+                            {mode === 'signin'
+                                ? 'Sign in to sync your preferences across devices'
                                 : 'Join AI-Worker to customize your experience'
                             }
                         </p>
@@ -91,7 +103,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                     <div className="p-6 space-y-6">
                         {/* Store/Local Error */}
                         {(storeError || localError) && (
-                            <motion.div 
+                            <motion.div
                                 initial={{ opacity: 0, y: -10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-2"
@@ -204,6 +216,33 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                             Continue with Google
                         </button>
 
+                        {/* Antigravity sign-in for free Gemini access */}
+                        {antigravitySignedIn ? (
+                            <div className="flex items-center gap-2 p-3 bg-[#4fd1c5]/10 border border-[#4fd1c5]/20 rounded-lg">
+                                <Check size={16} className="text-[#4fd1c5] flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-medium text-[#4fd1c5]">Free Gemini AI enabled</p>
+                                    <p className="text-xs text-white/40 truncate">{antigravityEmail}</p>
+                                </div>
+                            </div>
+                        ) : (
+                            <button
+                                onClick={handleAntigravitySignIn}
+                                disabled={antigravityLoading || loading}
+                                className="w-full flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-[#667eea]/20 to-[#764ba2]/20 border border-[#667eea]/30 text-white/80 rounded-lg font-medium hover:from-[#667eea]/30 hover:to-[#764ba2]/30 hover:text-white transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {antigravityLoading ? (
+                                    <Loader2 size={16} className="animate-spin" />
+                                ) : (
+                                    <Sparkles size={16} className="text-[#667eea]" />
+                                )}
+                                <span>Enable Free Gemini AI</span>
+                            </button>
+                        )}
+                        <p className="text-[10px] text-white/30 text-center -mt-3">
+                            Sign in with Google to access Gemini models without an API key
+                        </p>
+
                         <div className="text-center text-sm">
                             <span className="text-white/40">
                                 {mode === 'signin' ? "Don't have an account?" : "Already have an account?"}
@@ -221,3 +260,4 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
         </AnimatePresence>
     )
 }
+

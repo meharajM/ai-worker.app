@@ -53,6 +53,8 @@ export interface LLMSettings {
   openaiModel?: string;
   geminiApiKey?: string;
   geminiModel?: string;
+  geminiOAuthToken?: string;
+  geminiOAuthHeaders?: Record<string, string>;
   openrouterApiKey?: string;
   openrouterModel?: string;
 }

@@ -3,10 +3,11 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import { useSettingsStore } from './settingsStore'
 import { useMcpStore } from './mcpStore'
 import { FEATURE_FLAGS, RATE_LIMITS } from '../lib/constants'
-import { 
-    signInWithGoogle as firebaseSignIn, 
-    signOutFromFirebase, 
-    onAuthChange, 
+import electron from '../lib/electron'
+import {
+    signInWithGoogle as firebaseSignIn,
+    signOutFromFirebase,
+    onAuthChange,
     initializeFirebase,
     signInWithEmail as firebaseSignInEmail,
     signUpWithEmail as firebaseSignUpEmail,
@@ -33,6 +34,11 @@ interface AuthState {
     error: string | null
     usage: UsageTracking
 
+    // Antigravity OAuth state (for Gemini access without API key)
+    antigravitySignedIn: boolean
+    antigravityEmail: string | null
+    antigravityLoading: boolean
+
     // Actions
     setUser: (user: User | null) => void
     setLoading: (loading: boolean) => void
@@ -42,6 +48,11 @@ interface AuthState {
     signUpWithEmail: (email: string, pass: string, name: string) => Promise<void>
     signOut: () => Promise<void>
     initializeAuthListener: () => Promise<() => void>
+
+    // Antigravity actions
+    signInWithAntigravity: () => Promise<void>
+    signOutFromAntigravity: () => Promise<void>
+    initializeAntigravity: () => Promise<void>
 
     // Rate limiting
     canChat: () => boolean
@@ -66,6 +77,11 @@ export const useAuthStore = create<AuthState>()(
             loading: false,
             error: null,
             usage: getDefaultUsage(),
+
+            // Antigravity OAuth defaults
+            antigravitySignedIn: false,
+            antigravityEmail: null,
+            antigravityLoading: false,
 
             setUser: (user) => set({ user, error: null }),
             setLoading: (loading) => set({ loading }),
@@ -104,7 +120,7 @@ export const useAuthStore = create<AuthState>()(
                 set({ loading: true, error: null })
                 try {
                     const firebaseUser = await firebaseSignInEmail(email, password)
-                     set({
+                    set({
                         user: {
                             uid: firebaseUser.uid,
                             email: firebaseUser.email,
@@ -128,7 +144,7 @@ export const useAuthStore = create<AuthState>()(
                 set({ loading: true, error: null })
                 try {
                     const firebaseUser = await firebaseSignUpEmail(email, password)
-                    
+
                     // Update profile with name
                     if (name) {
                         await updateUserProfile(firebaseUser, { displayName: name })
@@ -145,7 +161,7 @@ export const useAuthStore = create<AuthState>()(
                         loading: false,
                     })
                 } catch (error) {
-                     console.error('Email sign up failed:', error)
+                    console.error('Email sign up failed:', error)
                     set({
                         error: error instanceof Error ? error.message : 'Sign up failed',
                         loading: false
@@ -159,7 +175,11 @@ export const useAuthStore = create<AuthState>()(
 
                 try {
                     await signOutFromFirebase()
-                    set({ user: null, loading: false })
+                    // Also sign out from Antigravity if signed in
+                    try {
+                        await electron.antigravity.signOut()
+                    } catch { /* Antigravity sign-out is best-effort */ }
+                    set({ user: null, loading: false, antigravitySignedIn: false, antigravityEmail: null })
                 } catch (error) {
                     console.error('Sign out failed:', error)
                     set({
@@ -169,21 +189,67 @@ export const useAuthStore = create<AuthState>()(
                 }
             },
 
+            // Antigravity OAuth — sign in for Gemini access without API key
+            signInWithAntigravity: async () => {
+                set({ antigravityLoading: true, error: null })
+                try {
+                    const result = await electron.antigravity.signIn()
+                    set({
+                        antigravitySignedIn: result.signedIn,
+                        antigravityEmail: result.email,
+                        antigravityLoading: false,
+                    })
+                    console.log('[Auth] Antigravity sign-in successful:', result.email)
+                } catch (error) {
+                    console.error('[Auth] Antigravity sign-in failed:', error)
+                    set({
+                        error: error instanceof Error ? error.message : 'Antigravity sign-in failed',
+                        antigravityLoading: false,
+                    })
+                }
+            },
+
+            signOutFromAntigravity: async () => {
+                try {
+                    await electron.antigravity.signOut()
+                    set({ antigravitySignedIn: false, antigravityEmail: null })
+                    console.log('[Auth] Antigravity signed out')
+                } catch (error) {
+                    console.error('[Auth] Antigravity sign-out failed:', error)
+                }
+            },
+
+            // Initialize Antigravity — restore session on app start
+            initializeAntigravity: async () => {
+                try {
+                    const status = await electron.antigravity.initialize()
+                    if (status.signedIn) {
+                        set({
+                            antigravitySignedIn: true,
+                            antigravityEmail: status.email,
+                        })
+                        console.log('[Auth] Antigravity session restored:', status.email)
+                    }
+                } catch (error) {
+                    console.error('[Auth] Antigravity initialization failed:', error)
+                }
+            },
+
             initializeAuthListener: async () => {
                 if (!FEATURE_FLAGS.AUTH_ENABLED) {
                     console.log('[Auth] Feature flag disabled, skipping listener')
-                    return () => {}
+                    return () => { }
                 }
 
                 try {
                     console.log('[Auth] Initializing Firebase...')
                     await initializeFirebase()
                     console.log('[Auth] Firebase initialized, setting up listener...')
-                    
+
                     // Set up auth state listener
                     const unsubscribe = await onAuthChange(async (firebaseUser) => {
                         console.log('[Auth] Auth state changed:', firebaseUser ? 'User Logged In' : 'User Null', firebaseUser?.uid)
-                        
+
                         if (firebaseUser) {
                             const userData = {
                                 uid: firebaseUser.uid,
@@ -192,7 +258,7 @@ export const useAuthStore = create<AuthState>()(
                                 photoURL: firebaseUser.photoURL,
                             }
                             console.log('[Auth] Updating store with user:', userData)
-                            
+
                             // Load scoped secrets/servers
                             try {
                                 await useSettingsStore.getState().loadUserSecrets(firebaseUser.uid)
@@ -207,7 +273,7 @@ export const useAuthStore = create<AuthState>()(
                             })
                         } else {
                             console.log('[Auth] Clearing user from store')
-                            
+
                             // Clear scoped secrets/servers
                             useSettingsStore.getState().clearUserSecrets()
                             useMcpStore.getState().clearUserServers().catch(console.error)
@@ -218,7 +284,7 @@ export const useAuthStore = create<AuthState>()(
                     return unsubscribe
                 } catch (error) {
                     console.error('[Auth] Failed to initialize auth listener:', error)
-                    return () => {}
+                    return () => { }
                 }
             },
 
@@ -302,6 +368,8 @@ export const useAuthStore = create<AuthState>()(
             partialize: (state) => ({
                 user: state.user,
                 usage: state.usage,
+                antigravitySignedIn: state.antigravitySignedIn,
+                antigravityEmail: state.antigravityEmail,
             }),
         }
     )
