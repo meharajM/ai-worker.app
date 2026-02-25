@@ -111,7 +111,7 @@ export function buildGatewayRequest(
     geminiPayload: Record<string, unknown>,
     action = 'generateContent',
 ): GatewayRequest {
-    const endpoint = GATEWAY_ENDPOINTS.daily
+    const endpoint = GATEWAY_ENDPOINTS.prod
 
     return {
         url: `${endpoint}/v1internal:${action}`,
