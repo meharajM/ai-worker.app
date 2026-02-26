@@ -54,7 +54,7 @@ export const LLM_CONFIG = {
     },
     GEMINI: {
         BASE_URL: 'https://generativelanguage.googleapis.com/v1beta',
-        DEFAULT_MODEL: 'gemini-1.5-flash',
+        DEFAULT_MODEL: 'gemini-2.5-flash',
     }
 }
 
