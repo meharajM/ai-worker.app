@@ -117,8 +117,10 @@ export async function chat(
   const preferredProvider = settings?.preferredProvider;
 
   if (preferredProvider === "auto" || !preferredProvider) {
-    // Auto-select: browser > ollama > openai > gemini > openrouter
-    if (providers.browser.available) {
+    // Auto-select: browser ONLY IF already loaded, then ollama, then openai, then gemini, then openrouter
+    // We don't auto-select browser if it's just 'available' (supported) to avoid
+    // triggering large downloads automatically.
+    if (providers.browser.available && providers.browser.isLoaded) {
       provider = "browser";
     } else if (providers.ollama.available) {
       provider = "ollama";
@@ -147,10 +149,19 @@ export async function chat(
     );
   }
 
+  // If browser is selected but not loaded, check if we should auto-load
+  if (provider === 'browser' && !providers.browser.isLoaded) {
+    const isDownloaded = providers.browser.downloadedModels?.includes(settings?.browserModel || '');
+    if (!isDownloaded) {
+      throw new Error(`On-Device model "${settings?.browserModel || 'default'}" is not downloaded. Please go to Settings and click Download.`);
+    }
+  }
+
   let useJsonFallback = provider === 'browser';
   let messagesWithSystem = [...prunedMessages];
   const systemMsgIndex = messagesWithSystem.findIndex((m) => m.role === "system");
 
+  // MERGE default tools with the new CREATE_PLAN_TOOL (and deduplicate)
   const toolMap = new Map<string, LLMTool>();
   toolMap.set(CREATE_PLAN_TOOL.name, CREATE_PLAN_TOOL);
   if (tools) {

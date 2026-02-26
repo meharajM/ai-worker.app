@@ -4,15 +4,20 @@ import { useAuthStore } from '../stores/authStore'
 
 /**
  * Hook to handle Firebase Auth state persistence
- * Ensures the auth listener is initialized exactly once on app mount
+ * Ensures the auth listener is initialized exactly once on app mount.
+ * Also initializes the Antigravity OAuth session (restores tokens from storage).
  */
 export function useAuthPersistence() {
-    const { initializeAuthListener } = useAuthStore()
+    const { initializeAuthListener, initializeAntigravity } = useAuthStore()
 
     useEffect(() => {
         const initAuth = async () => {
-             // initializeAuthListener handles FEATURE_FLAGS check internally
+            // initializeAuthListener handles FEATURE_FLAGS check internally
             const unsubscribe = await initializeAuthListener()
+
+            // Initialize Antigravity OAuth session (restore tokens from storage)
+            await initializeAntigravity()
+
             return unsubscribe
         }
 
@@ -22,5 +27,5 @@ export function useAuthPersistence() {
             // Cleanup subscription on unmount
             unsubscribePromise.then(unsub => unsub && unsub())
         }
-    }, [initializeAuthListener])
+    }, [initializeAuthListener, initializeAntigravity])
 }

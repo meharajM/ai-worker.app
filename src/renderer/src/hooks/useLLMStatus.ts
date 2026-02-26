@@ -87,6 +87,7 @@ export function useLLMStatus(currentView: string): { llmStatus: LLMStatus } {
                     geminiModel: settings.geminiModel,
                     openrouterApiKey: settings.openrouterApiKey,
                     openrouterModel: settings.openrouterModel,
+                    browserModel: settings.browserModel,
                 };
 
                 const providers = await getAvailableProviders(settingsForLLM);
@@ -145,6 +146,7 @@ export function useLLMStatus(currentView: string): { llmStatus: LLMStatus } {
         settings.geminiModel,
         settings.openrouterApiKey,
         settings.openrouterModel,
+        settings.browserModel,
         currentView,
     ]);
 

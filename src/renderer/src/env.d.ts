@@ -95,6 +95,15 @@ interface ElectronAPI {
         openFileLocation: () => Promise<{ success: boolean; error?: string }>
     }
 
+    antigravity?: {
+        initialize: () => Promise<{ signedIn: boolean; email: string | null; projectId: string | null }>
+        signIn: () => Promise<{ signedIn: boolean; email: string | null; projectId: string | null }>
+        getToken: () => Promise<{ token: string | null; headers: Record<string, string> | null }>
+        signOut: () => Promise<{ success: boolean }>
+        getStatus: () => Promise<{ signedIn: boolean; email: string | null; projectId: string | null }>
+        callGateway: (url: string, headers: Record<string, string>, body: string) => Promise<any>
+    }
+
     clipboard: {
         readFilePaths: () => string[]
     }
