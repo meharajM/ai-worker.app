@@ -5,7 +5,7 @@ import electron from '../lib/electron'
 import { saveUserSettings, getUserProfile } from '../lib/firebase'
 
 export type Theme = 'dark' | 'light' | 'system'
-export type LLMProviderType = 'auto' | 'ollama' | 'openai' | 'gemini' | 'openrouter' | 'browser'
+export type LLMProviderType = 'auto' | 'ollama' | 'openai' | 'gemini' | 'openrouter' | 'browser' | 'anthropic' | 'groq'
 export type PlaywrightBrowserType = 'auto' | 'chrome' | 'msedge' | 'firefox' | 'webkit' | 'chromium'
 
 interface SettingsState {
@@ -69,11 +69,11 @@ interface SettingsState {
     setPlaywrightBrowser: (browser: PlaywrightBrowserType) => void
     setPlaywrightHeadless: (headless: boolean) => void
     setFileSystemSafeMode: (enabled: boolean) => void
-    
+
     // Memory Settings
     memoryBackend: 'server-memory' | 'memento-mcp'
     setMemoryBackend: (backend: 'server-memory' | 'memento-mcp') => void
-    
+
     resetToDefaults: () => void
 
     // Sync Actions

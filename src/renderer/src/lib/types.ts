@@ -46,10 +46,10 @@ export interface LLMResponse {
   model: string;
 }
 
-export type LLMProvider = "browser" | "ollama" | "openai" | "gemini" | "openrouter";
+export type LLMProvider = "browser" | "ollama" | "openai" | "gemini" | "openrouter" | "anthropic" | "groq";
 
 export interface LLMSettings {
-  preferredProvider?: "auto" | "ollama" | "openai" | "browser" | "gemini" | "openrouter";
+  preferredProvider?: "auto" | "ollama" | "openai" | "browser" | "gemini" | "openrouter" | "anthropic" | "groq";
   ollamaModel?: string;
   ollamaBaseUrl?: string;
   openaiApiKey?: string;
@@ -61,5 +61,9 @@ export interface LLMSettings {
   geminiOAuthHeaders?: Record<string, string>;
   openrouterApiKey?: string;
   openrouterModel?: string;
+  anthropicApiKey?: string;
+  anthropicModel?: string;
+  groqApiKey?: string;
+  groqModel?: string;
   browserModel?: string;
 }
