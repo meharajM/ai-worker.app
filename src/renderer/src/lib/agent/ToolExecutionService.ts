@@ -156,9 +156,10 @@ export async function executeWithSelfHealing(
     args: Record<string, unknown>,
     tabId: number | undefined,
     workspacePath: string | undefined,
-    signal: AbortSignal | undefined
+    signal: AbortSignal | undefined,
+    isHeadless?: boolean
 ): Promise<{ result: unknown; error?: string }> {
-    return _executeWithRetry(name, args, tabId, workspacePath, signal, 1, Date.now());
+    return _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, 1, Date.now());
 }
 
 async function _executeWithRetry(
@@ -167,6 +168,7 @@ async function _executeWithRetry(
     tabId: number | undefined,
     workspacePath: string | undefined,
     signal: AbortSignal | undefined,
+    isHeadless: boolean | undefined,
     attempt: number,
     startTime: number
 ): Promise<{ result: unknown; error?: string }> {
@@ -192,6 +194,11 @@ async function _executeWithRetry(
         // ensures all browser tool calls from this agent stay in their own tab.
         if (tabId !== undefined && STATEFUL_BROWSER_TOOLS.includes(name)) {
             args = { ...args, tabId };
+        }
+
+        // ── Headless toggle: inject _headless into args ───────────────────────────
+        if (isHeadless) {
+            args = { ...args, _headless: true };
         }
 
         // ── Workspace security: inject workspacePath for filesystem tools ─────────
@@ -245,12 +252,12 @@ async function _executeWithRetry(
                 console.log(`[ToolExecutionService] Context destroyed in ${name}. Retrying in 1s...`);
                 await delay(1000);
                 if (signal?.aborted) return { result: null, error: "Aborted by user" };
-                return _executeWithRetry(name, args, tabId, workspacePath, signal, attempt + 1, startTime);
+                return _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, attempt + 1, startTime);
             }
 
             if (errorStr.includes("Element is not attached") || errorStr.includes("Node is detached")) {
                 console.log(`[ToolExecutionService] Stale element in ${name}. Retrying immediately...`);
-                return _executeWithRetry(name, args, tabId, workspacePath, signal, attempt + 1, startTime);
+                return _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, attempt + 1, startTime);
             }
 
             if (errorStr.includes("Lane timeout")) {

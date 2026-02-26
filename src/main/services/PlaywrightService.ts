@@ -17,6 +17,12 @@ export class PlaywrightService {
     // Browser instance is managed through the context for persistent contexts
     private context: BrowserContext | null = null
     private page: Page | null = null
+    
+    // Headless execution isolated instances
+    private headlessBrowser: any = null
+    private headlessContext: BrowserContext | null = null
+    private headlessPage: Page | null = null
+
     private store: Store<Record<string, unknown>>
     private nextTabId = 1
     private pagesMap = new Map<number, Page>()
@@ -319,7 +325,29 @@ export class PlaywrightService {
         return this.page!
     }
 
+    private async ensureHeadlessPage(): Promise<Page> {
+        if (!this.headlessBrowser) {
+            console.log('[PlaywrightService] Launching invisible headless browser...')
+            this.headlessBrowser = await chromium.launch({
+                headless: true,
+                args: ['--no-sandbox', '--disable-setuid-sandbox']
+            })
+        }
+        if (!this.headlessContext) {
+            this.headlessContext = await this.headlessBrowser.newContext()
+        }
+        if (!this.headlessPage || this.headlessPage.isClosed()) {
+            this.headlessPage = await this.headlessContext!.newPage()
+        }
+        return this.headlessPage
+    }
+
     private async getPage(args: any): Promise<Page> {
+        // Handle headless mode execution request
+        if (args && args._headless) {
+            return this.ensureHeadlessPage();
+        }
+
         // If tabId is explicitly provided, use key-based access
         if (typeof args.tabId === 'number') {
             if (!this.context) await this.ensureBrowser();
@@ -345,6 +373,12 @@ export class PlaywrightService {
             await this.context.close()
             this.context = null
             this.page = null
+        }
+        if (this.headlessBrowser) {
+            await this.headlessBrowser.close()
+            this.headlessBrowser = null
+            this.headlessContext = null
+            this.headlessPage = null
         }
     }
 
@@ -685,6 +719,19 @@ export class PlaywrightService {
                         properties: {
                             timeout: { type: 'number', description: 'Max wait in ms (default: 30000)' }
                         }
+                    }
+                },
+                {
+                    name: 'background_scrape',
+                    description: 'EXTRACTION: Silently opens a URL in a temporary headless browser, extracts data, and closes the browser immediately. Useful for quick fetch operations without disturbing the user\'s visible browser.',
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            url: { type: 'string', description: 'URL to scrape' },
+                            extractType: { type: 'string', enum: ['table', 'list', 'text'], description: 'What to extract: table, list, or text' },
+                            selector: { type: 'string', description: 'Optional CSS selector to target specific area' }
+                        },
+                        required: ['url', 'extractType']
                     }
                 },
                 // Browser turbo/recipe tools — imported from shared schema
@@ -1430,6 +1477,57 @@ export class PlaywrightService {
                 case 'wait_for_navigation':
                     await page.waitForLoadState('networkidle', { timeout: safeArgs.timeout || 30000 })
                     return { result: 'Navigation completed' }
+
+                case 'background_scrape': {
+                    const bgUrlErr = requireParam('url')
+                    if (bgUrlErr) return { result: null, error: bgUrlErr }
+                    const bgTypeErr = requireParam('extractType')
+                    if (bgTypeErr) return { result: null, error: bgTypeErr }
+
+                    console.log(`[PlaywrightService] Starting temp headless browser for background scrape...`)
+                    const tempBrowser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] })
+                    try {
+                        const tempPage = await tempBrowser.newPage()
+                        await tempPage.goto(safeArgs.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
+                        
+                        let data: any = null
+                        if (safeArgs.extractType === 'table') {
+                            data = await tempPage.evaluate((sel: string | undefined) => {
+                                const table = sel ? document.querySelector(sel) : document.querySelector('table')
+                                if (!table) return null
+                                const rows: string[][] = []
+                                table.querySelectorAll('tr').forEach(tr => {
+                                    const cells: string[] = []
+                                    tr.querySelectorAll('th, td').forEach(cell => cells.push((cell as HTMLElement).innerText.trim()))
+                                    if (cells.length > 0) rows.push(cells)
+                                })
+                                return rows
+                            }, safeArgs.selector)
+                        } else if (safeArgs.extractType === 'list') {
+                            data = await tempPage.evaluate((sel: string | undefined) => {
+                                const list = sel ? document.querySelector(sel) : document.querySelector('ul, ol')
+                                if (!list) return null
+                                const items: string[] = []
+                                list.querySelectorAll('li').forEach(li => items.push((li as HTMLElement).innerText.trim()))
+                                return items
+                            }, safeArgs.selector)
+                        } else {
+                            data = await tempPage.evaluate((sel: string | undefined) => {
+                                const el = sel ? document.querySelector(sel) : document.body
+                                return el ? (el as HTMLElement).innerText.trim() : null
+                            }, safeArgs.selector)
+                        }
+                        
+                        if (!data) {
+                            return { result: null, error: `ExtractionError: Could not extract ${safeArgs.extractType} from ${safeArgs.selector || 'page'}.` }
+                        }
+                        return { result: { type: safeArgs.extractType, data } }
+                    } catch (err: any) {
+                        return { result: null, error: err.message || String(err) }
+                    } finally {
+                        await tempBrowser.close()
+                    }
+                }
 
                 case 'browser_action_sequence': {
                     const steps: any[] = safeArgs.steps

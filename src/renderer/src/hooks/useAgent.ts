@@ -43,7 +43,7 @@ export interface UseAgentReturn {
      * @param content - The user's text message.
      * @param attachments - Optional file attachments (Electron exposes `.path`).
      */
-    handleSubmit: (content: string, attachments?: File[]) => Promise<void>;
+    handleSubmit: (content: string, attachments?: File[], isHeadless?: boolean) => Promise<void>;
 
     /**
      * Non-null when AgentRuntime has paused and is waiting for the user to
@@ -98,7 +98,7 @@ export function useAgent(): UseAgentReturn {
      * 9. Always: mark store as done processing
      */
     const handleSubmit = useCallback(
-        async (content: string, attachments?: File[]) => {
+        async (content: string, attachments?: File[], isHeadless?: boolean) => {
             if (!content.trim() && (!attachments || attachments.length === 0)) return;
 
             // Destructure store actions. We call setProcessing(true) first so the
@@ -206,6 +206,7 @@ export function useAgent(): UseAgentReturn {
                         activeSessionId: activeSessionId || "default",
                         workspacePath: activeSession?.workspacePath,
                         settings: settingsForLLM,
+                        isHeadless,
                         // Get the abort signal from the store. The store creates a new
                         // AbortController when setProcessing(true) is called.
                         signal: useChatStore.getState().getAbortSignal() || undefined,

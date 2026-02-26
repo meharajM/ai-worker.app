@@ -553,7 +553,8 @@ export class AgentRuntime implements IAgentClient {
               call.arguments as Record<string, unknown>,
               this.options.tabId,
               this.options.workspacePath,
-              this.options.signal
+              this.options.signal,
+              this.options.isHeadless
             );
             const { resultStr: formatted, isError } = formatToolResult(call.name, rawResult);
             resultStr = formatted;
