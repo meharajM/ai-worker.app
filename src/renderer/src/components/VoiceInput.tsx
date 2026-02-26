@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react'
-import { Mic, MicOff, Send, X, Maximize2, Minimize2, Square, Folder, File as FileIcon, XCircle } from 'lucide-react'
+import { Mic, MicOff, Send, X, Maximize2, Minimize2, Square, Folder, File as FileIcon, XCircle, Eye, EyeOff } from 'lucide-react'
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
 import { useFileDragDrop, generateFileConversionPrompt } from '../hooks/useFileDragDrop'
 import { VoiceVisualizer } from './VoiceVisualizer'
@@ -8,13 +8,14 @@ import { useChatStore } from '../stores/chatStore'
 import electron from '../lib/electron'
 
 interface VoiceInputProps {
-    onSubmit: (message: string, attachments?: File[]) => void
+    onSubmit: (message: string, attachments?: File[], isHeadless?: boolean) => void
     disabled?: boolean
     onAbort?: () => void
 }
 
 export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputProps) {
     const [textInput, setTextInput] = useState('')
+    const [isHeadless, setIsHeadless] = useState(false)
     const [workspacePath, setWorkspacePath] = useState<string | null>(null)
     const [attachments, setAttachments] = useState<File[]>([])
     const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -177,12 +178,12 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
         
         if ((message || hasAttachments) && !disabled) {
             // Pass attachments to onSubmit
-            onSubmit(message, attachments)
+            onSubmit(message, attachments, isHeadless)
             setTextInput('')
             setAttachments([]) // Clear attachments
             resetTranscript()
         }
-    }, [textInput, attachments, disabled, onSubmit, resetTranscript])
+    }, [textInput, attachments, disabled, onSubmit, resetTranscript, isHeadless])
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -318,6 +319,19 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
                         title={workspacePath ? `Workspace: ${workspacePath}` : 'Select workspace folder'}
                     >
                         <Folder size={18} />
+                    </button>
+
+                    {/* Headless Toggle */}
+                    <button
+                        onClick={() => setIsHeadless(!isHeadless)}
+                        disabled={disabled}
+                        className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${isHeadless
+                            ? 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30'
+                            : 'bg-transparent text-white/40 hover:text-white/60 hover:bg-white/5'
+                            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        title={isHeadless ? 'Run in Background (Headless Mode Active)' : 'Run Visibly (Headed Mode Active)'}
+                    >
+                        {isHeadless ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
 
                     {/* Right Button: Send OR Stop Generation */}

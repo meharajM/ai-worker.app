@@ -122,6 +122,12 @@ export interface AgentRuntimeOptions {
      * Used when pre-seeding memory before spawning the agent.
      */
     agentInstanceId?: string;
+
+    /**
+     * If true, execute Playwright browser tools in a headless background context
+     * instead of the visible UI context.
+     */
+    isHeadless?: boolean;
 }
 
 // ── Internal State Types ───────────────────────────────────────────────────────
