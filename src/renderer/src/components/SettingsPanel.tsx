@@ -129,6 +129,7 @@ export function SettingsPanel() {
                     geminiModel: settings.geminiModel,
                     openrouterApiKey: settings.openrouterApiKey,
                     openrouterModel: settings.openrouterModel,
+                    browserModel: settings.browserModel,
                 }
                 if (settings.preferredProvider === 'ollama') {
                     const ollama = await checkOllama(settingsForLLM)
@@ -183,40 +184,11 @@ export function SettingsPanel() {
 
         checkProvidersRef.current = promise
         return promise
-    }, [settings.preferredProvider, settings.ollamaModel, settings.ollamaBaseUrl, settings.openaiApiKey, settings.openaiBaseUrl, settings.openaiModel, settings.geminiApiKey, settings.geminiModel, settings.openrouterApiKey, settings.openrouterModel])
+    }, [settings.preferredProvider, settings.ollamaModel, settings.ollamaBaseUrl, settings.openaiApiKey, settings.openaiBaseUrl, settings.openaiModel, settings.geminiApiKey, settings.geminiModel, settings.openrouterApiKey, settings.openrouterModel, settings.browserModel])
 
-    // Auto-load effect
-    const autoLoadAttempted = useRef(false);
-    useEffect(() => {
-        if (
-            !autoLoadAttempted.current &&
-            providerStatus?.browser?.available &&
-            settings.preferredProvider === 'browser' &&
-            settings.browserModel &&
-            !providerStatus.browser.isLoaded &&
-            !providerStatus.browser.isLoading
-        ) {
-            const isDownloaded = providerStatus.browser.downloadedModels?.includes(settings.browserModel);
-            if (isDownloaded) {
-                autoLoadAttempted.current = true;
-                console.log('[Settings] Auto-loading preferred model:', settings.browserModel);
-                setDownloadingBrowser(true);
-                setDownloadingModelId(settings.browserModel);
-                downloadBrowserModel((p) => setDownloadProgress(p), settings.browserModel)
-                    .then((result) => {
-                        setDownloadingBrowser(false);
-                        setDownloadingModelId(null);
-                        if (result.success) {
-                            checkProviders();
-                        }
-                    });
-            } else {
-                // If preferred model is not downloaded, do nothing (wait for user)
-                // or mark as attempted so we don't try again repeatedly
-                autoLoadAttempted.current = true;
-            }
-        }
-    }, [providerStatus, settings.preferredProvider, settings.browserModel]);
+    // Auto-load effect removed to prevent unintended background downloads.
+    // Models now must be manually loaded or downloaded by the user in the model list.
+
 
     // Synchronize with global background download status
     useEffect(() => {
@@ -647,11 +619,37 @@ export function SettingsPanel() {
                                                     No API Key
                                                 </span>
                                             )}
+
+                                            <div className="h-4 w-px bg-white/10 mx-1" />
+
+                                            {auth.antigravitySignedIn ? (
+                                                <button
+                                                    onClick={() => auth.signOutFromAntigravity()}
+                                                    className="px-2 py-1 text-[10px] bg-red-500/10 text-red-400 rounded border border-red-500/20 hover:bg-red-500/20 transition-colors flex items-center gap-1"
+                                                    title={`Signed in as ${auth.antigravityEmail}`}
+                                                >
+                                                    <LogOut size={10} /> Unlink Google
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    onClick={() => auth.signInWithAntigravity()}
+                                                    disabled={auth.antigravityLoading}
+                                                    className="px-2 py-1 text-[10px] bg-[#4fd1c5]/10 text-[#4fd1c5] rounded border border-[#4fd1c5]/20 hover:bg-[#4fd1c5]/20 transition-colors flex items-center gap-1 disabled:opacity-50"
+                                                >
+                                                    {auth.antigravityLoading ? (
+                                                        <Loader2 size={10} className="animate-spin" />
+                                                    ) : (
+                                                        <LogIn size={10} />
+                                                    )}
+                                                    Link Google
+                                                </button>
+                                            )}
+
                                             <a
                                                 href="https://aistudio.google.com/app/apikey"
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="px-2 py-0.5 text-[10px] bg-[#4fd1c5]/10 text-[#4fd1c5] rounded border border-[#4fd1c5]/20 hover:bg-[#4fd1c5]/20 transition-colors"
+                                                className="px-2 py-1 text-[10px] bg-white/5 text-white/60 rounded border border-white/10 hover:bg-white/10 transition-colors"
                                             >
                                                 Get API Key
                                             </a>
@@ -659,12 +657,14 @@ export function SettingsPanel() {
                                     </div>
                                     <div className="space-y-3">
                                         <div>
-                                            <label className="block text-xs text-white/40 mb-1">API Key</label>
+                                            <label className="block text-xs text-white/40 mb-1">
+                                                API Key {auth.antigravitySignedIn && "(Optional)"}
+                                            </label>
                                             <input
                                                 type="password"
                                                 value={settings.geminiApiKey}
                                                 onChange={(e) => settings.setGeminiApiKey(e.target.value)}
-                                                placeholder="Enter Gemini API Key..."
+                                                placeholder={auth.antigravitySignedIn ? "Linked to Google Account" : "Enter Gemini API Key..."}
                                                 className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm
                                      placeholder-white/30 focus:border-white/20 focus:outline-none"
                                             />
@@ -681,8 +681,8 @@ export function SettingsPanel() {
                                         </div>
                                         <button
                                             onClick={async () => {
-                                                if (!settings.geminiApiKey) {
-                                                    setTestResults({ ...testResults, gemini: 'Please enter an API key first' })
+                                                if (!settings.geminiApiKey && !auth.antigravitySignedIn) {
+                                                    setTestResults({ ...testResults, gemini: 'Please enter an API key or link your Google account first' })
                                                     return
                                                 }
                                                 setTestingGemini(true)
@@ -690,10 +690,13 @@ export function SettingsPanel() {
                                                 try {
                                                     const result = await testGeminiConnection(
                                                         settings.geminiApiKey,
-                                                        settings.geminiModel || 'gemini-1.5-flash'
+                                                        settings.geminiModel || 'gemini-1.5-flash',
+                                                        settings // Pass store to allow gateway credentials fetching
                                                     )
                                                     if (result.success) {
-                                                        const message = `Connection successful! Found ${result.models?.length || 0} models.`
+                                                        const message = result.modelsEndpointAvailable !== false
+                                                            ? `Connection successful! Found ${result.models?.length || 0} models.`
+                                                            : `Connection successful! Using standard gateway models.`
                                                         setTestResults({ ...testResults, gemini: message })
                                                         await checkProviders()
                                                     } else {
@@ -705,7 +708,7 @@ export function SettingsPanel() {
                                                     setTestingGemini(false)
                                                 }
                                             }}
-                                            disabled={testingGemini || !settings.geminiApiKey}
+                                            disabled={testingGemini || (!settings.geminiApiKey && !auth.antigravitySignedIn)}
                                             className="w-full px-4 py-2 bg-[#4fd1c5]/10 hover:bg-[#4fd1c5]/20 text-[#4fd1c5] rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                         >
                                             {testingGemini ? (

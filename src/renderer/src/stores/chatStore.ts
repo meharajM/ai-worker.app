@@ -15,6 +15,8 @@ export interface Message {
     toolCalls?: ToolCall[]
     actions?: MessageAction[]
     attachments?: { name: string; path: string; type: string }[]
+    thought?: string
+    thought_signature?: string
 }
 
 export interface ToolCall {
@@ -59,7 +61,7 @@ interface ChatState {
     setProcessing: (processing: boolean) => void
     abortProcessing: () => void
     getAbortSignal: () => AbortSignal | null
-    
+
     // UI State
     sidebarOpen: boolean
     toggleSidebar: () => void
