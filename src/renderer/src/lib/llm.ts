@@ -29,6 +29,11 @@ import {
   LLMContentPart
 } from "./types";
 import { pruneContext } from "./dcp";
+import {
+  checkGemini,
+  testGeminiConnection,
+  callGemini,
+} from './gemini-provider';
 
 export {
   getWebLLMStatus,
@@ -48,6 +53,8 @@ export {
   type LLMProvider,
   type LLMSettings
 };
+
+export { testGeminiConnection, checkGemini };
 
 interface ProviderStatus {
 
@@ -92,31 +99,9 @@ async function getOpenAISettings(
   return { apiKey, baseUrl, model };
 }
 
-// Get Gemini settings from store or use defaults
-// Also fetches Antigravity OAuth credentials if available (for no-API-key usage)
-async function getGeminiSettings(
-  settings?: LLMSettings
-): Promise<{
-  apiKey: string;
-  baseUrl: string;
-  model: string;
-  antigravity: import('./antigravity-gateway').AntigravityCredentials | null;
-}> {
-  const electron = (await import("./electron")).default;
-  const { getAntigravityCredentials } = await import('./antigravity-gateway');
-
-  const apiKey =
-    settings?.geminiApiKey ||
-    (await electron.secure.get("gemini_api_key")).value ||
-    "";
-  const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
-  const model = settings?.geminiModel || LLM_CONFIG.GEMINI.DEFAULT_MODEL;
-
-  // Try to get Antigravity credentials (higher rate limits, no API key needed)
-  const antigravity = await getAntigravityCredentials();
-
-  return { apiKey, baseUrl, model, antigravity };
-}
+// ── Gemini settings/check/test/call are in gemini-provider.ts ───────────────
+// All Gemini and Antigravity gateway logic has been extracted to avoid
+// merge conflicts when the Gemini subsystem changes independently.
 
 // Get OpenRouter settings from store or use defaults
 async function getOpenRouterSettings(
@@ -420,105 +405,7 @@ export async function checkOpenRouter(
   return checkOpenAI(settings, "openrouter");
 }
 
-// Check if Gemini is configured and available
-export async function checkGemini(
-  settings?: LLMSettings
-): Promise<ProviderStatus> {
-  const { apiKey, model, antigravity } = await getGeminiSettings(settings);
-
-  // Available if we have either Antigravity credentials or an API key
-  if (!apiKey && !antigravity) {
-    return { available: false, error: "Sign in with Google or set Gemini API Key" };
-  }
-
-  // If using Antigravity OAuth, skip the models list check (the gateway doesn't
-  // expose a /models endpoint). Show the list of supported gateway models.
-  if (antigravity && !apiKey) {
-    const { SUPPORTED_GATEWAY_MODELS } = await import('./antigravity-gateway');
-    const models = Array.from(SUPPORTED_GATEWAY_MODELS);
-    return {
-      available: true,
-      model: models.includes(model as any) ? model : models[0],
-      models: models,
-      modelsEndpointAvailable: false,
-    };
-  }
-
-  try {
-    const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
-    const response = await fetch(`${baseUrl}/models?key=${apiKey}`);
-
-    if (response.ok) {
-      const data = await response.json();
-      const models = (data.models || [])
-        .filter((m: { name: string }) => m.name.includes("gemini"))
-        .map((m: { name: string }) => m.name.split("/").pop())
-        .filter(Boolean) as string[];
-
-      return {
-        available: true,
-        model: models.find(m => m === model) || models[0] || model,
-        models: models,
-        modelsEndpointAvailable: true,
-      };
-    }
-    return {
-      available: true,
-      model: model,
-      models: [model],
-      modelsEndpointAvailable: false,
-      error: "Could not fetch Gemini models list",
-    };
-  } catch (error) {
-    return {
-      available: true,
-      model: model,
-      models: [model],
-      modelsEndpointAvailable: false,
-    };
-  }
-}
-
-// Test Gemini connection and fetch models
-export async function testGeminiConnection(
-  apiKey: string,
-  model: string
-): Promise<{
-  success: boolean;
-  error?: string;
-  models?: string[];
-  modelsEndpointAvailable?: boolean;
-}> {
-  try {
-    const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
-    const response = await fetch(`${baseUrl}/models?key=${apiKey}`);
-
-    if (response.ok) {
-      const data = await response.json();
-      const models = (data.models || [])
-        .filter((m: { name: string }) => m.name.includes("gemini"))
-        .map((m: { name: string }) => m.name.split("/").pop())
-        .filter(Boolean) as string[];
-
-      return {
-        success: true,
-        models,
-        modelsEndpointAvailable: true,
-      };
-    } else {
-      const error = await response.json().catch(() => ({}));
-      return {
-        success: false,
-        error: error.error?.message || "Connection failed",
-      };
-    }
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Connection failed",
-    };
-  }
-}
+// checkGemini and testGeminiConnection live in gemini-provider.ts
 
 // Test OpenAI connection and fetch models
 export async function testOpenAIConnection(
@@ -696,12 +583,19 @@ async function callBrowserLLM(
 ): Promise<LLMResponse> {
   try {
     const status = getWebLLMStatus();
+    const modelId = settings?.browserModel || status.currentModel || WEBLLM_MODELS[0].id;
 
     // Check if model is loaded
-    if (!status.isLoaded) {
-      console.log('[WebLLM] Model not loaded, attempting to load...');
-      await loadWebLLMModel();
+    if (!status.isLoaded || status.currentModel !== modelId) {
+      // Safety check: Don't auto-download in chat
+      if (!status.downloadedModels.includes(modelId)) {
+        throw new Error(`Model ${modelId} not downloaded. Please download it in Settings first.`);
+      }
+
+      console.log(`[WebLLM] Model not loaded or different, attempting to load: ${modelId}`);
+      await loadWebLLMModel(modelId);
     }
+
 
     // Don't pass tools to WebLLM - the system prompt already contains tool definitions
     // Models will output JSON tool calls in their response content
@@ -1368,8 +1262,10 @@ export async function chat(
   const preferredProvider = settings?.preferredProvider;
 
   if (preferredProvider === "auto" || !preferredProvider) {
-    // Auto-select: try browser first (if enabled), then ollama, then openai
-    if (providers.browser.available) {
+    // Auto-select: try browser ONLY IF already loaded, then ollama, then openai
+    // We don't auto-select browser if it's just 'available' (supported) to avoid
+    // triggering large downloads automatically.
+    if (providers.browser.available && providers.browser.isLoaded) {
       provider = "browser";
     } else if (providers.ollama.available) {
       provider = "ollama";
@@ -1396,6 +1292,18 @@ export async function chat(
     throw new Error(
       "No LLM provider available. Please enable a provider (Browser LLM, Ollama, OpenAI, Gemini, or OpenRouter) and configure it appropriately."
     );
+  }
+
+  // If browser is selected but not loaded, check if we should auto-load
+  if (provider === 'browser' && !providers.browser.isLoaded) {
+    const isDownloaded = providers.browser.downloadedModels?.includes(settings?.browserModel || '');
+    if (!isDownloaded) {
+      throw new Error(`On-Device model "${settings?.browserModel || 'default'}" is not downloaded. Please go to Settings and click Download.`);
+    }
+    // If downloaded but not loaded, we can allow auto-loading (usually fast)
+    // but the user requirement is "only when clicks on download".
+    // However, if it's already on disk, 'load' is what happens.
+    // Let's allow auto-load if downloaded, but the chat function handles the callBrowserLLM which does the load.
   }
 
   // Try to detect if we need JSON fallback (will be handled in callOpenAI if error occurs)
@@ -1468,187 +1376,7 @@ export async function chat(
   }
 }
 
-// Gemini specific caller
-async function callGemini(
-  messages: LLMMessage[],
-  tools?: LLMTool[],
-  settings?: LLMSettings,
-  abortSignal?: AbortSignal
-): Promise<LLMResponse> {
-  const { apiKey, model, antigravity } = await getGeminiSettings(settings);
-  const { buildGatewayRequest, unwrapGatewayResponse, sanitizeToolSchema } = await import('./antigravity-gateway');
-  const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
-
-  // Create a map of tool_call_id to function name
-  const toolIdToName = new Map<string, string>();
-  messages.forEach(m => {
-    if (m.role === 'assistant' && m.tool_calls) {
-      m.tool_calls.forEach((tc: any) => {
-        if (tc.id && tc.function?.name) {
-          toolIdToName.set(tc.id, tc.function.name);
-        }
-      });
-    }
-  });
-
-  // Convert messages to Gemini format, including tool history
-  // valid roles: 'user', 'model'
-  const contents: any[] = [];
-  const validMessages = messages.filter(m => m.role !== 'system');
-
-  for (const m of validMessages) {
-    let role: 'user' | 'model' | null = null;
-    if (m.role === 'assistant') role = 'model';
-    if (m.role === 'user' || m.role === 'tool') role = 'user';
-    if (!role) continue;
-
-    const parts: any[] = [];
-
-    if (m.role !== 'tool' && m.content) {
-      if (typeof m.content === 'string') {
-        parts.push({ text: m.content });
-      } else {
-        m.content.forEach(part => {
-          if (part.type === 'text') {
-            parts.push({ text: part.text });
-          } else if (part.type === 'image_url') {
-            const matches = part.image_url.url.match(/^data:([^;]+);base64,(.+)$/);
-            if (matches) {
-              parts.push({
-                inline_data: {
-                  mime_type: matches[1],
-                  data: matches[2]
-                }
-              });
-            }
-          }
-        });
-      }
-    }
-
-    // Handle assistant tool calls
-    if (m.role === 'assistant' && (m as any).tool_calls) {
-      (m as any).tool_calls.forEach((tc: any) => {
-        parts.push({
-          functionCall: {
-            name: tc.function.name,
-            args: typeof tc.function.arguments === 'string'
-              ? (() => {
-                try {
-                  return safeParseJSON(tc.function.arguments);
-                } catch (e) {
-                  console.warn(`Failed to parse Gemini tool arguments for ${tc.function.name}:`, tc.function.arguments);
-                  return { _parse_error: "Invalid JSON arguments" };
-                }
-              })()
-              : tc.function.arguments
-          }
-        });
-      });
-    }
-
-    // Handle tool results
-    if (m.role === 'tool') {
-      const resultText = typeof m.content === 'string'
-        ? m.content
-        : Array.isArray(m.content)
-          ? extractTextForLegacyProviders(m.content)
-          : JSON.stringify(m.content ?? '');
-
-      // Resolve name from ID if not present
-      const fnName = (m as any).name || (m.tool_call_id ? toolIdToName.get(m.tool_call_id) : 'unknown_tool');
-
-      parts.push({
-        functionResponse: {
-          name: fnName,
-          response: { result: resultText }
-        }
-      });
-    }
-
-    // Merge logic: If current message has same role as previous, merge parts
-    if (parts.length === 0) continue;
-
-    if (contents.length > 0 && contents[contents.length - 1].role === role) {
-      contents[contents.length - 1].parts.push(...parts);
-    } else {
-      contents.push({ role, parts });
-    }
-  }
-
-  const systemMessage = messages.find(m => m.role === 'system');
-  const systemInstructionText = systemMessage ? extractTextForLegacyProviders(systemMessage.content) : undefined;
-
-  // Build tool definitions (sanitize schemas for gateway compatibility)
-  const toolConfig = tools && tools.length > 0 ? {
-    function_declarations: tools.map(t => ({
-      name: t.name,
-      description: t.description,
-      parameters: sanitizeToolSchema(t.parameters)
-    }))
-  } : undefined;
-
-  const geminiPayload: Record<string, unknown> = {
-    contents,
-    systemInstruction: systemInstructionText ? { parts: [{ text: systemInstructionText }] } : undefined,
-    tools: toolConfig ? [{ function_declarations: toolConfig.function_declarations }] : undefined,
-    generationConfig: {
-      temperature: 0.7,
-      maxOutputTokens: 2048,
-    }
-  };
-
-  // Route: Antigravity gateway (OAuth) → standard Gemini API (API key) → error
-  let data: any;
-  if (antigravity) {
-    // Antigravity gateway — higher rate limits, no API key needed.
-    // Proxy through main process to allow setting IDE-specific User-Agent.
-    const gw = buildGatewayRequest(antigravity, model, geminiPayload);
-    console.log('[callGemini] Using Antigravity gateway proxy');
-    const result = await (await import('./electron')).default.antigravity.callGateway(
-      gw.url,
-      gw.headers,
-      gw.body
-    );
-    data = unwrapGatewayResponse(result);
-  } else if (apiKey) {
-    // Fallback: standard Gemini API with API key (uses browser fetch)
-    const fetchUrl = `${baseUrl}/models/${model}:generateContent?key=${apiKey}`;
-    const fetchHeaders = { 'Content-Type': 'application/json' };
-    const fetchBody = JSON.stringify(geminiPayload);
-
-    const response = await fetch(fetchUrl, {
-      method: 'POST',
-      headers: fetchHeaders,
-      signal: abortSignal,
-      body: fetchBody
-    });
-
-    if (!response.ok) {
-      const errorDetails = await response.json().catch(() => ({}));
-      throw new Error(`Gemini API error: ${response.statusText}. ${JSON.stringify(errorDetails)}`);
-    }
-
-    data = await response.json();
-  } else {
-    throw new Error('No Gemini authentication available. Sign in with Google or set a Gemini API key.');
-  }
-
-  const candidate = data.candidates?.[0];
-  const content = candidate?.content?.parts?.[0]?.text || "";
-  const toolCalls = candidate?.content?.parts?.filter((p: any) => p.functionCall).map((p: any) => ({
-    id: `gemini-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-    name: p.functionCall.name,
-    arguments: ensureRecord(p.functionCall.args)
-  }));
-
-  return {
-    content,
-    toolCalls: toolCalls && toolCalls.length > 0 ? toolCalls : undefined,
-    provider: 'gemini',
-    model: model
-  };
-}
+// callGemini lives in gemini-provider.ts
 
 // Load WebLLM model (download if needed)
 export async function downloadBrowserModel(

@@ -199,6 +199,10 @@ export const useAuthStore = create<AuthState>()(
                         antigravityEmail: result.email,
                         antigravityLoading: false,
                     })
+                    // When user links Google/Gemini, set it as default as requested
+                    if (result.signedIn) {
+                        useSettingsStore.getState().setPreferredProvider('gemini')
+                    }
                     console.log('[Auth] Antigravity sign-in successful:', result.email)
                 } catch (error) {
                     console.error('[Auth] Antigravity sign-in failed:', error)

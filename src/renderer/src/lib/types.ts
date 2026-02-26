@@ -16,6 +16,8 @@ export interface LLMMessage {
   name?: string; // For Gemini/OpenAI tool names
   actions?: MessageAction[]; // For button-based interactions
   attachments?: { name: string; path: string; type: string }[]; // User-uploaded files
+  thought?: string; // Gemini 2.0 reasoning — must be echoed back in subsequent turns
+  thought_signature?: string; // Gemini tool-call integrity token — required to avoid 400 errors
 }
 
 export interface LLMTool {
@@ -38,6 +40,8 @@ export interface LLMResponse {
     name: string;
     arguments: Record<string, unknown>;
   }[];
+  thought?: string;
+  thought_signature?: string;
   provider: string;
   model: string;
 }
@@ -57,4 +61,5 @@ export interface LLMSettings {
   geminiOAuthHeaders?: Record<string, string>;
   openrouterApiKey?: string;
   openrouterModel?: string;
+  browserModel?: string;
 }

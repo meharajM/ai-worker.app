@@ -149,6 +149,10 @@ export function useAgent(): UseAgentReturn {
                     const msg: LLMMessage = {
                         role: m.role as "user" | "assistant" | "system",
                         content: m.content,
+                        // Preserve Gemini 2.0 thought signatures for tool-call correctness.
+                        // Without this, Gemini 400s with "missing thought_signature".
+                        ...(m.thought ? { thought: m.thought } : {}),
+                        ...(m.thought_signature ? { thought_signature: m.thought_signature } : {}),
                     };
 
                     // Attach tool_calls if this message triggered any tool executions
@@ -239,6 +243,11 @@ export function useAgent(): UseAgentReturn {
                                     arguments: tc.function.arguments,
                                 }));
                             }
+
+                            // Persist thought/thought_signature so they are included in the
+                            // next API call to Gemini — required for tool-calling with reasoning.
+                            if (msg.thought) storeMsg.thought = msg.thought;
+                            if (msg.thought_signature) storeMsg.thought_signature = msg.thought_signature;
 
                             // addSessionMessage returns the new Message object
                             const newMsg = addSessionMessage(activeSessionId || "default", storeMsg);

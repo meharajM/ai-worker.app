@@ -19,6 +19,8 @@
         "test:playwright": "node tests/playwright_tools_test.cjs",
         "test:speech": "node tests/speech_e2e.cjs",
         "clean": "rm -rf out dist",
+        "clean:state": "rm -rf ~/Library/Application\\ Support/AI-Worker",
+        "dev:clean": "npm run clean && rm -rf node_modules/.vite tsconfig.tsbuildinfo && npm run clean:state && npm run dev",
         "check:wine": "command -v wine >/dev/null 2>&1 || { echo >&2 'Error: Wine is required for Windows builds on Linux. Please run ./install_build_deps.sh to install it.'; exit 1; }",
         "rebuild:mac": "npm run clean && npm run build && electron-builder --mac",
         "rebuild:mac:intel": "npm run clean && npm run build && electron-builder --mac --x64",
