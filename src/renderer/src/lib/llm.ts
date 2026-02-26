@@ -70,7 +70,7 @@ export {
  */
 export async function getAvailableProviders(
   settings?: LLMSettings
-): Promise<Record<LLMProvider, ProviderStatus>> {
+): Promise<{ browser: ProviderStatus; ollama: ProviderStatus; openai: ProviderStatus; gemini: ProviderStatus; openrouter: ProviderStatus }> {
   const [webLLM, ollama, openai, gemini, openrouter] = await Promise.all([
     getWebLLMStatus(),
     checkOllama(settings),

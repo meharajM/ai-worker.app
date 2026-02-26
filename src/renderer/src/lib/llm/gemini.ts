@@ -1,4 +1,5 @@
 import { LLMMessage, LLMSettings, LLMTool, LLMResponse } from "../types";
+import type { AntigravityCredentials } from "../antigravity-gateway";
 import { ProviderStatus } from "./types";
 import { LLM_CONFIG } from "../constants";
 import { extractTextForLegacyProviders, ensureRecord, safeParseJSON } from "./utils";
@@ -11,7 +12,7 @@ export async function getGeminiSettings(settings?: LLMSettings): Promise<{
   apiKey: string;
   baseUrl: string;
   model: string;
-  antigravity: any;
+  antigravity: AntigravityCredentials | null;
 }> {
   const electron = (await import("../electron")).default;
   const { getAntigravityCredentials } = await import("../antigravity-gateway");
