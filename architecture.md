@@ -77,6 +77,7 @@ graph LR
         LLMHandlers[llm.ts<br/>LLM Placeholder]
         StoreHandlers[store.ts<br/>Storage Operations]
         SpeechHandlers[speech.ts<br/>Speech Operations]
+        AntigravityHandlers[antigravity.ts<br/>OAuth & Gateway]
     end
 
     App --> IPC
@@ -85,9 +86,11 @@ graph LR
     IPC --> LLMHandlers
     IPC --> StoreHandlers
     IPC --> SpeechHandlers
+    IPC --> AntigravityHandlers
     MCPHandlers --> MCP
     MCPHandlers --> Playwright
     SpeechHandlers --> Speech
+    AntigravityHandlers --> AntigravityAuthService[AntigravityAuthService]
     App --> Env
 ```
 
@@ -96,6 +99,7 @@ graph LR
 - Window management and lifecycle
 - IPC handler registration
 - MCP server connections (Stdio/SSE)
+- Antigravity OAuth flow & Gateway access
 - Speech Model Management (Download/Serving)
 - System-level operations (file system, shell)
 - Environment setup (PATH fixing, ESM compatibility)
@@ -170,6 +174,7 @@ graph TB
         MCPLib[mcp.ts]
         ElectronLib[electron.ts]
         VoskLib[vosk.ts]
+        ThinkFilter[thinkBlockFilter.ts]
         Constants[constants.ts]
     end
 
@@ -603,6 +608,14 @@ graph TD
 - **prompts.ts**: System prompt generation and tool filtering.
 - **utils.ts**: Shared JSON parsing and content normalization.
 
+#### Reasoning & Thinking Blocks
+
+The system implements a universal thinking filter (`thinkBlockFilter.ts`) to handle reasoning outputs from advanced models (e.g., Gemini 2.0, DeepSeek-R1).
+
+- **Multi-Format Support**: Detects and strips XML `<think>`, `<thinking>`, `<thought>` tags and Markdown ```think``` blocks.
+- **Leaked Reasoning Detection**: Proactively identifies reasoning patterns that escape designated blocks, ensuring a clean UI summary.
+- **Gemini 2.0 Integration**: Specifically handles Gemini's native `thought` and `thought_signature` fields, echoing them back in message history for consistent tool-calling contexts.
+
 ### Agent Runtime Architecture (Phase 2 Refactor)
 
 The `AgentRuntime` has been refactored from a monolithic class into a modular system of specialized services, orchestrated by a lean facade. This prepares the system for a client-server architecture in Phase 3.
@@ -650,10 +663,13 @@ graph TD
 
 #### 4. ToolExecutionService
 - **Responsibility**: Safely executes tools and robustly handles errors.
-- **Key Features**:
-  - **Loop Detection**: Prevents infinite loops by detecting repetitive arguments.
-  - **Self-Healing**: Automatically retries failed actions (e.g., stale elements, timeouts) with up to 8 recovery strategies.
-  - **Output Formatting**: Truncates large outputs and formats results for the LLM.
+- **Loop Detection**: Prevents infinite loops by detecting repetitive arguments or similar patterns (same tool N times in a row).
+- **Self-Healing**: Automatically retries failed actions with context-aware recovery strategies:
+  - **Context Destroyed**: 1s wait + retry (handles navigation race conditions).
+  - **Stale Element**: Immediate retry (handles dynamic DOM updates).
+  - **Lane/Tool Timeout**: Retry with extended/doubled timeout.
+  - **Network/Browser Error**: Transient error recovery with exponential backoff.
+- **Output Formatting**: Truncates large outputs (max 5000 chars) and formats results for the LLM with recovery hints (e.g., suggesting `get_interactive_elements` on click failure).
 
 ### Sub-Agent Delegation Flow
 
@@ -705,11 +721,12 @@ sequenceDiagram
 To support parallel execution of sub-agents and tool calls while maintaining internal state consistency, AI-Worker implements a granular resource locking system.
 
 #### 1. Hybrid Execution Engine
-Tools are classified into three categories:
+Tools are classified into three categories by the `laneManager`:
 
-- **Stateful Browser Tools**: Tools that modify the browser state (e.g., `navigate`, `click`). These share a global **Browser Lock** to prevent race conditions during tab operations.
-- **Stateful File Tools**: Tools that modify the filesystem. These use **Granular Locks** (Keyed Mutexes) where the lock key is the absolute file path. Multiple sub-agents can read/write different files simultaneously without blocking each other.
-- **Stateless Tools**: Tools like `search`, `memory_retrieve`, or `sequential-thinking` that have no side effects. these run in **True Parallelism**.
+- **Stateful Browser Tools**: Tools that modify the browser state (e.g., `navigate`, `click`). These share a global **Browser Lock** via a serial execution lane.
+- **Tab-Scoped Tools**: Tools bound to a specific tab (e.g., `screenshot(tabId)`). These run in a **Tab Serial Lane**, allowing parallel work across different tabs.
+- **Stateful File Tools**: Tools that modify the filesystem. These use **Granular Locks** (Keyed Mutexes) keyed by absolute file path.
+- **Stateless Tools**: Tools like `search`, `memory_retrieve`, or `sequential-thinking` that have no side effects. These run in **True Parallelism** via the API Parallel lane.
 
 #### 2. Isolation Strategy
 - **Sub-Agent Tabs**: Each sub-agent is provisioned with a **dedicated browser tab** (`tabId`). This ensures that one sub-agent's navigation does not interrupt another's workflow.
@@ -1397,6 +1414,13 @@ graph LR
     UnsafeInline --> Security
 ```
 
+### Antigravity Gateway Security
+
+The Antigravity integration follows a "Privileged Proxy" model:
+1. **OAuth Isolation**: OAuth tokens are handled exclusively by the `AntigravityAuthService` in the main process. The renderer never sees the refresh token or client secret.
+2. **Gateway Proxying**: To avoid CORS issues and protect credentials, all calls to the Antigravity/Google Cloud Code Assist API are proxied through a dedicated IPC channel (`antigravity:call-gateway`).
+3. **Internal Projects**: The service automatically resolves the correct Google Cloud Project ID needed for the gateway, falling back to a pre-authorized default for seamless onboarding.
+
 ---
 
 ## Firebase Authentication
@@ -1791,7 +1815,7 @@ ai-worker-app/
 
 ---
 
-**Last Updated:** 2024-12-29  
+**Last Updated:** 2026-02-27  
 **Version:** 0.1.0  
 **Architecture Version:** 1.1
 
@@ -1811,6 +1835,11 @@ ai-worker-app/
 - **Progress Checkpoints**: Standardized increment reporting via `update_progress_summary` mandatory checkpoints every 5-15 steps.
 - **Token Resilience**: Implemented 5,000ch tool output truncation with automated "Strategic Tips" for agent self-correction.
 - **Session Privacy**: Finalized session-level data isolation and auto-cleanup architecture.
+- **Antigravity Gateway**: Integrated Google OAuth flow and Cloud Code Assist API for high-limit Gemini access.
+- **Modular LLM Refactor**: Transitioned to a provider-based directory structure (`lib/llm/`) with isolated logic for Gemini, OpenAI, and Ollama.
+- **Universal Reasoning Filter**: Added `thinkBlockFilter` to strip internal thinking blocks from all LLM outputs.
+- **Self-Healing Tool Loop**: Enhanced `ToolExecutionService` with 8 context-aware recovery strategies for browser automation.
+- **Secure Storage**: Implemented user-scoped, OS-level encrypted storage for all LLM API keys and OAuth tokens.
 
 ---
 
