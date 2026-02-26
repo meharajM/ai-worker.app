@@ -165,7 +165,7 @@ graph TB
     end
 
     subgraph "Libraries"
-        LLMLib[llm.ts]
+        LLMLib[llm/]
         WebLLMLib[webllm.ts]
         MCPLib[mcp.ts]
         ElectronLib[electron.ts]
@@ -566,9 +566,42 @@ graph LR
 
 ---
 
-## LLM & Agent Architecture
+### LLM & Agent Architecture
 
 AI-Worker implements a reactive, tool-calling agent loop managed by the `AgentRuntime`. It prioritizes a **Plan-First** approach for complex tasks.
+
+#### Modular LLM Provider System
+
+The LLM logic is refactored into a modular provider system located in `src/renderer/src/lib/llm/`. This structure isolates provider-specific logic (OpenAI, Gemini, Ollama, WebLLM) and shared utilities.
+
+```mermaid
+graph TD
+    Orchestrator[llm.ts<br/>Orchestrator]
+    
+    subgraph "lib/llm/ Modules"
+        OpenAI[openai.ts]
+        Gemini[gemini.ts]
+        Ollama[ollama.ts]
+        Browser[browser-llm.ts]
+        Prompts[prompts.ts]
+        Utils[utils.ts]
+        Types[types.ts]
+    end
+
+    Orchestrator --> OpenAI
+    Orchestrator --> Gemini
+    Orchestrator --> Ollama
+    Orchestrator --> Browser
+    
+    OpenAI & Gemini & Ollama & Browser --> Prompts
+    OpenAI & Gemini & Ollama & Browser --> Utils
+    OpenAI & Gemini & Ollama & Browser --> Types
+```
+
+- **llm.ts**: Central entry point. Handles provider auto-selection and message pruning (DCP).
+- **openai.ts / gemini.ts / ...**: Provider-specific API formatting and calling.
+- **prompts.ts**: System prompt generation and tool filtering.
+- **utils.ts**: Shared JSON parsing and content normalization.
 
 ### Agent Runtime Architecture (Phase 2 Refactor)
 
@@ -581,12 +614,15 @@ graph TD
     subgraph "Core Services"
         Orchestration[OrchestrationService<br/>Task Decomposition]
         Tools[ToolExecutionService<br/>Loop Handling & Self-Healing]
+        LLMOrchestrator[llm.ts<br/>Provider Selection]
         State[AgentStateService<br/>Memory & Checkpoints]
     end
 
     Runtime --> State
     Runtime --> Orchestration
     Orchestration -->|Sub-Agents| Runtime
+    Runtime --> LLMOrchestrator
+    LLMOrchestrator --> Providers[llm/ Providers<br/>OpenAI, Gemini, Ollama, Browser]
     Runtime --> Tools
     
     Tools --> MCP[MCP Tools]

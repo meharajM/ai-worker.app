@@ -52,7 +52,7 @@ export function filterThinkBlocks(content: string): ThinkBlockResult {
     }
 
     // 2. Markdown Patterns
-    const markdownPattern = /```think\n([\s\S]*?)\n```/g;
+    const markdownPattern = /```think\s*([\s\S]*?)\s*```/g;
     let mdMatch;
     while ((mdMatch = markdownPattern.exec(content)) !== null) {
         thinkingParts.push(mdMatch[1].trim());
@@ -64,7 +64,7 @@ export function filterThinkBlocks(content: string): ThinkBlockResult {
     cleanedContent = cleanedContent.trim();
 
     // 3. Check for incomplete/streaming blocks (only if we haven't found complete ones, or at end)
-    const incompleteXml = cleanedContent.trim().match(/^<(think|thinking|thought|tools)(?![^>]*>)/i);
+    const incompleteXml = cleanedContent.trim().match(/^<(think|thinking|thought|tools)\b[^>]*>/i);
     const incompleteMarkdown = cleanedContent.trim().startsWith('```think');
 
     if (incompleteXml && thinkingParts.length === 0) {
