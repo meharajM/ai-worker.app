@@ -785,7 +785,15 @@ export class PlaywrightService {
                 return null
             }
 
-            const page = await this.getPage(safeArgs)
+            // Do not eagerly instantiate a UI browser for natively headless operations
+            let _page: Page | null = null;
+            if (name !== 'background_scrape') {
+                _page = await this.getPage(safeArgs)
+            }
+            
+            // Cast to Page because background_scrape is the only tool that doesn't use it.
+            // All other tools will have a properly initialized page object.
+            const page = _page as Page
 
             switch (name) {
                 case 'navigate':
