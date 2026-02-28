@@ -227,9 +227,19 @@ export function analyzeToolOutput(
     toolName: string,
     output: any
 ): PresentableResult {
+    // 0. If output is a stringified JSON object, parse it back to an object
+    let parsedOutput = output;
+    if (typeof output === 'string' && (output.trim().startsWith('{') || output.trim().startsWith('['))) {
+        try {
+            parsedOutput = JSON.parse(output);
+        } catch (e) {
+            // Keep as string if parsing fails
+        }
+    }
+
     // 1. Try to extract content from MCP structure first
-    const mcpContent = extractMcpContent(output);
-    const effectiveOutput = mcpContent || output;
+    const mcpContent = extractMcpContent(parsedOutput);
+    const effectiveOutput = mcpContent || parsedOutput;
 
     // Convert to string for pattern matching
     const outputStr = typeof effectiveOutput === 'string'
