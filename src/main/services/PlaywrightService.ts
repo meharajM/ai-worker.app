@@ -3,8 +3,8 @@ import { addExtra } from 'playwright-extra'
 import stealth from 'puppeteer-extra-plugin-stealth'
 import { BrowserContext, Page } from 'playwright-core'
 
-const stealthPlaywright: any = addExtra(playwrightCore as any)
-stealthPlaywright.chromium.use(stealth())
+const stealthChromium: any = addExtra(playwrightCore.chromium as any)
+stealthChromium.use(stealth())
 
 import { app } from 'electron'
 import * as path from 'path'
@@ -154,18 +154,18 @@ export class PlaywrightService {
 
                 for (const tryBrowser of [browserType, ...fallbackBrowsers.filter(b => b !== browserType)]) {
                     try {
-                        let tryLauncher: any = stealthPlaywright.chromium
+                        let tryLauncher: any = stealthChromium
                         const tryOptions = { ...launchOptions }
 
                         if (tryBrowser === 'firefox') {
-                            tryLauncher = stealthPlaywright.firefox
+                            tryLauncher = playwrightCore.firefox
                             // Core requires local firefox executable or fallback
                         } else if (tryBrowser === 'webkit') {
-                            tryLauncher = stealthPlaywright.webkit
+                            tryLauncher = playwrightCore.webkit
                             // Core requires local webkit executable or fallback
                         } else if (tryBrowser === 'chromium') {
                             // Using core, 'chromium' usually implies using local Chrome anyway
-                            tryLauncher = stealthPlaywright.chromium
+                            tryLauncher = stealthChromium
                             ;(tryOptions as any).channel = 'chrome'
                         } else {
                             // Chrome or Edge - use channel
@@ -332,7 +332,7 @@ export class PlaywrightService {
     private async ensureHeadlessPage(): Promise<Page> {
         if (!this.headlessBrowser) {
             console.log('[PlaywrightService] Launching invisible headless browser with stealth...')
-            this.headlessBrowser = await stealthPlaywright.chromium.launch({
+            this.headlessBrowser = await stealthChromium.launch({
                 headless: true, // Use boolean for modern playwright compat
                 channel: 'chrome', // Use local chrome path
                 args: [
@@ -1499,7 +1499,7 @@ export class PlaywrightService {
                     if (bgTypeErr) return { result: null, error: bgTypeErr }
 
                     console.log(`[PlaywrightService] Starting temp headless browser for background scrape...`)
-                    const tempBrowser = await stealthPlaywright.chromium.launch({ 
+                    const tempBrowser = await stealthChromium.launch({ 
                         headless: true, 
                         channel: 'chrome', // Use local chrome path
                         args: [
