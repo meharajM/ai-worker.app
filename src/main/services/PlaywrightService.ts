@@ -1,4 +1,11 @@
-import { chromium, firefox, webkit, BrowserContext, Page } from 'playwright'
+import * as playwrightCore from 'playwright-core'
+import { addExtra } from 'playwright-extra'
+import stealth from 'puppeteer-extra-plugin-stealth'
+import { BrowserContext, Page } from 'playwright-core'
+
+const stealthPlaywright: any = addExtra(playwrightCore as any)
+stealthPlaywright.chromium.use(stealth())
+
 import { app } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
@@ -125,10 +132,7 @@ export class PlaywrightService {
                         '--disable-infobars',
                         '--window-position=0,0',
                         '--ignore-certificate-errors',
-                        '--ignore-certificate-errors-spki-list',
-                        // Additional stealth args
-                        '--disable-accelerated-2d-canvas',
-                        '--disable-gpu',
+                        '--ignore-certificate-errors-spki-list'
                     ]
                 }
 
@@ -150,33 +154,33 @@ export class PlaywrightService {
 
                 for (const tryBrowser of [browserType, ...fallbackBrowsers.filter(b => b !== browserType)]) {
                     try {
-                        let tryLauncher = chromium
+                        let tryLauncher: any = stealthPlaywright.chromium
                         const tryOptions = { ...launchOptions }
 
                         if (tryBrowser === 'firefox') {
-                            tryLauncher = firefox
-                            delete (tryOptions as any).channel
+                            tryLauncher = stealthPlaywright.firefox
+                            // Core requires local firefox executable or fallback
                         } else if (tryBrowser === 'webkit') {
-                            tryLauncher = webkit
-                            delete (tryOptions as any).channel
+                            tryLauncher = stealthPlaywright.webkit
+                            // Core requires local webkit executable or fallback
                         } else if (tryBrowser === 'chromium') {
-                            // Bundled Chromium - no channel needed
-                            tryLauncher = chromium
-                            delete (tryOptions as any).channel
+                            // Using core, 'chromium' usually implies using local Chrome anyway
+                            tryLauncher = stealthPlaywright.chromium
+                            ;(tryOptions as any).channel = 'chrome'
                         } else {
                             // Chrome or Edge - use channel
-                            (tryOptions as any).channel = tryBrowser
+                            ;(tryOptions as any).channel = tryBrowser
                         }
 
                         console.log(`[PlaywrightService] Trying to launch: ${tryBrowser}...`)
                         this.context = await tryLauncher.launchPersistentContext(userDataDir, tryOptions)
 
                         // Register all existing pages and listen for new ones
-                        this.context.pages().forEach(p => this.registerPage(p))
-                        this.context.on('page', p => this.registerPage(p))
+                        this.context!.pages().forEach(p => this.registerPage(p))
+                        this.context!.on('page', p => this.registerPage(p))
 
                         // Handle unexpected closure
-                        this.context.on('close', () => {
+                        this.context!.on('close', () => {
                             console.log('[PlaywrightService] Browser context closed')
                             this.context = null
                             this.page = null
@@ -327,14 +331,24 @@ export class PlaywrightService {
 
     private async ensureHeadlessPage(): Promise<Page> {
         if (!this.headlessBrowser) {
-            console.log('[PlaywrightService] Launching invisible headless browser...')
-            this.headlessBrowser = await chromium.launch({
-                headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox']
+            console.log('[PlaywrightService] Launching invisible headless browser with stealth...')
+            this.headlessBrowser = await stealthPlaywright.chromium.launch({
+                headless: true, // Use boolean for modern playwright compat
+                channel: 'chrome', // Use local chrome path
+                args: [
+                    '--headless=new', // Explicitly force the new headless mode to prevent stealth plugin from overriding it
+                    '--disable-blink-features=AutomationControlled',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-infobars'
+                ]
             })
         }
         if (!this.headlessContext) {
-            this.headlessContext = await this.headlessBrowser.newContext()
+            this.headlessContext = await this.headlessBrowser.newContext({
+                viewport: { width: 1920, height: 1080 },
+                locale: 'en-US'
+            })
         }
         if (!this.headlessPage || this.headlessPage.isClosed()) {
             this.headlessPage = await this.headlessContext!.newPage()
@@ -1485,7 +1499,16 @@ export class PlaywrightService {
                     if (bgTypeErr) return { result: null, error: bgTypeErr }
 
                     console.log(`[PlaywrightService] Starting temp headless browser for background scrape...`)
-                    const tempBrowser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] })
+                    const tempBrowser = await stealthPlaywright.chromium.launch({ 
+                        headless: true, 
+                        channel: 'chrome', // Use local chrome path
+                        args: [
+                        '--headless=new',
+                        '--disable-blink-features=AutomationControlled',
+                        '--no-sandbox', 
+                        '--disable-setuid-sandbox',
+                        '--disable-infobars'
+                    ] })
                     try {
                         const tempPage = await tempBrowser.newPage()
                         await tempPage.goto(safeArgs.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
