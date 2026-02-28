@@ -15,9 +15,11 @@ import {
     checkOpenRouter,
 } from '../../../lib/llm'
 import { useSettingsStore, LLMProviderType } from '../../../stores/settingsStore'
+import electron from '../../../lib/electron'
 import { OllamaSettings } from './OllamaSettings'
 import { OpenAISettings } from './OpenAISettings'
 import { GeminiSettings } from './GeminiSettings'
+import { PerplexitySettings } from './PerplexitySettings'
 
 interface SingleProviderStatus {
     available: boolean
@@ -32,6 +34,7 @@ interface ProviderStatusMap {
     openai: SingleProviderStatus
     gemini: SingleProviderStatus
     openrouter: SingleProviderStatus
+    perplexity: SingleProviderStatus
     browser?: SingleProviderStatus
 }
 
@@ -40,6 +43,7 @@ const PROVIDERS: { id: LLMProviderType; label: string }[] = [
     { id: 'openai', label: 'OpenAI / Compatible' },
     { id: 'gemini', label: 'Gemini' },
     { id: 'openrouter', label: 'OpenRouter' },
+    { id: 'perplexity', label: 'Perplexity' },
     { id: 'auto', label: 'Auto' },
     { id: 'browser', label: 'On-Device' },
 ]
@@ -65,6 +69,7 @@ export function LLMProviderSettings() {
             openrouterApiKey: settings.openrouterApiKey,
             openrouterModel: settings.openrouterModel,
             browserModel: settings.browserModel,
+            perplexityModel: settings.perplexityModel,
         }
 
         const promise = (async () => {
@@ -73,23 +78,30 @@ export function LLMProviderSettings() {
                 const p = settings.preferredProvider
                 if (p === 'ollama') {
                     const ollama = await checkOllama(settingsForLLM)
-                    setProviderStatus({ ollama, openai: { available: false }, gemini: { available: false }, openrouter: { available: false } })
+                    setProviderStatus({ ollama, openai: { available: false }, gemini: { available: false }, openrouter: { available: false }, perplexity: { available: false } })
                 } else if (p === 'openai') {
                     const openai = await checkOpenAI(settingsForLLM)
-                    setProviderStatus({ ollama: { available: false }, openai, gemini: { available: false }, openrouter: { available: false } })
+                    setProviderStatus({ ollama: { available: false }, openai, gemini: { available: false }, openrouter: { available: false }, perplexity: { available: false } })
                 } else if (p === 'gemini') {
                     const gemini = await checkGemini(settingsForLLM)
-                    setProviderStatus({ ollama: { available: false }, openai: { available: false }, gemini, openrouter: { available: false } })
+                    setProviderStatus({ ollama: { available: false }, openai: { available: false }, gemini, openrouter: { available: false }, perplexity: { available: false } })
                 } else if (p === 'openrouter') {
                     const openrouter = await checkOpenRouter(settingsForLLM)
-                    setProviderStatus({ ollama: { available: false }, openai: { available: false }, gemini: { available: false }, openrouter })
+                    setProviderStatus({ ollama: { available: false }, openai: { available: false }, gemini: { available: false }, openrouter, perplexity: { available: false } })
+                } else if (p === 'perplexity') {
+                    // checkPerplexity would just check if token exists
+                    const isAvailable = await electron.perplexity?.getStatus()
+                    const perplexity = { available: !!isAvailable?.signedIn, models: ['concise', 'copilot'] }
+                    setProviderStatus({ ollama: { available: false }, openai: { available: false }, gemini: { available: false }, openrouter: { available: false }, perplexity })
                 } else {
                     const providers = await getAvailableProviders(settingsForLLM)
+                    const isPerpAvailable = await electron.perplexity?.getStatus()
                     setProviderStatus({
                         ollama: providers.ollama,
                         openai: providers.openai,
                         gemini: providers.gemini,
                         openrouter: providers.openrouter,
+                        perplexity: { available: !!isPerpAvailable?.signedIn, models: ['concise', 'copilot'] },
                         browser: providers.browser,
                     })
                 }
@@ -109,7 +121,7 @@ export function LLMProviderSettings() {
         settings.openaiApiKey, settings.openaiBaseUrl, settings.openaiModel,
         settings.geminiApiKey, settings.geminiModel,
         settings.openrouterApiKey, settings.openrouterModel,
-        settings.browserModel,
+        settings.browserModel, settings.perplexityModel
     ])
 
     // Debounced auto-check when relevant settings change
@@ -139,8 +151,8 @@ export function LLMProviderSettings() {
                                 onClick={() => settings.setPreferredProvider(id)}
                                 aria-label={`Select ${label} provider`}
                                 className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-colors ${settings.preferredProvider === id
-                                        ? 'bg-[#4fd1c5] text-white'
-                                        : 'bg-white/5 text-white/60 hover:bg-white/10'
+                                    ? 'bg-[#4fd1c5] text-white'
+                                    : 'bg-white/5 text-white/60 hover:bg-white/10'
                                     }`}
                             >
                                 {label}
@@ -182,6 +194,14 @@ export function LLMProviderSettings() {
                         available={providerStatus?.openrouter.available}
                         models={providerStatus?.openrouter.models}
                         error={providerStatus?.openrouter.error}
+                        checking={checking}
+                        onRefresh={checkProviders}
+                    />
+                )}
+                {(p === 'perplexity' || p === 'auto') && (
+                    <PerplexitySettings
+                        available={providerStatus?.perplexity.available}
+                        models={providerStatus?.perplexity.models}
                         checking={checking}
                         onRefresh={checkProviders}
                     />

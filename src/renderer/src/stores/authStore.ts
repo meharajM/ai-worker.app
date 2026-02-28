@@ -39,6 +39,11 @@ interface AuthState {
     antigravityEmail: string | null
     antigravityLoading: boolean
 
+    // Perplexity OAuth state
+    perplexitySignedIn: boolean
+    perplexityHasToken: boolean
+    perplexityLoading: boolean
+
     // Actions
     setUser: (user: User | null) => void
     setLoading: (loading: boolean) => void
@@ -53,6 +58,11 @@ interface AuthState {
     signInWithAntigravity: () => Promise<void>
     signOutFromAntigravity: () => Promise<void>
     initializeAntigravity: () => Promise<void>
+
+    // Perplexity actions
+    signInWithPerplexity: () => Promise<void>
+    signOutFromPerplexity: () => Promise<void>
+    initializePerplexity: () => Promise<void>
 
     // Rate limiting
     canChat: () => boolean
@@ -82,6 +92,11 @@ export const useAuthStore = create<AuthState>()(
             antigravitySignedIn: false,
             antigravityEmail: null,
             antigravityLoading: false,
+
+            // Perplexity OAuth defaults
+            perplexitySignedIn: false,
+            perplexityHasToken: false,
+            perplexityLoading: false,
 
             setUser: (user) => set({ user, error: null }),
             setLoading: (loading) => set({ loading }),
@@ -226,8 +241,8 @@ export const useAuthStore = create<AuthState>()(
             // Initialize Antigravity — restore session on app start
             initializeAntigravity: async () => {
                 try {
-                    const status = await electron.antigravity.initialize()
-                    if (status.signedIn) {
+                    const status = await electron.antigravity?.initialize()
+                    if (status?.signedIn) {
                         set({
                             antigravitySignedIn: true,
                             antigravityEmail: status.email,
@@ -236,6 +251,52 @@ export const useAuthStore = create<AuthState>()(
                     }
                 } catch (error) {
                     console.error('[Auth] Antigravity initialization failed:', error)
+                }
+            },
+
+            // Perplexity OAuth — sign in to Perplexity to capture token
+            signInWithPerplexity: async () => {
+                set({ perplexityLoading: true, error: null })
+                try {
+                    const result = await electron.perplexity?.signIn()
+                    set({
+                        perplexitySignedIn: result?.signedIn || false,
+                        perplexityHasToken: result?.hasToken || false,
+                        perplexityLoading: false,
+                    })
+                    console.log('[Auth] Perplexity sign-in successful')
+                } catch (error) {
+                    console.error('[Auth] Perplexity sign-in failed:', error)
+                    set({
+                        error: error instanceof Error ? error.message : 'Perplexity sign-in failed',
+                        perplexityLoading: false,
+                    })
+                }
+            },
+
+            signOutFromPerplexity: async () => {
+                try {
+                    await electron.perplexity?.signOut()
+                    set({ perplexitySignedIn: false, perplexityHasToken: false })
+                    console.log('[Auth] Perplexity signed out')
+                } catch (error) {
+                    console.error('[Auth] Perplexity sign-out failed:', error)
+                }
+            },
+
+            // Initialize Perplexity
+            initializePerplexity: async () => {
+                try {
+                    const status = await electron.perplexity?.initialize()
+                    if (status?.signedIn) {
+                        set({
+                            perplexitySignedIn: true,
+                            perplexityHasToken: status.hasToken,
+                        })
+                        console.log('[Auth] Perplexity session restored')
+                    }
+                } catch (error) {
+                    console.error('[Auth] Perplexity initialization failed:', error)
                 }
             },
 

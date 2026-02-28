@@ -3,6 +3,7 @@ import { LogOut, LogIn, Loader2, Mail } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { AuthModal } from '../AuthModal'
 import { AntigravityLinkButton } from './llm/AntigravityLinkButton'
+import { PerplexityLinkButton } from './llm/PerplexityLinkButton'
 
 export function AccountSettings() {
     const auth = useAuthStore()
@@ -92,6 +93,24 @@ export function AccountSettings() {
 
                 <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-5">
                     <AntigravityLinkButton variant="full" />
+                </div>
+            </div>
+
+            {/* Perplexity Access Section */}
+            <div className="mt-8">
+                <hr className="border-white/5 mb-8" />
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h4 className="font-bold text-lg">Perplexity AI Access</h4>
+                        <p className="text-xs text-white/40">Connect your Perplexity account to use as an LLM provider</p>
+                    </div>
+                    <div className="px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-[#3ab795]/10 text-[#3ab795] border border-[#3ab795]/20">
+                        Perplexity
+                    </div>
+                </div>
+
+                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-5">
+                    <PerplexityLinkButton variant="full" />
                 </div>
             </div>
         </div>

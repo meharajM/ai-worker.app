@@ -300,7 +300,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         console.log('⏳ Waiting for MCP tools to be ready...');
         console.log('⏳ Waiting for app UI to be ready...');
-        await window.locator('button[title="MCP Connections"]').waitFor({ state: 'visible', timeout: 15000 }).catch(() => { });
+        await window.locator('button[title="Start Voice Mode"]').waitFor({ state: 'visible', timeout: 30000 }).catch(() => { });
         await window.waitForTimeout(2000);
         console.log('✅ UI ready');
         console.log('✅ MCP tools ready');
@@ -312,14 +312,21 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         // Helper to send message
         const sendMessage = async (text) => {
+            const sendButton = window.locator('[data-testid="send-button"]');
+
+            // If the agent is still processing from a previous step, wait for it to finish
+            // (the send button is replaced by a stop button while processing)
+            await sendButton.waitFor({ state: 'visible', timeout: 30000 });
+
             await chatInput.scrollIntoViewIfNeeded();
             await chatInput.click({ force: true });
             await chatInput.fill(text);
-            await window.locator('button:has(svg.lucide-send)').click({ force: true });
 
-            // Wait for "Thinking..." state change or response
+            // Ensure button is not disabled (it's disabled if text is empty, but we just filled it)
+            await sendButton.click({ force: true });
+
             console.log(`  - Sent: "${text.substring(0, 40)}..."`);
-            await window.waitForTimeout(2000); // Give time for mock fetch to respond
+            await window.waitForTimeout(1000);
         };
 
         // --- TEST 1: PARALLEL AGENTS ---

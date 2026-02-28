@@ -133,6 +133,7 @@ export function useAgent(): UseAgentReturn {
                 geminiModel: settings.geminiModel,
                 openrouterApiKey: settings.openrouterApiKey,
                 openrouterModel: settings.openrouterModel,
+                perplexityModel: settings.perplexityModel,
             };
 
             try {

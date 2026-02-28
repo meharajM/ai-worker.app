@@ -78,6 +78,7 @@ graph LR
         StoreHandlers[store.ts<br/>Storage Operations]
         SpeechHandlers[speech.ts<br/>Speech Operations]
         AntigravityHandlers[antigravity.ts<br/>OAuth & Gateway]
+        PerplexityHandlers[perplexity.ts<br/>Perplexity Auth]
     end
 
     App --> IPC
@@ -87,10 +88,12 @@ graph LR
     IPC --> StoreHandlers
     IPC --> SpeechHandlers
     IPC --> AntigravityHandlers
+    IPC --> PerplexityHandlers
     MCPHandlers --> MCP
     MCPHandlers --> Playwright
     SpeechHandlers --> Speech
     AntigravityHandlers --> AntigravityAuthService[AntigravityAuthService]
+    PerplexityHandlers --> PerplexityAuthService[PerplexityAuthService]
     App --> Env
 ```
 
@@ -100,6 +103,7 @@ graph LR
 - IPC handler registration
 - MCP server connections (Stdio/SSE)
 - Antigravity OAuth flow & Gateway access
+- Perplexity Auth flow & Linking
 - Speech Model Management (Download/Serving)
 - System-level operations (file system, shell)
 - Environment setup (PATH fixing, ESM compatibility)
@@ -122,6 +126,7 @@ graph TB
         ShellAPI[Shell Operations]
         AppAPI[App Info]
         SpeechAPI[Speech Operations]
+        PerplexityAPI[Perplexity Operations]
     end
 
     ContextBridge --> MCPAPI
@@ -130,6 +135,7 @@ graph TB
     ContextBridge --> ShellAPI
     ContextBridge --> AppAPI
     ContextBridge --> SpeechAPI
+    ContextBridge --> PerplexityAPI
     IPCInvoke --> ContextBridge
 ```
 
@@ -423,6 +429,10 @@ graph TB
 | `electron.speech.checkSupport()`| `speech:check-support`| `speech.ts`    | Check/Verify Model     |
 | `electron.speech.downloadModel()`| `speech:download-model`| `speech.ts`  | Download logic         |
 | `electron.speech.getModelPath()`| `speech:get-model-path`| `speech.ts`   | Get model server URL   |
+| `electron.perplexity.signIn()`  | `perplexity:sign-in`  | `perplexity.ts`| Sign in to Perplexity  |
+| `electron.perplexity.signOut()` | `perplexity:sign-out` | `perplexity.ts`| Sign out of Perplexity |
+| `electron.perplexity.ask()`     | `perplexity:ask`      | `perplexity.ts`| Send query to model    |
+
 
 ---
 
@@ -588,6 +598,7 @@ graph TD
         Gemini[gemini.ts]
         Ollama[ollama.ts]
         Browser[browser-llm.ts]
+        Perplexity[perplexity.ts]
         Prompts[prompts.ts]
         Utils[utils.ts]
         Types[types.ts]
@@ -597,14 +608,15 @@ graph TD
     Orchestrator --> Gemini
     Orchestrator --> Ollama
     Orchestrator --> Browser
+    Orchestrator --> Perplexity
     
-    OpenAI & Gemini & Ollama & Browser --> Prompts
-    OpenAI & Gemini & Ollama & Browser --> Utils
-    OpenAI & Gemini & Ollama & Browser --> Types
+    OpenAI & Gemini & Ollama & Browser & Perplexity --> Prompts
+    OpenAI & Gemini & Ollama & Browser & Perplexity --> Utils
+    OpenAI & Gemini & Ollama & Browser & Perplexity --> Types
 ```
 
 - **llm.ts**: Central entry point. Handles provider auto-selection and message pruning (DCP).
-- **openai.ts / gemini.ts / ...**: Provider-specific API formatting and calling.
+- **openai.ts / gemini.ts / perplexity.ts / ...**: Provider-specific API formatting and calling.
 - **prompts.ts**: System prompt generation and tool filtering.
 - **utils.ts**: Shared JSON parsing and content normalization.
 

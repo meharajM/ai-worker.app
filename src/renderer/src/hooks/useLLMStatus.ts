@@ -108,6 +108,8 @@ export function useLLMStatus(currentView: string): { llmStatus: LLMStatus } {
                         setLlmStatus({ provider: `OpenRouter (${providers.openrouter.model})`, available: true });
                     } else if (providers.openai.available) {
                         setLlmStatus({ provider: `OpenAI (${providers.openai.model})`, available: true });
+                    } else if (providers.perplexity?.available) {
+                        setLlmStatus({ provider: `Perplexity (${settings.perplexityModel || 'concise'})`, available: true });
                     } else {
                         setLlmStatus({ provider: null, available: false });
                     }
@@ -119,6 +121,8 @@ export function useLLMStatus(currentView: string): { llmStatus: LLMStatus } {
                     setLlmStatus({ provider: `OpenRouter (${providers.openrouter.model})`, available: true });
                 } else if (providers.openai.available) {
                     setLlmStatus({ provider: `OpenAI (${providers.openai.model})`, available: true });
+                } else if (providers.perplexity?.available) {
+                    setLlmStatus({ provider: `Perplexity (${settings.perplexityModel || 'concise'})`, available: true });
                 } else {
                     setLlmStatus({ provider: null, available: false });
                 }

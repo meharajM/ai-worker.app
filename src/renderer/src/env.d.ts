@@ -104,6 +104,14 @@ interface ElectronAPI {
         callGateway: (url: string, headers: Record<string, string>, body: string) => Promise<any>
     }
 
+    perplexity?: {
+        initialize: () => Promise<{ signedIn: boolean; hasToken: boolean }>
+        signIn: () => Promise<{ signedIn: boolean; hasToken: boolean }>
+        signOut: () => Promise<{ success: boolean }>
+        getStatus: () => Promise<{ signedIn: boolean; hasToken: boolean }>
+        ask: (prompt: string, opts?: any) => Promise<any>
+    }
+
     clipboard: {
         readFilePaths: () => string[]
     }

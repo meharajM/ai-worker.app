@@ -29,6 +29,7 @@ import { checkOllama, testOllamaConnection, callOllama } from "./llm/ollama";
 import { checkBrowserLLM, testWebLLMConnection, callBrowserLLM, downloadBrowserModel } from "./llm/browser-llm";
 import { checkOpenAI, checkOpenRouter, testOpenAIConnection, callOpenAI } from "./llm/openai";
 import { checkGemini, testGeminiConnection, callGemini } from "./llm/gemini";
+import { checkPerplexity, testPerplexityConnection, callPerplexity } from "./llm/perplexity";
 import { buildSystemPrompt } from "./llm/prompts";
 import { ensureRecord, safeParseJSON } from "./llm/utils";
 
@@ -57,6 +58,7 @@ export {
   checkOpenAI,
   checkOpenRouter,
   checkGemini,
+  checkPerplexity,
   testGeminiConnection,
   testOpenAIConnection,
   downloadBrowserModel,
@@ -70,13 +72,14 @@ export {
  */
 export async function getAvailableProviders(
   settings?: LLMSettings
-): Promise<{ browser: ProviderStatus; ollama: ProviderStatus; openai: ProviderStatus; gemini: ProviderStatus; openrouter: ProviderStatus }> {
-  const [webLLM, ollama, openai, gemini, openrouter] = await Promise.all([
+): Promise<{ browser: ProviderStatus; ollama: ProviderStatus; openai: ProviderStatus; gemini: ProviderStatus; openrouter: ProviderStatus; perplexity: ProviderStatus }> {
+  const [webLLM, ollama, openai, gemini, openrouter, perplexity] = await Promise.all([
     getWebLLMStatus(),
     checkOllama(settings),
     checkOpenAI(settings, "openai"),
     checkGemini(settings),
     checkOpenRouter(settings),
+    checkPerplexity(settings),
   ]);
 
   const browser: ProviderStatus = {
@@ -91,6 +94,7 @@ export async function getAvailableProviders(
     openai,
     gemini,
     openrouter,
+    perplexity,
   };
 }
 
@@ -117,7 +121,7 @@ export async function chat(
   const preferredProvider = settings?.preferredProvider;
 
   if (preferredProvider === "auto" || !preferredProvider) {
-    // Auto-select: browser ONLY IF already loaded, then ollama, then openai, then gemini, then openrouter
+    // Auto-select: browser ONLY IF already loaded, then ollama, then openai, then gemini, then openrouter, then perplexity
     // We don't auto-select browser if it's just 'available' (supported) to avoid
     // triggering large downloads automatically.
     if (providers.browser.available && providers.browser.isLoaded) {
@@ -130,6 +134,8 @@ export async function chat(
       provider = "gemini";
     } else if (providers.openrouter.available) {
       provider = "openrouter";
+    } else if (providers.perplexity.available) {
+      provider = "perplexity";
     }
   } else if (preferredProvider === "browser" && providers.browser.available) {
     provider = "browser";
@@ -141,6 +147,8 @@ export async function chat(
     provider = "gemini";
   } else if (preferredProvider === "openrouter" && providers.openrouter.available) {
     provider = "openrouter";
+  } else if (preferredProvider === "perplexity" && providers.perplexity.available) {
+    provider = "perplexity";
   }
 
   if (!provider) {
@@ -198,6 +206,8 @@ export async function chat(
       return callGemini(messagesWithSystem, tools, settings, abortSignal);
     case "openrouter":
       return callOpenAI(messagesWithSystem, tools, settings, useJsonFallback, servers, true, abortSignal, dynamicRules, isSubAgent, workspacePath);
+    case "perplexity":
+      return callPerplexity(messagesWithSystem, settings, abortSignal);
     default:
       throw new Error(`Provider ${provider} not implemented`);
   }

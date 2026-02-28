@@ -8,7 +8,7 @@ import { useAuthStore } from '../stores/authStore'
  * Also initializes the Antigravity OAuth session (restores tokens from storage).
  */
 export function useAuthPersistence() {
-    const { initializeAuthListener, initializeAntigravity } = useAuthStore()
+    const { initializeAuthListener, initializeAntigravity, initializePerplexity } = useAuthStore()
 
     useEffect(() => {
         const initAuth = async () => {
@@ -17,6 +17,9 @@ export function useAuthPersistence() {
 
             // Initialize Antigravity OAuth session (restore tokens from storage)
             await initializeAntigravity()
+
+            // Initialize Perplexity session
+            await initializePerplexity()
 
             return unsubscribe
         }
@@ -27,5 +30,5 @@ export function useAuthPersistence() {
             // Cleanup subscription on unmount
             unsubscribePromise.then(unsub => unsub && unsub())
         }
-    }, [initializeAuthListener, initializeAntigravity])
+    }, [initializeAuthListener, initializeAntigravity, initializePerplexity])
 }

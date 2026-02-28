@@ -118,6 +118,14 @@ const electronAPI = {
         callGateway: (url: string, headers: Record<string, string>, body: string) =>
             ipcRenderer.invoke('antigravity:call-gateway', url, headers, body),
     },
+    // Perplexity OAuth operations
+    perplexity: {
+        initialize: () => ipcRenderer.invoke('perplexity:initialize'),
+        signIn: () => ipcRenderer.invoke('perplexity:sign-in'),
+        signOut: () => ipcRenderer.invoke('perplexity:sign-out'),
+        getStatus: () => ipcRenderer.invoke('perplexity:get-status'),
+        ask: (prompt: string, opts?: any) => ipcRenderer.invoke('perplexity:ask', prompt, opts),
+    },
     // Clipboard operations
     clipboard: {
         readFilePaths: () => {

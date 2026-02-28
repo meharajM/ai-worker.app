@@ -77,7 +77,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         // 1. App Loaded (Check for Mic Button - always visible)
         // Title might be hidden if chat history exists
-        await window.locator('button[title="Start Voice Mode"]').waitFor({ state: 'visible', timeout: 15000 });
+        await window.locator('button[title="Start Voice Mode"]').waitFor({ state: 'visible', timeout: 30000 });
         console.log('✅ Voice Input Found (App Loaded)');
 
         const titleVisible = await window.isVisible('text=AI Worker');

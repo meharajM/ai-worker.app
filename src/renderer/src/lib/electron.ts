@@ -222,6 +222,41 @@ export const electron = {
         },
     },
 
+    // Perplexity OAuth operations
+    perplexity: {
+        initialize: async (): Promise<{ signedIn: boolean; hasToken: boolean }> => {
+            if (isElectron() && window.electron?.perplexity) {
+                return await window.electron.perplexity.initialize()
+            }
+            return { signedIn: false, hasToken: false }
+        },
+        signIn: async (): Promise<{ signedIn: boolean; hasToken: boolean }> => {
+            if (isElectron() && window.electron?.perplexity) {
+                return await window.electron.perplexity.signIn()
+            }
+            console.warn('[Browser] Perplexity sign-in not available in browser mode')
+            throw new Error('Perplexity sign-in requires the desktop app')
+        },
+        signOut: async (): Promise<{ success: boolean }> => {
+            if (isElectron() && window.electron?.perplexity) {
+                return await window.electron.perplexity.signOut()
+            }
+            return { success: true }
+        },
+        getStatus: async (): Promise<{ signedIn: boolean; hasToken: boolean }> => {
+            if (isElectron() && window.electron?.perplexity) {
+                return await window.electron.perplexity.getStatus()
+            }
+            return { signedIn: false, hasToken: false }
+        },
+        ask: async (prompt: string, opts?: any): Promise<any> => {
+            if (isElectron() && window.electron?.perplexity) {
+                return await window.electron.perplexity.ask(prompt, opts)
+            }
+            throw new Error('Perplexity ask operation requires the desktop app')
+        }
+    },
+
     // Log operations
     logs: {
         add: async (entry: any) => {

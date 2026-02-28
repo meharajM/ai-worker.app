@@ -5,7 +5,7 @@ import electron from '../lib/electron'
 import { saveUserSettings, getUserProfile } from '../lib/firebase'
 
 export type Theme = 'dark' | 'light' | 'system'
-export type LLMProviderType = 'auto' | 'ollama' | 'openai' | 'gemini' | 'openrouter' | 'browser' | 'anthropic' | 'groq'
+export type LLMProviderType = 'auto' | 'ollama' | 'openai' | 'gemini' | 'openrouter' | 'browser' | 'anthropic' | 'groq' | 'perplexity'
 export type PlaywrightBrowserType = 'auto' | 'chrome' | 'msedge' | 'firefox' | 'webkit' | 'chromium'
 
 interface SettingsState {
@@ -30,6 +30,7 @@ interface SettingsState {
     openrouterApiKey: string
     openrouterModel: string
     browserModel: string
+    perplexityModel: string
 
     // Appearance
     theme: Theme
@@ -65,6 +66,7 @@ interface SettingsState {
     setOpenrouterApiKey: (key: string) => void
     setOpenrouterModel: (model: string) => void
     setBrowserModel: (model: string) => void
+    setPerplexityModel: (model: string) => void
     setTheme: (theme: Theme) => void
     setPlaywrightBrowser: (browser: PlaywrightBrowserType) => void
     setPlaywrightHeadless: (headless: boolean) => void
@@ -106,6 +108,7 @@ const defaultSettings = {
     openrouterApiKey: '',
     openrouterModel: LLM_CONFIG.OPENROUTER.DEFAULT_MODEL,
     browserModel: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', // Default small model
+    perplexityModel: 'concise', // 'concise' or 'copilot' (default unlock-perplexity)
     theme: 'dark' as Theme,
     playwrightBrowser: 'auto' as PlaywrightBrowserType, // Auto-detect based on OS
     playwrightHeadless: false, // Default to headed for user visibility
@@ -163,6 +166,7 @@ export const useSettingsStore = create<SettingsState>()(
             },
             setOpenrouterModel: (model) => set({ openrouterModel: model }),
             setBrowserModel: (model) => set({ browserModel: model }),
+            setPerplexityModel: (model) => set({ perplexityModel: model }),
             setTheme: (theme) => set({ theme }),
             setPlaywrightBrowser: async (browser) => {
                 set({ playwrightBrowser: browser })
