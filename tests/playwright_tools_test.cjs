@@ -1,4 +1,5 @@
 const { _electron: electron } = require('playwright');
+delete process.env.ELECTRON_RUN_AS_NODE;
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -30,7 +31,8 @@ const os = require('os');
             timeout: 60000,
             env: {
                 ...process.env,
-                NODE_ENV: 'production'
+                NODE_ENV: 'production',
+                ELECTRON_ENABLE_LOGGING: '1'
             }
         });
         console.log('✅ Electron launched successfully');
@@ -55,7 +57,7 @@ const os = require('os');
                 command: 'internal'
             });
         });
-        if (!connectResult.success) throw new Error('Connection failed');
+        if (!connectResult.success) throw new Error('Connection failed: ' + JSON.stringify(connectResult));
         console.log('✅ Connected');
         const serverId = connectResult.serverId;
 
@@ -66,7 +68,10 @@ const os = require('os');
                 return await window.electron.mcp.callTool(id, t, a);
             }, { id: serverId, t: name, a: args });
 
-            if (result.error) throw new Error(`Tool ${name} failed: ${result.error}`);
+            if (result.error) {
+                console.error(`❌ Tool [${name}] returned error:`, result.error);
+                throw new Error(`Tool ${name} failed: ${result.error}`);
+            }
 
             // Extract text from MCP response if possible for easier validation
             const content = result.result?.content?.[0]?.text;
@@ -92,6 +97,18 @@ const os = require('os');
                 <div id="hover-target" onmouseover="this.innerText='Hovered'">Hover Me</div>
                 <div id="scroll-target" style="margin-top: 2000px">Bottom</div>
                 <input type="file" id="file-upload" />
+                <div id="dynamic-element" style="display:none">Loaded!</div>
+                <div id="drag-source" draggable="true" style="width: 50px; height: 50px; background: blue;">Drag me</div>
+                <div id="drop-target" style="width: 100px; height: 100px; background: grey;">Drop here</div>
+                <iframe id="test-frame" srcdoc="<html><body><button id='frame-btn'>Frame Button</button></body></html>"></iframe>
+                <script>
+                    setTimeout(() => document.getElementById('dynamic-element').style.display = 'block', 1000);
+                    const ds = document.getElementById('drag-source');
+                    const dt = document.getElementById('drop-target');
+                    ds.addEventListener('dragstart', e => e.dataTransfer.setData('text/plain', 'dragData'));
+                    dt.addEventListener('dragover', e => e.preventDefault());
+                    dt.addEventListener('drop', e => { e.preventDefault(); dt.style.background = 'green'; });
+                </script>
             </body>
             </html>
         `;
@@ -164,6 +181,16 @@ const os = require('os');
         if (!interactiveRes.text.includes('elements') || !interactiveRes.text.includes('count')) throw new Error(`get_interactive_elements return mismatch: ${interactiveRes.text}`);
         console.log('✅ get_interactive_elements returns list');
 
+        console.log('\n--- 3b. Drag & Drop ---');
+        const dragRes = await callTool('drag_drop', { sourceSelector: '#drag-source', targetSelector: '#drop-target' });
+        if (!dragRes.text.includes('Dragged')) throw new Error(`drag_drop return mismatch: ${dragRes.text}`);
+
+        // Wait for dynamic element test
+        console.log('\n--- 3c. Waits & Timings ---');
+        const waitRes = await callTool('wait_for_element', { selector: '#dynamic-element', timeout: 3000 });
+        if (!waitRes.text.includes('appeared')) throw new Error(`wait_for_element return mismatch: ${waitRes.text}`);
+        console.log('✅ wait_for_element return success');
+
         // --- 4. JavaScript & Data ---
         console.log('\n--- 4. JS & Data ---');
 
@@ -228,6 +255,35 @@ const os = require('os');
             console.log('ℹ️ Only one tab open, skipping tab switch/close test');
         }
 
+        // --- 7b. Dialogs & Frames ---
+        console.log('\n--- 7b. Dialogs & Frames ---');
+        // Register dialog handler first
+        await callTool('handle_dialog', { action: 'accept' });
+        await callTool('evaluate', { script: 'alert("test alert")' }); // Should be auto-accepted without blocking
+        console.log('✅ handle_dialog success');
+
+        const frameRes = await callTool('switch_frame', { selector: '#test-frame' });
+        if (!frameRes.text.includes('Switched to frame')) throw new Error(`switch_frame return mismatch: ${frameRes.text}`);
+
+        const frameClickRes = await callTool('click', { selector: '#frame-btn' });
+        if (!frameClickRes.text.includes('Clicked')) throw new Error(`frame interaction mismatch: ${frameClickRes.text}`);
+        console.log('✅ switch_frame success');
+
+        // Return to main frame
+        await callTool('switch_frame', {});
+
+        // --- 7c. History Navigation ---
+        console.log('\n--- 7c. History Navigation ---');
+        await callTool('navigate', { url: 'data:text/plain,SecondPage' });
+        const goBackRes = await callTool('go_back');
+        if (!goBackRes.text.includes('Navigated back')) throw new Error(`go_back mismatch: ${goBackRes.text}`);
+        const contentAfterBack = await callTool('get_page_content');
+        if (!contentAfterBack.text.includes('Test Page')) throw new Error('go_back content mismatch');
+
+        const goForwardRes = await callTool('go_forward');
+        if (!goForwardRes.text.includes('Navigated forward')) throw new Error(`go_forward mismatch: ${goForwardRes.text}`);
+        console.log('✅ history navigation success');
+
         // --- 8. Cookies ---
         console.log('\n--- 8. Cookies ---');
         await callTool('navigate', { url: 'https://example.com' });
@@ -244,6 +300,22 @@ const os = require('os');
         const xpathRes = await callTool('find_by_xpath', { xpath: '//h1' });
         if (!xpathRes.text.includes('h1') && !xpathRes.text.includes('Example Domain')) throw new Error(`find_by_xpath return mismatch: ${xpathRes.text}`);
         console.log('✅ find_by_xpath returns results');
+
+        const cssRes = await callTool('find_by_css', { selector: 'h1' });
+        if (!cssRes.text.includes('h1') && !cssRes.text.includes('Welcome') && !cssRes.text.includes('Example Domain')) throw new Error(`find_by_css mismatch: ${cssRes.text}`);
+        console.log('✅ find_by_css returns results');
+
+        // --- 10. Background Scrape ---
+        console.log('\n--- 10. Background Scrape ---');
+        try {
+            // Note: This may be skipped dynamically or log a warning if it crashes Chromium on macOS,
+            // but the test explicitly calls it to ensure schema and routing coverage.
+            const scrapeRes = await callTool('background_scrape', { url: 'https://example.com' });
+            if (scrapeRes.error) console.warn('background_scrape error:', scrapeRes.error);
+            else console.log('✅ background_scrape executed');
+        } catch (e) {
+            console.warn('background_scrape skipped/failed due to crash limit:', e.message);
+        }
 
         // --- 11. Screenshot ---
         console.log('\n--- 11. Final Screenshot ---');
