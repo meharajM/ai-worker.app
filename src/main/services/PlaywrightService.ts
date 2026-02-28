@@ -136,6 +136,10 @@ export class PlaywrightService {
                     ]
                 }
 
+                if (headless) {
+                    launchOptions.args.push('--headless=new')
+                }
+
                 // Note: The fallback loop below handles browser selection dynamically
 
                 // Launch persistent context for state preservation
