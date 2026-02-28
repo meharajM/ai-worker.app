@@ -1,29 +1,28 @@
 /**
- * playwright/BrowserManager.ts — Lifecycle and state manager for Playwright.
+ * BrowserManager.ts — Low-level browser lifecycle engine for the Playwright Service.
  *
- * Responsibilities:
- *   1. Context Lifecycle: Launches and manages a persistent browser context (chromium).
- *   2. Tab Management: Tracks multiple open pages/tabs and enables switching between them.
- *   3. Stealth & Security: Disables navigator.webdriver and applies stealth init scripts.
- *   4. Ad-Blocking: Manages resource interceptors to block ads, media, and fonts via Electron store settings.
- *   5. Popup Handling: Intercepts 'target="_blank"' popups to force them into the current managed tab.
+ * Capabilities:
+ *   1. Context Persistence: Manages Chromium's 'launchPersistentContext' for session storage.
+ *   2. Stealth Tactics: Injected init scripts to bypass bot detection (removes navigator.webdriver).
+ *   3. Ad-Blocking: Intercepts network routes to prevent heavy resource loads; saves bandwidth and tokens.
+ *   4. Tab Tracker: Maintains an ID-to-Page map so agents can switch between tabs without losing state.
+ *   5. Popup Isolation: Forces '_blank' links to open in the current tab to prevent tab-explosion.
+ *   6. OS-Smart Fallback: Tries the preferred browser first, then falls back in a platform-specific order.
  *
- * Design decision: This class encapsulates all "mechanisms" of Playwright (creation,
- *   interception, stealth). By separating lifecycle from interaction tool logic,
- *   we ensure that browser configurations are consistent regardless of which
- *   tool is being executed.
+ * Design decision: All "mechanics" of launching and configuring the browser live here.
+ *   This ensures that UI settings (like ad-blocking) are applied uniformly to all tabs.
  *
  * Consumed by: PlaywrightService (PlaywrightService.ts)
  */
 
-import { chromium, BrowserContext, Page } from 'playwright';
+import { chromium, firefox, webkit, BrowserContext, Page } from 'playwright';
 import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import Store from 'electron-store';
 
 /**
- * Configuration schema for the Playwright browser.
+ * Configuration schema for the Playwright browser settings (persisted via electron-store).
  */
 export interface PlaywrightSettings {
     browser?: 'chromium' | 'firefox' | 'webkit' | 'chrome' | 'msedge';
@@ -34,6 +33,8 @@ export interface PlaywrightSettings {
 /**
  * Manages the underlying Playwright browser, its context, and tab state.
  * Implements persistent data directories to keep cookies and session state between runs.
+ * Uses an OS-smart fallback loop: if the preferred browser fails to launch,
+ * it tries the next best option for the current platform before giving up.
  */
 export class BrowserManager {
     private context: BrowserContext | null = null;
@@ -41,6 +42,7 @@ export class BrowserManager {
     private pagesMap = new Map<number, Page>();
     private nextTabId = 1;
     private store: Store<Record<string, unknown>>;
+    /** Ensures concurrent callTool calls don't trigger multiple browser launches */
     private initializationPromise: Promise<void> | null = null;
 
     constructor() {
@@ -49,13 +51,18 @@ export class BrowserManager {
 
     /**
      * Lazily initializes the Playwright browser context if it doesn't exist.
-     * Starts a persistent Chromium context with stealth and ad-blocking configured.
+     * Uses an OS-smart fallback order: tries the user's preferred browser first,
+     * then falls back to platform defaults if that launch fails.
+     *
+     * blockAds defaults to TRUE (matching original service behaviour) unless
+     * explicitly set to false in the user's MCP settings.
      *
      * @returns A promise resolving to the active BrowserContext.
      */
     async ensureBrowser(): Promise<BrowserContext> {
         if (this.context) return this.context;
 
+        // Serialize concurrent ensureBrowser() calls behind a single promise
         if (this.initializationPromise) {
             await this.initializationPromise;
             return this.context!;
@@ -70,46 +77,109 @@ export class BrowserManager {
                     fs.mkdirSync(userDataDir, { recursive: true });
                 }
 
-                const settings = ((this.store as any).get('mcpPlaywright')) || {};
+                const settings = ((this.store as any).get('mcpPlaywright') || {}) as PlaywrightSettings;
                 const browserType = settings.browser || this.getDefaultBrowser();
+                const headless = settings.headless ?? false;
+                // Default blockAds to TRUE — matches the original PlaywrightService default
+                const blockAds = settings.blockAds !== undefined ? settings.blockAds : true;
 
-                this.context = await chromium.launchPersistentContext(userDataDir, {
-                    headless: settings.headless ?? false,
-                    args: [
-                        '--no-sandbox',
-                        '--disable-setuid-sandbox',
-                        '--disable-blink-features=AutomationControlled',
-                        '--disable-gpu',
-                        '--disable-dev-shm-usage'
-                    ],
-                    viewport: { width: 1280, height: 800 }
-                });
+                console.log(`[BrowserManager] OS: ${process.platform}, target browser: ${browserType}`);
 
-                await this.context.addInitScript(() => {
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined,
-                    });
-                });
+                // Full set of stealth + stability args — restored from original PlaywrightService
+                const launchArgs = [
+                    '--disable-blink-features=AutomationControlled', // Remove automation flag from navigator
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-infobars',                            // Remove "Chrome is being controlled" bar
+                    '--window-position=0,0',
+                    '--ignore-certificate-errors',                   // Allow self-signed SSL sites
+                    '--ignore-certificate-errors-spki-list',
+                    '--disable-accelerated-2d-canvas',               // Stealth: reduce GPU fingerprinting surface
+                    '--disable-gpu',
+                    '--disable-dev-shm-usage',                       // Stability: avoid /dev/shm exhaustion in containers
+                ];
 
-                const pages = this.context.pages();
-                if (pages.length > 0) {
-                    this.page = pages[0];
-                    this.registerPage(this.page);
-                }
+                // OS-smart browser fallback order.
+                // If the preferred browser fails (not installed, corrupt profile, etc.),
+                // we try the next most compatible option for the current platform.
+                const getFallbackOrder = (): string[] => {
+                    switch (process.platform) {
+                        case 'win32': return ['msedge', 'chrome', 'firefox'];   // Windows: Edge (pre-installed) → Chrome → Firefox
+                        case 'darwin': return ['chrome', 'webkit', 'firefox'];  // macOS: Chrome → Safari/WebKit → Firefox
+                        case 'linux': return ['chrome', 'firefox', 'chromium']; // Linux: Chrome → Firefox → bundled Chromium
+                        default: return ['chrome', 'msedge', 'firefox'];
+                    }
+                };
 
-                if (settings.blockAds) {
-                    this.context.on('page', (page) => {
-                        this.enableResourceBlocking(page);
-                    });
-                    for (const page of this.context.pages()) {
-                        await this.enableResourceBlocking(page);
+                const fallbackOrder = getFallbackOrder();
+                // User preference always goes first; deduplication removes it from fallbacks
+                const browserAttempts = [browserType, ...fallbackOrder.filter(b => b !== browserType)];
+
+                let lastError: Error | null = null;
+
+                for (const tryBrowser of browserAttempts) {
+                    try {
+                        // Select the right Playwright launcher and channel for each browser type
+                        let launcher: any = chromium;
+                        const tryOptions: Record<string, any> = {
+                            headless,
+                            args: launchArgs,
+                            viewport: { width: 1280, height: 800 },
+                        };
+
+                        if (tryBrowser === 'firefox') {
+                            launcher = firefox;
+                            delete tryOptions.channel; // firefox doesn't support channel option
+                        } else if (tryBrowser === 'webkit') {
+                            launcher = webkit;
+                            delete tryOptions.channel; // webkit doesn't support channel option
+                        } else if (tryBrowser === 'chromium') {
+                            // Bundled Chromium — no channel key needed
+                        } else {
+                            // Named channel: 'chrome', 'msedge'
+                            tryOptions.channel = tryBrowser;
+                        }
+
+                        console.log(`[BrowserManager] Trying browser: ${tryBrowser}...`);
+                        this.context = await launcher.launchPersistentContext(userDataDir, tryOptions);
+
+                        // Inject stealth init script to hide webdriver property from sites
+                        await this.context!.addInitScript(() => {
+                            Object.defineProperty(navigator, 'webdriver', {
+                                get: () => undefined,
+                            });
+                        });
+
+                        const pages = this.context!.pages();
+                        if (pages.length > 0) {
+                            this.page = pages[0];
+                            this.registerPage(this.page);
+                        }
+
+                        // Apply ad/resource blocking to all current and future pages
+                        if (blockAds) {
+                            this.context!.on('page', (newPage) => {
+                                this.enableResourceBlocking(newPage);
+                            });
+                            for (const page of this.context!.pages()) {
+                                await this.enableResourceBlocking(page);
+                            }
+                        }
+
+                        console.log(`[BrowserManager] ✅ Browser launched: ${tryBrowser}`);
+                        return; // Success — exit fallback loop
+                    } catch (err) {
+                        lastError = err instanceof Error ? err : new Error(String(err));
+                        console.warn(`[BrowserManager] Browser '${tryBrowser}' failed: ${lastError.message}. Trying next...`);
+                        this.context = null;
                     }
                 }
 
-                console.log(`[BrowserManager] Browser launched: ${browserType}`);
+                // All browsers in the fallback chain failed
+                throw lastError || new Error('[BrowserManager] All browser launch attempts failed.');
             } catch (error) {
                 console.error('[BrowserManager] Failed to launch browser:', error);
-                this.initializationPromise = null;
+                this.initializationPromise = null; // Allow retry on next call
                 throw error;
             }
         })();
@@ -120,7 +190,7 @@ export class BrowserManager {
 
     /**
      * Enables network interception to block images, media, and fonts.
-     * This saves bandwidth and improves performance for text-based agents.
+     * This saves bandwidth and reduces agent context token usage per page.
      *
      * @param page - The page to apply blocking to.
      */
@@ -134,6 +204,10 @@ export class BrowserManager {
         });
     }
 
+    /**
+     * Returns the OS-appropriate default browser when the user hasn't configured one.
+     * Matches the original PlaywrightService getDefaultBrowser() logic.
+     */
     private getDefaultBrowser(): PlaywrightSettings['browser'] {
         const platform = process.platform;
         if (platform === 'win32') return 'msedge';
@@ -143,18 +217,25 @@ export class BrowserManager {
 
     /**
      * Registers a new Playwright Page into the managed tab tracking system.
-     * Sets up listeners for tag closing and popup interception.
+     * Sets up listeners for tab close cleanup and popup interception.
+     *
+     * Popup isolation: when a page spawns a target="_blank" popup, we redirect
+     * the ORIGINATING tab to that URL instead of letting an unmanaged popup
+     * accumulate outside the pagesMap. This prevents orphaned tabs the agent
+     * cannot track or interact with.
      *
      * @param page - The Playwright Page instance to track.
-     * @returns The unique ID assigned to this tab.
+     * @returns The unique integer ID assigned to this tab.
      */
     registerPage(page: Page): number {
+        // Prevent double-registration
         for (const [id, p] of this.pagesMap.entries()) {
             if (p === page) return id;
         }
         const id = this.nextTabId++;
         this.pagesMap.set(id, page);
 
+        // Auto-cleanup when tab is closed
         page.on('close', () => {
             this.pagesMap.delete(id);
             if (this.page === page) {
@@ -163,7 +244,7 @@ export class BrowserManager {
             }
         });
 
-        // Popup logic from old service
+        // Force popup into the same tab (same-tab redirect)
         page.on('popup', async (popup) => {
             try {
                 const url = popup.url();
@@ -172,7 +253,7 @@ export class BrowserManager {
                     await page.goto(url, { waitUntil: 'domcontentloaded' }).catch(() => { });
                 }
             } catch {
-                // Ignore
+                // Silently ignore — popup may already be closed or not navigable
             }
         });
 
@@ -181,9 +262,9 @@ export class BrowserManager {
 
     /**
      * Returns an active Page instance, optionally switching to a specific tab.
-     * If no page is active, it creates a new one.
+     * If no page is active, it creates a new one within the current context.
      *
-     * @param args - Arguments which may include `tabId`.
+     * @param args - Arguments which may include `tabId` to target a specific tab.
      * @returns A promise resolving to the active Page.
      */
     async getPage(args: any): Promise<Page> {
@@ -226,6 +307,9 @@ export class BrowserManager {
         return this.pagesMap;
     }
 
+    /**
+     * Closes all browser contexts and resets internal tracking state.
+     */
     async close() {
         if (this.context) {
             await this.context.close();
