@@ -105,6 +105,11 @@ export interface AgentRuntimeOptions {
     onMessageUpdate?: (id: string, updates: Partial<LLMMessage>) => void;
 
     /**
+     * Called to update the global active session progress.
+     */
+    onProgressUpdate?: (progress?: number, eta?: number, plan?: ExecutionPlan) => void;
+
+    /**
      * Dedicated browser tab ID for this agent instance.
      * Injected into all browser tool calls to ensure tab isolation between
      * parallel sub-agents (each gets its own tab, no cross-contamination).
@@ -157,7 +162,7 @@ export interface ExecutionPlan {
         id: number;
         description: string;
         /** 'pending' | 'completed' | 'failed' */
-        status: string;
+        status: 'pending' | 'active' | 'completed' | 'failed';
         /** Brief result summary (first 200 chars of the step's output). */
         result?: string;
         /** Which sub-agent is assigned to this step (for parallel plans). */

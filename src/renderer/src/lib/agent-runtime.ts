@@ -44,7 +44,6 @@ import {
   formatToolResult,
   truncateToolOutput,
   reportFinding,
-  MAX_IDENTICAL_CALLS,
 } from "./agent/ToolExecutionService";
 import {
   executeParallelSubAgents,
@@ -86,6 +85,7 @@ export class AgentRuntime implements IAgentClient {
   private readonly ABSOLUTE_MAX_ITERATIONS = 150;
   private toolCallHistory = new Set<string>();
   private agentInstanceId: string;
+  private taskStartTimeMs: number;
   private lastCheckpoint: AgentCheckpoint | null = null;
 
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
@@ -110,6 +110,7 @@ export class AgentRuntime implements IAgentClient {
     }
 
     this.agentInstanceId = options.agentInstanceId || globalThis.crypto.randomUUID();
+    this.taskStartTimeMs = Date.now();
   }
 
   // ── IAgentClient: chat ─────────────────────────────────────────────────────
@@ -155,6 +156,23 @@ export class AgentRuntime implements IAgentClient {
     if (this.options.parentAgentId) {
       const parentContextMsg = await loadParentContext(this.options.parentAgentId);
       if (parentContextMsg) this.messages.push(parentContextMsg);
+    }
+
+    // ── Check tasks.json for crash recovery ────────────────────────────────
+    if (!this.executionPlan && !this.options.isSubAgent && this.options.workspacePath) {
+      try {
+        const electron = (await import('./electron')).default;
+        const result = await electron.fs.readInternalFile(this.options.workspacePath, 'tasks.json');
+        if (result.success && result.content) {
+          this.executionPlan = JSON.parse(result.content);
+          console.log('[AgentRuntime] Recovered execution plan from tasks.json');
+
+          // Sync recovered plan to tasks.json to ensure file is up-to-date
+          import('./task-manager').then(m => m.syncPlanToFile(this.options.workspacePath, this.executionPlan!));
+        }
+      } catch (e) {
+        console.warn('[AgentRuntime] Failed to recover tasks.json:', e);
+      }
     }
 
     // ── Handoff detection (AgentStateService) ────────────────────────────────
@@ -320,6 +338,7 @@ export class AgentRuntime implements IAgentClient {
     let iterationCount = 0;
     let consecutiveErrors = 0;
     const recentToolCalls: string[] = [];
+    let activeAssistantMessageId: string | undefined;
 
     while (iterationCount < this.maxIterations) {
       this.totalIterations++;
@@ -510,7 +529,19 @@ export class AgentRuntime implements IAgentClient {
           function: { name: tc.name, arguments: tc.arguments },
         })) as any,
       };
-      this.addMessage(assistantMsg);
+      const messageIdResult = this.addMessage(assistantMsg);
+      if (typeof messageIdResult === "string") {
+        activeAssistantMessageId = messageIdResult;
+      }
+
+      // Sync tool calls to assistantMsg local tracking
+      if (!(assistantMsg as any).toolCalls) {
+        (assistantMsg as any).toolCalls = response.toolCalls.map(tc => ({
+          id: tc.id,
+          name: tc.name,
+          arguments: tc.arguments
+        }));
+      }
 
       // Execute all tool calls (in parallel)
       const toolPromises = response.toolCalls.map(async (call) => {
@@ -584,9 +615,62 @@ export class AgentRuntime implements IAgentClient {
         const truncated = truncateToolOutput(call.name, resultStr);
         this.addMessage({ role: "tool", content: truncated, tool_call_id: call.id });
 
+        // ── Update UI with tool result ─────────────────────────────────────
+        if (activeAssistantMessageId && this.options.onMessageUpdate) {
+          const currentToolCalls = (assistantMsg as any).toolCalls || [];
+          const storeToolCalls = currentToolCalls.map((t: any) =>
+            t.id === call.id ? { ...t, result: truncated } : t
+          );
+          (assistantMsg as any).toolCalls = storeToolCalls;
+          this.options.onMessageUpdate(activeAssistantMessageId, {
+            toolCalls: storeToolCalls
+          } as any);
+        }
+
+        // ── Progress calculation (Gap 2 fix) ──────────────────────────────
+        // Runs unconditionally — not just when there's presentable data.
+        // This ensures the progress bar advances for every tool call,
+        // including browser_navigate, browser_click, fs_read, etc.
+        if (!this.options.isSubAgent && this.options.onProgressUpdate) {
+          // Crude iteration-based estimate as the floor
+          let progress = Math.min(Math.round(((iterationCount + 1) / this.maxIterations) * 100), 95);
+
+          // If we have an execution plan, use the more accurate step-based progress
+          if (this.executionPlan && this.executionPlan.steps.length > 0) {
+            const totalSteps = this.executionPlan.steps.length;
+            const completedSteps = this.executionPlan.steps.filter(s => s.status === 'completed').length;
+            const activeSteps = this.executionPlan.steps.filter(s => s.status === 'active').length;
+            // Active steps count as 50% done for progress calculation
+            const rawProgress = ((completedSteps + (activeSteps * 0.5)) / totalSteps) * 100;
+            progress = Math.min(Math.max(Math.round(rawProgress), progress), 98);
+          }
+
+          let etaSeconds: number | undefined;
+          if (progress > 0) {
+            const elapsedMs = Date.now() - this.taskStartTimeMs;
+            const rate = progress / elapsedMs;
+            const remainingMs = Math.max(0, (100 - progress) / rate);
+            etaSeconds = Math.round(remainingMs / 1000);
+          }
+
+          this.options.onProgressUpdate(progress, etaSeconds, this.executionPlan ?? undefined);
+        }
+
         // ── Incremental finding reporting ──────────────────────────────────
+        // Only surfaces data-rich tool outputs (e.g. page content, file reads)
+        // as annotated findings on the tool call card. Does NOT update progress.
         if (!this.options.isSubAgent) {
-          reportFinding(call.name, resultStr, (msg) => this.addMessage(msg));
+          const findingSummary = reportFinding(call.name, resultStr);
+          if (findingSummary && activeAssistantMessageId && this.options.onMessageUpdate) {
+            const currentToolCalls = (assistantMsg as any).toolCalls || [];
+            const storeToolCalls = currentToolCalls.map((t: any) =>
+              t.id === call.id ? { ...t, isPresentable: true, finding: findingSummary.summary } : t
+            );
+            (assistantMsg as any).toolCalls = storeToolCalls;
+            this.options.onMessageUpdate(activeAssistantMessageId, {
+              toolCalls: storeToolCalls
+            } as any);
+          }
         }
 
         return undefined;
@@ -696,6 +780,10 @@ export class AgentRuntime implements IAgentClient {
         assigned_agent: s.assigned_agent,
       })),
     };
+
+    // Keep it in sync
+    import('./task-manager').then(m => m.syncPlanToFile(this.options.workspacePath, this.executionPlan!));
+
     console.log(`[AgentRuntime] Plan created with ${steps.length} steps:`, args.goal);
     return `Execution plan created: ${args.goal}\n\nSteps:\n${steps
       .map((s: any) => `${s.id}. ${s.description} [${s.assigned_agent}]`)
@@ -865,6 +953,59 @@ export class AgentRuntime implements IAgentClient {
         }
       }
 
+      // ── Detect sub-agent bailout vs clean completion ──────────────────────
+      // When consecutiveErrors >= maxConsecutiveErrors the sub-agent emits a
+      // bailout message starting with "I encountered N consecutive errors".
+      // In that case we salvage any partial data from its tool history so the
+      // parent LLM can still make use of what the sub-agent did collect.
+      const isBailout = finalContent.includes("consecutive errors") ||
+        finalContent.includes("stopping to prevent an infinite loop");
+
+      if (isBailout) {
+        // Extract partial tool outputs from the sub-agent's history
+        const subAgentHistory = (subAgent as any).getHistory?.() as LLMMessage[] | undefined;
+        const partialFindings: string[] = [];
+
+        if (subAgentHistory) {
+          for (const msg of subAgentHistory) {
+            if (msg.role === "tool") {
+              const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+              // Only salvage non-error, non-trivial outputs
+              if (!content.includes('"error":') && content.length > 50) {
+                const { analyzeToolOutput } = await import("./result-reporter");
+                const analysis = analyzeToolOutput("tool", content);
+                if (analysis.hasPresentableData && analysis.summary) {
+                  partialFindings.push(analysis.summary.substring(0, 300));
+                }
+              }
+            }
+          }
+        }
+
+        // Mark matching plan step as "failed" so tasks.json is accurate
+        if (this.executionPlan) {
+          const matchingStep = this.executionPlan.steps.find(
+            (s) =>
+              s.status === "pending" &&
+              (instruction.toLowerCase().includes(s.description.toLowerCase().substring(0, 20)) ||
+                s.description.toLowerCase().includes(instruction.toLowerCase().substring(0, 20)))
+          );
+          if (matchingStep) {
+            matchingStep.status = "failed";
+            matchingStep.result = `Failed after partial execution. ${partialFindings.length} findings salvaged.`;
+            import('./task-manager').then(m => m.syncPlanToFile(this.options.workspacePath, this.executionPlan!));
+          }
+        }
+
+        // Return partial data + error so the parent LLM can adapt
+        const partialSection = partialFindings.length > 0
+          ? `\n\nPartial data collected before failure:\n${partialFindings.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
+          : "";
+        console.warn(`[AgentRuntime] Sub-agent bailed out. Salvaged ${partialFindings.length} partial findings.`);
+        return `Sub-agent encountered errors and stopped.${partialSection}\n\nPlease use the partial data above if useful, or try a different approach for: ${instruction}`;
+      }
+
+      // ── Clean completion path ──────────────────────────────────────────────
       // Update execution plan if we have one
       if (this.executionPlan) {
         const matchingStep = this.executionPlan.steps.find(
@@ -876,6 +1017,10 @@ export class AgentRuntime implements IAgentClient {
         if (matchingStep) {
           matchingStep.status = "completed";
           matchingStep.result = finalContent.substring(0, 200);
+
+          // Keep it in sync
+          import('./task-manager').then(m => m.syncPlanToFile(this.options.workspacePath, this.executionPlan!));
+
           const completed = this.executionPlan.steps.filter((s) => s.status === "completed").length;
           const total = this.executionPlan.steps.length;
           console.log(`[AgentRuntime] Plan progress: ${completed}/${total} steps completed`);
@@ -909,6 +1054,11 @@ export class AgentRuntime implements IAgentClient {
       const subAgentOptions: AgentRuntimeOptions = {
         ...this.options,
         ...overrides,
+        // WHY always strip onProgressUpdate for sub-agents:
+        // Sub-agents must NEVER fire global UI progress updates. Progress is
+        // managed by the parent agent only. Stripping it here is an explicit
+        // boundary, not just relying on the `!isSubAgent` guard in _runLoop.
+        onProgressUpdate: undefined,
       };
       return new AgentRuntime(subAgentOptions);
     };

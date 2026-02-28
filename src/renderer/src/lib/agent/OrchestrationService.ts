@@ -76,6 +76,29 @@ export async function executeParallelSubAgents(
 ): Promise<LLMMessage> {
     const { contexts } = decomposition;
 
+    // Helper to salvage data from a sub-agent
+    const extractPartialFindings = async (subAgentInstance: any): Promise<string[]> => {
+        const history = subAgentInstance.getHistory?.() as LLMMessage[] | undefined;
+        const partials: string[] = [];
+        if (!history) return partials;
+
+        for (const msg of history) {
+            if (msg.role === "tool") {
+                const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+                if (!content.includes('"error":') && content.length > 50) {
+                    try {
+                        const { analyzeToolOutput } = await import("../result-reporter");
+                        const analysis = analyzeToolOutput("tool", content);
+                        if (analysis.hasPresentableData && analysis.summary) {
+                            partials.push(analysis.summary.substring(0, 300));
+                        }
+                    } catch (e) { }
+                }
+            }
+        }
+        return partials;
+    };
+
     // Track live status for each sub-agent
     const agentStatuses = contexts.map((ctx) => ({
         context: ctx,
@@ -181,9 +204,27 @@ export async function executeParallelSubAgents(
                     ? result.content
                     : (result.content as any[]).map((c: any) => (c.type === "text" ? c.text : "")).join("");
 
+            // Detect sub-agent bailout (max consecutive errors)
+            const isBailout = resultContent.includes("consecutive errors") ||
+                resultContent.includes("stopping to prevent an infinite loop");
+
+            let isSuccess = !isBailout;
+            let finalStatus = isSuccess ? "Done" : "Failed";
+            let finalResultStr = resultContent;
+
+            if (isBailout) {
+                const partials = await extractPartialFindings(subAgent);
+                if (partials.length > 0) {
+                    finalResultStr = `Sub-agent bailed out. Partial data collected:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
+                } else {
+                    finalResultStr = `Sub-agent bailed out with errors. No partial data salvaged.\n\nOriginal result: ${resultContent.substring(0, 100)}...`;
+                }
+                console.warn(`[OrchestrationService] Parallel sub-agent ${context} bailed out. Salvaged ${partials.length} partial findings.`);
+            }
+
             agentStatuses[index].isRunning = false;
-            agentStatuses[index].result = resultContent;
-            agentStatuses[index].status = "Done";
+            agentStatuses[index].result = finalResultStr;
+            agentStatuses[index].status = finalStatus;
 
             if (statusMessageId && parentOptions.onMessageUpdate) {
                 parentOptions.onMessageUpdate(statusMessageId, { content: renderStatus() });
@@ -203,23 +244,47 @@ export async function executeParallelSubAgents(
             }
 
             // Show the result immediately as a distinct message
-            addMessage({
-                role: "assistant",
-                content: `**✅ ${context} Analysis Complete**\n\n${resultContent.substring(0, 500)}${resultContent.length > 500 ? "..." : ""
-                    }`,
-            });
+            if (isSuccess) {
+                addMessage({
+                    role: "assistant",
+                    content: `**✅ ${context} Analysis Complete**\n\n${finalResultStr.substring(0, 500)}${finalResultStr.length > 500 ? "..." : ""
+                        }`,
+                });
+            } else {
+                addMessage({
+                    role: "assistant",
+                    content: `**⚠️ ${context} Analysis Failed/Partial**\n\n${finalResultStr}`,
+                });
+            }
 
-            return { context, success: true, result: resultContent };
+            return { context, success: isSuccess, result: finalResultStr };
         } catch (error: any) {
             agentStatuses[index].isRunning = false;
             agentStatuses[index].status = "Failed";
-            agentStatuses[index].result = `Error: ${error.message}`;
+
+            // Try to salvage partial data even on a hard crash
+            let partialsMsg = "";
+            try {
+                const partials = await extractPartialFindings(subAgent);
+                if (partials.length > 0) {
+                    partialsMsg = `\n\nPartial data collected before crash:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
+                    console.warn(`[OrchestrationService] Parallel sub-agent ${context} threw exception. Salvaged ${partials.length} partial findings.`);
+                }
+            } catch (e) { }
+
+            const errorText = `Error: ${error.message}${partialsMsg}`;
+            agentStatuses[index].result = errorText;
 
             if (statusMessageId && parentOptions.onMessageUpdate) {
                 parentOptions.onMessageUpdate(statusMessageId, { content: renderStatus() });
             }
 
-            return { context, success: false, result: `Error: ${error.message}` };
+            addMessage({
+                role: "assistant",
+                content: `**❌ ${context} Analysis Crashed**\n\n${errorText}`,
+            });
+
+            return { context, success: false, result: errorText };
         }
     });
 
@@ -364,6 +429,29 @@ Format as JSON:
         // ── Step 2: Execute each step via sub-agent ────────────────────────────────
         const results: Array<{ step: number; description: string; result: string }> = [];
 
+        // Helper to salvage data from a sub-agent
+        const extractPartialFindings = async (subAgentInstance: any): Promise<string[]> => {
+            const history = subAgentInstance.getHistory?.() as LLMMessage[] | undefined;
+            const partials: string[] = [];
+            if (!history) return partials;
+
+            for (const msg of history) {
+                if (msg.role === "tool") {
+                    const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
+                    if (!content.includes('"error":') && content.length > 50) {
+                        try {
+                            const { analyzeToolOutput } = await import("../result-reporter");
+                            const analysis = analyzeToolOutput("tool", content);
+                            if (analysis.hasPresentableData && analysis.summary) {
+                                partials.push(analysis.summary.substring(0, 300));
+                            }
+                        } catch (e) { }
+                    }
+                }
+            }
+            return partials;
+        };
+
         for (const step of steps) {
             if (parentOptions.signal?.aborted) {
                 console.log("[OrchestrationService] Sequential orchestration aborted by user");
@@ -429,7 +517,21 @@ End with "✓ Done" and a brief result.`;
                         ? stepResult.content
                         : (stepResult.content as any[]).map((c: any) => (c.type === "text" ? c.text : "")).join("");
 
-                results.push({ step: step.id, description: step.description, result: stepContent.trim() });
+                // Detect bailout
+                const isBailout = stepContent.includes("consecutive errors") ||
+                    stepContent.includes("stopping to prevent an infinite loop");
+
+                if (isBailout) {
+                    const partials = await extractPartialFindings(subAgent);
+                    let finalStepContent = stepContent;
+                    if (partials.length > 0) {
+                        finalStepContent = `Step bailed out. Partial data collected:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
+                    }
+                    console.warn(`[OrchestrationService] Sequential step ${step.id} bailed out. Salvaged ${partials.length} findings.`);
+                    results.push({ step: step.id, description: step.description, result: finalStepContent.trim() });
+                } else {
+                    results.push({ step: step.id, description: step.description, result: stepContent.trim() });
+                }
 
                 const progressMessage: LLMMessage = {
                     role: "assistant",
@@ -440,10 +542,21 @@ End with "✓ Done" and a brief result.`;
                 parentOptions.onMessage?.(progressMessage);
             } catch (error: any) {
                 console.error(`[OrchestrationService] Step ${step.id} failed:`, error);
+
+                // Try to salvage partial data even on a hard crash
+                let partialsMsg = "";
+                try {
+                    const partials = await extractPartialFindings(subAgent);
+                    if (partials.length > 0) {
+                        partialsMsg = `\n\nPartial data collected before crash:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
+                        console.warn(`[OrchestrationService] Sequential step ${step.id} crashed. Salvaged ${partials.length} findings.`);
+                    }
+                } catch (e) { }
+
                 results.push({
                     step: step.id,
                     description: step.description,
-                    result: `Error: ${error.message}`,
+                    result: `Error: ${error.message}${partialsMsg}`,
                 });
             }
         }

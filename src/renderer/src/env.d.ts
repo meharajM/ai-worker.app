@@ -73,6 +73,10 @@ interface ElectronAPI {
         }>>
         approveChange: (changeId: string) => Promise<{ success: boolean; error?: string }>
         rejectChange: (changeId: string) => Promise<{ success: boolean; error?: string }>
+        writeInternalFile: (workspacePath: string | undefined, filename: string, content: string) =>
+            Promise<{ success: boolean; path?: string; error?: string }>
+        readInternalFile: (workspacePath: string | undefined, filename: string) =>
+            Promise<{ success: boolean; content?: string; error?: string }>
     }
 
     memory: {

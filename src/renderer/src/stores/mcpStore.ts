@@ -64,14 +64,6 @@ function getPersistenceKey(uid: string | null) {
 
 const DEFAULT_MCP_SERVERS = [
     {
-        name: 'sequential-thinking',
-        description: 'Sequential Thinking MCP Server - Enables step-by-step reasoning for complex tasks',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
-        autoConnect: true
-    },
-    {
         name: 'playwright',
         description: 'Native Playwright Service - Browser automation (Internal)',
         type: 'stdio',

@@ -55,11 +55,10 @@ const MIN_REMAINING_FOR_RETRY_MS = 5_000;
 /**
  * Checks if the agent is stuck in a loop by examining recent tool call signatures.
  *
- * Detects two patterns:
+ * Detects:
  * 1. **Identical calls**: Same tool name + same arguments N times in a row.
- * 2. **Same tool repeated**: Same tool name with different arguments N times in a row.
- *    WHY: Even with different args, repeatedly calling the same tool usually means
- *    the agent is stuck and trying variations of the same failing approach.
+ *    (We no longer block same tool + different args, because reading 3 different
+ *    files or navigating to 3 different links in a row is perfectly valid exploration).
  *
  * @param recentToolCalls - Sliding window of the last N tool signatures.
  * @param toolCallHistory - Set of all unique tool signatures (for progress tracking).
@@ -77,14 +76,11 @@ export function checkForLoop(
 
     const lastN = recentToolCalls.slice(-MAX_IDENTICAL_CALLS);
     const allSame = lastN.every((sig) => sig === lastN[0]);
-    const toolNames = lastN.map((sig) => sig.split(":")[0]);
-    const sameToolRepeated = toolNames.every((name) => name === toolNames[0]);
 
-    if (!allSame && !sameToolRepeated) return null;
+    if (!allSame) return null;
 
-    const loopType = allSame ? "identical arguments" : "similar pattern (same tool)";
     console.error(
-        `[ToolExecutionService] Infinite loop detected: ${callName} called ${MAX_IDENTICAL_CALLS}+ times with ${loopType}`
+        `[ToolExecutionService] Infinite loop detected: ${callName} called ${MAX_IDENTICAL_CALLS}+ times with identical arguments`
     );
 
     // Gather recent tool outputs for context in the bailout message
@@ -103,7 +99,7 @@ export function checkForLoop(
         role: "assistant",
         content: `## ⚠️ I noticed I'm repeating the same action
 
-I've called \`${callName}\` **${MAX_IDENTICAL_CALLS} times** with ${loopType}, which usually means something isn't working as expected.
+I've called \`${callName}\` **${MAX_IDENTICAL_CALLS} times** with identical arguments, which usually means something isn't working as expected.
 
 ---
 
@@ -264,7 +260,7 @@ async function _executeWithRetry(
                 console.log(`[ToolExecutionService] Lane timeout for ${name} (attempt ${attempt}). Retrying in 2s...`);
                 await delay(2000);
                 if (signal?.aborted) return { result: null, error: "Aborted by user" };
-                return _executeWithRetry(name, args, tabId, workspacePath, signal, attempt + 1, startTime);
+                return _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, attempt + 1, startTime);
             }
 
             if (errorStr.includes("Timeout") && args.timeout && typeof args.timeout === "number") {
@@ -275,6 +271,7 @@ async function _executeWithRetry(
                     tabId,
                     workspacePath,
                     signal,
+                    isHeadless,
                     attempt + 1,
                     startTime
                 );
@@ -288,7 +285,7 @@ async function _executeWithRetry(
                 console.log(`[ToolExecutionService] Network error in ${name}. Retrying in 2s...`);
                 await delay(2000);
                 if (signal?.aborted) return { result: null, error: "Aborted by user" };
-                return _executeWithRetry(name, args, tabId, workspacePath, signal, attempt + 1, startTime);
+                return _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, attempt + 1, startTime);
             }
 
             if (
@@ -299,7 +296,7 @@ async function _executeWithRetry(
                 console.log(`[ToolExecutionService] Browser context lost in ${name}. Retrying in 1s...`);
                 await delay(1000);
                 if (signal?.aborted) return { result: null, error: "Aborted by user" };
-                return _executeWithRetry(name, args, tabId, workspacePath, signal, attempt + 1, startTime);
+                return _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, attempt + 1, startTime);
             }
 
             if (
@@ -314,6 +311,7 @@ async function _executeWithRetry(
                     tabId,
                     workspacePath,
                     signal,
+                    isHeadless,
                     attempt + 1,
                     startTime
                 );
@@ -327,6 +325,7 @@ async function _executeWithRetry(
                     tabId,
                     workspacePath,
                     signal,
+                    isHeadless,
                     attempt + 1,
                     startTime
                 );
@@ -445,25 +444,41 @@ export function truncateToolOutput(toolName: string, resultStr: string): string 
  * @param resultStr - The raw output string.
  * @param addMessage - Callback to add a message to the agent's history + UI.
  */
+/**
+ * Analyzes tool output and returns a findings summary if presentable data exists.
+ * Does NOT add a message directly to history to avoid UI clutter (Standalone bubbles).
+ */
 export function reportFinding(
     toolName: string,
-    resultStr: string,
-    addMessage: (msg: LLMMessage) => void
-): void {
+    resultStr: string
+): { hasPresentableData: boolean; summary: string } | null {
     try {
         const analysisResult = analyzeToolOutput(toolName, resultStr);
         if (analysisResult.hasPresentableData && analysisResult.summary) {
-            addMessage({
-                role: "assistant",
-                content: `**📋 Finding:**\n${analysisResult.summary}`,
-            });
             console.log(
-                `[ToolExecutionService] Reported finding: ${analysisResult.summary.substring(0, 50)}...`
+                `[ToolExecutionService] Detected finding: ${analysisResult.summary.substring(0, 50)}...`
             );
+            return {
+                hasPresentableData: true,
+                summary: analysisResult.summary
+            };
         }
     } catch (e) {
         console.warn("[ToolExecutionService] Failed to analyze tool output:", e);
     }
+    return null;
+}
+
+/**
+ * Checks if a tool call represents a progress/state update rather than a functional action.
+ */
+export function isProgressUpdate(toolName: string): boolean {
+    const internalTools = [
+        'update_progress_summary',
+        'create_execution_plan',
+        'memory_update_entity'
+    ];
+    return internalTools.includes(toolName);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
