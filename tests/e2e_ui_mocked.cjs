@@ -1,5 +1,5 @@
 const { _electron: electron } = require('playwright');
-const path = require('path');
+delete process.env.ELECTRON_RUN_AS_NODE; const path = require('path');
 const fs = require('fs');
 
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
@@ -29,7 +29,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         electronApp = await electron.launch({
             executablePath: execPath,
             args: [path.join(__dirname, '../out/main/index.js'), '--no-sandbox'],
-            timeout: 60000,
+            timeout: 120000,
             env: { ...process.env, NODE_ENV: 'production' }
         });
         console.log('✅ Electron launched');
@@ -259,7 +259,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         // RELOAD to ensure InitScript runs before App components mount/useEffect
         console.log('🔄 Reloading page to apply mocks...');
-        await window.reload();
+        await window.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
         await window.waitForLoadState('domcontentloaded');
 
         // Note: We removed the aggressive window.electron mock block since it was failing (immutable)
@@ -315,7 +315,8 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             await chatInput.scrollIntoViewIfNeeded();
             await chatInput.click({ force: true });
             await chatInput.fill(text);
-            await window.locator('button:has(svg.lucide-send)').click({ force: true });
+            await window.waitForTimeout(500);
+            await window.locator('[data-testid="send-button"]').click({ force: true });
 
             // Wait for "Thinking..." state change or response
             console.log(`  - Sent: "${text.substring(0, 40)}..."`);

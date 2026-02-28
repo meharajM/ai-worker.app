@@ -1,4 +1,12 @@
-import { Page } from 'playwright';
+/**
+ * MiscTools.ts — Utility navigation helpers.
+ * 
+ * Logic:
+ *   1. go_back/go_forward: History stack manipulation.
+ *   2. wait_for_navigation: Synchronization tool to wait for idle network after clicks.
+ */
+
+import { Page, Frame } from 'playwright';
 import { PlaywrightTool, ToolResult } from '../PlaywrightTool';
 
 export class GoBackTool extends PlaywrightTool {
@@ -19,11 +27,10 @@ export class GoForwardTool extends PlaywrightTool {
 
 export class WaitForNavigationTool extends PlaywrightTool {
     name = 'wait_for_navigation';
-    async execute(page: Page, args: any): Promise<ToolResult> {
-        await page.waitForNavigation({
-            waitUntil: 'networkidle',
-            timeout: args.timeout || 30000
+    async execute(page: Page | Frame, args: any): Promise<ToolResult> {
+        await page.waitForLoadState('networkidle', {
+            timeout: args.timeout || 10000
         });
-        return { result: 'Navigation complete' };
+        return { result: 'Navigation/Load complete' };
     }
 }

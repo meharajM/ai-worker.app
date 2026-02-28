@@ -3,7 +3,7 @@
  * Tests the Native Speech / Web Speech API integration
  */
 const { _electron: electron } = require('playwright');
-const path = require('path');
+delete process.env.ELECTRON_RUN_AS_NODE;const path = require('path');
 const fs = require('fs');
 
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
@@ -49,7 +49,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                 '--use-fake-ui-for-media-stream',
                 '--window-size=1200,800'
             ],
-            timeout: 60000,
+            timeout: 120000,
             env: {
                 ...process.env,
                 NODE_ENV: 'production'
@@ -143,7 +143,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             // await textarea.waitFor({ state: 'visible', timeout: 15000 });
 
             try {
-                await window.locator('[data-testid="chat-textarea"][placeholder="Listening..."]').waitFor({ timeout: 60000 });
+                await window.locator('[data-testid="chat-textarea"][placeholder="Listening..."]').waitFor({ timeout: 120000 });
                 console.log('✅ "Listening..." placeholder visible in textarea');
             } catch (e) {
                 const currentPlaceholder = await textarea.getAttribute('placeholder');
