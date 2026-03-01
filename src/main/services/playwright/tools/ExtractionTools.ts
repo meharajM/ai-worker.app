@@ -1,4 +1,4 @@
-import { Page, chromium } from 'playwright';
+import { Page, chromium } from 'playwright-core';
 import { PlaywrightTool, ToolResult } from '../PlaywrightTool';
 
 export class GetPageContentTool extends PlaywrightTool {

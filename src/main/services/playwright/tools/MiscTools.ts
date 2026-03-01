@@ -6,7 +6,7 @@
  *   2. wait_for_navigation: Synchronization tool to wait for idle network after clicks.
  */
 
-import { Page, Frame } from 'playwright';
+import { Page, Frame } from 'playwright-core';
 import { PlaywrightTool, ToolResult } from '../PlaywrightTool';
 
 export class GoBackTool extends PlaywrightTool {

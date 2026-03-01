@@ -13,7 +13,7 @@
  * Consumed by: PlaywrightService, ToolRegistry, all files in tools/ directory.
  */
 
-import { BrowserContext, Page } from 'playwright';
+import { BrowserContext, Page } from 'playwright-core';
 
 /**
  * The standard structure returned by all browser tools.

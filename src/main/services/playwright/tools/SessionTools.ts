@@ -1,4 +1,4 @@
-import { Page } from 'playwright';
+import { Page } from 'playwright-core';
 import { PlaywrightTool, ToolResult, PlaywrightContext } from '../PlaywrightTool';
 
 export class GetCookiesTool extends PlaywrightTool {

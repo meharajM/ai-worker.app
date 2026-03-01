@@ -1,4 +1,4 @@
-import { chromium, firefox, webkit, BrowserContext, Page } from 'playwright'
+import { chromium, firefox, webkit, BrowserContext, Page } from 'playwright-core'
 import { app } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'

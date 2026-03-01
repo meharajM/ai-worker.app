@@ -15,7 +15,13 @@
  * Consumed by: PlaywrightService (PlaywrightService.ts)
  */
 
-import { chromium, firefox, webkit, BrowserContext, Page } from 'playwright';
+import * as playwrightCore from 'playwright-core';
+import { addExtra } from 'playwright-extra';
+import stealth from 'puppeteer-extra-plugin-stealth';
+import { BrowserContext, Page, Browser } from 'playwright-core';
+
+const stealthChromium: any = addExtra(playwrightCore.chromium as any);
+stealthChromium.use(stealth());
 import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -44,6 +50,10 @@ export class BrowserManager {
     private store: Store<Record<string, unknown>>;
     /** Ensures concurrent callTool calls don't trigger multiple browser launches */
     private initializationPromise: Promise<void> | null = null;
+
+    private headlessBrowser: Browser | null = null;
+    private headlessContext: BrowserContext | null = null;
+    private headlessPage: Page | null = null;
 
     constructor() {
         this.store = new Store<Record<string, unknown>>();
@@ -117,24 +127,29 @@ export class BrowserManager {
 
                 let lastError: Error | null = null;
 
+                if (headless) {
+                    launchArgs.push('--headless=new');
+                }
+
                 for (const tryBrowser of browserAttempts) {
                     try {
                         // Select the right Playwright launcher and channel for each browser type
-                        let launcher: any = chromium;
+                        let launcher: any = stealthChromium;
                         const tryOptions: Record<string, any> = {
                             headless,
-                            args: launchArgs,
+                            args: [...launchArgs],
                             viewport: { width: 1280, height: 800 },
                         };
 
                         if (tryBrowser === 'firefox') {
-                            launcher = firefox;
+                            launcher = playwrightCore.firefox;
                             delete tryOptions.channel; // firefox doesn't support channel option
                         } else if (tryBrowser === 'webkit') {
-                            launcher = webkit;
+                            launcher = playwrightCore.webkit;
                             delete tryOptions.channel; // webkit doesn't support channel option
                         } else if (tryBrowser === 'chromium') {
-                            // Bundled Chromium — no channel key needed
+                            launcher = stealthChromium;
+                            tryOptions.channel = 'chrome'; // Using core, 'chromium' usually implies using local Chrome anyway
                         } else {
                             // Named channel: 'chrome', 'msedge'
                             tryOptions.channel = tryBrowser;
@@ -260,6 +275,33 @@ export class BrowserManager {
         return id;
     }
 
+    private async ensureHeadlessPage(): Promise<Page> {
+        if (!this.headlessBrowser) {
+            console.log('[BrowserManager] Launching invisible headless browser with stealth...');
+            this.headlessBrowser = await stealthChromium.launch({
+                headless: true, // Use boolean for modern playwright compat
+                channel: 'chrome', // Use local chrome path
+                args: [
+                    '--headless=new', // Explicitly force the new headless mode to prevent stealth plugin from overriding it
+                    '--disable-blink-features=AutomationControlled',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-infobars'
+                ]
+            });
+        }
+        if (!this.headlessContext) {
+            this.headlessContext = await this.headlessBrowser!.newContext({
+                viewport: { width: 1920, height: 1080 },
+                locale: 'en-US'
+            });
+        }
+        if (!this.headlessPage || this.headlessPage.isClosed()) {
+            this.headlessPage = await this.headlessContext!.newPage();
+        }
+        return this.headlessPage;
+    }
+
     /**
      * Returns an active Page instance, optionally switching to a specific tab.
      * If no page is active, it creates a new one within the current context.
@@ -268,6 +310,11 @@ export class BrowserManager {
      * @returns A promise resolving to the active Page.
      */
     async getPage(args: any): Promise<Page> {
+        // Handle headless mode execution request for background tools
+        if (args && args._headless) {
+            return this.ensureHeadlessPage();
+        }
+
         await this.ensureBrowser();
 
         if (args.tabId !== undefined) {
@@ -316,6 +363,12 @@ export class BrowserManager {
             this.context = null;
             this.page = null;
             this.pagesMap.clear();
+        }
+        if (this.headlessBrowser) {
+            await this.headlessBrowser.close();
+            this.headlessBrowser = null;
+            this.headlessContext = null;
+            this.headlessPage = null;
         }
     }
 }

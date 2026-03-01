@@ -8,7 +8,7 @@
  * Consumed by: PlaywrightService (via ToolRegistry)
  */
 
-import { Page } from 'playwright';
+import { Page } from 'playwright-core';
 import { PlaywrightTool, ToolResult } from '../PlaywrightTool';
 
 /**

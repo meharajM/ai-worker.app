@@ -20,7 +20,7 @@
  */
 
 import { ToolSchema, BROWSER_TURBO_SCHEMAS } from '../../shared/browser-tool-schemas';
-import { Page } from 'playwright';
+import { Page } from 'playwright-core';
 import { BrowserManager } from './playwright/BrowserManager';
 import { PlaywrightTool, ToolResult, PlaywrightContext } from './playwright/PlaywrightTool';
 import { getPlaywrightTools } from './playwright/ToolRegistry';
