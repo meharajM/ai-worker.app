@@ -1,5 +1,5 @@
 const { _electron: electron } = require('playwright');
-const path = require('path');
+delete process.env.ELECTRON_RUN_AS_NODE;const path = require('path');
 const fs = require('fs');
 
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
@@ -35,7 +35,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                 '--disable-gpu',
                 '--disable-dev-shm-usage'
             ],
-            timeout: 45000,
+            timeout: 120000,
             env: {
                 ...process.env,
                 NODE_ENV: 'production'

@@ -1,387 +1,125 @@
-import { chromium, firefox, webkit, BrowserContext, Page } from 'playwright'
-import { app } from 'electron'
-import * as path from 'path'
-import * as fs from 'fs'
-import Store from 'electron-store'
-import { ToolSchema, BROWSER_TURBO_SCHEMAS } from '../../shared/browser-tool-schemas'
+/**
+ * PlaywrightService.ts — Facade for Playwright-based browser automation.
+ *
+ * Responsibilities:
+ *   1. Tool Dispatching: Delegates incoming browser tool calls (click, navigate, etc.)
+ *      to specialized PlaywrightTool classes.
+ *   2. Lifecycle Coordination: Orchestrates between the BrowserManager (lifecycle)
+ *      and the individual Tool classes (execution).
+ *   3. Error Handling: Normalizes Playwright-specific errors into user-friendly
+ *      messages and actionable suggestions.
+ *   4. State Validation: Provides helper methods for validating DOM state before
+ *      and after interactions.
+ *
+ * Design decision: This service follows the Facade pattern. The monolithic logic
+ *   of the original service was decomposed into a modular tool-based architecture
+ *   to solve the "God Object" problem, making browser automation extensible and
+ *   independently testable.
+ *
+ * Consumed by: AgentRuntime, AppMain (IPC handlers)
+ */
 
-// Define the shape of our settings
-interface PlaywrightSettings {
-    browser?: 'chromium' | 'firefox' | 'webkit' | 'chrome' | 'msedge'
-    headless?: boolean
-    blockAds?: boolean
-}
+import { ToolSchema, BROWSER_TURBO_SCHEMAS } from '../../shared/browser-tool-schemas';
+import { Page } from 'playwright-core';
+import { BrowserManager } from './playwright/BrowserManager';
+import { PlaywrightTool, ToolResult, PlaywrightContext } from './playwright/PlaywrightTool';
+import { getPlaywrightTools } from './playwright/ToolRegistry';
 
+/**
+ * Main service responsible for browser orchestration and tool execution.
+ * Uses a singleton pattern to ensure a consistent browser state across the app.
+ */
 export class PlaywrightService {
-    private static instance: PlaywrightService
-    // Browser instance is managed through the context for persistent contexts
-    private context: BrowserContext | null = null
-    private page: Page | null = null
-    
-    // Headless execution isolated instances
-    private headlessBrowser: any = null
-    private headlessContext: BrowserContext | null = null
-    private headlessPage: Page | null = null
-
-    private store: Store<Record<string, unknown>>
-    private nextTabId = 1
-    private pagesMap = new Map<number, Page>()
-
-    private registerPage(page: Page): number {
-        for (const [id, p] of this.pagesMap.entries()) {
-            if (p === page) return id
-        }
-        const id = this.nextTabId++
-        this.pagesMap.set(id, page)
-
-        // Auto-cleanup on close
-        page.on('close', () => this.pagesMap.delete(id))
-
-        // Per-page popup isolation: when a page spawns a popup (e.g. target="_blank"),
-        // redirect the originating page to that URL instead of letting an unmanaged
-        // popup tab accumulate. This is scoped per-tab so the main browsing context
-        // (OAuth flows, payment pages, etc.) is NOT affected — only the page that
-        // triggered the popup gets redirected, not all pages globally.
-        page.on('popup', async (popup) => {
-            try {
-                const url = popup.url()
-                // Close the unmanaged popup immediately
-                await popup.close().catch(() => { })
-                // Navigate the originating page to the popup URL (same-tab redirect)
-                if (url && url !== 'about:blank') {
-                    await page.goto(url, { waitUntil: 'domcontentloaded' }).catch(() => { })
-                }
-            } catch {
-                // Silently ignore — popup may already be closed or not navigable
-            }
-        })
-
-        return id
-    }
+    private static instance: PlaywrightService;
+    private browserManager: BrowserManager;
+    private tools = new Map<string, PlaywrightTool>();
 
     private constructor() {
-        this.store = new Store<Record<string, unknown>>()
+        this.browserManager = new BrowserManager();
+        this.registerTools();
     }
 
-    static getInstance(): PlaywrightService {
+    /**
+     * Retrieves the singleton instance of PlaywrightService.
+     * @returns The active PlaywrightService instance.
+     */
+    public static getInstance(): PlaywrightService {
         if (!PlaywrightService.instance) {
-            PlaywrightService.instance = new PlaywrightService()
+            PlaywrightService.instance = new PlaywrightService();
         }
-        return PlaywrightService.instance
+        return PlaywrightService.instance;
     }
 
+    /**
+     * Initializes the Playwright service.
+     * Currently a placeholder as browser launch is lazy (handled on first tool call).
+     */
     async initialize(): Promise<void> {
-        // Initialization is now lazy - browser launches on first usage
-        console.log('[PlaywrightService] Service initialized (browser will launch on demand)')
+        console.log('[PlaywrightService] Service initialized (browser will launch on demand)');
     }
 
-    private initializationPromise: Promise<void> | null = null
-
-    private async ensureBrowser(): Promise<void> {
-        if (this.context) return
-
-        // If already initializing, wait for it to complete
-        if (this.initializationPromise) {
-            return this.initializationPromise
+    private registerTools() {
+        const toolList = getPlaywrightTools();
+        for (const tool of toolList) {
+            this.tools.set(tool.name, tool);
         }
+    }
 
-        this.initializationPromise = (async () => {
-            try {
-                console.log('[PlaywrightService] Launching browser...')
-                const userDataDir = path.join(app.getPath('userData'), 'playwright_data')
-
-                // Ensure directory exists
-                if (!fs.existsSync(userDataDir)) {
-                    fs.mkdirSync(userDataDir, { recursive: true })
-                }
-
-                const settings = ((this.store as any).get?.('mcpPlaywright') || {}) as PlaywrightSettings
-
-                // OS-specific default browser selection
-                const getDefaultBrowser = (): PlaywrightSettings['browser'] => {
-                    const platform = process.platform
-                    switch (platform) {
-                        case 'win32': return 'msedge'   // Windows: Edge is pre-installed
-                        case 'darwin': return 'chrome'  // macOS: Chrome is most common
-                        case 'linux': return 'chrome'   // Linux: Chrome or Firefox
-                        default: return 'chrome'
-                    }
-                }
-
-                const browserType = settings.browser || getDefaultBrowser()
-                console.log(`[PlaywrightService] OS: ${process.platform}, Default browser: ${browserType}`)
-                const headless = settings.headless !== undefined ? settings.headless : false // Default to headed as per stealth strategy
-                const blockAds = settings.blockAds !== undefined ? settings.blockAds : true
-
-                console.log(`[PlaywrightService] Launching ${browserType} (Headless: ${headless})`)
-
-                const launchOptions = {
-                    headless: headless,
-                    viewport: { width: 1280, height: 800 },
-                    args: [
-                        '--disable-blink-features=AutomationControlled',
-                        '--no-sandbox',
-                        '--disable-setuid-sandbox',
-                        '--disable-infobars',
-                        '--window-position=0,0',
-                        '--ignore-certificate-errors',
-                        '--ignore-certificate-errors-spki-list',
-                        // Additional stealth args
-                        '--disable-accelerated-2d-canvas',
-                        '--disable-gpu',
-                    ]
-                }
-
-                // Note: The fallback loop below handles browser selection dynamically
-
-                // Launch persistent context for state preservation
-                // Smart fallback order based on OS
-                const getFallbackOrder = (): string[] => {
-                    const platform = process.platform
-                    switch (platform) {
-                        case 'win32': return ['msedge', 'chrome', 'firefox']  // Windows: Edge -> Chrome -> Firefox
-                        case 'darwin': return ['chrome', 'webkit', 'firefox'] // macOS: Chrome -> Safari -> Firefox
-                        case 'linux': return ['chrome', 'firefox', 'chromium'] // Linux: Chrome -> Firefox -> Chromium
-                        default: return ['chrome', 'msedge', 'firefox']
-                    }
-                }
-                const fallbackBrowsers = getFallbackOrder()
-                let lastError: Error | null = null
-
-                for (const tryBrowser of [browserType, ...fallbackBrowsers.filter(b => b !== browserType)]) {
-                    try {
-                        let tryLauncher = chromium
-                        const tryOptions = { ...launchOptions }
-
-                        if (tryBrowser === 'firefox') {
-                            tryLauncher = firefox
-                            delete (tryOptions as any).channel
-                        } else if (tryBrowser === 'webkit') {
-                            tryLauncher = webkit
-                            delete (tryOptions as any).channel
-                        } else if (tryBrowser === 'chromium') {
-                            // Bundled Chromium - no channel needed
-                            tryLauncher = chromium
-                            delete (tryOptions as any).channel
-                        } else {
-                            // Chrome or Edge - use channel
-                            (tryOptions as any).channel = tryBrowser
-                        }
-
-                        console.log(`[PlaywrightService] Trying to launch: ${tryBrowser}...`)
-                        this.context = await tryLauncher.launchPersistentContext(userDataDir, tryOptions)
-
-                        // Register all existing pages and listen for new ones
-                        this.context.pages().forEach(p => this.registerPage(p))
-                        this.context.on('page', p => this.registerPage(p))
-
-                        // Handle unexpected closure
-                        this.context.on('close', () => {
-                            console.log('[PlaywrightService] Browser context closed')
-                            this.context = null
-                            this.page = null
-                            this.pagesMap.clear()
-                        })
-
-                        console.log(`[PlaywrightService] Successfully launched: ${tryBrowser}`)
-                        break // Success!
-                    } catch (error) {
-                        lastError = error as Error
-                        const isMissingExecutable = String(error).includes('Executable doesn\'t exist') ||
-                            String(error).includes('No executable path')
-                        if (isMissingExecutable) {
-                            console.warn(`[PlaywrightService] ${tryBrowser} not found, trying next...`)
-                            continue
-                        } else {
-                            // Non-executable error, don't try more browsers
-                            throw error
-                        }
-                    }
-                }
-
-                if (!this.context) {
-                    throw lastError || new Error('No browser available. Please install Chrome, Edge, or Firefox.')
-                }
-
-                // Stealth: Remove navigator.webdriver fingerprint so automation-detection
-                // scripts don't flag the browser. Applied globally via addInitScript so it
-                // runs on every new page before any JS executes.
-                // NOTE: Popup isolation (target=_blank handling) is done per-page inside
-                // registerPage() via the 'popup' event — NOT here — to avoid breaking
-                // legitimate new-tab flows (OAuth, payment redirects, download links).
-                if (this.context) {
-                    await this.context.addInitScript(() => {
-                        Object.defineProperty(navigator, 'webdriver', {
-                            get: () => undefined,
-                        });
-                    });
-                }
-
-                // Get the default page or create one
-                if (this.context) {
-                    const pages = this.context.pages()
-                    this.page = pages.length > 0 ? pages[0] : await this.context.newPage()
-                }
-
-                // Enable resource blocking if requested
-                if (blockAds && this.page) {
-                    await this.enableResourceBlocking(this.page)
-                }
-
-                console.log('[PlaywrightService] Browser initialized successfully')
-            } catch (error) {
-                console.error('[PlaywrightService] Initialization error:', error)
-                throw error
-            } finally {
-                this.initializationPromise = null
+    /**
+     * Executes a browser-based tool operation.
+     *
+     * This method automatically ensures a browser context is active and selects
+     * the appropriate page/tab before delegating execution to the tool class.
+     *
+     * @param name - The unique name of the tool (e.g., 'click', 'navigate').
+     * @param args - The arguments for the tool, typically conforming to its schema.
+     * @returns A promise resolving to the tool's result or an error message.
+     * @throws Does not throw; catches internal errors and returns a ToolResult with an `error`.
+     */
+    async callTool(name: string, args: any): Promise<ToolResult> {
+        try {
+            const tool = this.tools.get(name);
+            if (!tool) {
+                return { result: null, error: `Tool ${name} not found` };
             }
-        })()
 
-        return this.initializationPromise
-    }
+            const page = await this.browserManager.getPage(args);
+            const context: PlaywrightContext = {
+                context: this.browserManager.getContext(),
+                page: this.browserManager.getCurrentPage(),
+                pagesMap: this.browserManager.getPagesMap(),
+                registerPage: (p) => this.browserManager.registerPage(p),
+                setPage: (p) => this.browserManager.setPage(p),
+                callTool: (n, a) => this.callTool(n, a),
+                validateAndCorrectSelector: (s, t, p) => this.validateAndCorrectSelector(s, t, p || page)
+            };
 
-    private async enableResourceBlocking(page: Page): Promise<void> {
-        await page.route('**/*', (route) => {
-            const type = route.request().resourceType()
-            // Block ads, trackers, and heavy media
-            if (['image', 'media', 'font'].includes(type)) {
-                return route.abort()
+            return await tool.execute(page, args, context);
+        } catch (error) {
+            console.error(`[PlaywrightService] Error calling tool ${name}:`, error);
+            let errorMessage = error instanceof Error ? error.message : String(error);
+
+            if (errorMessage.includes('Timeout') && errorMessage.includes('exceeded')) {
+                const selectorMatch = errorMessage.match(/waiting for locator\(['"]([^'"]+)['"]\)/);
+                const selector = selectorMatch ? selectorMatch[1] : 'element';
+                errorMessage = `Timeout: The element '${selector}' was not found within the time limit.\n` +
+                    `Suggestion: The selector might be incorrect or the page structure changed.\n` +
+                    `1. Try using 'get_interactive_elements' to see what IS on the page.\n` +
+                    `2. Try a different selector (e.g. text content or aria-label).`;
             }
-            return route.continue()
-        })
-    }
 
-    async ensurePage(): Promise<Page> {
-        // 1. Ensure browser context exists
-        if (!this.context) {
-            await this.ensureBrowser()
-        }
-
-        // 2. Ensure page exists and is not closed
-        if (!this.page || this.page.isClosed()) {
-            try {
-                // Double check context is alive
-                if (!this.context) throw new Error('Context initialization failed')
-
-                // Reuse existing page if any (e.g. from manual user interaction)
-                const pages = this.context.pages()
-                const validPage = pages.find(p => !p.isClosed())
-
-                if (validPage) {
-                    this.page = validPage
-                } else {
-                    this.page = await this.context.newPage()
-                }
-
-                // Re-apply settings
-                const settings = ((this.store as any).get?.('mcpPlaywright') || {}) as PlaywrightSettings
-                if (settings.blockAds !== false) {
-                    await this.enableResourceBlocking(this.page)
-                }
-            } catch (error) {
-                // Detect "Target page, context or browser has been closed"
-                const msg = error instanceof Error ? error.message : String(error)
-                console.warn('[PlaywrightService] Error in ensurePage:', msg)
-
-                if (msg.includes('closed') || msg.includes('Session closed')) {
-                    console.log('[PlaywrightService] Context appears dead. Restarting browser...')
-                    this.context = null
-                    this.page = null
-
-                    // Retry initialization
-                    await this.ensureBrowser()
-
-                    // After ensureBrowser, verify context state
-                    if (!this.context) {
-                        throw new Error('Failed to restart browser context')
-                    }
-
-                    // Capture verified context in local variable
-                    // TypeScript can't track that ensureBrowser() reassigns this.context
-                    const context = this.context as BrowserContext
-
-                    // Re-create page if needed (after browser restart)
-                    // Get existing pages from the fresh context
-                    const existingPages = context.pages()
-                    const validPage = existingPages.find(p => !p.isClosed())
-
-                    if (validPage) {
-                        this.page = validPage
-                    } else {
-                        this.page = await context.newPage()
-                    }
-
-                    // Re-apply settings to the page
-                    const settings = ((this.store as any).get?.('mcpPlaywright') || {}) as PlaywrightSettings
-                    if (settings.blockAds !== false && this.page) {
-                        await this.enableResourceBlocking(this.page)
-                    }
-                } else {
-                    throw error
-                }
-            }
-        }
-
-        return this.page!
-    }
-
-    private async ensureHeadlessPage(): Promise<Page> {
-        if (!this.headlessBrowser) {
-            console.log('[PlaywrightService] Launching invisible headless browser...')
-            this.headlessBrowser = await chromium.launch({
-                headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox']
-            })
-        }
-        if (!this.headlessContext) {
-            this.headlessContext = await this.headlessBrowser.newContext()
-        }
-        if (!this.headlessPage || this.headlessPage.isClosed()) {
-            this.headlessPage = await this.headlessContext!.newPage()
-        }
-        return this.headlessPage
-    }
-
-    private async getPage(args: any): Promise<Page> {
-        // Handle headless mode execution request
-        if (args && args._headless) {
-            return this.ensureHeadlessPage();
-        }
-
-        // If tabId is explicitly provided, use key-based access
-        if (typeof args.tabId === 'number') {
-            if (!this.context) await this.ensureBrowser();
-            if (!this.context) throw new Error('Browser context not initialized');
-
-            const targetPage = this.pagesMap.get(args.tabId);
-            if (!targetPage) {
-                throw new Error(`Tab ID ${args.tabId} not found (Open tabs: ${this.pagesMap.size})`);
-            }
-            if (targetPage.isClosed()) {
-                this.pagesMap.delete(args.tabId);
-                throw new Error(`Tab ${args.tabId} is closed`);
-            }
-            return targetPage;
-        }
-
-        // Fallback to default "active" page logic
-        return this.ensurePage();
-    }
-
-    async close(): Promise<void> {
-        if (this.context) {
-            await this.context.close()
-            this.context = null
-            this.page = null
-        }
-        if (this.headlessBrowser) {
-            await this.headlessBrowser.close()
-            this.headlessBrowser = null
-            this.headlessContext = null
-            this.headlessPage = null
+            return { result: null, error: errorMessage };
         }
     }
 
+    /**
+     * Returns a list of all available browser tools and their JSON schemas.
+     *
+     * This is used by the LLM (and UI) to discover what actions the agent can
+     * perform in the browser.
+     *
+     * @returns An object containing an array of tool schemas.
+     */
     listTools(): { tools: ToolSchema[] } {
         return {
             tools: [
@@ -734,1080 +472,36 @@ export class PlaywrightService {
                         required: ['url', 'extractType']
                     }
                 },
-                // Browser turbo/recipe tools — imported from shared schema
                 ...BROWSER_TURBO_SCHEMAS
-            ]
-        }
-    }
-
-    async callTool(name: string, args: any): Promise<{ result: any; error?: string }> {
-        // Detailed logging for bridge debugging
-        console.log(`[PlaywrightService] Request: ${name}`, {
-            args: JSON.stringify(args),
-            argKeys: Object.keys(args || {}),
-            timestamp: new Date().toISOString()
-        })
-
-        try {
-            // Allow empty objects {} but reject null/undefined - default to empty object
-            const safeArgs = args ?? {}
-
-            // Helper to validate required parameters
-            const requireParam = (paramName: string, paramType: string = 'string'): string | null => {
-                const value = safeArgs[paramName]
-                if (value === undefined || value === null) {
-                    return `Missing required parameter: ${paramName}`
-                }
-                if (paramType === 'string' && typeof value !== 'string') {
-                    return `Parameter ${paramName} must be a string, got ${typeof value}`
-                }
-                if (paramType === 'number' && typeof value !== 'number') {
-                    return `Parameter ${paramName} must be a number, got ${typeof value}`
-                }
-                return null
-            }
-
-            const page = await this.getPage(safeArgs)
-
-            switch (name) {
-                case 'navigate':
-                    const navError = requireParam('url')
-                    if (navError) return { result: null, error: navError }
-                    try {
-                        await page.goto(safeArgs.url, { waitUntil: 'domcontentloaded' })
-
-                        // ── AUTO-EXTRACT: Return page context inline ──────────────
-                        // Eliminates the need for separate get_state/get_interactive_elements calls.
-                        // The LLM gets page content + CTAs in one shot.
-                        const navTitle = await page.title()
-                        const navPageText = await page.evaluate(() => {
-                            return document.body?.innerText?.substring(0, 2000) || ''
-                        }).catch(() => '')
-                        const navElements = await page.evaluate(() => {
-                            const sels = 'a[href],button,input,textarea,select,[role="button"],[role="link"]'
-                            const els = document.querySelectorAll(sels)
-                            const list: string[] = []
-                            let i = 1
-                            els.forEach(el => {
-                                const r = el.getBoundingClientRect()
-                                if (r.width > 0 && r.height > 0 && i <= 15) {
-                                    const t = ((el as HTMLElement).innerText ||
-                                        (el as HTMLInputElement).placeholder || '').substring(0, 40).trim()
-                                    const tag = el.tagName.toLowerCase()
-                                    let sel = tag
-                                    if (el.id) sel = `#${el.id}`
-                                    else if (el.className && typeof el.className === 'string') sel = `.${el.className.split(' ')[0]}`
-                                    list.push(`[${i++}] ${tag}: "${t || '(empty)'}" → ${sel}`)
-                                }
-                            })
-                            return list
-                        }).catch(() => [] as string[])
-
-                        return {
-                            result: `Page: ${navTitle}\nURL: ${page.url()}\n\n` +
-                                `--- Page Content (preview) ---\n${navPageText}\n\n` +
-                                `--- Interactive Elements (${navElements.length}) ---\n${navElements.join('\n')}`
-                        }
-                    } catch (e) {
-                        // AUTO-FALLBACK: Google Search
-                        // If we failed to resolve the name, it might be a typo or a non-url search query
-                        const errorStr = String(e);
-                        if (errorStr.includes('ERR_NAME_NOT_RESOLVED') || errorStr.includes('ERR_CONNECTION_REFUSED')) {
-                            const fallbackUrl = `https://google.com/search?q=${encodeURIComponent(safeArgs.url)}`;
-                            console.log(`[PlaywrightService] Navigation failed (${errorStr}). Falling back to Google Search: ${fallbackUrl}`);
-                            try {
-                                await page.goto(fallbackUrl, { waitUntil: 'domcontentloaded' });
-                                return { result: `Navigation failed for '${safeArgs.url}', so I searched Google instead. Now at: ${page.url()}` };
-                            } catch (fallbackError) {
-                                // If fallback also fails, return original error
-                                return { result: null, error: `Navigation failed: ${errorStr}` };
-                            }
-                        }
-                        throw e;
-                    }
-
-                case 'screenshot':
-                    const buffer = await page.screenshot({ fullPage: safeArgs.fullPage || false })
-                    return {
-                        result: {
-                            type: 'image',
-                            data: buffer.toString('base64'),
-                            mimeType: 'image/png'
-                        }
-                    }
-
-                case 'get_state':
-                    // Mode-based defaults for performance optimization
-                    const mode = safeArgs.mode || 'fast'
-                    const includeScreenshot = safeArgs.screenshot ?? (mode === 'vision')
-                    const includeTree = safeArgs.tree ?? (mode === 'full')
-                    const useHighlighting = safeArgs.highlight ?? includeScreenshot // Only highlight when taking screenshot
-
-                    const state: any = {
-                        url: page.url(),
-                        title: await page.title(),
-                        mode: mode, // Include mode in response for transparency
-                    }
-
-                    // Element map to store interactive elements found during highlighting
-                    let elementMap: Record<number, string> = {}
-
-                    if (useHighlighting && includeScreenshot) {
-                        try {
-                            // Inject script to highlight interactive elements with numbered boxes
-                            elementMap = await page.evaluate(() => {
-                                const interactiveSelectors = [
-                                    'a[href]', 'button', 'input', 'textarea', 'select', '[role="button"]', '[role="link"]', '[onclick]'
-                                ].join(',')
-
-                                const elements = document.querySelectorAll(interactiveSelectors)
-                                const map: Record<number, string> = {}
-                                const overlayId = 'ai-worker-highlight-overlay'
-
-                                // Remove existing overlay if any
-                                document.getElementById(overlayId)?.remove()
-
-                                const overlayContainer = document.createElement('div')
-                                overlayContainer.id = overlayId
-                                overlayContainer.style.position = 'absolute'
-                                overlayContainer.style.top = '0'
-                                overlayContainer.style.left = '0'
-                                overlayContainer.style.width = '100%'
-                                overlayContainer.style.height = '100%'
-                                overlayContainer.style.pointerEvents = 'none'
-                                overlayContainer.style.zIndex = '2147483647' // Max z-index
-
-                                let counter = 1
-                                elements.forEach((el) => {
-                                    const rect = el.getBoundingClientRect()
-                                    if (rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).visibility !== 'hidden') {
-                                        const label = counter++
-                                        const box = document.createElement('div')
-                                        box.style.position = 'absolute'
-                                        box.style.border = '2px solid #ff0000'
-                                        box.style.left = `${rect.left + window.scrollX}px`
-                                        box.style.top = `${rect.top + window.scrollY}px`
-                                        box.style.width = `${rect.width}px`
-                                        box.style.height = `${rect.height}px`
-
-                                        const tag = document.createElement('span')
-                                        tag.style.position = 'absolute'
-                                        tag.style.top = '-20px'
-                                        tag.style.left = '0'
-                                        tag.style.backgroundColor = '#ff0000'
-                                        tag.style.color = 'white'
-                                        tag.style.padding = '2px 4px'
-                                        tag.style.fontSize = '12px'
-                                        tag.style.fontWeight = 'bold'
-                                        tag.innerText = String(label)
-
-                                        box.appendChild(tag)
-                                        overlayContainer.appendChild(box)
-
-                                        // Store minimal selector info (heuristic)
-                                        let selector = el.tagName.toLowerCase()
-                                        if (el.id) selector += `#${el.id}`
-                                        else if (el.className) selector += `.${el.className.split(' ')[0]}`
-
-                                        map[label] = selector
-                                    }
-                                })
-
-                                document.body.appendChild(overlayContainer)
-                                return map
-                            })
-
-                            state.interactableElements = elementMap
-                        } catch (e) {
-                            console.warn('Failed to apply highlights:', e)
-                        }
-                    }
-
-                    if (includeTree) {
-                        // Get DOM structure as accessibility-like tree (works across all page types)
-                        try {
-                            const domTree = await page.evaluate(() => {
-                                function extractNode(el: Element, depth: number = 0): any {
-                                    if (depth > 5) return null // Limit depth for performance
-                                    const tagName = el.tagName.toLowerCase()
-                                    const role = el.getAttribute('role') || tagName
-                                    const text = (el as HTMLElement).innerText?.substring(0, 100) || ''
-                                    const children: any[] = []
-
-                                    for (const child of Array.from(el.children)) {
-                                        const childNode = extractNode(child, depth + 1)
-                                        if (childNode) children.push(childNode)
-                                    }
-
-                                    // Only include meaningful nodes
-                                    const isInteractive = ['a', 'button', 'input', 'textarea', 'select'].includes(tagName) ||
-                                        el.getAttribute('onclick') || el.getAttribute('role')
-                                    const hasContent = text.trim().length > 0 || children.length > 0
-
-                                    if (!isInteractive && !hasContent && children.length === 0) return null
-
-                                    return {
-                                        role,
-                                        name: el.getAttribute('aria-label') || el.getAttribute('title') || (isInteractive ? text.substring(0, 50) : ''),
-                                        children: children.length > 0 ? children : undefined
-                                    }
-                                }
-                                return extractNode(document.body)
-                            })
-                            state.domTree = domTree
-                        } catch (e) {
-                            state.domTreeError = String(e)
-                        }
-                    }
-
-                    if (includeScreenshot) {
-                        try {
-                            const buffer = await page.screenshot({
-                                fullPage: false,
-                                type: 'jpeg',
-                                quality: 70
-                            })
-                            state.screenshot = buffer.toString('base64')
-                        } catch (e) {
-                            state.screenshotError = String(e)
-                        }
-                    }
-
-                    // Clean up highlights after screenshot
-                    if (useHighlighting && includeScreenshot) {
-                        await page.evaluate(() => {
-                            document.getElementById('ai-worker-highlight-overlay')?.remove()
-                        })
-                    }
-
-                    // Always include quick elements for 'fast' mode (low token, high speed)
-                    if (mode === 'fast' && !state.interactableElements) {
-                        const quickElements = await page.evaluate(() => {
-                            const selectors = 'a[href],button,input,textarea,select,[role="button"],[role="link"]'
-                            const els = document.querySelectorAll(selectors)
-                            const list: string[] = []
-                            let i = 1
-                            els.forEach(el => {
-                                const r = el.getBoundingClientRect()
-                                if (r.width > 0 && r.height > 0 && i <= 30) {
-                                    const t = ((el as HTMLElement).innerText || (el as HTMLInputElement).placeholder || '').substring(0, 30).trim()
-                                    const tag = el.tagName.toLowerCase()
-                                    list.push(`[${i++}] ${tag}: ${t || '(empty)'}`)
-                                }
-                            })
-                            return list
-                        })
-                        state.elements = quickElements
-                    }
-
-                    return { result: state }
-
-                case 'get_interactive_elements':
-                    // Ultra-fast tool - lowest token consumption
-                    const limit = safeArgs.limit || 50
-                    const viewportOnly = safeArgs.viewport_only !== false
-
-                    const elements = await page.evaluate(({ limit, viewportOnly }) => {
-                        const interactiveSelectors = [
-                            'a[href]', 'button', 'input', 'textarea', 'select', '[role="button"]', '[role="link"]', '[onclick]'
-                        ].join(',')
-
-                        const elements = document.querySelectorAll(interactiveSelectors)
-                        const list: { index: number, text: string, selector: string, type: string }[] = []
-
-                        let counter = 1
-                        for (const el of Array.from(elements)) {
-                            if (list.length >= limit) break
-
-                            const rect = el.getBoundingClientRect()
-                            const isVisible = rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).visibility !== 'hidden'
-                            const isInViewport = rect.top < window.innerHeight && rect.bottom > 0 && rect.left < window.innerWidth && rect.right > 0
-
-                            if (isVisible && (!viewportOnly || isInViewport)) {
-                                let selector = el.tagName.toLowerCase()
-                                if (el.id) selector = `#${el.id}`
-                                else if (el.className) selector = `.${el.className.split(' ')[0]}`
-
-                                // Get meaningful text
-                                let text = (el as HTMLElement).innerText || (el as HTMLInputElement).value || (el as HTMLInputElement).placeholder || (el as HTMLElement).getAttribute('aria-label') || ''
-                                text = text.substring(0, 40).replace(/\n/g, ' ').trim()
-
-                                list.push({
-                                    index: counter++,
-                                    text: text || '(empty)',
-                                    selector,
-                                    type: el.tagName.toLowerCase()
-                                })
-                            }
-                        }
-                        return list
-                    }, { limit, viewportOnly })
-                    return { result: { elements, count: elements.length } }
-
-                case 'click':
-                    const clickError = requireParam('selector')
-                    if (clickError) return { result: null, error: clickError }
-                    try {
-                        await page.click(safeArgs.selector, { timeout: 5000 }) // Reduce initial timeout to fail fast for fallback
-                        return { result: `Clicked ${safeArgs.selector}` }
-                    } catch (error) {
-                        const errorStr = String(error);
-
-                        // AUTO-FALLBACK: click_text
-                        // Sometimes users pass text as selector or ID changed.
-                        // If selector looks like text (has spaces, no #/.), try click_text
-                        const isSimpleText = !safeArgs.selector.includes('#') && !safeArgs.selector.includes('.') && safeArgs.selector.includes(' ');
-
-                        if (isSimpleText || errorStr.includes('Timeout')) {
-                            console.log(`[PlaywrightService] Click failed. Trying fallback click_text("${safeArgs.selector}")`);
-                            try {
-                                const textWithQuotes = `text="${safeArgs.selector}"`; // Playwright text selector
-                                await page.click(textWithQuotes, { timeout: 5000 });
-                                return { result: `Clicked by Text "${safeArgs.selector}" (Fallback from failed selector)` };
-                            } catch (e2) {
-                                // Fallback failed
-                            }
-                        }
-
-                        const isTimeOut = errorStr.includes('Timeout');
-                        if (isTimeOut) {
-                            return {
-                                result: null,
-                                error: `Timeout clicking '${safeArgs.selector}'. \n\n💡 RECOVERY HINT: Selector failed. Try:\n1. click_text("Visible Text")\n2. get_interactive_elements() to find the ID/Class\n3. screenshot() to check if it's covered/hidden.`
-                            };
-                        }
-                        throw error;
-                    }
-
-                case 'fill':
-                    const fillSelectorError = requireParam('selector')
-                    if (fillSelectorError) return { result: null, error: fillSelectorError }
-                    const fillValueError = requireParam('value')
-                    if (fillValueError) return { result: null, error: fillValueError }
-                    await page.fill(safeArgs.selector, safeArgs.value)
-                    return { result: `Filled ${safeArgs.selector} with "${safeArgs.value}"` }
-
-                case 'hover':
-                    const hoverError = requireParam('selector')
-                    if (hoverError) return { result: null, error: hoverError }
-                    await page.hover(safeArgs.selector)
-                    return { result: `Hovered over ${safeArgs.selector}` }
-
-                case 'press':
-                    const pressError = requireParam('key')
-                    if (pressError) return { result: null, error: pressError }
-                    await page.keyboard.press(safeArgs.key)
-                    return { result: `Pressed ${safeArgs.key}` }
-
-                case 'scroll':
-                    const scrollError = requireParam('direction')
-                    if (scrollError) return { result: null, error: scrollError }
-                    if (safeArgs.direction === 'top') await page.evaluate(() => window.scrollTo(0, 0))
-                    else if (safeArgs.direction === 'bottom') await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-                    else if (safeArgs.direction === 'up') await page.mouse.wheel(0, -(safeArgs.amount || 500))
-                    else if (safeArgs.direction === 'down') await page.mouse.wheel(0, safeArgs.amount || 500)
-                    return { result: `Scrolled ${safeArgs.direction}` }
-
-                case 'evaluate':
-                    const result = await page.evaluate(safeArgs.script)
-                    return { result: result }
-
-                case 'get_page_content':
-                    // Simple text extraction for now
-                    const title = await page.title()
-                    const content = await page.evaluate(() => document.body.innerText)
-                    return { result: `Title: ${title}\n\n${content.substring(0, 5000)}...` }
-
-                case 'wait_for_element':
-                    const originalSelector = safeArgs.selector;
-                    const timeout = safeArgs.timeout || 5000;
-
-                    try {
-                        await page.waitForSelector(originalSelector, { timeout });
-                        return { result: `Element ${originalSelector} appeared` };
-                    } catch (error) {
-                        // AUTO-FALLBACK: Try resilient alternatives if the specific selector fails
-                        const fallbacks: string[] = [];
-
-                        // Strategy 1: Relaxed ID match (e.g. #submit-123 -> [id*="submit"])
-                        if (originalSelector.startsWith('#')) {
-                            const coreId = originalSelector.substring(1).replace(/-\d+$/, ''); // specific heuristic for trailing numbers
-                            if (coreId.length > 3) {
-                                fallbacks.push(`[id*="${coreId}"]`);
-                            }
-                        }
-
-                        // Strategy 2: Relaxed Class match (e.g. .btn.btn-primary -> [class*="btn-primary"])
-                        if (originalSelector.startsWith('.')) {
-                            const classes = originalSelector.split('.').filter(c => c);
-                            classes.forEach(c => {
-                                if (c.length > 4) fallbacks.push(`[class*="${c}"]`);
-                            });
-                        }
-
-                        // Try fallbacks
-                        for (const fallback of fallbacks) {
-                            try {
-                                // Short timeout for fallbacks
-                                await page.waitForSelector(fallback, { timeout: 2000 });
-                                return { result: `Element appeared (auto-recovered using fallback: ${fallback})` };
-                            } catch (e) {
-                                // Fallback failed, continue
-                            }
-                        }
-
-                        // ERROR ENRICHMENT: If all failed, provide helpful hints
-                        const isTimeOut = String(error).includes('Timeout');
-                        if (isTimeOut) {
-                            return {
-                                result: null,
-                                error: `Timeout waiting for '${originalSelector}'. \n\n💡 RECOVERY HINT: The selector might be dynamic or incorrect.\n1. Try finding it by text: click_text("label")\n2. Use get_interactive_elements() to see real selectors.\n3. Take a screenshot to verify visibility.`
-                            };
-                        }
-                        throw error;
-                    }
-
-                case 'type':
-                    // Focus and type character by character (simulates real typing)
-                    await page.click(safeArgs.selector)
-                    await page.type(safeArgs.selector, safeArgs.text, { delay: safeArgs.delay || 50 })
-                    return { result: `Typed "${safeArgs.text}" into ${safeArgs.selector}` }
-
-                case 'select_option':
-                    const selectSelectorError = requireParam('selector')
-                    if (selectSelectorError) return { result: null, error: selectSelectorError }
-                    const selectValueError = requireParam('value')
-                    if (selectValueError) return { result: null, error: selectValueError }
-
-                    await page.selectOption(safeArgs.selector, safeArgs.value)
-                    return { result: `Selected "${safeArgs.value}" in ${safeArgs.selector}` }
-
-                case 'go_back':
-                    await page.goBack()
-                    return { result: 'Navigated back' }
-
-                case 'go_forward':
-                    await page.goForward()
-                    return { result: 'Navigated forward' }
-
-                case 'new_tab':
-                    if (!this.context) throw new Error('No browser context')
-                    const newPage = await this.context.newPage()
-                    if (safeArgs.url) {
-                        await newPage.goto(safeArgs.url, { waitUntil: 'domcontentloaded' })
-                    }
-                    this.page = newPage // Switch to new tab
-                    const newTabIndex = this.registerPage(newPage)
-                    return { result: { message: `Opened new tab${safeArgs.url ? ` at ${safeArgs.url}` : ''}`, tabId: newTabIndex } }
-
-                case 'switch_tab':
-                    if (!this.context) throw new Error('No browser context')
-                    const targetTab = this.pagesMap.get(safeArgs.index)
-                    if (!targetTab) {
-                        return { result: null, error: `Tab ID ${safeArgs.index} not found` }
-                    }
-                    this.page = targetTab
-                    await this.page.bringToFront()
-                    return { result: `Switched to tab ${safeArgs.index}: ${await this.page.title()}` }
-
-                case 'close_tab':
-                    if (!this.context) throw new Error('No browser context')
-                    const pageToClose = await this.getPage(safeArgs)
-
-                    const openPages = this.context.pages().filter(p => !p.isClosed())
-                    if (openPages.length <= 1) {
-                        return { result: null, error: 'Cannot close the last tab' }
-                    }
-
-                    await pageToClose.close()
-
-                    // If we closed the active page, switch to the last available one
-                    if (this.page === pageToClose || this.page?.isClosed()) {
-                        const remaining = this.context.pages().filter(p => !p.isClosed())
-                        this.page = remaining[remaining.length - 1] || null
-                    }
-
-                    return { result: 'Closed tab' }
-
-                case 'get_tabs':
-                    if (!this.context) throw new Error('No browser context')
-                    const tabList = await Promise.all(
-                        Array.from(this.pagesMap.entries()).map(async ([id, p]) => ({
-                            index: id,
-                            title: await p.title().catch(() => 'Unknown'),
-                            url: p.url(),
-                            active: p === this.page
-                        }))
-                    )
-                    return { result: { tabs: tabList } }
-
-                case 'click_text':
-                    const textFindError = requireParam('text')
-                    if (textFindError) return { result: null, error: textFindError }
-
-                    const textToFind = safeArgs.text
-                    const exactMatch = safeArgs.exact || false
-                    const tagFilter = safeArgs.tag ? safeArgs.tag.toLowerCase() : null
-
-                    const clickTextSelector = tagFilter
-                        ? `${tagFilter}:has-text("${textToFind}")`
-                        : `text=${exactMatch ? `"${textToFind}"` : textToFind}`
-
-                    await page.click(clickTextSelector)
-                    return { result: `Clicked element with text "${textToFind}"` }
-
-                case 'extract_data':
-                    const extractTypeError = requireParam('type')
-                    if (extractTypeError) return { result: null, error: extractTypeError }
-
-                    const extractType = safeArgs.type || 'table'
-                    const extractSelector = safeArgs.selector
-
-                    // ERROR: Empty results usually mean bad selector
-                    const validateResults = (data: any, _p0?: string) => {
-                        let isEmpty = false;
-                        if (Array.isArray(data)) {
-                            isEmpty = data.length === 0;
-                        } else if (typeof data === 'object' && data !== null) {
-                            // Check if object values are mostly empty
-                            const values = Object.values(data);
-                            const emptyValues = values.filter(v => !v || (typeof v === 'string' && v.trim() === ''));
-                            isEmpty = emptyValues.length === values.length; // All empty
-                        }
-
-                        if (isEmpty) {
-                            throw new Error(`ExtractionError: The selector '${extractSelector || 'default'}' found no data. \n\n💡 RECOVERY HINT: The page structure likely doesn't match your selector.\n1. Use 'get_interactive_elements' to find valid selectors.\n2. Use 'scan_page_accessibility' to read the page content.\n3. Verify the page is fully loaded.`);
-                        }
-                        return data;
-                    };
-
-                    if (extractType === 'table') {
-                        const tableData = await page.evaluate((sel) => {
-                            const table = sel ? document.querySelector(sel) : document.querySelector('table')
-                            if (!table) return null
-
-                            const rows: string[][] = []
-                            const tableRows = table.querySelectorAll('tr')
-                            tableRows.forEach(tr => {
-                                const cells: string[] = []
-                                tr.querySelectorAll('th, td').forEach(cell => {
-                                    cells.push((cell as HTMLElement).innerText.trim())
-                                })
-                                if (cells.length > 0) rows.push(cells)
-                            })
-                            return rows
-                        }, extractSelector)
-
-                        try { validateResults(tableData, 'table'); } catch (e) { return { result: null, error: (e as Error).message }; }
-                        return { result: { type: 'table', data: tableData } }
-
-                    } else if (extractType === 'list') {
-                        const listData = await page.evaluate((sel) => {
-                            const list = sel ? document.querySelector(sel) : document.querySelector('ul, ol')
-                            if (!list) return null
-
-                            const items: string[] = []
-                            list.querySelectorAll('li').forEach(li => {
-                                items.push((li as HTMLElement).innerText.trim())
-                            })
-                            return items
-                        }, extractSelector)
-
-                        try { validateResults(listData, 'list'); } catch (e) { return { result: null, error: (e as Error).message }; }
-                        return { result: { type: 'list', data: listData } }
-
-                    } else if (extractType === 'custom' && safeArgs.fields) {
-                        const customData = await page.evaluate((fields) => {
-                            const result: Record<string, string> = {}
-                            for (const [key, selector] of Object.entries(fields)) {
-                                const el = document.querySelector(selector as string)
-                                result[key] = el ? (el as HTMLElement).innerText.trim() : ''
-                            }
-                            return result
-                        }, safeArgs.fields)
-
-                        try { validateResults(customData, 'custom'); } catch (e) { return { result: null, error: (e as Error).message }; }
-                        return { result: { type: 'custom', data: customData } }
-                    }
-                    return { result: null, error: 'Invalid extract_data type' }
-
-                case 'upload_file':
-                    const upSelectError = requireParam('selector')
-                    if (upSelectError) return { result: null, error: upSelectError }
-                    const upPathError = requireParam('filePath')
-                    if (upPathError) return { result: null, error: upPathError }
-
-                    await page.setInputFiles(safeArgs.selector, safeArgs.filePath)
-                    return { result: `Uploaded file to ${safeArgs.selector}` }
-
-                case 'get_cookies':
-                    if (!this.context) throw new Error('No browser context')
-                    const cookies = await this.context.cookies()
-                    return { result: { cookies } }
-
-                case 'set_cookie':
-                    const cNameErr = requireParam('name')
-                    if (cNameErr) return { result: null, error: cNameErr }
-                    const cValErr = requireParam('value')
-                    if (cValErr) return { result: null, error: cValErr }
-
-                    if (!this.context) throw new Error('No browser context')
-                    const url = page.url()
-                    const domain = safeArgs.domain || new URL(url).hostname
-                    await this.context.addCookies([{
-                        name: safeArgs.name,
-                        value: safeArgs.value,
-                        domain: domain,
-                        path: safeArgs.path || '/'
-                    }])
-                    return { result: `Set cookie ${safeArgs.name}` }
-
-                case 'handle_dialog':
-                    const diagActionErr = requireParam('action')
-                    if (diagActionErr) return { result: null, error: diagActionErr }
-
-                    // Set up dialog handler for next dialog
-                    page.once('dialog', async dialog => {
-                        if (safeArgs.action === 'accept') {
-                            await dialog.accept(safeArgs.promptText)
-                        } else {
-                            await dialog.dismiss()
-                        }
-                    })
-                    return { result: `Dialog handler set to ${safeArgs.action}` }
-
-                case 'switch_frame':
-                    if (!safeArgs.selector) {
-                        // Switch back to main frame - we just use the main page
-                        return { result: 'Switched to main frame' }
-                    }
-                    const frameElement = await page.$(safeArgs.selector)
-                    if (!frameElement) {
-                        return { result: null, error: `Frame not found: ${safeArgs.selector}` }
-                    }
-                    const frame = await frameElement.contentFrame()
-                    if (!frame) {
-                        return { result: null, error: 'Could not access frame content' }
-                    }
-                    return { result: `Switched to frame ${safeArgs.selector}` }
-
-                case 'find_by_xpath':
-                    const xpErr = requireParam('xpath')
-                    if (xpErr) return { result: null, error: xpErr }
-
-                    const xpathAction = safeArgs.action || 'info'
-                    const xpathElements = await page.$$(`xpath=${safeArgs.xpath}`)
-
-                    if (xpathElements.length === 0) {
-                        return { result: null, error: `No elements found for XPath: ${safeArgs.xpath}` }
-                    }
-
-                    if (xpathAction === 'click') {
-                        await xpathElements[0].click()
-                        return { result: `Clicked first XPath match` }
-                    } else if (xpathAction === 'text') {
-                        const texts = await Promise.all(
-                            xpathElements.slice(0, 10).map(el => el.innerText())
-                        )
-                        return { result: { texts } }
-                    } else {
-                        const info = await Promise.all(
-                            xpathElements.slice(0, 10).map(async el => ({
-                                tag: await el.evaluate(e => e.tagName.toLowerCase()),
-                                text: (await el.innerText()).substring(0, 100),
-                                visible: await el.isVisible()
-                            }))
-                        )
-                        return { result: { count: xpathElements.length, elements: info } }
-                    }
-
-                case 'drag_drop':
-                    const ddsErr = requireParam('sourceSelector')
-                    if (ddsErr) return { result: null, error: ddsErr }
-                    const ddtErr = requireParam('targetSelector')
-                    if (ddtErr) return { result: null, error: ddtErr }
-
-                    await page.dragAndDrop(safeArgs.sourceSelector, safeArgs.targetSelector)
-                    return { result: `Dragged ${safeArgs.sourceSelector} to ${safeArgs.targetSelector}` }
-
-                case 'check_element':
-                    const chkSelErr = requireParam('selector')
-                    if (chkSelErr) return { result: null, error: chkSelErr }
-
-                    const checkSelector = safeArgs.selector
-                    const property = safeArgs.property || 'exists'
-                    const element = await page.$(checkSelector)
-
-                    if (!element) {
-                        return { result: { exists: false, property: property, value: null } }
-                    }
-
-                    let propValue: any = true
-                    switch (property) {
-                        case 'exists':
-                            propValue = true
-                            break
-                        case 'visible':
-                            propValue = await element.isVisible()
-                            break
-                        case 'text':
-                            propValue = await element.innerText()
-                            break
-                        case 'value':
-                            propValue = await element.inputValue().catch(() => null)
-                            break
-                        case 'href':
-                            propValue = await element.getAttribute('href')
-                            break
-                        case 'src':
-                            propValue = await element.getAttribute('src')
-                            break
-                        case 'checked':
-                            propValue = await element.isChecked()
-                            break
-                        default:
-                            propValue = await element.getAttribute(property)
-                    }
-                    return { result: { exists: true, property: property, value: propValue } }
-
-                case 'set_viewport':
-                    await page.setViewportSize({ width: safeArgs.width, height: safeArgs.height })
-                    return { result: `Viewport set to ${safeArgs.width}x${safeArgs.height}` }
-
-                case 'wait_for_navigation':
-                    await page.waitForLoadState('networkidle', { timeout: safeArgs.timeout || 30000 })
-                    return { result: 'Navigation completed' }
-
-                case 'background_scrape': {
-                    const bgUrlErr = requireParam('url')
-                    if (bgUrlErr) return { result: null, error: bgUrlErr }
-                    const bgTypeErr = requireParam('extractType')
-                    if (bgTypeErr) return { result: null, error: bgTypeErr }
-
-                    console.log(`[PlaywrightService] Starting temp headless browser for background scrape...`)
-                    const tempBrowser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] })
-                    try {
-                        const tempPage = await tempBrowser.newPage()
-                        await tempPage.goto(safeArgs.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
-                        
-                        let data: any = null
-                        if (safeArgs.extractType === 'table') {
-                            data = await tempPage.evaluate((sel: string | undefined) => {
-                                const table = sel ? document.querySelector(sel) : document.querySelector('table')
-                                if (!table) return null
-                                const rows: string[][] = []
-                                table.querySelectorAll('tr').forEach(tr => {
-                                    const cells: string[] = []
-                                    tr.querySelectorAll('th, td').forEach(cell => cells.push((cell as HTMLElement).innerText.trim()))
-                                    if (cells.length > 0) rows.push(cells)
-                                })
-                                return rows
-                            }, safeArgs.selector)
-                        } else if (safeArgs.extractType === 'list') {
-                            data = await tempPage.evaluate((sel: string | undefined) => {
-                                const list = sel ? document.querySelector(sel) : document.querySelector('ul, ol')
-                                if (!list) return null
-                                const items: string[] = []
-                                list.querySelectorAll('li').forEach(li => items.push((li as HTMLElement).innerText.trim()))
-                                return items
-                            }, safeArgs.selector)
-                        } else {
-                            data = await tempPage.evaluate((sel: string | undefined) => {
-                                const el = sel ? document.querySelector(sel) : document.body
-                                return el ? (el as HTMLElement).innerText.trim() : null
-                            }, safeArgs.selector)
-                        }
-                        
-                        if (!data) {
-                            return { result: null, error: `ExtractionError: Could not extract ${safeArgs.extractType} from ${safeArgs.selector || 'page'}.` }
-                        }
-                        return { result: { type: safeArgs.extractType, data } }
-                    } catch (err: any) {
-                        return { result: null, error: err.message || String(err) }
-                    } finally {
-                        await tempBrowser.close()
-                    }
-                }
-
-                case 'browser_action_sequence': {
-                    const steps: any[] = safeArgs.steps
-                    if (!Array.isArray(steps) || steps.length === 0) {
-                        return { result: null, error: 'browser_action_sequence: steps must be a non-empty array' }
-                    }
-                    // (A) & (B) RUNTIME PRECONDITION & (C) AUTO-CORRECTION
-                    // Validate selectors before executing ANY step to prevent partial failures.
-                    const validationErrors: string[] = []
-                    for (let i = 0; i < steps.length; i++) {
-                        const step = steps[i]
-
-                        // CRITICAL: Stop validation if we hit a navigation step, 
-                        // as subsequent selectors will be on a new page we can't see yet.
-                        if (step.action === 'navigate' || step.action === 'reload') {
-                            break;
-                        }
-
-                        // Validate 'click' with selector
-                        if (step.action === 'click' && step.selector) {
-                            const check = await this.validateAndCorrectSelector(step.selector, step.text, page)
-                            if (!check.valid) {
-                                if (check.correction === 'click_text') {
-                                    // (C) AUTO-FAILOVER: Upgrade to click_text
-                                    console.log(`[PlaywrightService] Auto-correcting step ${i + 1}: click('${step.selector}') -> click_text('${step.text || step.selector}')`)
-                                    step.action = 'click_text'
-                                    step.text = step.text || step.selector // Fallback: try selector as text if text missing
-                                    delete step.selector
-                                } else {
-                                    validationErrors.push(`Step ${i + 1} (${step.action}) PRECONDITION FAILED: ${check.error}`)
-                                }
-                            }
-                        }
-
-                        // Validate 'fill', 'hover', 'wait_for_element', 'type' with selector
-                        if (['fill', 'hover', 'wait_for_element', 'type'].includes(step.action) && step.selector) {
-                            const check = await this.validateAndCorrectSelector(step.selector, undefined, page)
-                            if (!check.valid) {
-                                validationErrors.push(`Step ${i + 1} (${step.action}) PRECONDITION FAILED: ${check.error} (Did you forget to call get_interactive_elements?)`)
-                            }
-                        }
-                    }
-
-                    if (validationErrors.length > 0) {
-                        return {
-                            result: null,
-                            error: `Sequence Aborted by Runtime Guard:\n${validationErrors.join('\n')}\n\n💡 RECOVERY: Call get_interactive_elements() to find the correct valid selectors.`
-                        }
-                    }
-
-                    const results: string[] = []
-                    for (let i = 0; i < steps.length; i++) {
-                        const step = steps[i]
-                        const { action, ...stepArgs } = step
-                        try {
-                            const stepResult = await this.callTool(action, { ...stepArgs, tabId: safeArgs.tabId })
-                            if (stepResult.error) {
-                                results.push(`Step ${i + 1} (${action}): FAILED — ${stepResult.error}`)
-                                return {
-                                    result: `Sequence halted at step ${i + 1}/${steps.length}.\n${results.join('\n')}`,
-                                    error: `Step ${i + 1} (${action}) failed: ${stepResult.error}`
-                                }
-                            }
-                            const summary = typeof stepResult.result === 'string'
-                                ? stepResult.result
-                                : JSON.stringify(stepResult.result)
-                            results.push(`Step ${i + 1} (${action}): OK — ${summary.substring(0, 120)}`)
-                        } catch (e) {
-                            const msg = e instanceof Error ? e.message : String(e)
-                            results.push(`Step ${i + 1} (${action}): FAILED — ${msg}`)
-                            return {
-                                result: `Sequence halted at step ${i + 1}/${steps.length}.\n${results.join('\n')}`,
-                                error: `Step ${i + 1} (${action}) threw: ${msg}`
-                            }
-                        }
-                    }
-                    return { result: `All ${steps.length} steps completed.\n${results.join('\n')}` }
-                }
-
-                case 'web_search': {
-                    const query = safeArgs.query
-                    if (!query) return { result: null, error: 'web_search: query is required' }
-
-                    // ── Engine-agnostic search : to provide users option to select search engine────────────────────────────────────
-                    // Configurable search engine URL templates.
-                    // {q} is replaced with the encoded query.
-                    // In future, this can be driven by user preferences.
-                    const SEARCH_ENGINES: Record<string, string> = {
-                        google: 'https://www.google.com/search?q={q}&hl=en',
-                        bing: 'https://www.bing.com/search?q={q}',
-                        duckduckgo: 'https://duckduckgo.com/?q={q}',
-                        brave: 'https://search.brave.com/search?q={q}',
-                    }
-
-                    // TODO: read from user preferences once settings UI is built
-                    const engine = ((this.store as any).get?.('searchEngine') as string) || 'google'
-                    const urlTemplate = SEARCH_ENGINES[engine] || SEARCH_ENGINES.bing
-                    const searchUrl = urlTemplate.replace('{q}', encodeURIComponent(query))
-
-                    await page.goto(searchUrl, { waitUntil: 'domcontentloaded' })
-                    await page.waitForTimeout(1000)
-
-                    // Grab all visible text from the page — no DOM parsing, no selectors.
-                    // The LLM is smart enough to interpret raw search result text.
-                    const pageText = await page.evaluate(() => {
-                        return document.body.innerText
-                    })
-
-                    // Trim page text to a reasonable size
-                    const MAX_CHARS = 3000
-                    const trimmedText = pageText.length > MAX_CHARS
-                        ? pageText.substring(0, MAX_CHARS) + '\n\n... (truncated)'
-                        : pageText
-
-                    // ── Extract clickable result links ──────────────────────
-                    // Gives the LLM direct hrefs to click without needing get_interactive_elements
-                    const searchLinks = await page.evaluate(() => {
-                        const links = document.querySelectorAll('a[href]')
-                        const list: string[] = []
-                        let i = 1
-                        links.forEach(link => {
-                            const r = link.getBoundingClientRect()
-                            const t = (link as HTMLElement).innerText?.substring(0, 60).trim()
-                            const href = (link as HTMLAnchorElement).href
-                            // Filter to meaningful result links (skip nav, ads footers)
-                            if (r.width > 0 && r.height > 0 && t && t.length > 5 && i <= 10 &&
-                                href.startsWith('http') && !href.includes('google.com/search') &&
-                                !href.includes('accounts.google') && !href.includes('support.google')) {
-                                list.push(`[${i++}] "${t}" → ${href}`)
-                            }
-                        })
-                        return list
-                    }).catch(() => [] as string[])
-
-                    const pageTitle = await page.title()
-                    return {
-                        result: `Search results for "${query}" (via ${engine}):\n` +
-                            `Page: ${pageTitle}\n` +
-                            `URL: ${page.url()}\n\n` +
-                            trimmedText +
-                            (searchLinks.length > 0
-                                ? `\n\n--- Clickable Result Links (${searchLinks.length}) ---\n${searchLinks.join('\n')}`
-                                : '')
-                    }
-                }
-
-                case 'fill_form': {
-                    const { url: formUrl, fields, submit_selector, submit_text, wait_after_submit = true } = safeArgs
-                    if (!Array.isArray(fields) || fields.length === 0) {
-                        return { result: null, error: 'fill_form: fields array is required and must not be empty' }
-                    }
-                    // Navigate if URL provided
-                    if (formUrl) {
-                        await page.goto(formUrl, { waitUntil: 'domcontentloaded' })
-                    }
-
-                    // (A) & (B) RUNTIME PRECONDITION & (C) AUTO-CORRECTION
-                    const formErrors: string[] = []
-                    for (const field of fields) {
-                        const check = await this.validateAndCorrectSelector(field.selector)
-                        if (!check.valid) {
-                            formErrors.push(`Field '${field.selector}' PRECONDITION FAILED: ${check.error}`)
-                        }
-                    }
-
-                    let effectiveSubmitSelector = submit_selector
-                    let effectiveSubmitText = submit_text
-
-                    if (submit_selector) {
-                        const check = await this.validateAndCorrectSelector(submit_selector, submit_text)
-                        if (!check.valid) {
-                            if (check.correction === 'click_text') {
-                                console.log(`[PlaywrightService] Auto-correcting submit_selector -> submit_text('${submit_text || submit_selector}')`)
-                                effectiveSubmitText = submit_text || submit_selector
-                                effectiveSubmitSelector = undefined
-                            } else {
-                                formErrors.push(`Submit button '${submit_selector}' PRECONDITION FAILED: ${check.error}`)
-                            }
-                        }
-                    }
-
-                    if (formErrors.length > 0) {
-                        return {
-                            result: null,
-                            error: `Form Fill Aborted by Runtime Guard:\n${formErrors.join('\n')}\n\n💡 RECOVERY: Call get_interactive_elements() to find the correct valid selectors.`
-                        }
-                    }
-
-                    // Fill each field
-                    for (const field of fields) {
-                        const { selector, value, type: fillType = 'fill' } = field
-                        await page.waitForSelector(selector, { timeout: 5000 }).catch(() => null)
-                        if (fillType === 'type') {
-                            await page.click(selector).catch(() => null)
-                            await page.type(selector, value, { delay: 30 })
-                        } else if (fillType === 'select') {
-                            await page.selectOption(selector, value)
-                        } else {
-                            await page.fill(selector, value)
-                        }
-                    }
-                    // Submit
-                    if (effectiveSubmitSelector) {
-                        await page.click(effectiveSubmitSelector)
-                    } else if (effectiveSubmitText) {
-                        await page.getByText(effectiveSubmitText, { exact: false }).first().click()
-                    } else {
-                        // Press Enter on the last field
-                        const lastSelector = fields[fields.length - 1].selector
-                        await page.press(lastSelector, 'Enter')
-                    }
-                    // Wait for navigation if requested
-                    if (wait_after_submit) {
-                        await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => null)
-                    }
-                    const resultUrl = page.url()
-                    const resultTitle = await page.title()
-                    return { result: `Form submitted. Now at: ${resultTitle} (${resultUrl})` }
-                }
-
-                default:
-                    return { result: null, error: `Tool ${name} not implemented` }
-            }
-        } catch (error) {
-            console.error(`[PlaywrightService] Error calling tool ${name}:`, error)
-            let errorMessage = error instanceof Error ? error.message : String(error)
-
-            // Clean up common Playwright timeout errors
-            if (errorMessage.includes('Timeout') && errorMessage.includes('exceeded')) {
-                const selectorMatch = errorMessage.match(/waiting for locator\(['"]([^'"]+)['"]\)/);
-                const selector = selectorMatch ? selectorMatch[1] : 'element';
-                errorMessage = `Timeout: The element '${selector}' was not found within the time limit.\n` +
-                    `Suggestion: The selector might be incorrect or the page structure changed.\n` +
-                    `1. Try using 'get_interactive_elements' to see what IS on the page.\n` +
-                    `2. Try a different selector (e.g. text content or aria-label).\n` +
-                    `3. Be aware that Google Search and other modern sites change IDs effectively randomly. Avoid using IDs like '#lst-ib' or '#tsf'.`;
-            }
-
-            return {
-                result: null,
-                error: errorMessage
-            }
-        }
+            ] as ToolSchema[]
+        };
     }
 
     /**
-     * Runtime validation helper: Checks if a selector exists and offers corrections if not.
+     * Validates if a CSS selector exists on the given page and suggests
+     * alternatives if it doesn't.
+     *
+     * @param selector - The CSS selector to check.
+     * @param text - Optional text content associated with the element.
+     * @param page - The Playwright Page instance to check against.
+     * @returns Validation result with boolean `valid` and optional `correction`.
      */
     private async validateAndCorrectSelector(selector: string, text?: string, page?: Page): Promise<{ valid: boolean; correction?: string; error?: string }> {
-        const targetPage = page || this.page;
-        if (!targetPage) return { valid: false, error: 'Page not initialized' };
-
+        if (!page) return { valid: false, error: 'Page not initialized' };
         try {
-            // 1. Check if selector exists interactively
-            const exists = await targetPage.$(selector).then(res => !!res).catch(() => false);
+            const exists = await page.$(selector).then(res => !!res).catch(() => false);
             if (exists) return { valid: true };
-
-            // 2. If text is provided, suggest using text instead (fallback to click_text)
             if (text) {
-                const textExists = await targetPage.getByText(text, { exact: false }).isVisible().catch(() => false);
-                if (textExists) {
-                    return { valid: false, correction: `click_text`, error: `Selector '${selector}' not found, but text '${text}' is visible.` };
-                }
+                const textExists = await page.getByText(text, { exact: false }).isVisible().catch(() => false);
+                if (textExists) return { valid: false, correction: 'click_text', error: `Selector '${selector}' not found, but text '${text}' is visible.` };
             }
-
-            // 3. Heuristic: Is the selector actually plain text? (Common LLM error: click("Submit"))
-            const isTextLike = !selector.includes('#') && !selector.includes('.') &&
-                !selector.includes('[') && !selector.includes('>') &&
-                selector.match(/^[a-zA-Z0-9\s]+$/);
-
-            if (isTextLike) {
-                const textExists = await targetPage.getByText(selector, { exact: false }).isVisible().catch(() => false);
-                if (textExists) {
-                    return { valid: false, correction: `click_text`, error: `Selector '${selector}' looks like text, not CSS.` };
-                }
-            }
-
             return { valid: false, error: `Selector '${selector}' not found in DOM.` };
         } catch (e) {
             return { valid: false, error: `Invalid selector '${selector}': ${String(e)}` };
         }
+    }
+
+    async close() {
+        await this.browserManager.close();
     }
 }

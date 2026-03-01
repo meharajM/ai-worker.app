@@ -176,7 +176,7 @@ SEQUENTIAL (Single Context or Dependent Tasks):
 ❌ "Check price on Amazon, if over $500 check eBay" → Conditional dependency
 ❌ "Fill form on website1, submit, then download confirmation" → Sequential workflow
 
-Return JSON:
+Return ONLY valid JSON, do not include any markdown formatting or conversational text:
 {
   "should_parallelize": true/false,
   "contexts": ["context1", "context2", ...],
@@ -197,8 +197,21 @@ Return JSON:
 
     const response = await Promise.race([llmPromise, timeoutPromise]) as any;
 
+    // Extract JSON from response (handle markdown blocks and conversational text)
+    let jsonContent = response.content || '{}';
+    const jsonMatch = jsonContent.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (jsonMatch) {
+      jsonContent = jsonMatch[1];
+    } else {
+      const firstBrace = jsonContent.indexOf('{');
+      const lastBrace = jsonContent.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace >= firstBrace) {
+        jsonContent = jsonContent.substring(firstBrace, lastBrace + 1);
+      }
+    }
+
     // Parse and validate response
-    const result = JSON.parse(response.content || '{}');
+    const result = JSON.parse(jsonContent);
 
     // Validate required fields
     if (typeof result.should_parallelize !== 'boolean') {
