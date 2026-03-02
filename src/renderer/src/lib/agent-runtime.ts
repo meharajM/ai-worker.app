@@ -478,271 +478,7 @@ export class AgentRuntime implements IAgentClient {
     return this._handleMaxIterations(finalPrompt);
   }
 
-  // ── Private: Special Tool Handlers ────────────────────────────────────────
-
-  private _handleCreateExecutionPlan(args: any, iterationCount: number): string {
-    const steps = args.steps || [];
-    this.executionPlan = {
-      goal: args.goal || "Unknown goal",
-      steps: steps.map((s: any) => ({
-        id: s.id,
-        description: s.description,
-        status: s.status || "pending",
-        assigned_agent: s.assigned_agent,
-      })),
-    };
-
-    // Keep it in sync
-    import('./task-manager').then(m => m.syncPlanToFile(this.options.workspacePath, this.executionPlan!));
-
-    console.log(`[AgentRuntime] Plan created with ${steps.length} steps:`, args.goal);
-    return `Execution plan created: ${args.goal}\n\nSteps:\n${steps
-      .map((s: any) => `${s.id}. ${s.description} [${s.assigned_agent}]`)
-      .join("\n")}\n\nI will now execute each step sequentially.`;
-  }
-
-  private async _handleScanPageAccessibility(): Promise<string> {
-    console.log("[AgentRuntime] Scanning page accessibility tree...");
-    const script = `
-      (function() {
-        function getAccessibilityTree(element) {
-          if (!element) return null;
-          const style = window.getComputedStyle(element);
-          if (style.display === 'none' || style.visibility === 'hidden') return null;
-          const role = element.getAttribute('role') || element.tagName.toLowerCase();
-          const label = element.getAttribute('aria-label') || element.innerText || '';
-          const interestingRoles = ['button', 'link', 'input', 'textarea', 'select', 'heading', 'article', 'section', 'nav', 'main', 'form', 'img', 'a'];
-          const isInteresting = interestingRoles.includes(role) || (element.onclick != null) ||
-            (role === 'div' && (element.className.includes('btn') || element.className.includes('button')));
-          if (!isInteresting && element.children.length === 0 && !label.trim()) return null;
-          const node = {
-            role: role,
-            name: (label.substring(0, 50) + (label.length > 50 ? '...' : '')).replace(/\\n/g, ' ').trim(),
-          };
-          if (element.id) node.id = element.id;
-          if (element.value) node.value = element.value;
-          if (element.href) node.href = element.href;
-          if (element.children.length > 0) {
-            const children = Array.from(element.children).map(child => getAccessibilityTree(child)).filter(c => c !== null);
-            if (children.length > 0) node.children = children;
-          }
-          if (!isInteresting && node.children) {
-            return node.children.length === 1 ? node.children[0] : { role: 'group', children: node.children };
-          }
-          if (!isInteresting && !node.children) return null;
-          return node;
-        }
-        return JSON.stringify(getAccessibilityTree(document.body));
-      })()
-    `;
-
-    try {
-      let result;
-      try {
-        result = await executeToolCall("browser_evaluate", { script, tabId: this.options.tabId });
-      } catch (e) {
-        console.warn("[AgentRuntime] browser_evaluate failed, trying browser_run_code...");
-      }
-      if (!result || result.error) {
-        result = await executeToolCall("browser_run_code", { code: script, tabId: this.options.tabId });
-      }
-      if (result.error) {
-        return `Error scanning page: ${result.error}. Try using browser_snapshot instead if this persists.`;
-      }
-      const tree =
-        typeof result.result === "string" ? result.result : JSON.stringify(result.result);
-      const output = `Page Accessibility Tree (Semantic Structure):\n${tree.substring(0, 15000)}`;
-      console.log(`[AgentRuntime] Accessibility scan complete (${output.length} chars)`);
-      return output;
-    } catch (err: any) {
-      return `Error executing accessibility scan: ${err.message}`;
-    }
-  }
-
-  private async _handleUpdateProgressSummary(args: any, iterationCount: number): Promise<string> {
-    const summary = args.summary || "";
-    if (summary.trim()) {
-      this.lastCheckpoint = { step: iterationCount, summary, timestamp: Date.now() };
-      await executeToolCall("memory_update_entity", {
-        name: `AgentState_${this.agentInstanceId}`,
-        Metadata: {
-          lastCheckpoint: this.lastCheckpoint,
-          status: "active",
-          iterationCount,
-        },
-      });
-      console.log(`[AgentRuntime] Progress checkpoint saved to memory (Step ${iterationCount})`);
-    }
-    return JSON.stringify({
-      success: true,
-      message: "Progress checkpoint saved to persistent memory.",
-      checkpointStep: iterationCount,
-    });
-  }
-
-  private async _handleDelegateSubTask(args: any): Promise<string> {
-    const instruction = args.instruction || "";
-    let context = args.context || "";
-
-    if (context.length > 5000) {
-      console.warn(`[AgentRuntime] Sub-agent context too large (${context.length} chars), truncating to 5000`);
-      context = context.substring(0, 5000) + "\n...[truncated for efficiency]...";
-    }
-
-    console.log(`[AgentRuntime] Delegating to sub-agent: ${instruction}`);
-
-    const subAgentId = globalThis.crypto.randomUUID();
-
-    // Pre-seed memory for the sub-agent
-    const { preSeedSubAgentMemory } = await import("./agent/AgentStateService");
-    await preSeedSubAgentMemory(
-      subAgentId,
-      this.agentInstanceId,
-      this.options.activeSessionId,
-      [
-        `Sequential sub-agent for task: ${instruction.substring(0, 100)}`,
-        `Initialized at ${new Date().toISOString()}`,
-      ].join("\n"),
-      { instruction: instruction.substring(0, 200) }
-    );
-
-    // Provision a dedicated browser tab
-    let subAgentTabId: number | undefined;
-    try {
-      const { browserLock } = await import("./resource-lock");
-      const tabResult = await browserLock.runExclusive(async () =>
-        executeToolCall("new_tab", { url: "about:blank" })
-      );
-      // Extract tabId from the MCP content envelope (or raw fallback)
-      const subAgentTabIdResult = parseTabIdFromResult(tabResult);
-      if (subAgentTabIdResult !== undefined) {
-        subAgentTabId = subAgentTabIdResult;
-        console.log(`[AgentRuntime] Provisioned tab ${subAgentTabId} for sub-agent`);
-      } else {
-        console.warn("[AgentRuntime] new_tab result did not contain a tabId:", tabResult.result);
-      }
-    } catch (e) {
-      console.warn("[AgentRuntime] Failed to provision tab for sub-agent", e);
-    }
-
-    const subAgent = this._makeSubAgentFactory()({
-      agentInstanceId: subAgentId,
-      parentAgentId: this.agentInstanceId,
-      isSubAgent: true,
-      tabId: subAgentTabId,
-      taskCategory: this.taskCategory,
-      requireConfirmation: false,
-      onMessage: (msg: LLMMessage) => {
-        const contentStr =
-          typeof msg.content === "string"
-            ? msg.content
-            : (msg.content as any[])
-              .map((c: any) => (c.type === "text" ? c.text : "[Image]"))
-              .join(" ");
-        console.log(`[SubAgent Tab:${subAgentTabId ?? "default"}] ${msg.role}: ${contentStr?.substring(0, 50)}`);
-      },
-    });
-
-    try {
-      const prompt = `${instruction}${context ? `\n\nContext: ${context}` : ""}\n\nReturn key findings only. End with "✓ Done".`;
-      const finalRes = await subAgent.chat(prompt);
-      const finalContent =
-        typeof finalRes.content === "string"
-          ? finalRes.content
-          : (finalRes.content as any[]).map((c: any) => (c.type === "text" ? c.text : "")).join("");
-
-      // Close the sub-agent's tab
-      if (subAgentTabId !== undefined) {
-        try {
-          const { browserLock } = await import("./resource-lock");
-          await browserLock.runExclusive(async () =>
-            executeToolCall("close_tab", { tabId: subAgentTabId })
-          );
-          console.log(`[AgentRuntime] Closed sub-agent tab ${subAgentTabId}`);
-        } catch (e) {
-          console.warn(`[AgentRuntime] Failed to close sub-agent tab ${subAgentTabId}`, e);
-        }
-      }
-
-      // ── Detect sub-agent bailout vs clean completion ──────────────────────
-      // When consecutiveErrors >= maxConsecutiveErrors the sub-agent emits a
-      // bailout message starting with "I encountered N consecutive errors".
-      // In that case we salvage any partial data from its tool history so the
-      // parent LLM can still make use of what the sub-agent did collect.
-      const isBailout = finalContent.includes("consecutive errors") ||
-        finalContent.includes("stopping to prevent an infinite loop");
-
-      if (isBailout) {
-        // Extract partial tool outputs from the sub-agent's history
-        const subAgentHistory = (subAgent as any).getHistory?.() as LLMMessage[] | undefined;
-        const partialFindings: string[] = [];
-
-        if (subAgentHistory) {
-          for (const msg of subAgentHistory) {
-            if (msg.role === "tool") {
-              const content = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
-              // Only salvage non-error, non-trivial outputs
-              if (!content.includes('"error":') && content.length > 50) {
-                const { analyzeToolOutput } = await import("./result-reporter");
-                const analysis = analyzeToolOutput("tool", content);
-                if (analysis.hasPresentableData && analysis.summary) {
-                  partialFindings.push(analysis.summary.substring(0, 300));
-                }
-              }
-            }
-          }
-        }
-
-        // Mark matching plan step as "failed" so tasks.json is accurate
-        if (this.executionPlan) {
-          const matchingStep = this.executionPlan.steps.find(
-            (s) =>
-              s.status === "pending" &&
-              (instruction.toLowerCase().includes(s.description.toLowerCase().substring(0, 20)) ||
-                s.description.toLowerCase().includes(instruction.toLowerCase().substring(0, 20)))
-          );
-          if (matchingStep) {
-            matchingStep.status = "failed";
-            matchingStep.result = `Failed after partial execution. ${partialFindings.length} findings salvaged.`;
-            import('./task-manager').then(m => m.syncPlanToFile(this.options.workspacePath, this.executionPlan!));
-          }
-        }
-
-        // Return partial data + error so the parent LLM can adapt
-        const partialSection = partialFindings.length > 0
-          ? `\n\nPartial data collected before failure:\n${partialFindings.map((f, i) => `${i + 1}. ${f}`).join("\n")}`
-          : "";
-        console.warn(`[AgentRuntime] Sub-agent bailed out. Salvaged ${partialFindings.length} partial findings.`);
-        return `Sub-agent encountered errors and stopped.${partialSection}\n\nPlease use the partial data above if useful, or try a different approach for: ${instruction}`;
-      }
-
-      // ── Clean completion path ──────────────────────────────────────────────
-      // Update execution plan if we have one
-      if (this.executionPlan) {
-        const matchingStep = this.executionPlan.steps.find(
-          (s) =>
-            s.status === "pending" &&
-            (instruction.toLowerCase().includes(s.description.toLowerCase().substring(0, 20)) ||
-              s.description.toLowerCase().includes(instruction.toLowerCase().substring(0, 20)))
-        );
-        if (matchingStep) {
-          matchingStep.status = "completed";
-          matchingStep.result = finalContent.substring(0, 200);
-
-          // Keep it in sync
-          import('./task-manager').then(m => m.syncPlanToFile(this.options.workspacePath, this.executionPlan!));
-
-          const completed = this.executionPlan.steps.filter((s) => s.status === "completed").length;
-          const total = this.executionPlan.steps.length;
-          console.log(`[AgentRuntime] Plan progress: ${completed}/${total} steps completed`);
-        }
-      }
-
-      return finalContent.trim();
-    } catch (err: any) {
-      return `Sub-agent failed: ${err.message}`;
-    }
-  }
+  // ── Private: Helpers ───────────────────────────────────────────────────────
 
   private async _handleContextLimits() {
     const contextText = JSON.stringify(this.messages);
@@ -764,8 +500,8 @@ export class AgentRuntime implements IAgentClient {
     const mcpTools = getAllTools();
     const toolMap = new Map<string, LLMTool>();
     const all = [
-      ...mcpTools.map(t => ({ name: t.name, description: t.description, parameters: t.inputSchema })),
-      ...CLIENT_TOOLS.map(t => ({ name: t.name, description: t.description, parameters: t.inputSchema }))
+      ...mcpTools.map((t) => ({ name: t.name, description: t.description, parameters: t.inputSchema })),
+      ...CLIENT_TOOLS.map((t) => ({ name: t.name, description: t.description, parameters: t.inputSchema })),
     ];
     for (const tool of all) {
       if (!toolMap.has(tool.name)) toolMap.set(tool.name, tool);
@@ -774,12 +510,15 @@ export class AgentRuntime implements IAgentClient {
   }
 
   private _getServerInfo(): ServerInfo[] {
-    return getServers().filter(s => s.connected).map(s => ({
-      name: s.name,
-      description: s.description.substring(0, 40),
-      toolCount: s.tools.length,
-      isReasoningServer: s.name.includes("sequential") || s.description.toLowerCase().includes("reasoning")
-    }));
+    return getServers()
+      .filter((s) => s.connected)
+      .map((s) => ({
+        name: s.name,
+        description: s.description.substring(0, 40),
+        toolCount: s.tools.length,
+        isReasoningServer:
+          s.name.includes("sequential") || s.description.toLowerCase().includes("reasoning"),
+      }));
   }
 
   private async _getDynamicRules(): Promise<string | undefined> {
@@ -790,12 +529,27 @@ export class AgentRuntime implements IAgentClient {
   }
 
   private _handleModelRefusal(response: LLMResponse): boolean {
-    const refusalPatterns = [/don't have access to/i, /can't (?:access|check|fetch|get)/i, /unable to (?:browse|access)/i];
-    if (refusalPatterns.some(p => p.test(response.content || "")) && !this.messages.some(m => m.content?.toString().includes("[AUTO-CORRECT]"))) {
-      const query = this.messages.filter(m => m.role === "user").pop()?.content?.toString() || "the request";
+    const refusalPatterns = [
+      /don't have access to/i,
+      /can't (?:access|check|fetch|get)/i,
+      /I (?:am|'m) (?:just|only) a/i,
+      /unable to (?:browse|access)/i,
+      /you(?:'ll)? need to check/i,
+    ];
+    const isRefusal = refusalPatterns.some((p) => p.test(response.content || ""));
+    const alreadyCorrected = this.messages.some(
+      (m) => typeof m.content === "string" && m.content.includes("[AUTO-CORRECT]")
+    );
+
+    if (isRefusal && !alreadyCorrected) {
+      console.warn("[AgentRuntime] Model refused tool use. Auto-correcting...");
+      const userQuery = this.messages.filter((m) => m.role === "user").pop();
+      const query = typeof userQuery?.content === "string" ? userQuery.content : "the request";
       this.addMessage({
         role: "user",
-        content: `[AUTO-CORRECT] You refused to help. You HAVE browser tools. Use navigate to search for "${query}".`
+        content: `[AUTO-CORRECT] You refused to help. This is wrong — you HAVE browser tools.\n            \nFor "${query}", use: navigate({"url": "https://google.com/search?q=${encodeURIComponent(
+          query
+        )}"})`,
       });
       return true;
     }
@@ -811,11 +565,11 @@ export class AgentRuntime implements IAgentClient {
 
   private async _handleCheckpoints(iterationCount: number) {
     if (this.options.isSubAgent) return;
-    const INTERVAL = 15;
-    if (iterationCount % INTERVAL === 0) {
+    const CHECKPOINT_INTERVAL = 15;
+    if (iterationCount % CHECKPOINT_INTERVAL === 0) {
       this.addMessage({
         role: "user",
-        content: `[CHECKPOINT ${iterationCount}] Please call update_progress_summary now.`
+        content: `[CHECKPOINT ${iterationCount}] Please call update_progress_summary now to summarize your progress so far. This will help prevent context overflow.`,
       });
     }
   }
@@ -824,11 +578,19 @@ export class AgentRuntime implements IAgentClient {
     if (this.options.isSubAgent) throw new Error("Max iterations reached");
     const handoffMsg: LLMMessage = {
       role: "assistant",
-      content: `I've worked for ${this.maxIterations} steps. Current summary: ${this.lastCheckpoint?.summary || "Working..."}. Continue?`,
+      content: `I've worked for ${this.maxIterations} steps on this task. To ensure accuracy and prevent context issues, I've saved a checkpoint of my progress. Should I continue with a fresh context or stop here?`,
       actions: [
-        { type: "continue", label: "▶️ Continue Task", payload: { goal: finalPrompt } },
-        { type: "cancel", label: "⏹️ Stop Here", payload: {} }
-      ]
+        {
+          type: "continue",
+          label: "▶️ Continue Task",
+          payload: { goal: finalPrompt },
+        },
+        {
+          type: "cancel",
+          label: "⏹️ Stop Here",
+          payload: {},
+        },
+      ],
     };
     this.addMessage(handoffMsg);
     return handoffMsg;

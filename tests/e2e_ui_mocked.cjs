@@ -265,6 +265,28 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                         choices: [{
                             message: {
                                 role: "assistant",
+                                content: "I will use evaluate to get the secret.",
+                                tool_calls: [
+                                    {
+                                        id: "call_eval",
+                                        type: "function",
+                                        function: {
+                                            name: "browser_evaluate",
+                                            arguments: JSON.stringify({ script: "return 'SECRET_SALVAGED_DATA_42';" })
+                                        }
+                                    }
+                                ]
+                            }
+                        }]
+                    }
+                },
+                {
+                    // Triggered when the sub-agent sends the results of the browser_evaluate tool back to the LLM
+                    triggers: ["SECRET_SALVAGED_DATA_42"],
+                    response: {
+                        choices: [{
+                            message: {
+                                role: "assistant",
                                 content: "I encountered 3 consecutive errors and am stopping to prevent an infinite loop.",
                             }
                         }]
