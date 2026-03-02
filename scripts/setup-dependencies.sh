@@ -153,6 +153,15 @@ case "${PLATFORM}" in
         ;;
 esac
 
+# Install Playwright browsers (Requires Node/npx from previous steps)
+if command_exists npx; then
+    echo ""
+    echo "📦 Installing Playwright browser binaries (this may take a minute)..."
+    npx playwright install
+else
+    echo "⚠️ npx not found, skipping Playwright browser installation."
+fi
+
 echo ""
 echo "✅ All dependencies installed successfully!"
 echo "================================================================"

@@ -56,7 +56,7 @@ export class BrowserManager {
     private headlessPage: Page | null = null;
 
     constructor() {
-        this.store = new Store<Record<string, unknown>>();
+        this.store = new Store<Record<string, unknown>>({ name: 'ai-worker-store' });
     }
 
     /**
@@ -95,8 +95,9 @@ export class BrowserManager {
 
                 console.log(`[BrowserManager] OS: ${process.platform}, target browser: ${browserType}`);
 
+                const baseArgs: string[] = [];
                 // Full set of stealth + stability args — restored from original PlaywrightService
-                const launchArgs = [
+                const chromiumArgs = [
                     '--disable-blink-features=AutomationControlled', // Remove automation flag from navigator
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
@@ -122,22 +123,26 @@ export class BrowserManager {
                 };
 
                 const fallbackOrder = getFallbackOrder();
-                // User preference always goes first; deduplication removes it from fallbacks
-                const browserAttempts = [browserType, ...fallbackOrder.filter(b => b !== browserType)];
+                // If user explicitly configured a browser, do NOT fall back to other engines.
+                // If they relied on 'auto' (undefined), use the OS-smart fallback sequence.
+                const browserAttempts = settings.browser 
+                    ? [settings.browser]
+                    : [browserType, ...fallbackOrder.filter(b => b !== browserType)];
 
                 let lastError: Error | null = null;
 
                 if (headless) {
-                    launchArgs.push('--headless=new');
+                    chromiumArgs.push('--headless=new');
                 }
 
                 for (const tryBrowser of browserAttempts) {
                     try {
+                        const isChromiumBased = ['chromium', 'chrome', 'msedge'].includes(tryBrowser || '');
                         // Select the right Playwright launcher and channel for each browser type
                         let launcher: any = stealthChromium;
                         const tryOptions: Record<string, any> = {
                             headless,
-                            args: [...launchArgs],
+                            args: isChromiumBased ? [...chromiumArgs] : [...baseArgs],
                             viewport: { width: 1280, height: 800 },
                         };
 

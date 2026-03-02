@@ -42,6 +42,27 @@ export class DependencyService {
         // Check uv (Required for uvx)
         results.push(await this.checkCommand('uv', '--version', true))
 
+        // Check Playwright browsers
+        let playwrightInstalled = false;
+        try {
+            const { chromium, firefox, webkit } = require('playwright-core');
+            const fs = require('fs');
+            // We require at least chromium to be installed, but ideally all 3. 
+            // npx playwright install installs all 3 default browsers.
+            playwrightInstalled = fs.existsSync(chromium.executablePath()) || 
+                                  fs.existsSync(firefox.executablePath()) || 
+                                  fs.existsSync(webkit.executablePath());
+        } catch (e) {
+            playwrightInstalled = false;
+        }
+
+        results.push({
+            name: 'playwright-browsers',
+            installed: playwrightInstalled,
+            required: true,
+            error: playwrightInstalled ? undefined : 'Playwright browsers not found'
+        });
+
         return results
     }
 

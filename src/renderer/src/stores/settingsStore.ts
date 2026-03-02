@@ -168,7 +168,8 @@ export const useSettingsStore = create<SettingsState>()(
                 set({ playwrightBrowser: browser })
                 // Also save to main process store for PlaywrightService to read
                 const browserValue = browser === 'auto' ? undefined : browser
-                await electron.store.set('mcpPlaywright', { browser: browserValue })
+                const current = await electron.store.get<any>('mcpPlaywright') || {}
+                await electron.store.set('mcpPlaywright', { ...current, browser: browserValue })
             },
             setPlaywrightHeadless: async (headless) => {
                 set({ playwrightHeadless: headless })
