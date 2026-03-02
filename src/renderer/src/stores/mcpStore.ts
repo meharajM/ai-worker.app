@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import electron from '../lib/electron'
 import { STORAGE_KEYS } from '../lib/constants'
+import { useChatStore } from './chatStore'
 
 // Types
 export interface MCPServer {
@@ -93,6 +94,14 @@ const DEFAULT_MCP_SERVERS = [
         type: 'stdio',
         command: 'internal-filesystem',
         args: [],
+        autoConnect: true
+    },
+    {
+        name: 'official-filesystem',
+        description: 'Official MCP Filesystem (Advanced features like search and metadata)',
+        type: 'stdio',
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-filesystem', '{workspace}'],
         autoConnect: true
     },
     {
@@ -297,11 +306,20 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                 )
             }))
 
+            let dynamicArgs = server.args;
+            if (server.name === 'official-filesystem' && dynamicArgs) {
+                const activeSession = useChatStore.getState().getActiveSession();
+                // Default to a safe fallback (/) if no workspace is selected
+                const workspacePath = activeSession?.workspacePath || '/';
+                dynamicArgs = dynamicArgs.map(arg => arg === '{workspace}' ? workspacePath : arg);
+                console.log(`[mcpStore] Injected workspace path for official-filesystem: ${workspacePath}`);
+            }
+
             const result = await electron.mcp.connect({
                 id: server.id,
                 type: server.type,
                 command: server.command,
-                args: server.args,
+                args: dynamicArgs,
                 url: server.url,
                 env: server.env
             })
