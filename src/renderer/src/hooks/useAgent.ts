@@ -224,6 +224,12 @@ export function useAgent(): UseAgentReturn {
                         // We write each message to the session so it appears in the chat UI
                         // even if the user has navigated to another tab.
                         onMessage: (msg: LLMMessage) => {
+                            // Do not add raw tool execution results as standalone chat bubbles.
+                            // The tool result is instead mapped to the assistant message's toolCalls.
+                            if (msg.role === "tool") {
+                                return undefined;
+                            }
+
                             const { addSessionMessage } = useChatStore.getState();
 
                             // Map LLMMessage → store message shape
@@ -276,6 +282,11 @@ export function useAgent(): UseAgentReturn {
 
                             updateSessionMessage(activeSessionId || "default", id, storeUpdates);
                         },
+
+                        onProgressUpdate: (progress?: number, eta?: number, plan?: any) => {
+                            const { updateSessionProgress } = useChatStore.getState();
+                            updateSessionProgress(activeSessionId || "default", progress, eta, plan);
+                        }
                     },
                     reconstructedHistory // Pass reconstructed history as initial context
                 );
@@ -308,7 +319,15 @@ export function useAgent(): UseAgentReturn {
             } finally {
                 // Always clear the processing state, even on error, so the UI
                 // re-enables the input and hides the spinner.
-                useChatStore.getState().setProcessing(false);
+                const storeState = useChatStore.getState();
+                storeState.setProcessing(false);
+                // Gap 1 fix: clear session-level progress so the bar never lingers
+                // across new messages or after an early abort/error.
+                // WHY read activeSessionId from store here: the try-block's `activeSessionId`
+                // may not be in scope if the error occurred before Step 2. Reading from the
+                // store is always safe and correct.
+                const sessionToClear = storeState.activeSessionId || "default";
+                storeState.updateSessionProgress(sessionToClear, undefined, undefined, undefined);
             }
         },
         // WHY settings in deps: If the user changes LLM provider mid-session,

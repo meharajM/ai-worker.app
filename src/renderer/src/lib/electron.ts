@@ -159,6 +159,40 @@ export const electron = {
 
     },
 
+    // FS operations
+    fs: {
+        getPendingChanges: async () => {
+            if (isElectron() && window.electron?.fs) {
+                return await window.electron.fs.getPendingChanges()
+            }
+            return []
+        },
+        approveChange: async (changeId: string) => {
+            if (isElectron() && window.electron?.fs) {
+                return await window.electron.fs.approveChange(changeId)
+            }
+            return { success: false }
+        },
+        rejectChange: async (changeId: string) => {
+            if (isElectron() && window.electron?.fs) {
+                return await window.electron.fs.rejectChange(changeId)
+            }
+            return { success: false }
+        },
+        writeInternalFile: async (workspacePath: string | undefined, filename: string, content: string) => {
+            if (isElectron() && window.electron?.fs && window.electron.fs.writeInternalFile) {
+                return await window.electron.fs.writeInternalFile(workspacePath, filename, content)
+            }
+            return { success: false, error: 'Not supported in browser' }
+        },
+        readInternalFile: async (workspacePath: string | undefined, filename: string) => {
+            if (isElectron() && window.electron?.fs && window.electron.fs.readInternalFile) {
+                return await window.electron.fs.readInternalFile(workspacePath, filename)
+            }
+            return { success: false, error: 'Not supported in browser' }
+        }
+    },
+
     // Memory operations
     memory: {
         callTool: async (name: string, args: any) => {

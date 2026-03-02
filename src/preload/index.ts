@@ -97,6 +97,10 @@ const electronAPI = {
         getPendingChanges: () => ipcRenderer.invoke('fs:get-pending-changes'),
         approveChange: (changeId: string) => ipcRenderer.invoke('fs:approve-change', changeId),
         rejectChange: (changeId: string) => ipcRenderer.invoke('fs:reject-change', changeId),
+        writeInternalFile: (workspacePath: string | undefined, filename: string, content: string) =>
+            ipcRenderer.invoke('fs:write-internal-file', workspacePath, filename, content),
+        readInternalFile: (workspacePath: string | undefined, filename: string) =>
+            ipcRenderer.invoke('fs:read-internal-file', workspacePath, filename)
     },
     // Memory operations
     memory: {

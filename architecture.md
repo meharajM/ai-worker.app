@@ -627,6 +627,7 @@ graph TD
     subgraph "Core Services"
         Orchestration[OrchestrationService<br/>Task Decomposition]
         Tools[ToolExecutionService<br/>Loop Handling & Self-Healing]
+        SpecialHandlers[SpecialToolHandlers<br/>High-level Tools]
         LLMOrchestrator[llm.ts<br/>Provider Selection]
         State[AgentStateService<br/>Memory & Checkpoints]
     end
@@ -637,6 +638,7 @@ graph TD
     Runtime --> LLMOrchestrator
     LLMOrchestrator --> Providers[llm/ Providers<br/>OpenAI, Gemini, Ollama, Browser]
     Runtime --> Tools
+    Runtime --> SpecialHandlers
     
     Tools --> MCP[MCP Tools]
     State --> Memory[Memory DB]
@@ -644,7 +646,7 @@ graph TD
 
 #### 1. AgentRuntime Facade
 - **Role**: Entry point for the UI (`useAgent.ts`).
-- **Responsibility**: Coordinates the high-level loop (Think -> Act -> Observe).
+- **Responsibility**: Coordinates the high-level loop (Think -> Act -> Observe) and manages context limits.
 - **Interface**: Implements `IAgentClient`, ensuring the UI is decoupled from the implementation (ready for remote execution).
 
 #### 2. AgentStateService
@@ -654,14 +656,22 @@ graph TD
   - **Context Loading**: Loads parent context for sub-agents to share knowledge.
   - **Handoff Detection**: Automatically prompts for user intervention if the context limit is reached.
 
-#### 3. OrchestrationService
+#### 3. SpecialToolHandlers
+- **Responsibility**: Owns inline handlers for complex "agent-specific" logic.
+- **Key Features**:
+  - Coordinates multi-step execution plans (`create_execution_plan`).
+  - Spawns sub-agents for isolated research (`delegate_sub_task`) and salvages partial data on failure.
+  - Generates progress checkpoints for context preservation (`update_progress_summary`).
+  - Runs advanced browser analysis like semantic accessibility trees (`scan_page_accessibility`).
+
+#### 4. OrchestrationService
 - **Responsibility**: Spawns and manages sub-agents.
 - **Patterns**:
   - **Parallel Orchestration**: Spawns N sub-agents for independent contexts (e.g., comparing 3 websites).
   - **Sequential Orchestration**: Executes multi-step plans where step N+1 depends on step N.
   - **Sub-Agent Factory**: Uses a factory pattern to create new `AgentRuntime` instances, breaking circular dependencies.
 
-#### 4. ToolExecutionService
+#### 5. ToolExecutionService
 - **Responsibility**: Safely executes tools and robustly handles errors.
 - **Loop Detection**: Prevents infinite loops by detecting repetitive arguments or similar patterns (same tool N times in a row).
 - **Self-Healing**: Automatically retries failed actions with context-aware recovery strategies:
@@ -678,11 +688,12 @@ The system supports recursive task delegation through the `delegate_sub_task` to
 #### How It Works
 
 1.  **Main Agent Decides**: The main agent determines a sub-task is too complex or requires isolation.
-2.  **Tool Call**: Calls `delegate_sub_task` with specific instructions and context.
+2.  **Tool Call**: Calls `delegate_sub_task` with specific instructions and context. The `SpecialToolHandlers` service intercepts this.
 3.  **Recursive Runtime**: The system instantiates a *new* `AgentRuntime` (the "Sub-Agent").
 4.  **Context Inheritance**: The Sub-Agent inherits the parent's `taskCategory`, ensuring it loads the correct safety protocols (e.g., a Shopping sub-agent also knows not to buy things).
 5.  **Isolated Execution**: The Sub-Agent runs its own loop (Plan -> Act -> Verify) with a fresh context window.
-6.  **Result Aggregation**: The Sub-Agent returns a final summary string, which becomes the tool result for the Main Agent.
+6.  **Bailout & Salvage**: If the Sub-Agent fails (e.g. consecutive errors), `SpecialToolHandlers` detects the bailout and scans the Sub-Agent's history to salvage any useful partial data found before failure.
+7.  **Result Aggregation**: The `SpecialToolHandlers` returns the final summary (or salvaged data) string, which becomes the tool result for the Main Agent.
 
 ```mermaid
 sequenceDiagram

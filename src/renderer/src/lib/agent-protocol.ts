@@ -1,8 +1,9 @@
 export interface AgentStep {
   id: number;
   description: string;
-  assigned_agent: string;
+  assigned_agent?: string;
   status: 'pending' | 'active' | 'completed' | 'failed';
+  result?: string;
 }
 
 export interface ExecutionPlan {

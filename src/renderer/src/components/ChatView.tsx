@@ -4,6 +4,18 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useChatStore } from '../stores/chatStore'
 import { MessageBubble } from './MessageBubble'
 import { WorkflowTiles } from './WorkflowTiles'
+import { AgentPlan } from './AgentPlan'
+
+const formatETA = (etaSeconds?: number) => {
+    if (etaSeconds === undefined || etaSeconds < 0) return null;
+    if (etaSeconds < 60) return `< 1m remaining`;
+    const m = Math.floor(etaSeconds / 60);
+    if (m >= 60) {
+        const h = Math.floor(m / 60);
+        return `~${h}h ${m % 60}m remaining`;
+    }
+    return `~${m}m remaining`;
+};
 
 interface ChatViewProps {
     onClearChat?: () => void
@@ -87,28 +99,60 @@ export function ChatView({ onClearChat }: ChatViewProps) {
                         <div className="w-8 h-8 rounded-lg bg-[#00a896] flex items-center justify-center flex-shrink-0">
                             <Bot size={18} className="text-white" />
                         </div>
-                            <motion.div 
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0, scale: 0.9 }}
-                                className="bg-[#1a1d23] border border-white/10 rounded-2xl px-4 py-3"
-                            >
-                                <div className="flex gap-1.5">
-                                    {[0, 1, 2].map((i) => (
-                                        <motion.span
-                                            key={i}
-                                            className="w-2 h-2 bg-white/40 rounded-full"
-                                            animate={{ y: [0, -5, 0] }}
-                                            transition={{
-                                                duration: 0.6,
-                                                repeat: Infinity,
-                                                delay: i * 0.15,
-                                                ease: "easeInOut"
-                                            }}
-                                        />
-                                    ))}
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.9 }}
+                            className="bg-[#1a1d23] border border-white/10 rounded-2xl px-4 py-3"
+                        >
+                            <div className="flex gap-1.5">
+                                {[0, 1, 2].map((i) => (
+                                    <motion.span
+                                        key={i}
+                                        className="w-2 h-2 bg-white/40 rounded-full"
+                                        animate={{ y: [0, -5, 0] }}
+                                        transition={{
+                                            duration: 0.6,
+                                            repeat: Infinity,
+                                            delay: i * 0.15,
+                                            ease: "easeInOut"
+                                        }}
+                                    />
+                                ))}
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+
+                {/* Global Plan and Progress */}
+                {activeSession?.progress !== undefined && activeSession.progress > 0 && activeSession.progress < 100 && (
+                    <div className="flex gap-3 justify-start max-w-3xl mx-auto w-full">
+                        <div className="w-8 h-8 rounded-lg bg-[#00a896] flex items-center justify-center flex-shrink-0">
+                            <Bot size={18} className="text-white" />
+                        </div>
+                        <div className="flex-1 bg-[#1a1d23] border border-white/10 rounded-2xl px-4 py-3 shadow-sm text-white/90">
+                            <div className="mb-3 space-y-1.5">
+                                <div className="flex items-center justify-between text-[10px] uppercase tracking-wider font-bold text-white/40">
+                                    <span className="flex items-center gap-1.5">
+                                        Task Progress
+                                        {activeSession.eta !== undefined && (
+                                            <span className="text-[#00a896] normal-case tracking-normal">({formatETA(activeSession.eta)})</span>
+                                        )}
+                                    </span>
+                                    <span>{activeSession.progress}%</span>
                                 </div>
-                            </motion.div>
+                                <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
+                                    <motion.div
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${activeSession.progress}%` }}
+                                        className="h-full bg-gradient-to-r from-[#00a896] to-[#4fd1c5] relative"
+                                    >
+                                        <div className="absolute inset-0 bg-white/20 animate-pulse" />
+                                    </motion.div>
+                                </div>
+                            </div>
+                            {activeSession.plan && <AgentPlan plan={activeSession.plan} />}
+                        </div>
                     </div>
                 )}
 

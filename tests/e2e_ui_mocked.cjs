@@ -26,10 +26,19 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
     let electronApp;
     try {
+        const tempUserDataDir = path.join(__dirname, 'temp-user-data');
+        if (fs.existsSync(tempUserDataDir)) {
+            fs.rmSync(tempUserDataDir, { recursive: true, force: true });
+        }
+
         electronApp = await electron.launch({
             executablePath: execPath,
-            args: [path.join(__dirname, '../out/main/index.js'), '--no-sandbox'],
-            timeout: 120000,
+            args: [
+                path.join(__dirname, '../out/main/index.js'),
+                '--no-sandbox',
+                `--user-data-dir=${tempUserDataDir}`
+            ],
+            timeout: 60000,
             env: { ...process.env, NODE_ENV: 'production' }
         });
         console.log('✅ Electron launched');
@@ -43,7 +52,14 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         window.on('console', msg => console.log(`[Renderer]: ${msg.text()}`));
 
         // Mocking at the window level is more reliable than network interception for localhost in Electron
-        await window.addInitScript(() => {
+        await window.addInitScript(async () => {
+            console.log("🧹 Clearing IndexedDB to ensure clean state...");
+            try {
+                const dbs = await window.indexedDB.databases();
+                for (const db of dbs) {
+                    window.indexedDB.deleteDatabase(db.name);
+                }
+            } catch (e) { }
             console.log("🛠️ Injecting Mock Fetch...");
 
             // --- SCENARIO DEFINITIONS ---
@@ -57,8 +73,8 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                                 role: "assistant",
                                 content: "Starting parallel search for minimal price...",
                                 tool_calls: [
-                                    { id: "call_1", type: "function", function: { name: "create_sub_agent", arguments: JSON.stringify({ name: "Amazon Search", goal: "Check Amazon" }) } },
-                                    { id: "call_2", type: "function", function: { name: "create_sub_agent", arguments: JSON.stringify({ name: "BestBuy Search", goal: "Check BestBuy" }) } }
+                                    { id: "call_1", type: "function", function: { name: "delegate_sub_task", arguments: JSON.stringify({ instruction: "Amazon Search" }) } },
+                                    { id: "call_2", type: "function", function: { name: "delegate_sub_task", arguments: JSON.stringify({ instruction: "BestBuy Search" }) } }
                                 ]
                             }
                         }]
@@ -187,6 +203,94 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                             }
                         }]
                     }
+                },
+                {
+                    triggers: ["loop different args"],
+                    response: {
+                        choices: [{
+                            message: {
+                                role: "assistant",
+                                content: "Exploring files.",
+                                tool_calls: [
+                                    { id: "c1", type: "function", function: { name: "fs_read_file", arguments: JSON.stringify({ path: "/fileA" }) } },
+                                    { id: "c2", type: "function", function: { name: "fs_read_file", arguments: JSON.stringify({ path: "/fileB" }) } },
+                                    { id: "c3", type: "function", function: { name: "fs_read_file", arguments: JSON.stringify({ path: "/fileC" }) } },
+                                    { id: "c4", type: "function", function: { name: "fs_read_file", arguments: JSON.stringify({ path: "/fileD" }) } }
+                                ]
+                            }
+                        }]
+                    }
+                },
+                {
+                    triggers: ["loop same args"],
+                    response: {
+                        choices: [{
+                            message: {
+                                role: "assistant",
+                                content: "Stuck reading the same file.",
+                                tool_calls: [
+                                    { id: "c1", type: "function", function: { name: "fs_read_file", arguments: JSON.stringify({ path: "/stuck_file" }) } },
+                                    { id: "c2", type: "function", function: { name: "fs_read_file", arguments: JSON.stringify({ path: "/stuck_file" }) } },
+                                    { id: "c3", type: "function", function: { name: "fs_read_file", arguments: JSON.stringify({ path: "/stuck_file" }) } }
+                                ]
+                            }
+                        }]
+                    }
+                },
+                {
+                    triggers: ["sub-agent crash salvage"],
+                    response: {
+                        choices: [{
+                            message: {
+                                role: "assistant",
+                                content: "Gathering intel then delegating...",
+                                tool_calls: [
+                                    {
+                                        id: "c_sub",
+                                        type: "function",
+                                        function: {
+                                            name: "delegate_sub_task",
+                                            arguments: JSON.stringify({ instruction: "Crash me" })
+                                        }
+                                    }
+                                ]
+                            }
+                        }]
+                    }
+                },
+                {
+                    // Catch-all inside sub-agent for "Crash me"
+                    triggers: ["Crash me"],
+                    response: {
+                        choices: [{
+                            message: {
+                                role: "assistant",
+                                content: "I will use evaluate to get the secret.",
+                                tool_calls: [
+                                    {
+                                        id: "call_eval",
+                                        type: "function",
+                                        function: {
+                                            name: "browser_evaluate",
+                                            arguments: JSON.stringify({ script: "return 'SECRET_SALVAGED_DATA_42';" })
+                                        }
+                                    }
+                                ]
+                            }
+                        }]
+                    }
+                },
+                {
+                    // Triggered when the sub-agent sends the results of the browser_evaluate tool back to the LLM
+                    triggers: ["SECRET_SALVAGED_DATA_42"],
+                    response: {
+                        choices: [{
+                            message: {
+                                role: "assistant",
+                                content: "I encountered 3 consecutive errors and am stopping to prevent an infinite loop.",
+                            }
+                        }]
+                    }
                 }
             ];
 
@@ -225,7 +329,13 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
                     try {
                         const body = JSON.parse(bodyStr);
-                        const lastMsg = body.messages[body.messages.length - 1].content;
+                        let lastMsgRaw = body.messages[body.messages.length - 1].content;
+                        let lastMsg = typeof lastMsgRaw === "string"
+                            ? lastMsgRaw
+                            : Array.isArray(lastMsgRaw)
+                                ? lastMsgRaw.map(c => c.text || JSON.stringify(c)).join(" ")
+                                : JSON.stringify(lastMsgRaw);
+
                         console.log(`[MockFetch] Prompt: "${lastMsg.substring(0, 50)}..."`);
 
                         // Find matching scenario
@@ -313,10 +423,18 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         // Helper to send message
         const sendMessage = async (text) => {
             await chatInput.scrollIntoViewIfNeeded();
+
+            // Wait for any 'Processing' or 'Stop' overlay to finish (button must be Send)
+            await window.waitForTimeout(1000);
+            await window.locator('button:has(svg.lucide-send)').waitFor({ state: 'attached', timeout: 30000 });
+
             await chatInput.click({ force: true });
             await chatInput.fill(text);
-            await window.waitForTimeout(500);
-            await window.locator('[data-testid="send-button"]').click({ force: true });
+
+            // Wait for button to be enabled after filling
+            await window.locator('button:has(svg.lucide-send):not([disabled])').waitFor({ state: 'attached', timeout: 30000 });
+
+            await window.locator('button:has(svg.lucide-send)').click({ force: true });
 
             // Wait for "Thinking..." state change or response
             console.log(`  - Sent: "${text.substring(0, 40)}..."`);
@@ -425,6 +543,66 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             console.log('✅ Safety refusal displayed');
         } catch (e) {
             console.error('⚠️ Safety test timed out');
+        }
+
+        // --- TEST 10: PROGRESS BAR CLEANUP ---
+        console.log('\n--- Test 10: Progress Bar Cleanup ---');
+        try {
+            const progressBars = window.locator('.progress-bar-container, progress');
+            const count = await progressBars.count();
+            if (count > 0) {
+                // Check if any are actually visible
+                const isVis = await progressBars.first().isVisible();
+                if (isVis) throw new Error("Progress bar lingered after tasks completed");
+            }
+            console.log('✅ No lingering progress bars detected');
+        } catch (e) {
+            console.error('⚠️ Progress Bar cleanup test failed:', e);
+            throw e;
+        }
+
+        // --- TEST 11: LOOP DETECTION (DIFFERENT ARGS) ---
+        console.log('\n--- Test 11: Loop Detection (Different Args) ---');
+        await sendMessage("Simulate loop different args");
+        try {
+            await window.locator('text=Exploring files').first().waitFor({ state: 'visible', timeout: 15000 });
+
+            // Wait slightly to ensure loop check had time to process
+            await window.waitForTimeout(1000);
+
+            const stuckVisible = await window.locator('text=repeating the same action').isVisible();
+            if (stuckVisible) throw new Error("Loop detector falsely triggered on different args");
+            console.log('✅ Different args execution successful without false loop detection');
+        } catch (e) {
+            console.error('❌ Different args test failed:', e);
+            throw e;
+        }
+
+        // --- TEST 12: LOOP DETECTION (SAME ARGS) ---
+        console.log('\n--- Test 12: Loop Detection (Same Args) ---');
+        await sendMessage("Simulate loop same args");
+        try {
+            await window.locator('text=repeating the same action').first().waitFor({ state: 'visible', timeout: 15000 });
+            console.log('✅ Identical args loop detector triggered successfully');
+        } catch (e) {
+            console.error('❌ Loop detection test failed:', e);
+            throw e;
+        }
+
+        // --- TEST 13: SUB-AGENT CRASH SALVAGE ---
+        console.log('\n--- Test 13: Sub-Agent Crash Salvage ---');
+        // Because "Crash me" triggers the delegate_sub_task and the sub-agent bails out
+        // The delegate_sub_task will return "Sub-agent encountered errors and stopped."
+        // Our mock LLM (being dumb in this catch-all) might just output "Generic mock response" after receiving the tool return
+        // but let's see if we can find the sub-agent salvaged text in the UI logs, or at least no crash
+        await sendMessage("Simulate sub-agent crash salvage");
+        try {
+            // Wait for parent generic response which happens after delegation completes
+            await window.locator('text=generic mock response').last().waitFor({ state: 'visible', timeout: 20000 });
+            console.log('✅ Sub-agent crash did not bring down the main agent');
+        } catch (e) {
+            console.error('❌ Sub-agent crash test failed:', e);
+            throw e;
         }
 
         console.log('\n🎉 ALL SCENARIOS PASSED (with handled warnings)');

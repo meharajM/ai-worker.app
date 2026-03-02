@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
+import type { ExecutionPlan } from '../lib/agent-protocol'
 
 export interface MessageAction {
     type: 'continue' | 'cancel' | 'custom';
@@ -17,6 +18,10 @@ export interface Message {
     attachments?: { name: string; path: string; type: string }[]
     thought?: string
     thought_signature?: string
+    progress?: number // 0-100 representation of task completion
+    eta?: number // Estimated time remaining in seconds
+    plan?: ExecutionPlan // Current ExecutionPlan state for the UI
+    findings?: string[] // Summarized findings to show in the UI bubble
 }
 
 export interface ToolCall {
@@ -24,6 +29,8 @@ export interface ToolCall {
     name: string
     arguments: Record<string, unknown>
     result?: string
+    isPresentable?: boolean // Whether the tool output was summarized/reported as a finding
+    finding?: string // The summarized finding text for this specific tool call
 }
 
 export interface ChatSession {
@@ -33,6 +40,9 @@ export interface ChatSession {
     createdAt: number
     updatedAt: number
     workspacePath?: string  // Optional workspace folder for this chat session
+    progress?: number
+    eta?: number
+    plan?: ExecutionPlan
 }
 
 interface ChatState {
@@ -49,6 +59,7 @@ interface ChatState {
     setActiveSession: (id: string) => void
     updateSessionTitle: (id: string, title: string) => void
     updateSessionWorkspace: (id: string, workspacePath: string) => void
+    updateSessionProgress: (id: string, progress?: number, eta?: number, plan?: any) => void
     setOfflineSpeech: (enabled: boolean) => void
 
     // Message Actions (operate on active session)
@@ -138,6 +149,14 @@ export const useChatStore = create<ChatState>()(
                 set((state) => ({
                     sessions: state.sessions.map((s) =>
                         s.id === id ? { ...s, workspacePath, updatedAt: Date.now() } : s
+                    ),
+                }))
+            },
+
+            updateSessionProgress: (id, progress, eta, plan) => {
+                set((state) => ({
+                    sessions: state.sessions.map((s) =>
+                        s.id === id ? { ...s, progress, eta, plan, updatedAt: Date.now() } : s
                     ),
                 }))
             },
@@ -243,9 +262,17 @@ export const useChatStore = create<ChatState>()(
                             s.id === sessionId
                                 ? {
                                     ...s,
-                                    messages: s.messages.map((msg) =>
-                                        msg.id === messageId ? { ...msg, ...updates } : msg
-                                    ),
+                                    messages: s.messages.map((msg) => {
+                                        if (msg.id === messageId) {
+                                            const updatedMsg = { ...msg, ...updates };
+                                            // Ensure toolCalls is updated correctly if provided in updates
+                                            if (updates.toolCalls && Array.isArray(updates.toolCalls)) {
+                                                updatedMsg.toolCalls = updates.toolCalls;
+                                            }
+                                            return updatedMsg;
+                                        }
+                                        return msg;
+                                    }),
                                     updatedAt: Date.now()
                                 }
                                 : s

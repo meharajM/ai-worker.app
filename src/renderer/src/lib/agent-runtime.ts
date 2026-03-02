@@ -44,7 +44,6 @@ import {
   formatToolResult,
   truncateToolOutput,
   reportFinding,
-  MAX_IDENTICAL_CALLS,
 } from "./agent/ToolExecutionService";
 import {
   executeParallelSubAgents,
@@ -88,6 +87,7 @@ export class AgentRuntime implements IAgentClient {
   private readonly ABSOLUTE_MAX_ITERATIONS = 150;
   private toolCallHistory = new Set<string>();
   private agentInstanceId: string;
+  private taskStartTimeMs: number;
   private lastCheckpoint: AgentCheckpoint | null = null;
   private specialHandlers: SpecialToolHandlers;
 
@@ -106,6 +106,12 @@ export class AgentRuntime implements IAgentClient {
     this.maxIterations = options.isSubAgent ? 15 : 50;
     if (options.taskCategory) this.taskCategory = options.taskCategory;
 
+    if (options.taskCategory) {
+      this.taskCategory = options.taskCategory;
+    }
+
+    this.agentInstanceId = options.agentInstanceId || globalThis.crypto.randomUUID();
+    this.taskStartTimeMs = Date.now();
     this.specialHandlers = new SpecialToolHandlers(
       this.agentInstanceId,
       this.options,
@@ -140,6 +146,24 @@ export class AgentRuntime implements IAgentClient {
       if (parentContextMsg) this.messages.push(parentContextMsg);
     }
 
+    // ── Check tasks.json for crash recovery ────────────────────────────────
+    if (!this.executionPlan && !this.options.isSubAgent && this.options.workspacePath) {
+      try {
+        const electron = (await import('./electron')).default;
+        const result = await electron.fs.readInternalFile(this.options.workspacePath, 'tasks.json');
+        if (result.success && result.content) {
+          this.executionPlan = JSON.parse(result.content);
+          console.log('[AgentRuntime] Recovered execution plan from tasks.json');
+
+          // Sync recovered plan to tasks.json to ensure file is up-to-date
+          import('./task-manager').then(m => m.syncPlanToFile(this.options.workspacePath, this.executionPlan!));
+        }
+      } catch (e) {
+        console.warn('[AgentRuntime] Failed to recover tasks.json:', e);
+      }
+    }
+
+    // ── Handoff detection (AgentStateService) ────────────────────────────────
     if (!this.options.isSubAgent) {
       const handoff = await detectHandoff(this.options.activeSessionId);
       if (handoff.found) {
@@ -255,6 +279,7 @@ export class AgentRuntime implements IAgentClient {
     let iterationCount = 0;
     let consecutiveErrors = 0;
     const recentToolCalls: string[] = [];
+    let activeAssistantMessageId: string | undefined;
 
     while (iterationCount < this.maxIterations) {
       this.totalIterations++;
@@ -306,7 +331,19 @@ export class AgentRuntime implements IAgentClient {
           function: { name: tc.name, arguments: tc.arguments },
         })) as any,
       };
-      this.addMessage(assistantMsg);
+      const messageIdResult = this.addMessage(assistantMsg);
+      if (typeof messageIdResult === "string") {
+        activeAssistantMessageId = messageIdResult;
+      }
+
+      // Sync tool calls to assistantMsg local tracking
+      if (!(assistantMsg as any).toolCalls) {
+        (assistantMsg as any).toolCalls = response.toolCalls.map(tc => ({
+          id: tc.id,
+          name: tc.name,
+          arguments: tc.arguments
+        }));
+      }
 
       const toolPromises = response.toolCalls.map(async (call) => {
         if (this.options.signal?.aborted) return null;
@@ -370,8 +407,62 @@ export class AgentRuntime implements IAgentClient {
         const truncated = truncateToolOutput(call.name, resultStr);
         this.addMessage({ role: "tool", content: truncated, tool_call_id: call.id });
 
+        // ── Update UI with tool result ─────────────────────────────────────
+        if (activeAssistantMessageId && this.options.onMessageUpdate) {
+          const currentToolCalls = (assistantMsg as any).toolCalls || [];
+          const storeToolCalls = currentToolCalls.map((t: any) =>
+            t.id === call.id ? { ...t, result: truncated } : t
+          );
+          (assistantMsg as any).toolCalls = storeToolCalls;
+          this.options.onMessageUpdate(activeAssistantMessageId, {
+            toolCalls: storeToolCalls
+          } as any);
+        }
+
+        // ── Progress calculation (Gap 2 fix) ──────────────────────────────
+        // Runs unconditionally — not just when there's presentable data.
+        // This ensures the progress bar advances for every tool call,
+        // including browser_navigate, browser_click, fs_read, etc.
+        if (!this.options.isSubAgent && this.options.onProgressUpdate) {
+          // Crude iteration-based estimate as the floor
+          let progress = Math.min(Math.round(((iterationCount + 1) / this.maxIterations) * 100), 95);
+
+          // If we have an execution plan, use the more accurate step-based progress
+          if (this.executionPlan && this.executionPlan.steps.length > 0) {
+            const totalSteps = this.executionPlan.steps.length;
+            const completedSteps = this.executionPlan.steps.filter(s => s.status === 'completed').length;
+            const activeSteps = this.executionPlan.steps.filter(s => s.status === 'active').length;
+            // Active steps count as 50% done for progress calculation
+            const rawProgress = ((completedSteps + (activeSteps * 0.5)) / totalSteps) * 100;
+            progress = Math.min(Math.max(Math.round(rawProgress), progress), 98);
+          }
+
+          let etaSeconds: number | undefined;
+          if (progress > 0) {
+            const elapsedMs = Date.now() - this.taskStartTimeMs;
+            const rate = progress / elapsedMs;
+            const remainingMs = Math.max(0, (100 - progress) / rate);
+            etaSeconds = Math.round(remainingMs / 1000);
+          }
+
+          this.options.onProgressUpdate(progress, etaSeconds, this.executionPlan ?? undefined);
+        }
+
+        // ── Incremental finding reporting ──────────────────────────────────
+        // Only surfaces data-rich tool outputs (e.g. page content, file reads)
+        // as annotated findings on the tool call card. Does NOT update progress.
         if (!this.options.isSubAgent) {
-          reportFinding(call.name, resultStr, (msg) => this.addMessage(msg));
+          const findingSummary = reportFinding(call.name, resultStr);
+          if (findingSummary && activeAssistantMessageId && this.options.onMessageUpdate) {
+            const currentToolCalls = (assistantMsg as any).toolCalls || [];
+            const storeToolCalls = currentToolCalls.map((t: any) =>
+              t.id === call.id ? { ...t, isPresentable: true, finding: findingSummary.summary } : t
+            );
+            (assistantMsg as any).toolCalls = storeToolCalls;
+            this.options.onMessageUpdate(activeAssistantMessageId, {
+              toolCalls: storeToolCalls
+            } as any);
+          }
         }
         return undefined;
       });
@@ -386,6 +477,8 @@ export class AgentRuntime implements IAgentClient {
 
     return this._handleMaxIterations(finalPrompt);
   }
+
+  // ── Private: Helpers ───────────────────────────────────────────────────────
 
   private async _handleContextLimits() {
     const contextText = JSON.stringify(this.messages);
@@ -407,8 +500,8 @@ export class AgentRuntime implements IAgentClient {
     const mcpTools = getAllTools();
     const toolMap = new Map<string, LLMTool>();
     const all = [
-      ...mcpTools.map(t => ({ name: t.name, description: t.description, parameters: t.inputSchema })),
-      ...CLIENT_TOOLS.map(t => ({ name: t.name, description: t.description, parameters: t.inputSchema }))
+      ...mcpTools.map((t) => ({ name: t.name, description: t.description, parameters: t.inputSchema })),
+      ...CLIENT_TOOLS.map((t) => ({ name: t.name, description: t.description, parameters: t.inputSchema })),
     ];
     for (const tool of all) {
       if (!toolMap.has(tool.name)) toolMap.set(tool.name, tool);
@@ -417,12 +510,15 @@ export class AgentRuntime implements IAgentClient {
   }
 
   private _getServerInfo(): ServerInfo[] {
-    return getServers().filter(s => s.connected).map(s => ({
-      name: s.name,
-      description: s.description.substring(0, 40),
-      toolCount: s.tools.length,
-      isReasoningServer: s.name.includes("sequential") || s.description.toLowerCase().includes("reasoning")
-    }));
+    return getServers()
+      .filter((s) => s.connected)
+      .map((s) => ({
+        name: s.name,
+        description: s.description.substring(0, 40),
+        toolCount: s.tools.length,
+        isReasoningServer:
+          s.name.includes("sequential") || s.description.toLowerCase().includes("reasoning"),
+      }));
   }
 
   private async _getDynamicRules(): Promise<string | undefined> {
@@ -433,12 +529,27 @@ export class AgentRuntime implements IAgentClient {
   }
 
   private _handleModelRefusal(response: LLMResponse): boolean {
-    const refusalPatterns = [/don't have access to/i, /can't (?:access|check|fetch|get)/i, /unable to (?:browse|access)/i];
-    if (refusalPatterns.some(p => p.test(response.content || "")) && !this.messages.some(m => m.content?.toString().includes("[AUTO-CORRECT]"))) {
-      const query = this.messages.filter(m => m.role === "user").pop()?.content?.toString() || "the request";
+    const refusalPatterns = [
+      /don't have access to/i,
+      /can't (?:access|check|fetch|get)/i,
+      /I (?:am|'m) (?:just|only) a/i,
+      /unable to (?:browse|access)/i,
+      /you(?:'ll)? need to check/i,
+    ];
+    const isRefusal = refusalPatterns.some((p) => p.test(response.content || ""));
+    const alreadyCorrected = this.messages.some(
+      (m) => typeof m.content === "string" && m.content.includes("[AUTO-CORRECT]")
+    );
+
+    if (isRefusal && !alreadyCorrected) {
+      console.warn("[AgentRuntime] Model refused tool use. Auto-correcting...");
+      const userQuery = this.messages.filter((m) => m.role === "user").pop();
+      const query = typeof userQuery?.content === "string" ? userQuery.content : "the request";
       this.addMessage({
         role: "user",
-        content: `[AUTO-CORRECT] You refused to help. You HAVE browser tools. Use navigate to search for "${query}".`
+        content: `[AUTO-CORRECT] You refused to help. This is wrong — you HAVE browser tools.\n            \nFor "${query}", use: navigate({"url": "https://google.com/search?q=${encodeURIComponent(
+          query
+        )}"})`,
       });
       return true;
     }
@@ -454,11 +565,11 @@ export class AgentRuntime implements IAgentClient {
 
   private async _handleCheckpoints(iterationCount: number) {
     if (this.options.isSubAgent) return;
-    const INTERVAL = 15;
-    if (iterationCount % INTERVAL === 0) {
+    const CHECKPOINT_INTERVAL = 15;
+    if (iterationCount % CHECKPOINT_INTERVAL === 0) {
       this.addMessage({
         role: "user",
-        content: `[CHECKPOINT ${iterationCount}] Please call update_progress_summary now.`
+        content: `[CHECKPOINT ${iterationCount}] Please call update_progress_summary now to summarize your progress so far. This will help prevent context overflow.`,
       });
     }
   }
@@ -467,11 +578,19 @@ export class AgentRuntime implements IAgentClient {
     if (this.options.isSubAgent) throw new Error("Max iterations reached");
     const handoffMsg: LLMMessage = {
       role: "assistant",
-      content: `I've worked for ${this.maxIterations} steps. Current summary: ${this.lastCheckpoint?.summary || "Working..."}. Continue?`,
+      content: `I've worked for ${this.maxIterations} steps on this task. To ensure accuracy and prevent context issues, I've saved a checkpoint of my progress. Should I continue with a fresh context or stop here?`,
       actions: [
-        { type: "continue", label: "▶️ Continue Task", payload: { goal: finalPrompt } },
-        { type: "cancel", label: "⏹️ Stop Here", payload: {} }
-      ]
+        {
+          type: "continue",
+          label: "▶️ Continue Task",
+          payload: { goal: finalPrompt },
+        },
+        {
+          type: "cancel",
+          label: "⏹️ Stop Here",
+          payload: {},
+        },
+      ],
     };
     this.addMessage(handoffMsg);
     return handoffMsg;
@@ -483,6 +602,17 @@ export class AgentRuntime implements IAgentClient {
   }
 
   private _makeSubAgentFactory(): SubAgentFactory {
-    return (overrides) => new AgentRuntime({ ...this.options, ...overrides });
+    return (overrides) => {
+      const subAgentOptions: AgentRuntimeOptions = {
+        ...this.options,
+        ...overrides,
+        // WHY always strip onProgressUpdate for sub-agents:
+        // Sub-agents must NEVER fire global UI progress updates. Progress is
+        // managed by the parent agent only. Stripping it here is an explicit
+        // boundary, not just relying on the `!isSubAgent` guard in _runLoop.
+        onProgressUpdate: undefined,
+      };
+      return new AgentRuntime(subAgentOptions);
+    };
   }
 }
