@@ -98,14 +98,14 @@ ${dynamicRules ? `\n# TASK-SPECIFIC\n${dynamicRules}` : ''}`;
 }
 
 export // Build robust but token-efficient system prompt
-async function buildSystemPrompt(
-  tools?: LLMTool[],
-  servers?: ServerInfo[],
-  useJsonFallback = false,
-  dynamicRules?: string,
-  isSubAgent = false, // NEW: Flag for lightweight prompt
-  workspacePath?: string // Injected workspace path for filesystem scoping
-): Promise<string> {
+  async function buildSystemPrompt(
+    tools?: LLMTool[],
+    servers?: ServerInfo[],
+    useJsonFallback = false,
+    dynamicRules?: string,
+    isSubAgent = false, // NEW: Flag for lightweight prompt
+    workspacePath?: string // Injected workspace path for filesystem scoping
+  ): Promise<string> {
   // Use compact prompt for sub-agents
   if (isSubAgent) {
     return buildSubAgentSystemPrompt(tools, dynamicRules, workspacePath);
@@ -246,6 +246,7 @@ RULES:
 1. **Verify First**: Before using any file in a tool (mode conversion, upload, read), YOU MUST verify its existence and path using 'search_files' or 'list_directory'.
 2. **Absolute Paths Only**: Tools require ABSOLUTE paths (e.g., '/Users/username/Documents/file.txt'). NEVER use relative paths (e.g., 'file.txt') or 'file:' URIs without a full path.
 3. **No Assumptions**: Do NOT assume a file is in the project root. Search for it if the user provides a filename only.
+4. **Tool Selection (CRITICAL)**: For creating or modifying files, YOU MUST use 'fs_write_file' instead of 'write_file'. This triggers the safe user-approval UI. However, for reading, searching, or exploring the workspace, you should freely use the advanced tools like 'search_files', 'read_multiple_files', or 'directory_tree'.
 
 
 
