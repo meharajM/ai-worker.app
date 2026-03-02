@@ -437,7 +437,7 @@ AI-Worker comes with two pre-configured MCP servers that are automatically initi
    - Purpose: Browser automation and web interaction
    - Mode: **Internal Service** (Zero-latency, in-process)
    - Configuration: `command: 'internal'` (Automatically routed by `mcp.ts`)
-   - Tools: 30+ tools including navigate, click, fill, screenshot, get_state, evaluate
+   - Tools: 30+ tools including navigate, click, fill, screenshot, get_state, evaluate, background_scrape (headless)
 
 2. **Sequential Thinking Server** (`sequential-thinking`)
    - Purpose: Step-by-step reasoning for complex tasks
@@ -546,7 +546,7 @@ graph LR
   - Type: `stdio`
   - Command: `npx`
   - Args: `-y @modelcontextprotocol/server-playwright`
-  - Description: Browser automation and web interaction tools
+  - Description: Browser automation and web interaction tools (includes headless `background_scrape` for background extraction)
 
 - **Sequential Thinking** (`sequential-thinking`)
   - Type: `stdio`
