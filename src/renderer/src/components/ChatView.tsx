@@ -1,8 +1,9 @@
-import React, { useRef, useEffect } from 'react'
-import { Trash2, Bot, ArrowDown } from 'lucide-react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
+import { Trash2, Bot } from 'lucide-react'
 import { useChatStore } from '../stores/chatStore'
+import { useAutoScroll } from '../hooks/useAutoScroll'
 import { MessageBubble } from './MessageBubble'
+import { JumpToBottom } from './JumpToBottom'
 import { WorkflowTiles } from './WorkflowTiles'
 import { AgentPlan } from './AgentPlan'
 
@@ -23,67 +24,18 @@ interface ChatViewProps {
 
 export function ChatView({ onClearChat }: ChatViewProps) {
     const { sessions, activeSessionId, isProcessing, processingSessionId, removeMessage, clearMessages } = useChatStore()
-    const messagesEndRef = useRef<HTMLDivElement>(null)
-    const scrollContainerRef = useRef<HTMLDivElement>(null)
-    const [isAtBottom, setIsAtBottom] = React.useState(true)
-    const [hasUnread, setHasUnread] = React.useState(false)
 
     const activeSession = sessions.find(s => s.id === activeSessionId)
     const messages = activeSession?.messages || []
-    
-    // Check if user is scrolled to the bottom
-    const handleScroll = React.useCallback(() => {
-        if (!scrollContainerRef.current) return;
-        const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
-        // A small threshold (e.g., 50px) to account for rounding errors and fast scrolling
-        const atBottom = scrollHeight - scrollTop - clientHeight < 50;
-        
-        setIsAtBottom(atBottom);
-        if (atBottom) {
-            setHasUnread(false);
-        }
-    }, []);
 
-    // Also observe the bottom anchor for intersection 
-    useEffect(() => {
-        const observer = new IntersectionObserver(
-            ([entry]) => {
-                if (entry.isIntersecting) {
-                    setIsAtBottom(true);
-                    setHasUnread(false);
-                }
-            },
-            { root: scrollContainerRef.current, threshold: 0.1 }
-        );
-
-        if (messagesEndRef.current) {
-            observer.observe(messagesEndRef.current);
-        }
-
-        return () => observer.disconnect();
-    }, []);
-
-    // Auto-scroll logic
-    useEffect(() => {
-        if (isAtBottom) {
-            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-        } else if (messages.length > 0) {
-            // New messages arrived but we aren't at the bottom
-            const lastMsg = messages[messages.length - 1];
-            // If it's a new user message, force scroll to bottom regardless of current position
-            if (lastMsg.role === 'user') {
-                 messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-            } else {
-                 setHasUnread(true);
-            }
-        }
-    }, [messages, isProcessing, isAtBottom])
-
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-        setIsAtBottom(true);
-        setHasUnread(false);
-    }
+    const {
+        scrollContainerRef,
+        messagesEndRef,
+        handleScroll,
+        isAtBottom,
+        hasUnread,
+        scrollToBottom
+    } = useAutoScroll(messages, isProcessing)
 
     const handleClear = () => {
         if (window.confirm('Clear all messages? This cannot be undone.')) {
@@ -216,40 +168,12 @@ export function ChatView({ onClearChat }: ChatViewProps) {
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Jump to bottom button */}
-            <AnimatePresence>
-                {!isAtBottom && hasUnread && (
-                    <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 10 }}
-                        className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10"
-                    >
-                        <button
-                            onClick={scrollToBottom}
-                            className="flex items-center gap-2 px-4 py-2 bg-[#00a896] hover:bg-[#00a896]/90 text-white rounded-full shadow-lg shadow-black/20 text-sm font-medium transition-all hover:scale-105"
-                        >
-                            <ArrowDown size={16} />
-                            New messages
-                        </button>
-                    </motion.div>
-                )}
-                {!isAtBottom && !hasUnread && (
-                    <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 10 }}
-                        className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10"
-                    >
-                        <button
-                            onClick={scrollToBottom}
-                            className="flex items-center gap-2 p-2 bg-[#1a1d23] border border-white/10 hover:bg-[#25252b] text-white/60 hover:text-white rounded-full shadow-lg shadow-black/20 transition-all"
-                        >
-                            <ArrowDown size={16} />
-                        </button>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+            {/* Jump to bottom overlay */}
+            <JumpToBottom
+                isAtBottom={isAtBottom}
+                hasUnread={hasUnread}
+                onScrollToBottom={scrollToBottom}
+            />
         </div>
     )
 }
