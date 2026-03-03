@@ -69,20 +69,6 @@ export interface AgentRuntimeOptions {
     signal?: AbortSignal;
 
     /**
-     * If true, the agent will analyze the user's task and ask for confirmation
-     * before executing complex or potentially destructive actions.
-     * Always false for sub-agents (they receive specific instructions, not open-ended tasks).
-     */
-    requireConfirmation?: boolean;
-
-    /**
-     * Called when the agent determines a task needs user confirmation.
-     * @param analysis - The task analysis result (intent, complexity, risks).
-     * @returns A promise that resolves to the enriched prompt (if confirmed) or null (if cancelled).
-     */
-    onConfirmationNeeded?: (analysis: TaskAnalysis) => Promise<string | null>;
-
-    /**
      * If true, this agent is a sub-agent spawned by a parent agent.
      * Sub-agents: start with empty context, get 15 iterations (not 50),
      * skip confirmation, skip task decomposition.
