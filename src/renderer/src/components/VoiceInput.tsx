@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react'
-import { Mic, MicOff, Send, X, Maximize2, Minimize2, Square, Folder, File as FileIcon, XCircle, Eye, EyeOff } from 'lucide-react'
+import { Mic, MicOff, Send, X, Maximize2, Minimize2, Square, Folder, File as FileIcon, XCircle, Eye, EyeOff, Paperclip, FolderOpen } from 'lucide-react'
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
 import { useFileDragDrop, generateFileConversionPrompt } from '../hooks/useFileDragDrop'
 import { VoiceVisualizer } from './VoiceVisualizer'
@@ -18,7 +18,10 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
     const [isHeadless, setIsHeadless] = useState(false)
     const [workspacePath, setWorkspacePath] = useState<string | null>(null)
     const [attachments, setAttachments] = useState<File[]>([])
+    const [showContextMenu, setShowContextMenu] = useState(false)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
+    const fileInputRef = useRef<HTMLInputElement>(null)
+    const contextMenuRef = useRef<HTMLDivElement>(null)
     const { addLog } = useLogStore()
     const { activeSessionId, getActiveSession } = useChatStore()
 
@@ -147,6 +150,27 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
         }
     }, [addLog])
 
+    // Handle file selection
+    const handleSelectFiles = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files.length > 0) {
+            const selectedFiles = Array.from(e.target.files)
+            setAttachments(prev => [...prev, ...selectedFiles])
+            
+            // Focus textarea for user to edit/send
+            textareaRef.current?.focus()
+            
+            addLog({
+                eventType: 'STATE_CHANGE',
+                sessionId: activeSessionId || 'unknown',
+                component: 'VoiceInput',
+                details: { metadata: { action: 'files_selected', count: selectedFiles.length } }
+            })
+
+            // Reset value so same files can be selected again
+            e.target.value = ''
+        }
+    }, [addLog, activeSessionId])
+
     // Handle file drag-and-drop
     const handleFilesDropped = useCallback((files: File[]) => {
         // Add new files to existing attachments
@@ -170,6 +194,19 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
     const { isDragging, dragHandlers } = useFileDragDrop({
         onFilesDropped: handleFilesDropped
     })
+
+    // Close context menu on click outside
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+                setShowContextMenu(false)
+            }
+        }
+        if (showContextMenu) {
+            document.addEventListener('mousedown', handleClickOutside)
+        }
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [showContextMenu])
 
     // Handle text input submission
     const handleTextSubmit = useCallback(() => {
@@ -308,18 +345,62 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
                         />
                     </div>
 
-                    {/* Workspace Folder Button */}
-                    <button
-                        onClick={handleSelectFolder}
-                        disabled={disabled}
-                        className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${workspacePath
-                            ? 'bg-[#00a896]/20 text-[#00a896] hover:bg-[#00a896]/30'
-                            : 'bg-transparent text-white/40 hover:text-white/60 hover:bg-white/5'
-                            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        title={workspacePath ? `Workspace: ${workspacePath}` : 'Select workspace folder'}
-                    >
-                        <Folder size={18} />
-                    </button>
+                    {/* Hidden file input */}
+                    <input
+                        type="file"
+                        multiple
+                        ref={fileInputRef}
+                        onChange={handleSelectFiles}
+                        style={{ display: 'none' }}
+                    />
+
+                    {/* Unified Workspace / File Selector */}
+                    <div className="relative" ref={contextMenuRef}>
+                        <button
+                            onClick={() => setShowContextMenu(!showContextMenu)}
+                            disabled={disabled}
+                            className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${
+                                workspacePath
+                                    ? 'bg-[#00a896]/20 text-[#00a896] hover:bg-[#00a896]/30'
+                                    : attachments.length > 0
+                                        ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                                        : 'bg-transparent text-white/40 hover:text-white/60 hover:bg-white/5'
+                                } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            title={workspacePath ? `Workspace: ${workspacePath}` : 'Select workspace or files'}
+                        >
+                            <Paperclip size={18} />
+                        </button>
+
+                        {/* Dropdown Menu */}
+                        {showContextMenu && (
+                            <div className="absolute bottom-full mb-2 right-0 bg-[#1e2028] border border-white/15 rounded-xl shadow-2xl overflow-hidden min-w-[200px] animate-in fade-in slide-in-from-bottom-2 duration-150 z-50">
+                                {/* Select Workspace */}
+                                <button
+                                    onClick={() => { handleSelectFolder(); setShowContextMenu(false) }}
+                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/80 hover:bg-white/10 hover:text-white transition-colors"
+                                >
+                                    <FolderOpen size={16} className={workspacePath ? 'text-[#00a896]' : 'text-white/50'} />
+                                    <div className="flex flex-col items-start">
+                                        <span className="font-medium">Select Workspace</span>
+                                        {workspacePath && (
+                                            <span className="text-[10px] text-[#00a896]/70 max-w-[160px] truncate">
+                                                {workspacePath.split('/').pop()}
+                                            </span>
+                                        )}
+                                    </div>
+                                </button>
+                                <div className="border-t border-white/10" />
+                                {/* Select Files */}
+                                <button
+                                    onClick={() => { fileInputRef.current?.click(); setShowContextMenu(false) }}
+                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/80 hover:bg-white/10 hover:text-white transition-colors"
+                                >
+                                    <FileIcon size={16} className={attachments.length > 0 ? 'text-emerald-400' : 'text-white/50'} />
+                                    <span className="font-medium">Select Files</span>
+                                </button>
+                            </div>
+                        )}
+                    </div>
 
                     {/* Headless Toggle */}
                     <button
