@@ -116,7 +116,8 @@ function countActions(text: string): number {
  */
 async function analyzeTaskWithLLM(
   userRequest: string,
-  settings: any
+  settings: any,
+  conversationSummary?: string
 ): Promise<{
   shouldParallelize: boolean;
   contexts: string[];
@@ -128,10 +129,15 @@ async function analyzeTaskWithLLM(
     return cached;
   }
 
+  // Build conversation context block for follow-up detection
+  const conversationBlock = conversationSummary
+    ? `\nCONVERSATION HISTORY (previous messages in this session):\n${conversationSummary}\n\nIMPORTANT: If the user request above is a follow-up question referencing data from the conversation history (e.g., "give me links", "show me more details", "which one is cheapest"), then it is NOT a new multi-context task. It should be answered using the existing context — set should_parallelize to false and contexts to ["current_page"].\n`
+    : '';
+
   const prompt = `Analyze this workflow automation request and determine the optimal execution strategy.
 
 User Request: "${userRequest}"
-
+${conversationBlock}
 TASK:
 1. Identify if there are multiple INDEPENDENT contexts that can be processed in PARALLEL
 2. Extract the contexts (e.g., websites, files, APIs, applications, data sources, locations)
@@ -152,12 +158,13 @@ CRITICAL RULES FOR PARALLELIZATION:
   - No task needs output from another
   - Can run simultaneously without conflicts
 
-❌ SEQUENTIAL: Use in these cases:
+❌ SEQUENTIAL / DIRECT: Use in these cases:
   - One task needs output from another (dependency chain)
   - Single context/workflow
   - Conditional logic (if X then Y)
   - Multi-step workflow on same context
   - Verbs like "google" (action) vs "google.com" (website)
+  - **FOLLOW-UP QUESTIONS** referencing previous results (the data already exists in the conversation)
 
 EXAMPLES:
 
@@ -168,13 +175,16 @@ PARALLEL (Multiple Independent Contexts):
 ✅ "Check order status on Amazon and track package on FedEx" → 2 platforms, independent
 ✅ "Fetch user data from API1 and API2" → 2 APIs, independent
 
-SEQUENTIAL (Single Context or Dependent Tasks):
+SEQUENTIAL / DIRECT (Single Context or Dependent Tasks):
 ❌ "google flipkart.com and give me details" → "google" is a verb, 1 context: flipkart.com
 ❌ "Search Amazon for laptops, then compare top result with eBay" → Dependent (eBay needs Amazon)
 ❌ "Research Apple and Microsoft trends" → Single research task, 2 topics
 ❌ "Process file1.csv, then use results to update file2.csv" → Dependent workflow
 ❌ "Check price on Amazon, if over $500 check eBay" → Conditional dependency
 ❌ "Fill form on website1, submit, then download confirmation" → Sequential workflow
+❌ "give me links for products" → Follow-up, data exists in history, no new browsing
+❌ "which one is cheapest?" → Follow-up, answer from existing data
+❌ "show me more details" → Follow-up referencing prior results
 
 Return ONLY valid JSON, do not include any markdown formatting or conversational text:
 {
@@ -257,13 +267,46 @@ Return ONLY valid JSON, do not include any markdown formatting or conversational
 export async function analyzeTaskForDecomposition(
   userRequest: string,
   settings: any,
-  currentUrl?: string
+  currentUrl?: string,
+  conversationHistory?: Array<{ role: string; content: string }>
 ): Promise<TaskDecomposition> {
   const estimatedActions = countActions(userRequest);
 
+  // ── Follow-up detection guard ──────────────────────────────────────────────
+  // If there's existing conversation context AND the user prompt is short/vague
+  // (a follow-up), skip the decomposer entirely. Follow-ups should use the
+  // main agent's conversation context, not spawn fresh sub-agents.
+  if (conversationHistory && conversationHistory.length > 0) {
+    const hasAssistantResults = conversationHistory.some(
+      m => m.role === 'assistant' && m.content && m.content.length > 50
+    );
+    const isShortPrompt = userRequest.trim().length < 80;
+    const containsExplicitUrls = /https?:\/\/|\b\w+\.(com|org|net|io)\b/i.test(userRequest);
+
+    if (hasAssistantResults && isShortPrompt && !containsExplicitUrls) {
+      console.log('[TaskDecomposer] Short follow-up with existing context — skipping decomposition, direct execution.');
+      return {
+        type: 'single_context',
+        contexts: ['current_page'],
+        estimatedActions: 1,
+        shouldFork: false,
+        forkReason: 'Follow-up question — using existing conversation context'
+      };
+    }
+  }
+
+  // Build a brief summary of the last few messages for the LLM to detect follow-ups
+  let conversationSummary: string | undefined;
+  if (conversationHistory && conversationHistory.length > 0) {
+    const recentMessages = conversationHistory.slice(-6); // Last 6 messages max
+    conversationSummary = recentMessages
+      .map(m => `${m.role}: ${(m.content || '').substring(0, 200)}`)
+      .join('\n');
+  }
+
   // Use LLM to analyze task for contexts and dependencies
   console.log('[TaskDecomposer] Analyzing task with LLM...');
-  const analysis = await analyzeTaskWithLLM(userRequest, settings);
+  const analysis = await analyzeTaskWithLLM(userRequest, settings, conversationSummary);
 
   // If LLM recommends parallel execution
   if (analysis.shouldParallelize && analysis.contexts.length > 1) {

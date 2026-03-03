@@ -206,7 +206,18 @@ export class AgentRuntime implements IAgentClient {
     }
 
     if (!this.options.isSubAgent) {
-      const decomposition = await analyzeTaskForDecomposition(finalPrompt, this.options.settings);
+      const decomposition = await analyzeTaskForDecomposition(
+        finalPrompt,
+        this.options.settings,
+        undefined,
+        this.messages
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .map(m => ({
+            role: m.role,
+            content: typeof m.content === 'string' ? m.content : ''
+          }))
+      );
+
       if (decomposition.shouldFork && decomposition.type === "multi_context") {
         // ── Emit progress for parallel orchestration path ────────────────────
         const ctxCount = decomposition.contexts?.length || 1;
