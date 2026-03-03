@@ -63,6 +63,35 @@ export function filterThinkBlocks(content: string): ThinkBlockResult {
     // Clean up residual whitespace after stripping
     cleanedContent = cleanedContent.trim();
 
+    // 2b. Aggressive General Tag Stripper
+    // Some models (especially local/DeepSeek variants) leak internal tags like <debug_log> or <thought_process>.
+    // This removes any <tag>...</tag> or <tag/> that isn't a standard HTML formatting tag.
+    const ALLOWED_TAGS = ['b', 'i', 'code', 'pre', 'a', 'strong', 'em', 'p', 'br', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'span', 'div'];
+    
+    // Process block-level tags: <tag>...</tag>
+    const generalTagRegex = /<([a-zA-Z0-9_-]+)[^>]*>([\s\S]*?)<\/\1>/g;
+    let tagMatch;
+    while ((tagMatch = generalTagRegex.exec(cleanedContent)) !== null) {
+        const tagName = tagMatch[1].toLowerCase();
+        if (!ALLOWED_TAGS.includes(tagName)) {
+            // It's a leaked internal tag, strip it
+            cleanedContent = cleanedContent.replace(tagMatch[0], '');
+        }
+    }
+
+    // Process self-closing tags: <tag/>
+    const selfClosingRegex = /<([a-zA-Z0-9_-]+)[^>]*\/>/g;
+    let selfClosingMatch;
+    while ((selfClosingMatch = selfClosingRegex.exec(cleanedContent)) !== null) {
+        const tagName = selfClosingMatch[1].toLowerCase();
+        if (!ALLOWED_TAGS.includes(tagName)) {
+            cleanedContent = cleanedContent.replace(selfClosingMatch[0], '');
+        }
+    }
+
+    // Secondary cleanup after general tag stripping
+    cleanedContent = cleanedContent.trim();
+
     // 3. Check for incomplete/streaming blocks (only if we haven't found complete ones, or at end)
     const incompleteXml = cleanedContent.trim().match(/^<(think|thinking|thought|tools)\b[^>]*>/i);
     const incompleteMarkdown = cleanedContent.trim().startsWith('```think');
