@@ -178,35 +178,31 @@ export class AgentRuntime implements IAgentClient {
 
     let taskComplexity: "simple" | "moderate" | "complex" = "moderate";
 
-    try {
-      // ── Prompt Enrichment Layer ────────────────────────────────────────────
-      // Instead of blocking the user with a confirmation modal, we silently
-      // analyze the prompt, categorize it, and pick the best "assumed" action.
-      const isSimpleReply = /^(yes|no|ok|okay|sure|nope|continue|stop|proceed|go ahead|skip|next|back)$/i.test(userContent.trim());
-      const lastMessage = this.messages[this.messages.length - 1];
-      const lastContent = typeof lastMessage?.content === "string" ? lastMessage.content : "";
-      const isReplyToQuestion = lastMessage?.role === "assistant" && lastContent.includes("?");
+    if (this.options.requireConfirmation && this.options.onConfirmationNeeded) {
+      try {
+        const isSimpleReply = /^(yes|no|ok|okay|sure|nope|continue|stop|proceed|go ahead|skip|next|back)$/i.test(userContent.trim());
+        const lastMessage = this.messages[this.messages.length - 1];
+        const lastContent = typeof lastMessage?.content === "string" ? lastMessage.content : "";
+        const isReplyToQuestion = lastMessage?.role === "assistant" && lastContent.includes("?");
 
-      if (isSimpleReply && isReplyToQuestion) {
-        taskComplexity = "simple";
-      } else {
-        const analysis = await analyzeTask(userContent, this.options.settings, attachments);
-        if (analysis.category) this.taskCategory = analysis.category;
-        if (analysis.complexity) taskComplexity = analysis.complexity.level;
+        if (isSimpleReply && isReplyToQuestion) {
+          taskComplexity = "simple";
+        } else {
+          const analysis = await analyzeTask(userContent, this.options.settings, attachments);
+          if (analysis.category) this.taskCategory = analysis.category;
+          if (analysis.complexity) taskComplexity = analysis.complexity.level;
 
-        // Auto-select the "proceed with assumptions" option, or fallback to intent.
-        const defaultSuggestion = analysis.suggestions.find(s => s.type === 'defaults');
-        const fallbackSuggestion = analysis.suggestions[0];
-        
-        finalPrompt = defaultSuggestion?.enrichedPrompt || 
-                      fallbackSuggestion?.enrichedPrompt || 
-                      analysis.detectedIntent || 
-                      userContent;
-                      
-        console.log(`[AgentRuntime] Auto-enriched prompt: "${userContent}" -> "${finalPrompt}"`);
+          if (analysis.shouldConfirm) {
+            const enrichedPrompt = await this.options.onConfirmationNeeded(analysis);
+            if (enrichedPrompt === null) {
+              return { role: "assistant", content: "Task cancelled. Let me know when you want to try again!" };
+            }
+            finalPrompt = enrichedPrompt;
+          }
+        }
+      } catch (error) {
+        console.error("[AgentRuntime] Confirmation analysis failed:", error);
       }
-    } catch (error) {
-      console.error("[AgentRuntime] Enrichment analysis failed:", error);
     }
 
     const lastMsg = this.messages[this.messages.length - 1];
