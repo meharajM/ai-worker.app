@@ -58,8 +58,20 @@ const analysisCache = new Map<string, {
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 const MAX_CACHE_SIZE = 100;
 
-function getCachedAnalysis(userRequest: string) {
-  const cached = analysisCache.get(userRequest);
+function getCacheKey(request: string, context?: string): string {
+  if (!context) return request;
+  // Simple hash to keep key reasonable size
+  let hash = 0;
+  for (let i = 0; i < context.length; i++) {
+    hash = ((hash << 5) - hash) + context.charCodeAt(i);
+    hash |= 0;
+  }
+  return `${request}|${Math.abs(hash).toString(16)}`;
+}
+
+function getCachedAnalysis(userRequest: string, conversationSummary?: string) {
+  const key = getCacheKey(userRequest, conversationSummary);
+  const cached = analysisCache.get(key);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     console.log('[TaskDecomposer] Using cached analysis');
     return cached.result;
@@ -69,8 +81,10 @@ function getCachedAnalysis(userRequest: string) {
 
 function setCachedAnalysis(
   userRequest: string,
-  result: { shouldParallelize: boolean; contexts: string[]; reasoning: string }
+  result: { shouldParallelize: boolean; contexts: string[]; reasoning: string },
+  conversationSummary?: string
 ) {
+  const key = getCacheKey(userRequest, conversationSummary);
   // Simple LRU: if cache is full, remove oldest entry
   if (analysisCache.size >= MAX_CACHE_SIZE) {
     const firstKey = analysisCache.keys().next().value;
@@ -78,7 +92,7 @@ function setCachedAnalysis(
       analysisCache.delete(firstKey);
     }
   }
-  analysisCache.set(userRequest, { result, timestamp: Date.now() });
+  analysisCache.set(key, { result, timestamp: Date.now() });
 }
 
 
@@ -124,7 +138,7 @@ async function analyzeTaskWithLLM(
   reasoning: string;
 }> {
   // Check cache first to avoid redundant LLM calls
-  const cached = getCachedAnalysis(userRequest);
+  const cached = getCachedAnalysis(userRequest, conversationSummary);
   if (cached) {
     return cached;
   }
@@ -243,7 +257,7 @@ Return ONLY valid JSON, do not include any markdown formatting or conversational
     };
 
     // Cache the result for future use
-    setCachedAnalysis(userRequest, analysisResult);
+    setCachedAnalysis(userRequest, analysisResult, conversationSummary);
 
     return analysisResult;
   } catch (e) {
@@ -298,7 +312,9 @@ export async function analyzeTaskForDecomposition(
   // Build a brief summary of the last few messages for the LLM to detect follow-ups
   let conversationSummary: string | undefined;
   if (conversationHistory && conversationHistory.length > 0) {
-    const recentMessages = conversationHistory.slice(-6); // Last 6 messages max
+    const recentMessages = conversationHistory
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .slice(-6); // Last 6 user/assistant messages max
     conversationSummary = recentMessages
       .map(m => `${m.role}: ${(m.content || '').substring(0, 200)}`)
       .join('\n');
