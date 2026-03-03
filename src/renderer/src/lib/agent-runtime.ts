@@ -27,9 +27,8 @@
 import { chat } from "./llm";
 import { LLMMessage, LLMTool, ServerInfo, type LLMResponse } from "./types";
 import { pruneContext } from "./dcp";
-import { executeToolCall, getAllTools, getServers, parseTabIdFromResult } from "./mcp";
+import { getAllTools, getServers } from "./mcp";
 import { CLIENT_TOOLS } from "./client-tools";
-import { analyzeTask } from "./confirmation-message";
 import type { IAgentClient } from "./agent/IAgentClient";
 import {
   initializeSessionState,
@@ -178,9 +177,6 @@ export class AgentRuntime implements IAgentClient {
       }
     }
 
-    // @deprecated - The TaskConfirmationDialog has been removed so this block is dead code.
-    // Kept the variable declarations since they're used below.
-    let taskComplexity: "simple" | "moderate" | "complex" = "moderate" as any;
 
     const lastMsg = this.messages[this.messages.length - 1];
     const isConfirmingHandoff =
@@ -209,7 +205,7 @@ export class AgentRuntime implements IAgentClient {
       return continuationResult;
     }
 
-    if (!this.options.isSubAgent && taskComplexity !== "simple") {
+    if (!this.options.isSubAgent) {
       const decomposition = await analyzeTaskForDecomposition(finalPrompt, this.options.settings);
       if (decomposition.shouldFork && decomposition.type === "multi_context") {
         // ── Emit progress for parallel orchestration path ────────────────────
