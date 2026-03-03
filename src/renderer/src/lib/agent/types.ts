@@ -69,6 +69,7 @@ export interface AgentRuntimeOptions {
     signal?: AbortSignal;
 
     /**
+     * @deprecated The confirmation UI has been removed. This flag is ignored.
      * If true, the agent will analyze the user's task and ask for confirmation
      * before executing complex or potentially destructive actions.
      * Always false for sub-agents (they receive specific instructions, not open-ended tasks).
@@ -76,6 +77,7 @@ export interface AgentRuntimeOptions {
     requireConfirmation?: boolean;
 
     /**
+     * @deprecated The confirmation UI has been removed. This callback is ignored.
      * Called when the agent determines a task needs user confirmation.
      * @param analysis - The task analysis result (intent, complexity, risks).
      * @returns A promise that resolves to the enriched prompt (if confirmed) or null (if cancelled).

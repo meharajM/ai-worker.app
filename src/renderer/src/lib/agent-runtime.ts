@@ -178,34 +178,9 @@ export class AgentRuntime implements IAgentClient {
       }
     }
 
-    let taskComplexity: "simple" | "moderate" | "complex" = "moderate";
-
-    if (this.options.requireConfirmation && this.options.onConfirmationNeeded) {
-      try {
-        const isSimpleReply = /^(yes|no|ok|okay|sure|nope|continue|stop|proceed|go ahead|skip|next|back)$/i.test(userContent.trim());
-        const lastMessage = this.messages[this.messages.length - 1];
-        const lastContent = typeof lastMessage?.content === "string" ? lastMessage.content : "";
-        const isReplyToQuestion = lastMessage?.role === "assistant" && lastContent.includes("?");
-
-        if (isSimpleReply && isReplyToQuestion) {
-          taskComplexity = "simple";
-        } else {
-          const analysis = await analyzeTask(userContent, this.options.settings, attachments);
-          if (analysis.category) this.taskCategory = analysis.category;
-          if (analysis.complexity) taskComplexity = analysis.complexity.level;
-
-          if (analysis.shouldConfirm) {
-            const enrichedPrompt = await this.options.onConfirmationNeeded(analysis);
-            if (enrichedPrompt === null) {
-              return { role: "assistant", content: "Task cancelled. Let me know when you want to try again!" };
-            }
-            finalPrompt = enrichedPrompt;
-          }
-        }
-      } catch (error) {
-        console.error("[AgentRuntime] Confirmation analysis failed:", error);
-      }
-    }
+    // @deprecated - The TaskConfirmationDialog has been removed so this block is dead code.
+    // Kept the variable declarations since they're used below.
+    let taskComplexity: "simple" | "moderate" | "complex" = "moderate" as any;
 
     const lastMsg = this.messages[this.messages.length - 1];
     const isConfirmingHandoff =
@@ -274,6 +249,7 @@ export class AgentRuntime implements IAgentClient {
           this._makeSubAgentFactory()
         );
         this._emitProgress(100);
+        MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
         return seqResult;
       }
     }
@@ -564,10 +540,14 @@ export class AgentRuntime implements IAgentClient {
     this._lastProgressPct = clamped;
     let eta = etaSeconds;
     if (eta === undefined && clamped > 0 && clamped < 100) {
-      const elapsedMs = Date.now() - this.taskStartTimeMs;
+      const elapsedMs = Math.max(1, Date.now() - this.taskStartTimeMs);
       const rate = clamped / elapsedMs;
-      const remainingMs = Math.max(0, (100 - clamped) / rate);
-      eta = Math.round(remainingMs / 1000);
+      if (rate > 0 && Number.isFinite(rate)) {
+        const remainingMs = Math.max(0, (100 - clamped) / rate);
+        eta = Math.round(remainingMs / 1000);
+      } else {
+        eta = 0;
+      }
     }
     // Sending undefined for progress clears the bar (matches useAgent.ts finally-block behaviour)
     this.options.onProgressUpdate(clamped === 100 ? undefined : clamped, clamped === 100 ? undefined : eta, this.executionPlan ?? undefined);
