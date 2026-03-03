@@ -33,7 +33,7 @@ const ICON_MAP: Record<string, React.ReactNode> = {
 
 export function WorkflowTiles() {
     const handleTileClick = (prompt: string) => {
-        const event = new CustomEvent('populate-chat-input', { detail: { prompt } })
+        const event = new CustomEvent('populate-chat-input', { detail: { prompt, autoSubmit: true } })
         window.dispatchEvent(event)
     }
 

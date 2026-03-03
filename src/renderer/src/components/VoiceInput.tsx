@@ -195,8 +195,19 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
     // Listen for external population events
     useEffect(() => {
         const handlePopulate = (e: CustomEvent) => {
-            const { prompt } = e.detail
+            const { prompt, autoSubmit } = e.detail
             if (prompt) {
+                if (autoSubmit && !disabled) {
+                    // Send immediately without waiting for user input
+                    onSubmit(prompt, attachments, isHeadless)
+                    setTextInput('')
+                    setText('') 
+                    setAttachments([])
+                    resetTranscript()
+                    return
+                }
+
+                // Just populate
                 setTextInput(prompt)
                 setText(prompt) // Sync with speech hook
 
@@ -215,7 +226,7 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
 
         window.addEventListener('populate-chat-input', handlePopulate as EventListener)
         return () => window.removeEventListener('populate-chat-input', handlePopulate as EventListener)
-    }, [setText])
+    }, [setText, onSubmit, attachments, isHeadless, disabled, resetTranscript])
 
     return (
         <div className="bg-[#1a1d23]/80 backdrop-blur-md border border-white/10 rounded-2xl p-4 transition-all duration-300 relative">
