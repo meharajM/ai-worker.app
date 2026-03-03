@@ -90,6 +90,8 @@ export class AgentRuntime implements IAgentClient {
   private taskStartTimeMs: number;
   private lastCheckpoint: AgentCheckpoint | null = null;
   private specialHandlers: SpecialToolHandlers;
+  /** Tracks last emitted progress % for incremental orchestration ticks */
+  private _lastProgressPct = 0;
 
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
     this.options = options;
@@ -217,7 +219,9 @@ export class AgentRuntime implements IAgentClient {
         this.messages.find((m) => m.role === "user")?.content?.toString() || "Complete the task";
       const stepsTaken = Math.floor(this.messages.length / 2);
       const progressContext = this.lastCheckpoint ? `Last Checkpoint: ${this.lastCheckpoint.summary}` : "No detailed progress recorded yet.";
-      return continueWithSubAgent(
+      // ── Emit progress for continuation handoff path ──────────────────────
+      this._emitProgress(5);
+      const continuationResult = await continueWithSubAgent(
         originalGoal,
         stepsTaken,
         progressContext,
@@ -226,32 +230,51 @@ export class AgentRuntime implements IAgentClient {
         (msg) => this.addMessage(msg),
         this._makeSubAgentFactory()
       );
+      this._emitProgress(100);
+      return continuationResult;
     }
 
     if (!this.options.isSubAgent && taskComplexity !== "simple") {
       const decomposition = await analyzeTaskForDecomposition(finalPrompt, this.options.settings);
       if (decomposition.shouldFork && decomposition.type === "multi_context") {
+        // ── Emit progress for parallel orchestration path ────────────────────
+        const ctxCount = decomposition.contexts?.length || 1;
+        this._emitProgress(5);
         const result = await executeParallelSubAgents(
           finalPrompt,
           decomposition,
           this.options,
           this.agentInstanceId,
-          (msg) => this.addMessage(msg),
+          (msg) => {
+            // Tick progress forward as each sub-agent message arrives
+            this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (ctxCount * 3))));
+            return this.addMessage(msg);
+          },
           this._makeSubAgentFactory()
         );
+        this._emitProgress(100);
         MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
         return result;
       }
 
       if (decomposition.shouldFork && decomposition.type === "single_context") {
-        return executeSequentialSubAgents(
+        // ── Emit progress for sequential orchestration path ──────────────────
+        const stepCount = decomposition.contexts?.length || 3;
+        this._emitProgress(5);
+        const seqResult = await executeSequentialSubAgents(
           finalPrompt,
           decomposition,
           this.options,
           this.agentInstanceId,
-          (msg) => this.addMessage(msg),
+          (msg) => {
+            // Advance progress by one step slice as each step message arrives
+            this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (stepCount * 2))));
+            return this.addMessage(msg);
+          },
           this._makeSubAgentFactory()
         );
+        this._emitProgress(100);
+        return seqResult;
       }
     }
 
@@ -279,7 +302,11 @@ export class AgentRuntime implements IAgentClient {
     let iterationCount = 0;
     let consecutiveErrors = 0;
     const recentToolCalls: string[] = [];
+    // Tracks the single live UI bubble created for ALL tool-calling iterations.
+    // Only one bubble is ever created per agent run; all tool calls accumulate into it.
     let activeAssistantMessageId: string | undefined;
+    // Master list of all tool calls across every iteration — merged into the one bubble.
+    const accumulatedToolCalls: any[] = [];
 
     while (iterationCount < this.maxIterations) {
       this.totalIterations++;
@@ -316,7 +343,20 @@ export class AgentRuntime implements IAgentClient {
 
         const assistantMsg: LLMMessage = { role: "assistant", content: response.content };
         this._appendCheckpointReport(assistantMsg);
-        this.addMessage(assistantMsg);
+
+        if (activeAssistantMessageId && this.options.onMessageUpdate) {
+          // ── Final response: update the live bubble in-place (no new bubble created) ──
+          // Push to internal history without firing onMessage (which would add a new bubble).
+          this.messages.push(assistantMsg);
+          const finalUpdates: any = { content: assistantMsg.content };
+          if (accumulatedToolCalls.length > 0) {
+            finalUpdates.toolCalls = accumulatedToolCalls;
+          }
+          this.options.onMessageUpdate(activeAssistantMessageId, finalUpdates);
+        } else {
+          // No live bubble yet (agent answered immediately without tools) — create one normally.
+          this.addMessage(assistantMsg);
+        }
 
         await cleanupState(this.agentInstanceId);
         return assistantMsg;
@@ -331,19 +371,41 @@ export class AgentRuntime implements IAgentClient {
           function: { name: tc.name, arguments: tc.arguments },
         })) as any,
       };
-      const messageIdResult = this.addMessage(assistantMsg);
-      if (typeof messageIdResult === "string") {
-        activeAssistantMessageId = messageIdResult;
+
+      // Build tool call entries for this iteration (no result yet — pending)
+      const iterationToolCalls = response.toolCalls.map(tc => ({
+        id: tc.id,
+        name: tc.name,
+        arguments: tc.arguments
+      }));
+
+      if (!activeAssistantMessageId) {
+        // ── First tool-calling iteration: create the single live UI bubble ──
+        // assistantMsg carries this iteration's tool_calls so the LLM history is correct.
+        // We also attach the store-format toolCalls so onMessage can persist them.
+        (assistantMsg as any).toolCalls = iterationToolCalls;
+        const messageIdResult = this.addMessage(assistantMsg);
+        if (typeof messageIdResult === "string") {
+          activeAssistantMessageId = messageIdResult;
+        }
+        // Seed the accumulator with this iteration's calls
+        accumulatedToolCalls.push(...iterationToolCalls);
+      } else {
+        // ── Subsequent iterations: do NOT create a new bubble ──
+        // Push to internal LLM history silently (no onMessage callback).
+        this.messages.push(assistantMsg);
+        // Merge new tool calls into the accumulator
+        accumulatedToolCalls.push(...iterationToolCalls);
+        // Immediately update the live bubble to show the new pending tool calls
+        if (this.options.onMessageUpdate) {
+          this.options.onMessageUpdate(activeAssistantMessageId, {
+            toolCalls: [...accumulatedToolCalls]
+          } as any);
+        }
       }
 
-      // Sync tool calls to assistantMsg local tracking
-      if (!(assistantMsg as any).toolCalls) {
-        (assistantMsg as any).toolCalls = response.toolCalls.map(tc => ({
-          id: tc.id,
-          name: tc.name,
-          arguments: tc.arguments
-        }));
-      }
+      // Keep local assistantMsg.toolCalls in sync for the tool execution block below
+      (assistantMsg as any).toolCalls = iterationToolCalls;
 
       const toolPromises = response.toolCalls.map(async (call) => {
         if (this.options.signal?.aborted) return null;
@@ -409,13 +471,19 @@ export class AgentRuntime implements IAgentClient {
 
         // ── Update UI with tool result ─────────────────────────────────────
         if (activeAssistantMessageId && this.options.onMessageUpdate) {
+          // Update the result on the matching tool call in the master accumulator
+          const tcIndex = accumulatedToolCalls.findIndex((t: any) => t.id === call.id);
+          if (tcIndex !== -1) {
+            accumulatedToolCalls[tcIndex] = { ...accumulatedToolCalls[tcIndex], result: truncated };
+          }
+          // Also update the local assistantMsg for finding reporting below
           const currentToolCalls = (assistantMsg as any).toolCalls || [];
-          const storeToolCalls = currentToolCalls.map((t: any) =>
+          const updatedLocal = currentToolCalls.map((t: any) =>
             t.id === call.id ? { ...t, result: truncated } : t
           );
-          (assistantMsg as any).toolCalls = storeToolCalls;
+          (assistantMsg as any).toolCalls = updatedLocal;
           this.options.onMessageUpdate(activeAssistantMessageId, {
-            toolCalls: storeToolCalls
+            toolCalls: [...accumulatedToolCalls]
           } as any);
         }
 
@@ -454,13 +522,19 @@ export class AgentRuntime implements IAgentClient {
         if (!this.options.isSubAgent) {
           const findingSummary = reportFinding(call.name, resultStr);
           if (findingSummary && activeAssistantMessageId && this.options.onMessageUpdate) {
+            // Mark the tool call as presentable in the master accumulator
+            const tcIdx = accumulatedToolCalls.findIndex((t: any) => t.id === call.id);
+            if (tcIdx !== -1) {
+              accumulatedToolCalls[tcIdx] = { ...accumulatedToolCalls[tcIdx], isPresentable: true, finding: findingSummary.summary };
+            }
+            // Also keep local assistantMsg in sync for any downstream use
             const currentToolCalls = (assistantMsg as any).toolCalls || [];
-            const storeToolCalls = currentToolCalls.map((t: any) =>
+            const updatedLocal = currentToolCalls.map((t: any) =>
               t.id === call.id ? { ...t, isPresentable: true, finding: findingSummary.summary } : t
             );
-            (assistantMsg as any).toolCalls = storeToolCalls;
+            (assistantMsg as any).toolCalls = updatedLocal;
             this.options.onMessageUpdate(activeAssistantMessageId, {
-              toolCalls: storeToolCalls
+              toolCalls: [...accumulatedToolCalls]
             } as any);
           }
         }
@@ -476,6 +550,27 @@ export class AgentRuntime implements IAgentClient {
     }
 
     return this._handleMaxIterations(finalPrompt);
+  }
+
+  /**
+   * Emits a progress update to the UI via onProgressUpdate.
+   * Stores `lastPct` on itself so orchestration path callbacks can increment ticks.
+   * Passing 100 clears the progress bar (sends undefined — the store's reset signal).
+   * No-op for sub-agents or when onProgressUpdate is not wired.
+   */
+  private _emitProgress(pct: number, etaSeconds?: number): void {
+    if (this.options.isSubAgent || !this.options.onProgressUpdate) return;
+    const clamped = Math.max(0, Math.min(100, pct));
+    this._lastProgressPct = clamped;
+    let eta = etaSeconds;
+    if (eta === undefined && clamped > 0 && clamped < 100) {
+      const elapsedMs = Date.now() - this.taskStartTimeMs;
+      const rate = clamped / elapsedMs;
+      const remainingMs = Math.max(0, (100 - clamped) / rate);
+      eta = Math.round(remainingMs / 1000);
+    }
+    // Sending undefined for progress clears the bar (matches useAgent.ts finally-block behaviour)
+    this.options.onProgressUpdate(clamped === 100 ? undefined : clamped, clamped === 100 ? undefined : eta, this.executionPlan ?? undefined);
   }
 
   // ── Private: Helpers ───────────────────────────────────────────────────────
@@ -611,6 +706,7 @@ export class AgentRuntime implements IAgentClient {
         // managed by the parent agent only. Stripping it here is an explicit
         // boundary, not just relying on the `!isSubAgent` guard in _runLoop.
         onProgressUpdate: undefined,
+        onMessageUpdate: undefined,
       };
       return new AgentRuntime(subAgentOptions);
     };

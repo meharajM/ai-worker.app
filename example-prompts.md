@@ -714,3 +714,144 @@ The agent's browser tools feature built-in protective layers to prevent hallucin
 - ✅ The form submission **succeeds**.
 - 🔄 The guard abandons the bad `submit_selector` and seamlessly falls back to the `submit_text` to complete the form.
 
+---
+
+## 21. Single Bubble, Progress Bar & Sub-Agent Isolation (Recent Fixes)
+
+> These prompts target the three changes made in the latest patch:
+> 1. **Single live bubble** — all tool calls across iterations accumulate into one "Agent Actions" card instead of spawning a new card per LLM call.
+> 2. **Progress bar + ETA for ALL execution types** — previously only appeared during direct `_runLoop` tool calls; now also fires for Parallel, Sequential, and Continuation Handoff paths.
+> 3. **Sub-agent `onMessageUpdate` isolation** — sub-agents can no longer accidentally update the parent's live bubble.
+
+---
+
+### 21A. Single Bubble — Direct Tool-Calling Agent
+**What to verify:** Only **one** "Agent Actions" card should appear for the entire task, updating in-place as each tool completes.
+
+**Prompt:**
+> "Go to bbc.com, find the top headline, then go to reuters.com and find their top headline, then compare the two."
+
+**What to watch in the UI:**
+- [ ] Exactly **one** `Agent Actions` card appears — it should NOT create a new card for each website visit
+- [ ] Tool calls accumulate inside that single card (BBC navigate → BBC read → Reuters navigate → Reuters read)
+- [ ] Each tool shows a spinner while running, then its result when done
+- [ ] The final text summary appears inside the **same** card, not as a separate bubble
+
+**What you should NOT see:**
+- ❌ Three separate "1 Agent Action", "2 Agent Actions", "3 Agent Actions" cards
+- ❌ A blank assistant bubble followed by a separate tool card
+
+**Console logs to check:**
+```
+[AgentRuntime] Iteration 1: Calling LLM...   ← first bubble created
+[AgentRuntime] Executing tool: browser_navigate
+[AgentRuntime] Executing tool: browser_get_text
+[AgentRuntime] Iteration 2: Calling LLM...   ← NO new bubble, updates existing
+[AgentRuntime] Executing tool: browser_navigate
+[AgentRuntime] Executing tool: browser_get_text
+[AgentRuntime] Iteration 3: Calling LLM...   ← final response, still same bubble
+```
+
+---
+
+### 21B. Progress Bar — Direct Agent (Multi-Step)
+**What to verify:** Progress bar and ETA appear while the agent is working.
+
+**Prompt:**
+> "Search Google for 'best mechanical keyboards 2024', open the first result, and give me the top 3 recommendations with prices."
+
+**What to watch in the UI:**
+- [ ] Progress bar appears at the **bottom of the chat** within 1-2 seconds of sending
+- [ ] ETA label shows `< 1m remaining` or similar
+- [ ] Bar advances as each tool completes
+- [ ] Bar **disappears** completely when the final answer is shown (it should not linger at 95%)
+
+---
+
+### 21C. Progress Bar — Parallel Orchestration
+**What to verify:** Progress bar appears and ticks forward during multi-site parallel execution.
+
+**Prompt:**
+> "Compare the price of AirPods Pro on Amazon, BestBuy, and Target."
+
+**What to watch in the UI:**
+- [ ] Progress bar appears at **5%** immediately when orchestration starts (before sub-agents finish)
+- [ ] Bar ticks forward as each sub-agent sends status messages
+- [ ] Bar reaches ~90% before the final aggregated result appears
+- [ ] Bar disappears once the comparison card is complete
+
+---
+
+### 21D. Progress Bar — Sequential Orchestration
+**What to verify:** Progress bar appears and advances step-by-step during sequential execution.
+
+**Prompt:**
+> "Help me book a bus from Bangalore to Mysore for tomorrow on RedBus — search for routes, pick the first available, and show me the available seats."
+
+**What to watch in the UI:**
+- [ ] Progress bar appears at **5%** when orchestration begins
+- [ ] Bar steps forward as each sequential step completes (`Step 1 completed ✓`, etc.)
+- [ ] ETA updates reflect remaining steps
+- [ ] Bar disappears after final summary
+
+---
+
+### 21E. Progress Bar — Continuation Handoff
+**What to verify:** Progress bar appears when the user confirms "Continue Task" after max iterations.
+
+**Prompt (force a long task):**
+> "Deeply analyze 10 different tech blogs (TechCrunch, Wired, The Verge, Ars Technica, Engadget, Gizmodo, AnandTech, Tom's Hardware, Hacker News, ZDNet). For each: navigate to the homepage, find the main headline, and extract the publication date. Compile a ranked list by recency."
+
+**What to watch in the UI:**
+- [ ] Agent hits max iterations → shows "Continue Task / Stop Here" buttons
+- [ ] Click **Continue Task**
+- [ ] Progress bar appears at **5%** immediately when continuation sub-agent starts
+- [ ] Bar disappears when the continuation sub-agent returns its result
+
+---
+
+### 21F. Sub-Agent Isolation — Parent Bubble Not Corrupted
+**What to verify:** When the main agent runs parallel sub-agents, the parent's live progress card is not accidentally overwritten with sub-agent tool calls.
+
+**Prompt:**
+> "Compare the job listings for 'React developer' on LinkedIn and Indeed."
+
+**What to watch in the UI:**
+- [ ] A **"⚡ Parallel Execution"** status card appears showing both sites with live status text
+- [ ] The status card updates correctly (`LinkedIn: Navigating... / Indeed: Searching...`)
+- [ ] The status card shows `Completed` for each site when done
+- [ ] **No sub-agent tool call cards** appear in the main chat (sub-agent work is invisible)
+- [ ] Each site's result appears as its own `✅ Analysis Complete` bubble
+
+**What you should NOT see:**
+- ❌ Sub-agent's individual tool calls appearing as separate cards in the main chat
+- ❌ The "⚡ Parallel Execution" card being overwritten with raw tool call data
+
+---
+
+### 21G. Immediate Reply — No Bubble, No Progress Bar
+**What to verify:** For instant answers with no tool usage, the progress bar should NOT appear and no empty tool card should be created.
+
+**Prompt:**
+> "What is the difference between TCP and UDP?"
+
+**What to watch in the UI:**
+- [ ] The answer appears immediately as a normal text bubble
+- [ ] **No** "Agent Actions" card appears
+- [ ] **No** progress bar appears (there are no tools to track)
+- [ ] Response feels instant
+
+---
+
+### Quick UI Checklist for Section 21
+
+| Scenario | Single Bubble? | Progress Bar? | ETA? | Bar Clears? |
+|---|---|---|---|---|
+| 21A: Direct multi-step (tool calls) | ✅ | ✅ | ✅ | ✅ |
+| 21B: Direct multi-step (progress) | ✅ | ✅ | ✅ | ✅ |
+| 21C: Parallel sub-agents | N/A (status card) | ✅ | ✅ | ✅ |
+| 21D: Sequential sub-agents | N/A (step cards) | ✅ | ✅ | ✅ |
+| 21E: Continuation handoff | ✅ | ✅ | ✅ | ✅ |
+| 21F: Sub-agent isolation | N/A | ✅ | ✅ | ✅ |
+| 21G: Instant reply (no tools) | N/A | ❌ (correct) | ❌ (correct) | N/A |
+

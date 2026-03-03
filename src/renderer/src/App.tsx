@@ -22,7 +22,6 @@ import { ChatView } from "./components/ChatView";
 import { ChatSidebar } from "./components/ChatSidebar";
 import { ConnectionsPanel } from "./components/ConnectionsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
-import { TaskConfirmationDialog } from "./components/TaskConfirmationDialog";
 import { FileChangeReview } from "./components/FileChangeReview";
 import { CommandPalette } from "./components/CommandPalette";
 import { Sidebar, View } from "./components/Sidebar";
@@ -74,7 +73,7 @@ function App() {
   // All agent execution logic lives in useAgent. All LLM status polling lives
   // in useLLMStatus. App.tsx just wires their outputs to the UI.
 
-  const { handleSubmit, pendingConfirmation, clearConfirmation } = useAgent();
+  const { handleSubmit } = useAgent();
   const { llmStatus } = useLLMStatus(currentView);
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -97,49 +96,14 @@ function App() {
                 <div className="p-4 flex-shrink-0 border-t border-white/5">
                   <VoiceInput
                     onSubmit={handleSubmit}
-                    // Disable input while the agent is processing in the active session,
-                    // or while waiting for user confirmation on a task.
-                    disabled={
-                      (isProcessing && processingSessionId === activeSessionId) ||
-                      !!pendingConfirmation
-                    }
+                    // Disable input while the agent is processing in the active session
+                    disabled={isProcessing && processingSessionId === activeSessionId}
                     onAbort={abortProcessing}
                   />
                 </div>
               </div>
             </div>
           )}
-
-          {/* Task Confirmation Dialog ─────────────────────────────────────────
-              Shown when AgentRuntime pauses and asks the user to confirm or
-              cancel a task before executing it. The `resolve` callback is
-              provided by the agent — calling it unblocks the agent's async flow. */}
-          <TaskConfirmationDialog
-            open={!!pendingConfirmation}
-            analysis={pendingConfirmation?.analysis || null}
-            onConfirm={(enrichedPrompt) => {
-              if (pendingConfirmation) {
-                pendingConfirmation.resolve(enrichedPrompt);
-                clearConfirmation();
-              }
-            }}
-            onCancel={() => {
-              if (pendingConfirmation) {
-                pendingConfirmation.resolve(null); // null = user cancelled
-                clearConfirmation();
-                useChatStore.getState().setProcessing(false);
-              }
-            }}
-            onBypass={() => {
-              if (pendingConfirmation) {
-                // Bypass: skip the enriched prompt, use the raw detected intent
-                pendingConfirmation.resolve(
-                  pendingConfirmation.analysis.detectedIntent
-                );
-                clearConfirmation();
-              }
-            }}
-          />
 
           {currentView === "connections" && <ConnectionsPanel />}
           {currentView === "settings" && <SettingsPanel />}
