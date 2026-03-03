@@ -44,44 +44,20 @@ export interface UseAgentReturn {
      * @param attachments - Optional file attachments (Electron exposes `.path`).
      */
     handleSubmit: (content: string, attachments?: File[], isHeadless?: boolean) => Promise<void>;
-
-    /**
-     * Non-null when AgentRuntime has paused and is waiting for the user to
-     * confirm or cancel a task before proceeding.
-     * Pass this to `<TaskConfirmationDialog>`.
-     */
-    pendingConfirmation: {
-        analysis: TaskAnalysis;
-        resolve: (enrichedPrompt: string | null) => void;
-    } | null;
-
-    /**
-     * Clears the pending confirmation state. Call this after the dialog
-     * resolves (confirm, cancel, or bypass).
-     */
-    clearConfirmation: () => void;
 }
 
 /**
  * Encapsulates all agent execution logic, extracted from App.tsx.
  *
- * @returns `{ handleSubmit, pendingConfirmation, clearConfirmation }`
+ * @returns `{ handleSubmit }`
  *
  * @example
  * // In App.tsx:
- * const { handleSubmit, pendingConfirmation, clearConfirmation } = useAgent();
+ * const { handleSubmit } = useAgent();
  * // Pass handleSubmit to <VoiceInput onSubmit={handleSubmit} />
- * // Pass pendingConfirmation to <TaskConfirmationDialog open={!!pendingConfirmation} />
  */
 export function useAgent(): UseAgentReturn {
     const settings = useSettingsStore();
-
-    // `pendingConfirmation` is set by AgentRuntime when it needs user approval
-    // before executing a potentially destructive or complex task.
-    const [pendingConfirmation, setPendingConfirmation] = useState<{
-        analysis: TaskAnalysis;
-        resolve: (enrichedPrompt: string | null) => void;
-    } | null>(null);
 
     /**
      * Main entry point: processes user input, runs the agent, handles errors.
@@ -210,14 +186,10 @@ export function useAgent(): UseAgentReturn {
                         // Get the abort signal from the store. The store creates a new
                         // AbortController when setProcessing(true) is called.
                         signal: useChatStore.getState().getAbortSignal() || undefined,
-                        requireConfirmation: true,
-
-                        // Called by AgentRuntime when it needs user approval before
-                        // executing a task. We surface a dialog and wait for the user's choice.
+                        // We keep the callback for API compatibility but it will
+                        // rarely/never fire if requireConfirmation is false
                         onConfirmationNeeded: async (analysis) => {
-                            return new Promise((resolve) => {
-                                setPendingConfirmation({ analysis, resolve });
-                            });
+                            return new Promise((resolve) => resolve(null));
                         },
 
                         // Called by AgentRuntime for every new message (user, assistant, tool).
@@ -379,13 +351,5 @@ export function useAgent(): UseAgentReturn {
             window.removeEventListener("agent-action", handleAgentAction as EventListener);
     }, [handleSubmit]);
 
-    /**
-     * Clears the pending confirmation state after the dialog has been resolved.
-     * Call this in the dialog's onConfirm, onCancel, and onBypass handlers.
-     */
-    const clearConfirmation = useCallback(() => {
-        setPendingConfirmation(null);
-    }, []);
-
-    return { handleSubmit, pendingConfirmation, clearConfirmation };
+    return { handleSubmit };
 }
