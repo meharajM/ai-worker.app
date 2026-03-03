@@ -136,11 +136,34 @@ const CodeBlock = ({ inline, className, children, ...props }: any) => {
 };
 
 /**
+ * Balances unclosed markdown code blocks (```)
+ * Useful for when LLM responses stream or get truncated by token limits.
+ */
+function sanitizeMarkdown(text: string): string {
+    if (!text) return text;
+    
+    // Count occurrences of ``` (fences)
+    const fences = text.match(/```/g);
+    if (!fences) return text;
+
+    // If there's an odd number of fences, the last code block is unclosed
+    if (fences.length % 2 !== 0) {
+        // Did it truncate mid-word or right after a newline?
+        // Add a newline and a closing fence to gracefully terminate the block
+        return text + '\n```';
+    }
+
+    return text;
+}
+
+/**
  * Renders Markdown using react-markdown with GitHub Flavored Markdown support.
  * Styled to match the "Gemini 3" aesthetic.
  */
 export function FormattedText({ content, className = '' }: FormattedTextProps) {
   if (!content) return null;
+
+  const safeContent = sanitizeMarkdown(content);
 
   return (
     <div className={`prose prose-invert max-w-none text-sm leading-relaxed ${className} select-text`}>
@@ -195,7 +218,7 @@ export function FormattedText({ content, className = '' }: FormattedTextProps) {
           hr: () => <hr className="border-white/10 my-4" />
         }}
       >
-        {content}
+        {safeContent}
       </ReactMarkdown>
     </div>
   );
