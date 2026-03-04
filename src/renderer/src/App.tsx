@@ -4,7 +4,6 @@
  * Architecture: This component is ONLY responsible for:
  *   1. Rendering the top-level layout (Sidebar, Header, main content area)
  *   2. Routing between views (chat, connections, settings)
- *   3. Rendering the TaskConfirmationDialog when the agent needs user approval
  *
  * What this file does NOT do (extracted to hooks):
  *   - Agent execution logic → useAgent.ts

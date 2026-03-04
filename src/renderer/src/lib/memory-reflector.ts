@@ -62,7 +62,6 @@ export class MemoryReflector {
             const reflectorAgent: IAgentClient = new AgentRuntime({
                 settings,
                 isSubAgent: true,
-                requireConfirmation: false,
                 // We don't listen to messages, just results
                 onMessage: (msg: LLMMessage) => {
                     // console.log('[MemoryReflector] Internal thought:', msg.content);

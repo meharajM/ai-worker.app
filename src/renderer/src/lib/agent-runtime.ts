@@ -59,6 +59,19 @@ export type { AgentRuntimeOptions, AgentStatusCallback } from "./agent/types";
 import type { AgentRuntimeOptions, AgentCheckpoint, ExecutionPlan } from "./agent/types";
 
 /**
+ * A single tool call entry in the master accumulator for the live UI bubble.
+ * Typed explicitly to satisfy the no-any policy (typescript-standards.md).
+ */
+interface AccumulatedToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  result?: string;
+  isPresentable?: boolean;
+  finding?: string;
+}
+
+/**
  * AgentRuntime — Local implementation of IAgentClient.
  *
  * Owns:
@@ -206,17 +219,28 @@ export class AgentRuntime implements IAgentClient {
     }
 
     if (!this.options.isSubAgent) {
-      const decomposition = await analyzeTaskForDecomposition(
-        finalPrompt,
-        this.options.settings,
-        undefined,
-        this.messages
-          .filter(m => m.role === 'user' || m.role === 'assistant')
-          .map(m => ({
-            role: m.role,
-            content: typeof m.content === 'string' ? m.content : ''
-          }))
-      );
+      // ── Trivially-short prompt guard ────────────────────────────────────────
+      // Skip the decomposition LLM call entirely for very short inputs.
+      // "yes", "ok", "continue", "no" etc. should never spawn sub-agents — they
+      // are conversational replies that belong in _runLoop directly.
+      // The task-decomposer already has a follow-up guard (< 80 chars) for
+      // prompts with conversation history, but this fires even with empty history.
+      const TRIVIAL_PROMPT_LENGTH = 20;
+      const isTrivialPrompt = finalPrompt.trim().length <= TRIVIAL_PROMPT_LENGTH;
+
+      const decomposition = isTrivialPrompt
+        ? { shouldFork: false, type: 'single_context' as const, contexts: ['current_page'], estimatedActions: 1 }
+        : await analyzeTaskForDecomposition(
+          finalPrompt,
+          this.options.settings,
+          undefined,
+          this.messages
+            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .map(m => ({
+              role: m.role,
+              content: typeof m.content === 'string' ? m.content : ''
+            }))
+        );
 
       if (decomposition.shouldFork && decomposition.type === "multi_context") {
         // ── Emit progress for parallel orchestration path ────────────────────
@@ -289,7 +313,7 @@ export class AgentRuntime implements IAgentClient {
     // Only one bubble is ever created per agent run; all tool calls accumulate into it.
     let activeAssistantMessageId: string | undefined;
     // Master list of all tool calls across every iteration — merged into the one bubble.
-    const accumulatedToolCalls: any[] = [];
+    const accumulatedToolCalls: AccumulatedToolCall[] = [];
 
     while (iterationCount < this.maxIterations) {
       this.totalIterations++;
@@ -356,7 +380,7 @@ export class AgentRuntime implements IAgentClient {
       };
 
       // Build tool call entries for this iteration (no result yet — pending)
-      const iterationToolCalls = response.toolCalls.map(tc => ({
+      const iterationToolCalls: AccumulatedToolCall[] = response.toolCalls.map(tc => ({
         id: tc.id,
         name: tc.name,
         arguments: tc.arguments
@@ -455,13 +479,13 @@ export class AgentRuntime implements IAgentClient {
         // ── Update UI with tool result ─────────────────────────────────────
         if (activeAssistantMessageId && this.options.onMessageUpdate) {
           // Update the result on the matching tool call in the master accumulator
-          const tcIndex = accumulatedToolCalls.findIndex((t: any) => t.id === call.id);
+          const tcIndex = accumulatedToolCalls.findIndex(t => t.id === call.id);
           if (tcIndex !== -1) {
             accumulatedToolCalls[tcIndex] = { ...accumulatedToolCalls[tcIndex], result: truncated };
           }
           // Also update the local assistantMsg for finding reporting below
-          const currentToolCalls = (assistantMsg as any).toolCalls || [];
-          const updatedLocal = currentToolCalls.map((t: any) =>
+          const currentToolCalls = (assistantMsg as any).toolCalls as AccumulatedToolCall[] || [];
+          const updatedLocal = currentToolCalls.map(t =>
             t.id === call.id ? { ...t, result: truncated } : t
           );
           (assistantMsg as any).toolCalls = updatedLocal;
@@ -506,13 +530,13 @@ export class AgentRuntime implements IAgentClient {
           const findingSummary = reportFinding(call.name, resultStr);
           if (findingSummary && activeAssistantMessageId && this.options.onMessageUpdate) {
             // Mark the tool call as presentable in the master accumulator
-            const tcIdx = accumulatedToolCalls.findIndex((t: any) => t.id === call.id);
+            const tcIdx = accumulatedToolCalls.findIndex(t => t.id === call.id);
             if (tcIdx !== -1) {
               accumulatedToolCalls[tcIdx] = { ...accumulatedToolCalls[tcIdx], isPresentable: true, finding: findingSummary.summary };
             }
             // Also keep local assistantMsg in sync for any downstream use
-            const currentToolCalls = (assistantMsg as any).toolCalls || [];
-            const updatedLocal = currentToolCalls.map((t: any) =>
+            const currentToolCalls = (assistantMsg as any).toolCalls as AccumulatedToolCall[] || [];
+            const updatedLocal = currentToolCalls.map(t =>
               t.id === call.id ? { ...t, isPresentable: true, finding: findingSummary.summary } : t
             );
             (assistantMsg as any).toolCalls = updatedLocal;

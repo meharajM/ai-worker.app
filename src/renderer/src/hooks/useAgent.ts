@@ -28,7 +28,6 @@ import { useState, useCallback, useEffect } from "react";
 import { useChatStore } from "../stores/chatStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { type LLMMessage } from "../lib/llm";
-import { type TaskAnalysis } from "../lib/confirmation-message";
 
 /**
  * State returned by `useAgent`.
@@ -186,11 +185,6 @@ export function useAgent(): UseAgentReturn {
                         // Get the abort signal from the store. The store creates a new
                         // AbortController when setProcessing(true) is called.
                         signal: useChatStore.getState().getAbortSignal() || undefined,
-                        // We keep the callback for API compatibility but it will
-                        // rarely/never fire if requireConfirmation is false
-                        onConfirmationNeeded: async (analysis) => {
-                            return new Promise((resolve) => resolve(null));
-                        },
 
                         // Called by AgentRuntime for every new message (user, assistant, tool).
                         // We write each message to the session so it appears in the chat UI

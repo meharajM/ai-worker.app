@@ -207,7 +207,6 @@ export class SpecialToolHandlers {
             isSubAgent: true,
             tabId: subAgentTabId,
             taskCategory: this.taskCategory,
-            requireConfirmation: false,
             onMessage: (msg: LLMMessage) => {
                 const contentStr = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
                 console.log(`[SubAgent Tab:${subAgentTabId ?? "default"}] ${msg.role}: ${contentStr?.substring(0, 50)}`);
