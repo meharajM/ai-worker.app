@@ -741,7 +741,7 @@ Tools are classified into three categories by the `laneManager`:
 
 #### 2. Isolation Strategy
 - **Sub-Agent Tabs**: Each sub-agent is provisioned with a **dedicated browser tab** (`tabId`). This ensures that one sub-agent's navigation does not interrupt another's workflow.
-- **Auto-Cleanup**: Tabs are automatically closed upon sub-task completion to prevent memory leaks.
+- **Auto-Cleanup**: Tabs are automatically closed and their associated **execution lanes are released** upon sub-task completion to prevent memory leaks.
 
 ### Universal Self-Healing Architecture
 
