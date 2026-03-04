@@ -1,5 +1,5 @@
 import React from 'react'
-import { Plus, MessageSquare, Trash2, Edit2 } from 'lucide-react'
+import { Plus, MessageSquare, Trash2, Edit2, Loader2, X } from 'lucide-react'
 import { useChatStore, ChatSession } from '../stores/chatStore'
 import { useLogStore } from '../stores/logStore'
 
@@ -10,7 +10,10 @@ export function ChatSidebar() {
         createSession,
         deleteSession,
         setActiveSession,
-        updateSessionTitle
+        updateSessionTitle,
+        isSessionProcessing,
+        abortSession,
+        _processingSessions,
     } = useChatStore()
     const { addLog } = useLogStore()
 
@@ -36,6 +39,11 @@ export function ChatSidebar() {
         }
     }
 
+    const handleAbortSession = (e: React.MouseEvent, id: string) => {
+        e.stopPropagation()
+        abortSession(id)
+    }
+
     const startEditing = (e: React.MouseEvent, session: ChatSession) => {
         e.stopPropagation()
         setEditingId(session.id)
@@ -57,6 +65,11 @@ export function ChatSidebar() {
         }
     }
 
+    // Derive the set of all currently-processing session IDs from the Map.
+    // This subscribes to the Map so the sidebar re-renders when any session
+    // starts or stops processing.
+    const processingIds = new Set(_processingSessions.keys())
+
     return (
         <div className="w-64 flex-shrink-0 bg-[#1a1d23] border-r border-white/5 flex flex-col h-full">
             <div className="p-4 border-b border-white/5">
@@ -70,68 +83,97 @@ export function ChatSidebar() {
             </div>
 
             <div className="flex-1 overflow-y-auto py-2">
-                {sessions.map((session) => (
-                    <div
-                        key={session.id}
-                        onClick={() => setActiveSession(session.id)}
-                        className={`group relative flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors
-                            ${session.id === activeSessionId
-                                ? 'bg-white/10 text-white'
-                                : 'text-white/60 hover:bg-white/5 hover:text-white'
-                            }`}
-                    >
-                        <MessageSquare size={16} className="flex-shrink-0" />
+                {sessions.map((session) => {
+                    const isRunning = processingIds.has(session.id)
+                    const isActive = session.id === activeSessionId
 
-                        {editingId === session.id ? (
-                            <input
-                                autoFocus
-                                type="text"
-                                value={editTitle}
-                                onChange={(e) => setEditTitle(e.target.value)}
-                                onBlur={() => saveTitle(session.id)}
-                                onKeyDown={(e) => handleKeyDown(e, session.id)}
-                                onClick={(e) => e.stopPropagation()}
-                                className="flex-1 bg-[#0f1115] text-white text-sm px-2 py-1 rounded outline-none border border-[#00a896]"
-                                aria-label="Edit chat title"
-                            />
-                        ) : (
-                            <div className="flex-1 flex items-center gap-2 pr-8">
-                                <span className="text-sm truncate">
-                                    {session.title}
+                    return (
+                        <div
+                            key={session.id}
+                            onClick={() => setActiveSession(session.id)}
+                            className={`group relative flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors
+                                ${isActive
+                                    ? 'bg-white/10 text-white'
+                                    : 'text-white/60 hover:bg-white/5 hover:text-white'
+                                }`}
+                        >
+                            {/* Session icon — animated spinner when processing */}
+                            {isRunning ? (
+                                <span title="Processing...">
+                                    <Loader2
+                                        size={16}
+                                        className="flex-shrink-0 text-[#00a896] animate-spin"
+                                    />
                                 </span>
-                                {session.workspacePath && (
-                                    <span
-                                        className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-[#00a896]/20 text-[#00a896] border border-[#00a896]/30"
-                                        title={`Workspace: ${session.workspacePath}`}
-                                    >
-                                        📁
-                                    </span>
-                                )}
-                            </div>
-                        )}
+                            ) : (
+                                <MessageSquare size={16} className="flex-shrink-0" />
+                            )}
 
-                        {/* Actions (visible on hover or active) */}
-                        {editingId !== session.id && (
-                            <div className={`absolute right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity
-                                ${session.id === activeSessionId ? 'opacity-100' : ''}`}>
-                                <button
-                                    onClick={(e) => startEditing(e, session)}
-                                    className="p-1 text-white/40 hover:text-white rounded hover:bg-white/10"
-                                    title="Rename"
-                                >
-                                    <Edit2 size={12} />
-                                </button>
-                                <button
-                                    onClick={(e) => handleDeleteSession(e, session.id)}
-                                    className="p-1 text-white/40 hover:text-red-400 rounded hover:bg-red-500/10"
-                                    title="Delete"
-                                >
-                                    <Trash2 size={12} />
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                ))}
+                            {editingId === session.id ? (
+                                <input
+                                    autoFocus
+                                    type="text"
+                                    value={editTitle}
+                                    onChange={(e) => setEditTitle(e.target.value)}
+                                    onBlur={() => saveTitle(session.id)}
+                                    onKeyDown={(e) => handleKeyDown(e, session.id)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="flex-1 bg-[#0f1115] text-white text-sm px-2 py-1 rounded outline-none border border-[#00a896]"
+                                    aria-label="Edit chat title"
+                                />
+                            ) : (
+                                <div className="flex-1 flex items-center gap-2 pr-8 min-w-0">
+                                    <span className="text-sm truncate">
+                                        {session.title}
+                                    </span>
+                                    {session.workspacePath && (
+                                        <span
+                                            className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-[#00a896]/20 text-[#00a896] border border-[#00a896]/30"
+                                            title={`Workspace: ${session.workspacePath}`}
+                                        >
+                                            📁
+                                        </span>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Actions (visible on hover or active) */}
+                            {editingId !== session.id && (
+                                <div className={`absolute right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity
+                                    ${isActive || isRunning ? 'opacity-100' : ''}`}>
+                                    {/* Abort button — only shown when the session is actively processing */}
+                                    {isRunning && (
+                                        <button
+                                            onClick={(e) => handleAbortSession(e, session.id)}
+                                            className="p-1 text-red-400  hover:text-red-300 rounded hover:bg-red-500/10"
+                                            title="Stop this session"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    )}
+                                    {!isRunning && (
+                                        <>
+                                            <button
+                                                onClick={(e) => startEditing(e, session)}
+                                                className="p-1 text-white/40 hover:text-white rounded hover:bg-white/10"
+                                                title="Rename"
+                                            >
+                                                <Edit2 size={12} />
+                                            </button>
+                                            <button
+                                                onClick={(e) => handleDeleteSession(e, session.id)}
+                                                className="p-1 text-white/40 hover:text-red-400 rounded hover:bg-red-500/10"
+                                                title="Delete"
+                                            >
+                                                <Trash2 size={12} />
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )
+                })}
 
                 {sessions.length === 0 && (
                     <div className="text-center py-8 px-4 text-white/20 text-sm">

@@ -24,10 +24,12 @@ interface ChatViewProps {
 }
 
 export function ChatView({ onClearChat }: ChatViewProps) {
-    const { sessions, activeSessionId, isProcessing, processingSessionId, removeMessage, clearMessages } = useChatStore()
+    const { sessions, activeSessionId, isSessionProcessing, removeMessage, clearMessages } = useChatStore()
 
     const activeSession = sessions.find(s => s.id === activeSessionId)
     const messages = activeSession?.messages || []
+    // Per-session processing state — true only if THIS session is actively running
+    const isProcessing = activeSessionId ? isSessionProcessing(activeSessionId) : false
 
     const {
         scrollContainerRef,
@@ -62,7 +64,7 @@ export function ChatView({ onClearChat }: ChatViewProps) {
             )}
 
             {/* Messages area */}
-            <div 
+            <div
                 ref={scrollContainerRef}
                 onScroll={handleScroll}
                 className="flex-1 overflow-y-auto overflow-x-hidden p-6 space-y-4 min-w-0"
@@ -102,8 +104,8 @@ export function ChatView({ onClearChat }: ChatViewProps) {
                     ))
                 )}
 
-                {/* Processing indicator - Hide if last message is a dynamic status update */}
-                {isProcessing && processingSessionId === activeSessionId && !messages[messages.length - 1]?.content.includes('Parallel Execution') && (
+                {/* Processing indicator - shown only when this session is actively processing */}
+                {isProcessing && !messages[messages.length - 1]?.content.includes('Parallel Execution') && (
                     <div className="flex gap-3 justify-start">
                         <div className="w-8 h-8 rounded-lg bg-[#00a896] flex items-center justify-center flex-shrink-0">
                             <Bot size={18} className="text-white" />

@@ -48,12 +48,13 @@ function App() {
   const {
     activeSessionId,
     sessions,
-    isProcessing,
-    processingSessionId,
-    abortProcessing,
+    isSessionProcessing,
+    abortSession,
   } = useChatStore();
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
+  // Whether the currently-active session is processing (used to disable the input)
+  const activeIsProcessing = activeSessionId ? isSessionProcessing(activeSessionId) : false;
 
   // ── Side-effect hooks ─────────────────────────────────────────────────────
   useAuthPersistence();
@@ -95,9 +96,9 @@ function App() {
                 <div className="p-4 flex-shrink-0 border-t border-white/5">
                   <VoiceInput
                     onSubmit={handleSubmit}
-                    // Disable input while the agent is processing in the active session
-                    disabled={isProcessing && processingSessionId === activeSessionId}
-                    onAbort={abortProcessing}
+                    // Only disable input while THIS session is the one processing
+                    disabled={activeIsProcessing}
+                    onAbort={activeSessionId ? () => abortSession(activeSessionId) : undefined}
                   />
                 </div>
               </div>
