@@ -772,6 +772,7 @@ Tools are classified into three categories by the `laneManager` (singleton in `e
 
 #### 2. Isolation Strategy
 - **Sub-Agent Tabs**: Each sub-agent is provisioned with a **dedicated browser tab** (`tabId`). This ensures that one sub-agent's navigation does not interrupt another's workflow.
+
 - **Auto-Cleanup**: After each sub-agent completes, its tab is closed *and* `laneManager.cleanupTabLane(tabId)` is called to remove the stale `LaneQueue` from memory. Without this, long sessions accumulate leaked queues.
 - **Multi-Session Abort Isolation**: Each chat session has its own `AbortController` stored in `chatStore._processingSessions`. Calling `abortSession(sessionA)` only cancels Session A — Session B continues unaffected.
 
