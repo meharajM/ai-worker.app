@@ -4,7 +4,6 @@
  * Architecture: This component is ONLY responsible for:
  *   1. Rendering the top-level layout (Sidebar, Header, main content area)
  *   2. Routing between views (chat, connections, settings)
- *   3. Rendering the TaskConfirmationDialog when the agent needs user approval
  *
  * What this file does NOT do (extracted to hooks):
  *   - Agent execution logic → useAgent.ts
@@ -49,12 +48,13 @@ function App() {
   const {
     activeSessionId,
     sessions,
-    isProcessing,
-    processingSessionId,
-    abortProcessing,
+    isSessionProcessing,
+    abortSession,
   } = useChatStore();
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
+  // Whether the currently-active session is processing (used to disable the input)
+  const activeIsProcessing = activeSessionId ? isSessionProcessing(activeSessionId) : false;
 
   // ── Side-effect hooks ─────────────────────────────────────────────────────
   useAuthPersistence();
@@ -96,9 +96,9 @@ function App() {
                 <div className="p-4 flex-shrink-0 border-t border-white/5">
                   <VoiceInput
                     onSubmit={handleSubmit}
-                    // Disable input while the agent is processing in the active session
-                    disabled={isProcessing && processingSessionId === activeSessionId}
-                    onAbort={abortProcessing}
+                    // Only disable input while THIS session is the one processing
+                    disabled={activeIsProcessing}
+                    onAbort={activeSessionId ? () => abortSession(activeSessionId) : undefined}
                   />
                 </div>
               </div>
