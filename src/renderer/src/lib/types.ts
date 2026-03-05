@@ -11,7 +11,11 @@ export interface MessageAction {
 export interface LLMMessage {
   role: "user" | "assistant" | "system" | "tool";
   content: string | LLMContentPart[];
-  tool_calls?: any[];
+  tool_calls?: {
+    id: string;
+    name: string;
+    arguments: Record<string, unknown>;
+  }[];
   tool_call_id?: string;
   name?: string; // For Gemini/OpenAI tool names
   actions?: MessageAction[]; // For button-based interactions

@@ -21,6 +21,8 @@ import type { AgentRuntimeOptions, AgentCheckpoint, ExecutionPlan } from "./type
 import { parseTabIdFromResult } from "../mcp";
 import type { SubAgentFactory } from "./OrchestrationService";
 import { analyzeToolOutput } from "../result-reporter";
+import { laneManager } from "../execution-lanes";
+
 
 /**
  * Handlers for "system" or "special" tools like create_execution_plan,
@@ -207,7 +209,6 @@ export class SpecialToolHandlers {
             isSubAgent: true,
             tabId: subAgentTabId,
             taskCategory: this.taskCategory,
-            requireConfirmation: false,
             onMessage: (msg: LLMMessage) => {
                 const contentStr = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
                 console.log(`[SubAgent Tab:${subAgentTabId ?? "default"}] ${msg.role}: ${contentStr?.substring(0, 50)}`);
@@ -255,6 +256,8 @@ export class SpecialToolHandlers {
                     await browserLock.runExclusive(async () =>
                         executeToolCall("close_tab", { tabId: subAgentTabId })
                     );
+                    // Clean up the execution lane to prevent memory leaks
+                    laneManager.cleanupTabLane(subAgentTabId);
                 } catch (e) {
                     console.warn(`[SpecialToolHandlers] Failed to close sub-agent tab ${subAgentTabId}`, e);
                 }
@@ -276,6 +279,18 @@ export class SpecialToolHandlers {
 
             return { result: salvagedResult.trim(), planUpdate: updatedPlan };
         } catch (err: any) {
+            // Best-effort tab cleanup on hard failure to prevent leaks
+            if (subAgentTabId !== undefined) {
+                try {
+                    const { browserLock } = await import("../resource-lock");
+                    await browserLock.runExclusive(async () =>
+                        executeToolCall("close_tab", { tabId: subAgentTabId })
+                    );
+                    laneManager.cleanupTabLane(subAgentTabId);
+                } catch (e) {
+                    console.warn(`[SpecialToolHandlers] Failed to close sub-agent tab ${subAgentTabId} after error`, e);
+                }
+            }
             return { result: `Sub-agent failed: ${err.message}` };
         }
     }

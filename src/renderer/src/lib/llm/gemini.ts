@@ -2,7 +2,7 @@ import { LLMMessage, LLMSettings, LLMTool, LLMResponse } from "../types";
 import type { AntigravityCredentials } from "../antigravity-gateway";
 import { ProviderStatus } from "./types";
 import { LLM_CONFIG } from "../constants";
-import { extractTextForLegacyProviders, ensureRecord, safeParseJSON } from "./utils";
+import { extractTextForLegacyProviders, ensureRecord } from "./utils";
 
 /**
  * Resolves Gemini credentials from settings / secure store / Antigravity OAuth.
@@ -45,7 +45,7 @@ export async function checkGemini(settings?: LLMSettings): Promise<ProviderStatu
     const models = Array.from(SUPPORTED_GATEWAY_MODELS);
     return {
       available: true,
-      model: models.includes(model as any) ? model : models[0],
+      model: (models as string[]).includes(model as string) ? model : models[0],
       models,
       modelsEndpointAvailable: false,
     };
@@ -77,7 +77,7 @@ export async function checkGemini(settings?: LLMSettings): Promise<ProviderStatu
       modelsEndpointAvailable: false,
       error: "Could not fetch Gemini models list",
     };
-  } catch (error) {
+  } catch {
     return {
       available: true,
       model: model,
@@ -94,7 +94,7 @@ export async function checkGemini(settings?: LLMSettings): Promise<ProviderStatu
 export async function testGeminiConnection(
   apiKey: string,
   model: string,
-  settings?: LLMSettings
+  _settings?: LLMSettings
 ): Promise<{
   success: boolean;
   error?: string;
@@ -115,10 +115,10 @@ export async function testGeminiConnection(
         return { success: true, models, modelsEndpointAvailable: true };
       }
 
-      const error = await response.json().catch(() => ({}));
+      const errorData = await response.json().catch(() => ({})) as Record<string, unknown>;
       return {
         success: false,
-        error: (error as any).error?.message || `API error: ${response.statusText}`
+        error: (errorData.error as any)?.message || `API error: ${response.statusText}`
       };
     }
 
@@ -137,8 +137,8 @@ export async function testGeminiConnection(
       if (response.ok) {
         return { success: true, models: Array.from(SUPPORTED_GATEWAY_MODELS), modelsEndpointAvailable: false };
       }
-      const error = await response.json().catch(() => ({}));
-      return { success: false, error: (error as any).error?.message || `Gateway error: ${response.statusText}` };
+      const errorData = await response.json().catch(() => ({})) as Record<string, unknown>;
+      return { success: false, error: (errorData.error as any)?.message || `Gateway error: ${response.statusText}` };
     }
 
     return { success: false, error: 'No API key provided and not signed in with Google.' };
@@ -163,17 +163,22 @@ export async function callGemini(
   const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
 
   // Build a lookup: tool_call_id → function name
+  // Note: at runtime, tool_calls on LLMMessage objects are stored in OpenAI wire format
+  // ({ id, type, function: { name, arguments } }) by agent-runtime — we must handle both shapes.
+  type RuntimeToolCall = { id?: string; name?: string; function?: { name: string; arguments: Record<string, unknown> } };
   const toolIdToName = new Map<string, string>();
   messages.forEach(m => {
     if (m.role === 'assistant' && m.tool_calls) {
-      m.tool_calls.forEach((tc: any) => {
-        if (tc.id && tc.function?.name) toolIdToName.set(tc.id, tc.function.name);
+      (m.tool_calls as unknown as RuntimeToolCall[]).forEach((tc) => {
+        const id = tc.id;
+        const name = tc.name || tc.function?.name;
+        if (id && name) toolIdToName.set(id, name);
       });
     }
   });
 
   // Convert messages to Gemini format
-  const contents: any[] = [];
+  const contents: Array<{ role: 'user' | 'model'; parts: Record<string, unknown>[] }> = [];
   const validMessages = messages.filter(m => m.role !== 'system');
 
   for (const m of validMessages) {
@@ -182,7 +187,7 @@ export async function callGemini(
     if (m.role === 'user' || m.role === 'tool') role = 'user';
     if (!role) continue;
 
-    const parts: any[] = [];
+    const parts: Record<string, unknown>[] = [];
 
     if (m.role !== 'tool' && m.content) {
       if (typeof m.content === 'string') {
@@ -206,27 +211,27 @@ export async function callGemini(
       }
     }
 
+    const extendedMsg = m as LLMMessage & { thought?: string; thought_signature?: string };
     // Gemini 2.0 Thinking: echo thought_signature back to the API.
-    if (m.role === 'assistant' && (m as any).thought) {
+    if (m.role === 'assistant' && extendedMsg.thought) {
       parts.push({
-        thought: (m as any).thought,
-        thought_signature: (m as any).thought_signature
+        thought: extendedMsg.thought,
+        thought_signature: extendedMsg.thought_signature
       });
     }
 
     // Tool calls
-    if (m.role === 'assistant' && (m as any).tool_calls) {
-      (m as any).tool_calls.forEach((tc: any) => {
+    if (m.role === 'assistant' && m.tool_calls) {
+      (m.tool_calls as unknown as RuntimeToolCall[]).forEach((tc) => {
+        // Handle both our internal format (tc.name/tc.arguments) and OpenAI wire
+        // format (tc.function.name/tc.function.arguments) which agent-runtime uses at runtime.
+        const name = tc.name || tc.function?.name;
+        const rawArgs = (tc as unknown as { arguments?: Record<string, unknown> }).arguments ?? tc.function?.arguments;
+        const args = typeof rawArgs === 'string'
+          ? (() => { try { return JSON.parse(rawArgs); } catch { return { _parse_error: 'Invalid JSON arguments' }; } })()
+          : rawArgs;
         parts.push({
-          functionCall: {
-            name: tc.function.name,
-            args: typeof tc.function.arguments === 'string'
-              ? (() => {
-                try { return safeParseJSON(tc.function.arguments); }
-                catch (e) { return { _parse_error: 'Invalid JSON arguments' }; }
-              })()
-              : tc.function.arguments
-          }
+          functionCall: { name, args }
         });
       });
     }
@@ -239,7 +244,8 @@ export async function callGemini(
           ? extractTextForLegacyProviders(m.content)
           : JSON.stringify(m.content ?? '');
 
-      const fnName = (m as any).name || (m.tool_call_id ? toolIdToName.get(m.tool_call_id) : 'unknown_tool');
+      const extendedToolMsg = m as LLMMessage & { name?: string };
+      const fnName = extendedToolMsg.name || (m.tool_call_id ? toolIdToName.get(m.tool_call_id) : 'unknown_tool');
       parts.push({
         functionResponse: {
           name: fnName,
@@ -281,11 +287,11 @@ export async function callGemini(
   };
 
   // Route: Antigravity gateway → standard API
-  let data: any;
+  let data: Record<string, unknown>;
   if (antigravity) {
     const gw = buildGatewayRequest(antigravity, model, geminiPayload);
-    const result = await (await import('../electron')).default.antigravity.callGateway(gw.url, gw.headers, gw.body);
-    data = unwrapGatewayResponse(result);
+    const result = await (await import('../electron')).default.antigravity.callGateway(gw.url, gw.headers, gw.body as string);
+    data = unwrapGatewayResponse(result) as unknown as Record<string, unknown>;
   } else if (apiKey) {
     const response = await fetch(`${baseUrl}/models/${model}:generateContent?key=${apiKey}`, {
       method: 'POST',
@@ -304,24 +310,27 @@ export async function callGemini(
   }
 
   // Parse response
-  const candidate = data.candidates?.[0];
-  const responseParts: any[] = candidate?.content?.parts || [];
+  const candidate = data.candidates && Array.isArray(data.candidates) ? data.candidates[0] : null;
+  const responseParts: Record<string, unknown>[] = (candidate?.content?.parts as Record<string, unknown>[]) || [];
 
-  const content = responseParts.find((p: any) => p.text && !p.thought)?.text || '';
-  const thoughtPart = responseParts.find((p: any) => p.thought);
+  const content = responseParts.find((p) => p.text && !p.thought)?.text || '';
+  const thoughtPart = responseParts.find((p) => p.thought);
   const thought = thoughtPart?.thought as string | undefined;
   const thoughtSignature = thoughtPart?.thought_signature as string | undefined;
 
   const toolCalls = responseParts
-    .filter((p: any) => p.functionCall)
-    .map((p: any) => ({
-      id: `gemini-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-      name: p.functionCall.name,
-      arguments: ensureRecord(p.functionCall.args)
-    }));
+    .filter((p) => p.functionCall !== undefined)
+    .map((p) => {
+      const fc = p.functionCall as Record<string, unknown>;
+      return {
+        id: `gemini-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+        name: (fc.name as string) || 'unknown',
+        arguments: ensureRecord(fc.args)
+      };
+    });
 
   return {
-    content,
+    content: (content as string) || '',
     thought,
     thought_signature: thoughtSignature,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,

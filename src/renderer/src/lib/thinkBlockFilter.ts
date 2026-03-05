@@ -28,10 +28,10 @@ export function filterThinkBlocks(content: string): ThinkBlockResult {
         };
     }
 
-    let thinkingParts: string[] = [];
+    const thinkingParts: string[] = [];
     let cleanedContent = content;
     let format: 'xml' | 'markdown' | 'none' = 'none';
-    let isComplete = true;
+    const isComplete = true;
 
     // 1. XML Patterns (Multiple occurrences supported)
     const xmlPatterns = [
@@ -41,7 +41,7 @@ export function filterThinkBlocks(content: string): ThinkBlockResult {
         { regex: /<tools>([\s\S]*?)<\/tools>/g, tag: 'tools' } // Hide leaked tool definitions
     ];
 
-    for (const { regex, tag } of xmlPatterns) {
+    for (const { regex } of xmlPatterns) {
         let match;
         // Use loop to find all occurrences
         while ((match = regex.exec(content)) !== null) {
