@@ -183,6 +183,24 @@ export class LaneManager {
     }
 
     /**
+     * Removes the lane associated with a specific tab, allowing its memory to be garbage-collected.
+     * This should typically be called after the target tab is closed or a sub-agent completes.
+     */
+    cleanupTabLane(tabId: number): void {
+        const laneId = `TAB_${tabId}`;
+        const lane = this.lanes.get(laneId);
+
+        if (lane) {
+            const stats = lane.stats;
+            if (stats.active > 0 || stats.queued > 0) {
+                console.warn(`[LaneManager] Cleaning up lane ${laneId} but it still has tasks (active: ${stats.active}, queued: ${stats.queued})`);
+            }
+            this.lanes.delete(laneId);
+            console.log(`[LaneManager] Cleaned up lane for tab ${tabId}`);
+        }
+    }
+
+    /**
      * Routes a tool call to the appropriate execution lane.
      */
     getLane(toolName: string, context: { tabId?: number } = {}): LaneQueue {

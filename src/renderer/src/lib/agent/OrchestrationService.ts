@@ -28,6 +28,8 @@ import { generateSubAgentInstruction, type TaskDecomposition } from "../task-dec
 import { type LLMMessage } from "../types";
 import { type AgentRuntimeOptions } from "./types";
 import { preSeedSubAgentMemory } from "./AgentStateService";
+import { laneManager } from "../execution-lanes";
+
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -237,6 +239,8 @@ export async function executeParallelSubAgents(
                         executeToolCall("close_tab", { tabId: subAgentTabId })
                     );
                     console.log(`[OrchestrationService] Closed sub-agent tab ${subAgentTabId}`);
+                    // Clean up the execution lane to prevent memory leaks
+                    laneManager.cleanupTabLane(subAgentTabId);
                 } catch (e) {
                     console.warn(`[OrchestrationService] Failed to close sub-agent tab ${subAgentTabId}`, e);
                 }
@@ -271,6 +275,19 @@ export async function executeParallelSubAgents(
                 }
             } catch (e) { }
 
+            // Close the tab + clean up the lane even on crash path to prevent leaks
+            if (subAgentTabId !== undefined) {
+                try {
+                    const { browserLock } = await import("../resource-lock");
+                    await browserLock.runExclusive(async () =>
+                        executeToolCall("close_tab", { tabId: subAgentTabId })
+                    );
+                    laneManager.cleanupTabLane(subAgentTabId);
+                } catch (e) {
+                    console.warn(`[OrchestrationService] Failed to close crashed sub-agent tab ${subAgentTabId}`, e);
+                }
+            }
+
             const errorText = `Error: ${error.message}${partialsMsg}`;
             agentStatuses[index].result = errorText;
 
@@ -285,6 +302,7 @@ export async function executeParallelSubAgents(
 
             return { context, success: false, result: errorText };
         }
+
     });
 
     const results = await Promise.all(subAgentPromises);
