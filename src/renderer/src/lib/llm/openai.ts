@@ -61,7 +61,7 @@ export async function checkOpenAI(
 
   try {
     // Use IPC to fetch models from main process (bypasses CORS)
-    const electron = (window as any).electron;
+    const electron = (window as unknown as { electron: { llm: { fetchOpenAIModels: (url: string, key: string) => Promise<{ success: boolean; models?: string[]; error?: string }> } } }).electron;
     if (electron?.llm?.fetchOpenAIModels) {
       const result = await electron.llm.fetchOpenAIModels(baseUrl, apiKey);
 
@@ -168,7 +168,7 @@ export async function checkOpenAI(
 export async function checkOpenRouter(
   settings?: LLMSettings
 ): Promise<ProviderStatus> {
-  const { apiKey, baseUrl, model } = await getOpenRouterSettings(settings);
+  const { apiKey } = await getOpenRouterSettings(settings);
   if (!apiKey) return { available: false, error: "OpenRouter API Key not set" };
 
   // reuse OpenAI check with OpenRouter specific headers if needed
@@ -210,7 +210,7 @@ export async function testOpenAIConnection(
     }
 
     // Try to fetch models if connection succeeds
-    const electron = (window as any).electron;
+    const electron = (window as unknown as { electron: { llm: { fetchOpenAIModels: (url: string, key: string) => Promise<{ success: boolean; models?: string[]; error?: string }> } } }).electron;
     if (electron?.llm?.fetchOpenAIModels) {
       try {
         const modelsResult = await electron.llm.fetchOpenAIModels(
@@ -230,7 +230,7 @@ export async function testOpenAIConnection(
             error: modelsResult.error || "Models endpoint not available",
           };
         }
-      } catch (modelsError) {
+      } catch {
         // Connection works but models endpoint doesn't
         return {
           success: true,
@@ -249,26 +249,37 @@ export async function testOpenAIConnection(
 }
 
 // Helper to format messages for OpenAI-compatible APIs
-function formatMessagesForOpenAI(messages: LLMMessage[]): any[] {
+function formatMessagesForOpenAI(messages: LLMMessage[]): Record<string, unknown>[] {
   return messages.map(m => {
     // Basic message structure
-    const formatted: any = {
+    const formatted: Record<string, unknown> = {
       role: m.role,
       content: m.content
     };
 
     // Add tool_calls if present (and strictly stringify arguments)
     if (m.tool_calls && m.tool_calls.length > 0) {
-      formatted.tool_calls = m.tool_calls.map((tc: any) => ({
-        id: tc.id,
-        type: 'function',
-        function: {
-          name: tc.function.name,
-          arguments: typeof tc.function.arguments === 'object'
-            ? JSON.stringify(tc.function.arguments)
-            : tc.function.arguments
-        }
-      }));
+      // At runtime, tool_calls can be in OpenAI wire format { function: { name, arguments } }
+      // (set by agent-runtime via `as any`) or our internal LLMMessage format { name, arguments }.
+      // We handle both gracefully.
+      type RuntimeToolCall = {
+        id: string;
+        name?: string;
+        arguments?: Record<string, unknown>;
+        function?: { name: string; arguments: string | Record<string, unknown> };
+      };
+      formatted.tool_calls = (m.tool_calls as unknown as RuntimeToolCall[]).map((tc) => {
+        const name = tc.name ?? tc.function?.name ?? '';
+        const rawArgs = tc.arguments ?? tc.function?.arguments ?? {};
+        return {
+          id: tc.id,
+          type: 'function',
+          function: {
+            name,
+            arguments: typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs)
+          }
+        };
+      });
     }
 
     // Add tool_call_id if it's a tool response
@@ -294,9 +305,9 @@ export // Call OpenAI-compatible API
     servers?: ServerInfo[],
     isOpenRouter: boolean = false,
     abortSignal?: AbortSignal,
-    dynamicRules?: string,
-    isSubAgent?: boolean,
-    workspacePath?: string // New parameter
+    _dynamicRules?: string,
+    _isSubAgent?: boolean,
+    _workspacePath?: string // New parameter
   ): Promise<LLMResponse> {
   const { apiKey, baseUrl, model } = isOpenRouter
     ? await getOpenRouterSettings(settings)
@@ -417,7 +428,7 @@ export // Call OpenAI-compatible API
   // If using JSON fallback, try to parse tool calls from content
   let toolCalls = choice.message?.tool_calls?.map(
     (tc: { id: string; function: { name: string; arguments: string } }) => {
-      let args: any = {};
+      let args: Record<string, unknown> = {};
 
       // Handle null, undefined, or empty string arguments
       if (!tc.function.arguments || tc.function.arguments === 'null' || tc.function.arguments === 'undefined') {
@@ -428,7 +439,7 @@ export // Call OpenAI-compatible API
           const parsed = JSON.parse(tc.function.arguments);
           // JSON.parse(null) returns null, so we need to check the result
           args = parsed !== null && typeof parsed === 'object' ? parsed : {};
-        } catch (e) {
+        } catch {
           console.warn(`[LLM] Failed to parse tool arguments for "${tc.function.name}":`, tc.function.arguments);
           args = { _parse_error: "Invalid JSON arguments from LLM" };
         }

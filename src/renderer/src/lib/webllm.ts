@@ -160,7 +160,7 @@ class WebLLMManager {
         const reasons: string[] = [];
 
         // Check RAM
-        const ram = (navigator as any).deviceMemory || 8; // Default to 8 if not available
+        const ram = (navigator as unknown as { deviceMemory?: number }).deviceMemory || 8; // Default to 8 if not available
         if (ram < model.requiredRamGB) {
             reasons.push(`Insufficient RAM: ${ram}GB available, ${model.requiredRamGB}GB required`);
         }
@@ -181,7 +181,7 @@ class WebLLMManager {
             if (availableGB < requiredDisk) {
                 reasons.push(`Low Disk Space: ~${availableGB.toFixed(1)}GB free, ~${requiredDisk}GB needed`);
             }
-        } catch (e) {
+        } catch {
             // Ignore storage estimate errors
         }
 
@@ -364,8 +364,8 @@ class WebLLMManager {
         if (this.engine) {
             try {
                 await this.engine.unload();
-            } catch (e) {
-                console.warn('[WebLLM] Error unloading model:', e);
+            } catch {
+                console.warn('[WebLLM] Error unloading model');
             }
             this.engine = null;
         }
@@ -415,7 +415,7 @@ class WebLLMManager {
             const supportsNativeTools = currentModelInfo?.supportsTools ?? false;
 
             // Only pass tools if model supports them
-            let openAITools: any[] | undefined;
+            let openAITools: { type: "function"; function: { name: string; description: string; parameters: Record<string, unknown> } }[] | undefined;
             if (supportsNativeTools && tools && tools.length > 0) {
                 openAITools = tools.map(t => ({
                     type: 'function' as const,
@@ -484,14 +484,14 @@ class WebLLMManager {
             if (jsonMatch) {
                 const parsed = JSON.parse(jsonMatch[0]);
                 if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
-                    return parsed.tool_calls.map((tc: any, idx: number) => ({
+                    return parsed.tool_calls.map((tc: { name: string; arguments?: Record<string, unknown> }, idx: number) => ({
                         id: `json_call_${Date.now()}_${idx}`,
                         name: tc.name,
                         arguments: tc.arguments || {},
                     }));
                 }
             }
-        } catch (e) {
+        } catch {
             // Failed to parse, return undefined
             console.debug('[WebLLM] Could not parse tool calls from content');
         }

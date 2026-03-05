@@ -4,7 +4,7 @@ import { LLM_CONFIG, FEATURE_FLAGS } from "../constants";
 import { extractTextForLegacyProviders } from "./utils";
 
 export // Get Ollama settings from store or use defaults
-function getOllamaSettings(settings?: LLMSettings) {
+  function getOllamaSettings(settings?: LLMSettings) {
   const baseUrl = settings?.ollamaBaseUrl || LLM_CONFIG.OLLAMA.BASE_URL;
   const model = settings?.ollamaModel || LLM_CONFIG.OLLAMA.DEFAULT_MODEL;
   return { baseUrl, model };
@@ -22,7 +22,7 @@ export async function checkOllama(
 
   try {
     // Use IPC to fetch models from main process (bypasses potential CORS issues)
-    const electron = (window as any).electron;
+    const electron = (window as unknown as { electron: { llm: { fetchOllamaModels: (url: string) => Promise<{ success: boolean; models?: string[]; error?: string }> } } }).electron;
     if (electron?.llm?.fetchOllamaModels) {
       const result = await electron.llm.fetchOllamaModels(baseUrl);
 
@@ -95,13 +95,13 @@ export async function testOllamaConnection(
 }
 
 export // Call Ollama API
-async function callOllama(
-  messages: LLMMessage[],
-  tools?: LLMTool[],
-  settings?: LLMSettings,
-  abortSignal?: AbortSignal,
-  workspacePath?: string // New parameter
-): Promise<LLMResponse> {
+  async function callOllama(
+    messages: LLMMessage[],
+    tools?: LLMTool[],
+    settings?: LLMSettings,
+    abortSignal?: AbortSignal,
+    _workspacePath?: string // New parameter
+  ): Promise<LLMResponse> {
   const { baseUrl, model } = getOllamaSettings(settings);
 
   console.log(`[LLM Chat] Calling Ollama at: ${baseUrl}/api/chat`);

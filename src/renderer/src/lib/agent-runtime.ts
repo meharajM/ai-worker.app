@@ -139,7 +139,7 @@ export class AgentRuntime implements IAgentClient {
     userContent: string,
     attachments?: { name: string; path: string; type: string }[]
   ): Promise<LLMMessage> {
-    let finalPrompt = userContent;
+    const finalPrompt = userContent;
 
     let attachmentContext = "";
     if (attachments && attachments.length > 0) {

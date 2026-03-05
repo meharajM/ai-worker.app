@@ -98,7 +98,7 @@ interface ChatState {
     setActiveSession: (id: string) => void
     updateSessionTitle: (id: string, title: string) => void
     updateSessionWorkspace: (id: string, workspacePath: string) => void
-    updateSessionProgress: (id: string, progress?: number, eta?: number, plan?: unknown) => void
+    updateSessionProgress: (id: string, progress?: number, eta?: number, plan?: ExecutionPlan) => void
     setOfflineSpeech: (enabled: boolean) => void
 
     // Message Actions (primarily target a specific session by ID)

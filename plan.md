@@ -525,12 +525,18 @@ ai-worker-app/
 
 ### 🏁 Phase 18: Distribution & V1 Launch
 
-**Goal:** Public release and update mechanism.
+**Goal:** Public release, auto-updates, and update mechanism.
 
 **Implementation:**
 - [ ] Set up GitHub Actions for automated multi-platform releases
 - [ ] Configure Code Signing (Apple Developer / Windows Certs)
 - [ ] Direct download server / S3 bucket setup
+- [ ] **Auto-Updater Implementation**
+  - [ ] Install `electron-updater` (already bundled with `electron-builder`)
+  - [ ] Configure `autoUpdater.checkForUpdatesAndNotify()` in main process
+  - [ ] Configure `publish` settings in `electron-builder` config (GitHub Releases provider)
+  - [ ] Add update notification UI (toast/dialog for "Update available, restart to apply")
+  - [ ] Test update flow: publish v0.1.1 → verify v0.1.0 auto-downloads and applies
 - [ ] Initial social launch (Product Hunt / Twitter)
 
 ---

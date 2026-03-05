@@ -40,7 +40,7 @@ export class MemoryReflector {
     /**
      * Fire-and-forget analysis of recent conversation history.
      */
-    async analyze(recentHistory: LLMMessage[], settings: any) {
+    async analyze(recentHistory: LLMMessage[], settings: Record<string, unknown> | null | undefined) {
         if (this.isAnalyzing) {
             console.log('[MemoryReflector] Skipping analysis - already busy');
             return;
@@ -63,8 +63,8 @@ export class MemoryReflector {
                 settings,
                 isSubAgent: true,
                 // We don't listen to messages, just results
-                onMessage: (msg: LLMMessage) => {
-                    // console.log('[MemoryReflector] Internal thought:', msg.content);
+                onMessage: (_msg: LLMMessage) => {
+                    // console.log('[MemoryReflector] Internal thought:', _msg.content);
                 }
             });
 
