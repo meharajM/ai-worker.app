@@ -1,6 +1,4 @@
-/// <reference path="../env.d.ts" />
-
-// Platform detection and Electron API wrapper
+import '../env.d.ts'
 // Provides fallbacks for browser environment
 
 export const isElectron = (): boolean => {
@@ -195,7 +193,7 @@ export const electron = {
 
     // Memory operations
     memory: {
-        callTool: async (name: string, args: any) => {
+        callTool: async (name: string, args: Record<string, unknown>) => {
             if (isElectron() && window.electron?.memory) {
                 return await window.electron.memory.callTool(name, args)
             }
@@ -248,7 +246,7 @@ export const electron = {
             }
             return { signedIn: false, email: null, projectId: null }
         },
-        callGateway: async (url: string, headers: Record<string, string>, body: string): Promise<any> => {
+        callGateway: async (url: string, headers: Record<string, string>, body: string): Promise<unknown> => {
             if (isElectron() && window.electron?.antigravity) {
                 return await window.electron.antigravity.callGateway(url, headers, body)
             }
@@ -258,7 +256,7 @@ export const electron = {
 
     // Log operations
     logs: {
-        add: async (entry: any) => {
+        add: async (entry: unknown) => {
             if (isElectron() && window.electron?.logs) {
                 return await window.electron.logs.add(entry)
             }

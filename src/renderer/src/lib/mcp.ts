@@ -1,15 +1,7 @@
-import { ensureRecord } from "./llm";
 import { useMcpStore, MCPServer, MCPTool } from "../stores/mcpStore";
 import electron from "./electron";
-import { STORAGE_KEYS } from "./constants";
 
 /// <reference path="../env.d.ts" />
-
-
-
-
-
-
 
 // Add a custom server
 export async function addCustomServer(
@@ -107,6 +99,11 @@ function sanitizeArgsForLogging(
   return sanitized;
 }
 
+// Helper to ensure args is a record
+function ensureRecord(args: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  return args || {};
+}
+
 // Execute a tool call with retry logic for connection errors
 export async function executeToolCall(
   toolName: string,
@@ -175,7 +172,7 @@ export async function executeToolCall(
       }
     }
     // Remove workspacePath from args before sending to tool (it doesn't expect it)
-    delete (args as any).workspacePath;
+    delete (args as Record<string, unknown>).workspacePath;
   }
 
   const server = findServerForTool(toolName);
@@ -184,10 +181,10 @@ export async function executeToolCall(
     if (toolName.startsWith('memory_')) {
       logMcpRenderer("info", "Executing memory tool via direct IPC fallback", { tool: toolName });
       try {
-        const result = await electron.memory.callTool(toolName, safeArgs) as { result: any; error?: string };
+        const result = await electron.memory.callTool(toolName, safeArgs) as { result: unknown; error?: string };
         return result;
-      } catch (err: any) {
-        return { result: null, error: `Direct memory tool call failed: ${err.message}` };
+      } catch (err) {
+        return { result: null, error: `Direct memory tool call failed: ${err instanceof Error ? err.message : String(err)}` };
       }
     }
 
@@ -232,7 +229,9 @@ export async function executeToolCall(
           if (attempt < MAX_RETRIES) {
             try {
               await connectServer(server.id);
-            } catch (e) { }
+            } catch {
+              // Ignore reconnection errors, we'll return the last error
+            }
             continue; // Retry
           }
         }
@@ -269,7 +268,9 @@ export async function executeToolCall(
       if (attempt < MAX_RETRIES) {
         try {
           await connectServer(server.id);
-        } catch (e) { }
+        } catch {
+          // Ignore reconnection errors
+        }
         continue;
       }
     }
@@ -280,8 +281,6 @@ export async function executeToolCall(
     error: lastError || "Tool execution failed after retries",
   };
 }
-
-
 
 /**
  * Parses a tabId from a `new_tab` tool result.
@@ -294,15 +293,15 @@ export async function executeToolCall(
  * @returns The numeric tabId, or undefined if it cannot be parsed.
  */
 export function parseTabIdFromResult(toolResult: { result: unknown }): number | undefined {
-  const resAny = toolResult.result as any;
+  const resAny = toolResult.result as Record<string, unknown> | null | undefined;
 
   // Primary path: standard MCP content envelope
-  if (resAny?.content && Array.isArray(resAny.content) && resAny.content[0]?.text) {
+  if (resAny?.content && Array.isArray(resAny.content) && (resAny.content[0] as Record<string, unknown>)?.text) {
     try {
-      const parsed = JSON.parse(resAny.content[0].text);
+      const parsed = JSON.parse((resAny.content[0] as Record<string, unknown>).text as string);
       if (typeof parsed.tabId === 'number') return parsed.tabId;
     } catch {
-      console.warn('[MCP] parseTabIdFromResult: failed to JSON-parse content[0].text:', resAny.content[0].text);
+      console.warn('[MCP] parseTabIdFromResult: failed to JSON-parse content[0].text:', (resAny.content[0] as Record<string, unknown>).text);
     }
   }
 
@@ -315,8 +314,6 @@ export function parseTabIdFromResult(toolResult: { result: unknown }): number | 
 export async function setAutoConnect(serverId: string, enabled: boolean): Promise<void> {
   return useMcpStore.getState().setAutoConnect(serverId, enabled);
 }
-
-
 
 export async function initializeMcpServers(): Promise<void> {
   return useMcpStore.getState().initialize();
