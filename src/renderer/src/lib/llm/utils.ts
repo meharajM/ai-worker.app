@@ -7,7 +7,7 @@ function extractTextForLegacyProviders(content: string | LLMContentPart[]): stri
 }
 export { extractTextForLegacyProviders };
 
-export function ensureRecord(input: any): Record<string, unknown> {
+export function ensureRecord(input: unknown): Record<string, unknown> {
   if (input === null || input === undefined) return {};
   if (typeof input === 'object' && !Array.isArray(input)) return input as Record<string, unknown>;
 
@@ -18,7 +18,7 @@ export function ensureRecord(input: any): Record<string, unknown> {
         const parsed = JSON.parse(trimmed);
         if (typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
         return { input: parsed };
-      } catch (e) {
+      } catch {
         // Fall through to default wrapping
       }
     }
@@ -28,7 +28,7 @@ export function ensureRecord(input: any): Record<string, unknown> {
   return { value: input };
 }
 
-export function safeParseJSON(input: string | any): any {
+export function safeParseJSON(input: unknown): unknown {
   if (input === null || input === undefined) return {};
   if (typeof input !== 'string') return input;
   if (!input || input.trim() === '') return {};
@@ -39,7 +39,7 @@ export function safeParseJSON(input: string | any): any {
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
       try {
         return JSON.parse(trimmed);
-      } catch (e) { /* fall through to extraction */ }
+      } catch { /* fall through to extraction */ }
     }
 
     // Find the first occurrence of { or [ and the last occurrence of } or ]
@@ -71,9 +71,9 @@ export function safeParseJSON(input: string | any): any {
 }
 
 export // Parse tool calls from JSON in response content
-function parseToolCallsFromJson(
-  content: string
-): LLMResponse["toolCalls"] | undefined {
+  function parseToolCallsFromJson(
+    content: string
+  ): LLMResponse["toolCalls"] | undefined {
   try {
     // Try to find JSON in the content (might be in code blocks or raw)
     let jsonStr = content.trim();

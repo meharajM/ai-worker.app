@@ -209,8 +209,8 @@ export async function executeParallelSubAgents(
             const isBailout = resultContent.includes("consecutive errors") ||
                 resultContent.includes("stopping to prevent an infinite loop");
 
-            let isSuccess = !isBailout;
-            let finalStatus = isSuccess ? "Done" : "Failed";
+            const isSuccess = !isBailout;
+            const finalStatus = isSuccess ? "Done" : "Failed";
             let finalResultStr = resultContent;
 
             if (isBailout) {

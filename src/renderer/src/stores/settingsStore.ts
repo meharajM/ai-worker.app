@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import { FEATURE_FLAGS, VOICE_CONFIG, LLM_CONFIG, STORAGE_KEYS } from '../lib/constants'
+import { VOICE_CONFIG, LLM_CONFIG, STORAGE_KEYS } from '../lib/constants'
 import electron from '../lib/electron'
-import { saveUserSettings, getUserProfile } from '../lib/firebase'
+import { getUserProfile } from '../lib/firebase'
 
 export type Theme = 'dark' | 'light' | 'system'
 export type LLMProviderType = 'auto' | 'ollama' | 'openai' | 'gemini' | 'openrouter' | 'browser' | 'anthropic' | 'groq'
@@ -173,20 +173,20 @@ export const useSettingsStore = create<SettingsState>()(
             setPlaywrightHeadless: async (headless) => {
                 set({ playwrightHeadless: headless })
                 // Also save to main process store for PlaywrightService to read
-                const current = await electron.store.get<any>('mcpPlaywright') || {}
+                const current = await electron.store.get<Record<string, unknown>>('mcpPlaywright') || {}
                 await electron.store.set('mcpPlaywright', { ...current, headless })
             },
             setFileSystemSafeMode: async (enabled) => {
                 set({ fileSystemSafeMode: enabled })
                 // Save to main process store for FileSystemService to read
-                const current = await electron.store.get<any>('mcpFileSystem') || {}
+                const current = await electron.store.get<Record<string, unknown>>('mcpFileSystem') || {}
                 await electron.store.set('mcpFileSystem', { ...current, safeMode: enabled })
             },
             setMemoryBackend: async (backend) => {
                 set({ memoryBackend: backend })
                 // Update main process store (triggers migration check if changed via UI, though usually handled by IPC)
                 // We store complete config structure
-                const current = await electron.store.get<any>('memory') || {}
+                const current = await electron.store.get<Record<string, unknown>>('memory') || {}
                 await electron.store.set('memory', { ...current, backend })
             },
             resetToDefaults: () => set(defaultSettings),

@@ -119,7 +119,7 @@ function sanitizeArgs(args: unknown): unknown {
 }
 
 export function registerMcpHandlers(): void {
-    ipcMain.handle('mcp:connect', async (_event, serverConfig) => {
+    ipcMain.handle('mcp:connect', async (_event, serverConfig: { id: string; type: 'stdio' | 'sse'; command: string; args?: string[]; url?: string; env?: Record<string, string> }) => {
         const startTime = Date.now()
         const { id, type, command, args, url, env } = serverConfig
 
@@ -167,7 +167,7 @@ export function registerMcpHandlers(): void {
                     })
 
                     return { success: true, serverId: id, inProcess: true }
-                } catch (playwrightError) {
+                } catch (playwrightError: unknown) {
                     const errorMsg = playwrightError instanceof Error ? playwrightError.message : String(playwrightError)
                     logMcpOperation('warn', 'In-process Playwright failed, falling back to external process', {
                         operation: 'connect',
@@ -180,7 +180,7 @@ export function registerMcpHandlers(): void {
 
             // === MEMORY IN-PROCESS INTERCEPTION ===
             if (command === 'internal-memory' || (args && args.includes('memory-service'))) {
-                 logMcpOperation('info', '🧠 Using in-process Memory service', {
+                logMcpOperation('info', '🧠 Using in-process Memory service', {
                     operation: 'connect',
                     serverId: id,
                     inProcess: true,
@@ -201,7 +201,7 @@ export function registerMcpHandlers(): void {
 
                     return { success: true, serverId: id, inProcess: true }
                 } catch (error) {
-                     logMcpOperation('error', 'In-process Memory failed to initialize', {
+                    logMcpOperation('error', 'In-process Memory failed to initialize', {
                         operation: 'connect',
                         serverId: id,
                         error: error instanceof Error ? error.message : String(error),
@@ -212,7 +212,7 @@ export function registerMcpHandlers(): void {
 
             // === FILESYSTEM IN-PROCESS INTERCEPTION ===
             if (command === 'internal-filesystem' || (args && args.includes('filesystem-service'))) {
-                 logMcpOperation('info', '📁 Using in-process Filesystem service', {
+                logMcpOperation('info', '📁 Using in-process Filesystem service', {
                     operation: 'connect',
                     serverId: id,
                     inProcess: true,
@@ -263,9 +263,9 @@ export function registerMcpHandlers(): void {
                 })
 
                 // Monitor the underlying process for crashes
-                const transportAny = transport as any
+                const transportAny = transport as unknown as { process?: ChildProcess }
                 if (transportAny.process) {
-                    const process = transportAny.process as ChildProcess
+                    const process = transportAny.process;
                     activeProcesses.set(id, process)
 
                     // Monitor process exit
@@ -284,7 +284,7 @@ export function registerMcpHandlers(): void {
                     })
 
                     // Monitor process errors
-                    process.on('error', (error) => {
+                    process.on('error', (error: Error) => {
                         logMcpOperation('error', 'MCP server process error', {
                             operation: 'process-monitor',
                             serverId: id,
@@ -295,9 +295,7 @@ export function registerMcpHandlers(): void {
 
                     // Monitor stderr for server errors
                     if (process.stderr) {
-                        let stderrBuffer = ''
                         process.stderr.on('data', (data: Buffer) => {
-                            stderrBuffer += data.toString()
                             // Log stderr for debugging
                             const stderrStr = data.toString().trim()
                             if (stderrStr) {
@@ -342,7 +340,7 @@ export function registerMcpHandlers(): void {
 
             activeConnections.set(id, client)
             return { success: true, serverId: id }
-        } catch (error) {
+        } catch (error: unknown) {
             const duration = Date.now() - startTime
             const errorMessage = error instanceof Error ? error.message : String(error)
 
@@ -606,9 +604,9 @@ export function registerMcpHandlers(): void {
 
         // Handle in-process Memory connections
         if (inProcessMemoryConnections.has(serverId)) {
-             const memoryService = MemoryService.getInstance()
-             const result = await memoryService.callTool(toolName, args)
-             const duration = Date.now() - startTime
+            const memoryService = MemoryService.getInstance()
+            const result = await memoryService.callTool(toolName, args)
+            const duration = Date.now() - startTime
 
             logMcpOperation('info', 'In-process Memory tool call completed', {
                 operation: 'call-tool',
@@ -632,9 +630,9 @@ export function registerMcpHandlers(): void {
 
         // Handle in-process Filesystem connections
         if (inProcessFilesystemConnections.has(serverId)) {
-             const fsService = FileSystemService.getInstance()
-             const result = await fsService.callTool(toolName, args)
-             const duration = Date.now() - startTime
+            const fsService = FileSystemService.getInstance()
+            const result = await fsService.callTool(toolName, args)
+            const duration = Date.now() - startTime
 
             logMcpOperation('info', 'In-process Filesystem tool call completed', {
                 operation: 'call-tool',
@@ -669,8 +667,8 @@ export function registerMcpHandlers(): void {
 
         try {
             // Final defensive check to ensure arguments are a record
-            const finalArgs = (args && typeof args === 'object' && !Array.isArray(args)) 
-                ? (args as Record<string, unknown>) 
+            const finalArgs = (args && typeof args === 'object' && !Array.isArray(args))
+                ? (args as Record<string, unknown>)
                 : (typeof args === 'string' ? { input: args } : { value: args });
 
             const result = await client.callTool({
@@ -731,43 +729,43 @@ function getInstallInstructions(cmd: string, args?: string[]): string {
     const isMac = process.platform === 'darwin'
     const isWin = process.platform === 'win32'
 
-    const header = `### 🛠️ Environment Setup Needed\n\nIt looks like the command \`${cmd}\` isn't available on your system yet. Don't worry, you can fix this in a few steps:`
-    const internalNodeTip = "\n\n💡 **Pro Tip:** This app has a built-in Node.js runtime. If you have a local script, you can simply use \`node\` as the command and it will work immediately!"
+    const header = "### 🛠️ Environment Setup Needed\n\nIt looks like the command `" + cmd + "` isn't available on your system yet. Don't worry, you can fix this in a few steps:"
+    const internalNodeTip = "\n\n💡 **Pro Tip:** This app has a built-in Node.js runtime. If you have a local script, you can simply use `node` as the command and it will work immediately!"
 
     if (cmd.includes('node') || cmd.includes('npx') || cmd.includes('npm')) {
         let steps = ""
-        if (isMac) steps = "1. Open your **Terminal** app.\n2. Type \`brew install node\` and press Enter.\n3. *If you don't have Homebrew, download Node.js from [nodejs.org](https://nodejs.org).* "
+        if (isMac) steps = "1. Open your **Terminal** app.\n2. Type `brew install node` and press Enter.\n3. *If you don't have Homebrew, download Node.js from [nodejs.org](https://nodejs.org).* "
         else if (isWin) steps = "1. Download and run the installer from [nodejs.org](https://nodejs.org).\n2. Follow the setup wizard and make sure 'Add to PATH' is checked.\n3. Restart the AI-Worker app once finished."
-        else steps = "1. Install Node.js using your system's package manager (e.g., \`sudo apt install nodejs\`)."
+        else steps = "1. Install Node.js using your system's package manager (e.g., `sudo apt install nodejs`)."
 
-        return `${header}\n\n${steps}${internalNodeTip}`
+        return header + "\n\n" + steps + internalNodeTip
     }
     if (cmd.includes('python') || cmd.includes('pip')) {
         let steps = ""
-        if (isMac) steps = "1. Open your **Terminal** app.\n2. Type \`brew install python\` and press Enter.\n3. **Note:** Try using \`python3\` as the command in settings if \`python\` fails."
+        if (isMac) steps = "1. Open your **Terminal** app.\n2. Type `brew install python` and press Enter.\n3. **Note:** Try using `python3` as the command in settings if `python` fails."
         else if (isWin) steps = "1. Download Python from [python.org](https://www.python.org/downloads/).\n2. **Important:** Check the box that says 'Add Python to PATH' during installation."
-        else steps = "1. Install Python 3 using your system's package manager (e.g., \`sudo apt install python3\`)."
+        else steps = "1. Install Python 3 using your system's package manager (e.g., `sudo apt install python3`)."
 
         if (args?.some(a => a.includes('mcp-server-git') || a.includes('mcp_server_git'))) {
             steps += `\n\n4. Finally, install the Git tool by running: \`pip install mcp-server-git\``
         }
 
-        return `${header}\n\n${steps}`
+        return header + "\n\n" + steps
     }
     if (cmd.includes('uv')) {
         const installCmd = isWin ? 'powershell -c "irm https://astral.sh/uv/install.ps1 | iex"' : 'curl -LsSf https://astral.sh/uv/install.sh | sh'
         let steps = `1. **Install Python 3** (required):\n`
-        
+
         if (isMac) steps += `   \`brew install python\`\n`
         else if (isWin) steps += `   Download from [python.org](https://www.python.org/downloads/) and check 'Add to PATH'\n`
         else steps += `   \`sudo apt install python3\`\n`
-        
+
         steps += `\n2. **Install uv** (Python package runner):\n   \`${installCmd}\`\n\n3. **Restart the AI-Worker app**`
 
         if (args?.some(a => a.includes('mcp-server-git') || a.includes('mcp_server_git'))) {
             steps += `\n\n💡 **Quick Fix:** Use \`uvx mcp-server-git /path/to/your/repo\` to run without installing.`
         }
-        
+
         if (args?.some(a => a.includes('markitdown'))) {
             steps += `\n\n📄 **MarkItDown** will be automatically available once uv is installed. It converts PDFs, Word docs, Excel, images, and audio files to Markdown!`
         }

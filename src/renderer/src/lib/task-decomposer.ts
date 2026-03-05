@@ -8,6 +8,7 @@
  */
 
 import { chat } from './llm';
+import { LLMResponse } from './types';
 
 export interface TaskDecomposition {
   type: 'single_context' | 'multi_context';
@@ -219,7 +220,7 @@ Return ONLY valid JSON, do not include any markdown formatting or conversational
       settings
     );
 
-    const response = await Promise.race([llmPromise, timeoutPromise]) as any;
+    const response = await Promise.race([llmPromise, timeoutPromise]) as LLMResponse;
 
     // Extract JSON from response (handle markdown blocks and conversational text)
     let jsonContent = response.content || '{}';

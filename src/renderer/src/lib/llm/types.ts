@@ -1,4 +1,4 @@
-import { LLMMessage, LLMSettings, LLMTool, LLMProvider, LLMResponse, ServerInfo, LLMContentPart } from "../types";
+// ProviderStatus defines the state of an LLM provider (Ollama, WebLLM, etc.)
 
 export interface ProviderStatus {
   available: boolean;

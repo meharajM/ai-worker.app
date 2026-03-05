@@ -157,8 +157,8 @@ export async function chat(
     }
   }
 
-  let useJsonFallback = provider === 'browser';
-  let messagesWithSystem = [...prunedMessages];
+  const useJsonFallback = provider === 'browser';
+  const messagesWithSystem = [...prunedMessages];
   const systemMsgIndex = messagesWithSystem.findIndex((m) => m.role === "system");
 
   // MERGE default tools with the new CREATE_PLAN_TOOL (and deduplicate)
