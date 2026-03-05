@@ -1,37 +1,38 @@
 import React, { useState, useEffect } from 'react';
 import { Command } from 'cmdk';
-import { Search, Loader2, Bot, Trash2, Layout, Settings } from 'lucide-react';
+import { Search, Bot, Trash2, Layout, Settings } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { motion, AnimatePresence } from 'framer-motion';
-import { cn } from '../lib/utils';
+import { View } from './Sidebar';
 
-export function CommandPalette() {
+interface CommandPaletteProps {
+  onViewChange?: (view: View) => void;
+}
+
+export function CommandPalette({ onViewChange }: CommandPaletteProps) {
   const [open, setOpen] = useState(false);
   const { clearMessages, toggleSidebar } = useChatStore();
 
-  // Toggle with Cmd+K or close with Escape
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         setOpen((open) => !open);
       }
-      
-      if (e.key === 'Escape') {
-        setOpen(false);
-      }
+      if (e.key === 'Escape') setOpen(false);
     };
     document.addEventListener('keydown', down);
     return () => document.removeEventListener('keydown', down);
   }, []);
 
-  const itemClass = "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-white/80 aria-selected:bg-[#00a896] aria-selected:text-white cursor-pointer transition-colors";
+  // List Item classes (Matches standard actions style)
+  const itemClass = "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-white/80 aria-selected:bg-[var(--color-primary)] aria-selected:text-white cursor-pointer transition-colors";
 
   return (
     <AnimatePresence>
       {open && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]">
-            {/* Backdrop */}
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh]">
+          {/* Backdrop */}
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -46,27 +47,28 @@ export function CommandPalette() {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -20 }}
             transition={{ duration: 0.2 }}
-            className="w-full max-w-lg relative z-50"
+            className="w-full max-w-3xl relative z-50"
           >
             <Command 
-                className="bg-[#1a1d23] border border-white/10 rounded-xl shadow-2xl overflow-hidden"
+                className="bg-[var(--color-bg-dark)] border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
                 loop
             >
-              <div className="flex items-center border-b border-white/5 px-4">
-                <Search size={16} className="text-white/40 mr-3" />
+              <div className="flex items-center border-b border-white/5 px-6 shrink-0 bg-[var(--color-surface)]">
+                <Search size={20} className="text-white/40 mr-4" />
                 <Command.Input 
-                    placeholder="Type a command or search..." 
-                    className="flex-1 bg-transparent py-4 text-sm text-white placeholder-white/40 outline-none"
+                    placeholder="Type a command, search agents..." 
+                    className="flex-1 bg-transparent py-5 text-base text-white placeholder-white/40 outline-none"
                     autoFocus
                 />
               </div>
 
-              <Command.List className="max-h-[300px] overflow-y-auto p-2 scroll-py-2">
-                <Command.Empty className="py-6 text-center text-sm text-white/40">
-                    No results found.
+              <Command.List className="max-h-[60vh] overflow-y-auto p-4 scroll-py-4">
+                <Command.Empty className="py-12 text-center text-sm text-white/40">
+                    No matching commands or agents found.
                 </Command.Empty>
 
-                <Command.Group heading="Actions" className="text-xs font-bold text-white/30 uppercase tracking-wider mb-2 px-2">
+
+                <Command.Group heading="Actions" className="text-xs font-bold text-white/30 uppercase tracking-wider mb-2 px-2 mt-6">
                     <Command.Item 
                         onSelect={() => {
                             clearMessages();
@@ -76,7 +78,7 @@ export function CommandPalette() {
                     >
                         <Trash2 size={16} />
                         <span>Clear Chat</span>
-                        <span className="ml-auto text-xs opacity-50">Cmd+Del</span>
+                        <span className="ml-auto text-xs opacity-50 font-mono">Cmd+Del</span>
                     </Command.Item>
                 </Command.Group>
 
@@ -90,17 +92,18 @@ export function CommandPalette() {
                     >
                         <Layout size={16} />
                         <span>Toggle Sidebar</span>
-                        <span className="ml-auto text-xs opacity-50">Cmd+B</span>
+                        <span className="ml-auto text-xs opacity-50 font-mono">Cmd+B</span>
                     </Command.Item>
-                     <Command.Item 
+                      <Command.Item 
                         onSelect={() => {
+                            onViewChange?.('settings');
                             setOpen(false);
                         }}
                         className={itemClass}
                     >
                         <Settings size={16} />
                         <span>Settings</span>
-                        <span className="ml-auto text-xs opacity-50">Cmd+,</span>
+                        <span className="ml-auto text-xs opacity-50 font-mono">Cmd+,</span>
                     </Command.Item>
                 </Command.Group>
 
@@ -125,18 +128,18 @@ export function CommandPalette() {
             </Command>
              
              {/* Footer hint */}
-            <div className="absolute top-full left-0 right-0 mt-2 flex justify-center gap-4 text-[10px] text-white/40 font-medium">
+            <div className="absolute top-full left-0 right-0 mt-3 flex justify-center gap-4 text-[10px] text-white/40 font-medium">
                 <span className="flex items-center gap-1">
-                    <kbd className="bg-white/10 px-1.5 py-0.5 rounded">↵</kbd>
+                    <kbd className="bg-black/40 border border-white/10 px-1.5 py-0.5 rounded shadow-sm">↵</kbd>
                     select
                 </span>
                 <span className="flex items-center gap-1">
-                    <kbd className="bg-white/10 px-1.5 py-0.5 rounded">↓</kbd>
-                    <kbd className="bg-white/10 px-1.5 py-0.5 rounded">↑</kbd>
+                    <kbd className="bg-black/40 border border-white/10 px-1.5 py-0.5 rounded shadow-sm">↓</kbd>
+                    <kbd className="bg-black/40 border border-white/10 px-1.5 py-0.5 rounded shadow-sm">↑</kbd>
                     navigate
                 </span>
                 <span className="flex items-center gap-1">
-                    <kbd className="bg-white/10 px-1.5 py-0.5 rounded">esc</kbd>
+                    <kbd className="bg-black/40 border border-white/10 px-1.5 py-0.5 rounded shadow-sm">esc</kbd>
                     close
                 </span>
             </div>

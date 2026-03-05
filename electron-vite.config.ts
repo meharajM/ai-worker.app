@@ -17,11 +17,12 @@ export default defineConfig({
         input: resolve(__dirname, 'src/renderer/index.html')
       }
     },
+    // Remove jsxInject entirely—let react() plugin use automatic runtime
     resolve: {
       alias: {
         '@renderer': resolve('src/renderer/src')
       }
     },
-    plugins: [react()]
+    plugins: [react()]  // This enables automatic JSX by default
   }
 })

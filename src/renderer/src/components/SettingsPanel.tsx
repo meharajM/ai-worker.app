@@ -42,29 +42,16 @@ import { MemoryPreferencesPanel } from './settings/MemoryPreferencesPanel'
 import { ModelSelect } from './ModelSelect'
 import { ErrorBoundary } from './ErrorBoundary'
 import { LLMProviderSettings } from './settings/llm/LLMProviderSettings'
+import { SidebarHeader } from './sidebar/SidebarHeader'
+import { ArrowLeft } from 'lucide-react'
 
 type SettingsSection = 'account' | 'llm' | 'voice' | 'memory' | 'browser' | 'appearance' | 'logs' | 'flags' | 'about'
 
-interface ProviderStatus {
-    ollama: { available: boolean; model?: string; models?: string[]; error?: string; modelsEndpointAvailable?: boolean }
-    openai: { available: boolean; model?: string; models?: string[]; error?: string; modelsEndpointAvailable?: boolean }
-    gemini: { available: boolean; model?: string; models?: string[]; error?: string; modelsEndpointAvailable?: boolean }
-    openrouter: { available: boolean; model?: string; models?: string[]; error?: string; modelsEndpointAvailable?: boolean }
-    browser?: {
-        available: boolean;
-        model?: string;
-        models?: string[];
-        error?: string;
-        isWebGPUSupported?: boolean;
-        isLoaded?: boolean;
-        isLoading?: boolean;
-        loadingProgress?: number;
-        loadingStage?: string;
-        downloadedModels?: string[];
-    }
+interface SettingsPanelProps {
+    onClose: () => void;
 }
 
-export function SettingsPanel() {
+export function SettingsPanel({ onClose }: SettingsPanelProps) {
     const [activeSection, setActiveSection] = useState<SettingsSection>('llm')
 
     const [testingBrowser, setTestingBrowser] = useState(false)
@@ -123,28 +110,48 @@ export function SettingsPanel() {
 
     return (
         <div className="flex-1 flex overflow-hidden">
-            {/* Sidebar */}
-            <div className="w-48 flex-shrink-0 bg-[#1a1d23]/50 border-r border-white/5 p-4">
-                <h2 className="text-lg font-bold mb-4 px-2">Settings</h2>
-                <nav className="space-y-1">
-                    {sections.map((section) => (
-                        <button
-                            key={section.id}
-                            onClick={() => setActiveSection(section.id)}
-                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${activeSection === section.id
-                                ? 'bg-white/10 text-white'
-                                : 'text-white/60 hover:text-white hover:bg-white/5'
-                                }`}
-                        >
-                            {section.icon}
-                            {section.label}
-                        </button>
-                    ))}
-                </nav>
+            {/* Sidebar styling matched exactly to Co-Worker Hub */}
+            <div className="w-64 flex-shrink-0 bg-[var(--color-card-dark)] flex flex-col h-full border-r border-[var(--color-border)] transition-all duration-300">
+                <SidebarHeader />
+                
+                <div className="flex-1 overflow-y-auto px-5 py-4">
+                    <h3 className="text-[10px] font-bold text-white/40 tracking-wider uppercase mb-3">
+                        Settings
+                    </h3>
+                    <nav className="flex flex-col gap-1">
+                        {sections.map((section) => (
+                            <button
+                                key={section.id}
+                                onClick={() => setActiveSection(section.id)}
+                                className={`w-full flex items-center gap-3 px-2 py-2 -mx-2 rounded-lg text-xs font-medium transition-colors ${activeSection === section.id
+                                    ? 'bg-[var(--color-surface)] text-white'
+                                    : 'text-white/60 hover:text-white hover:bg-[var(--color-surface)]'
+                                    }`}
+                            >
+                                <span className={activeSection === section.id ? 'text-[var(--color-primary)]' : 'opacity-70'}>
+                                    {section.icon}
+                                </span>
+                                {section.label}
+                            </button>
+                        ))}
+                    </nav>
+                </div>
+
+                <div className="px-5 py-4 border-t border-[var(--color-border)]">
+                    <button
+                        onClick={onClose}
+                        className="w-full flex items-center justify-between py-2 px-2 -mx-2 rounded-lg transition-colors group cursor-pointer text-white/50 hover:bg-[var(--color-surface)] hover:text-white"
+                    >
+                        <div className="flex items-center gap-3">
+                            <ArrowLeft size={16} className="opacity-70 group-hover:opacity-100" />
+                            <span className="text-xs font-medium">Back to Hub</span>
+                        </div>
+                    </button>
+                </div>
             </div>
 
-            {/* Content */}
-            <div className="flex-1 min-w-0 overflow-y-auto p-6">
+            {/* Content pane with darker background for contrast with the Settings panel elements */}
+            <div className="flex-1 min-w-0 overflow-y-auto p-10 bg-[var(--color-bg-dark)]">
                 {/* Account Section */}
                 {activeSection === 'account' && FEATURE_FLAGS.AUTH_ENABLED && (
                     <AccountSettings />
