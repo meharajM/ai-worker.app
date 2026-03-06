@@ -176,7 +176,7 @@ export async function executeParallelSubAgents(
                     const content = typeof msg.content === "string" ? msg.content : "";
                     newStatus = content.includes("<think>") ? "Thinking..." : "Processing response...";
                 } else if (msg.tool_calls && msg.tool_calls.length > 0) {
-                    const toolName = msg.tool_calls[0].name;
+                    const toolName = msg.tool_calls[0].function.name;
                     if (toolName.includes("navigate")) newStatus = "Navigating...";
                     else if (toolName.includes("click")) newStatus = "Interacting...";
                     else if (toolName.includes("search")) newStatus = "Searching...";

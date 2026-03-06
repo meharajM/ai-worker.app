@@ -154,8 +154,7 @@ export function useAgent(): UseAgentReturn {
                         msg.tool_calls = m.toolCalls.map((tc) => ({
                             id: tc.id,
                             type: "function",
-                            name: tc.name,
-                            arguments: tc.arguments,
+                            function: { name: tc.name, arguments: tc.arguments },
                         }));
                     }
 
@@ -223,8 +222,8 @@ export function useAgent(): UseAgentReturn {
                             if (msg.tool_calls) {
                                 storeMsg.toolCalls = msg.tool_calls.map((tc) => ({
                                     id: tc.id,
-                                    name: tc.name,
-                                    arguments: tc.arguments as Record<string, unknown>,
+                                    name: tc.function.name,
+                                    arguments: tc.function.arguments,
                                 }));
                             }
 

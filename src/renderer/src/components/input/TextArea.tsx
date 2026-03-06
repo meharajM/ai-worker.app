@@ -14,7 +14,7 @@ interface TextAreaProps {
   /** Whether the speech model is being set up */
   isFirstSetup?: boolean
   /** Ref forwarding for external focus control */
-  textareaRef?: React.RefObject<HTMLTextAreaElement | null>
+  textareaRef?: React.RefObject<HTMLTextAreaElement>
 }
 
 /**
@@ -58,11 +58,11 @@ export function TextArea({
             ? 'Downloading model...'
             : 'Message... (Shift+Enter for new line, or drag files here)'
       }
-      rows={1}
+      rows={5}
       style={{
         resize: 'none',
-        minHeight: '24px',
-        maxHeight: '200px',
+        minHeight: '120px',
+        maxHeight: '400px',
       }}
       className={`
         w-full bg-transparent border-none outline-none

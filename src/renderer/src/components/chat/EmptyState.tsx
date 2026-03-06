@@ -6,7 +6,7 @@ import { WorkflowTiles } from '../WorkflowTiles'
  */
 export function EmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center h-full max-w-4xl mx-auto w-full pt-12 pb-24">
+    <div className="flex flex-col items-center justify-center min-h-full max-w-4xl mx-auto w-full pt-12 pb-60">
       
       {/* System Active Badge */}
       <div className="mb-8 px-3 py-1 rounded-full border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 text-[var(--color-primary)] text-[10px] font-bold tracking-widest uppercase">

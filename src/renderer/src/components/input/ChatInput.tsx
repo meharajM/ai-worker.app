@@ -199,12 +199,7 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
         setTextInput(prompt)
         setText(prompt)
 
-        if (!disabled) {
-          onSubmit(prompt, [], isHeadless)
-          setTextInput('')
-          setAttachments([])
-          resetTranscript()
-        } else if (textareaRef.current) {
+        if (textareaRef.current) {
           textareaRef.current.focus()
           setTimeout(() => {
             if (textareaRef.current) {

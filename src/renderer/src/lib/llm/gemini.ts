@@ -163,16 +163,11 @@ export async function callGemini(
   const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
 
   // Build a lookup: tool_call_id → function name
-  // Note: at runtime, tool_calls on LLMMessage objects are stored in OpenAI wire format
-  // ({ id, type, function: { name, arguments } }) by agent-runtime — we must handle both shapes.
-  type RuntimeToolCall = { id?: string; name?: string; function?: { name: string; arguments: Record<string, unknown> } };
   const toolIdToName = new Map<string, string>();
   messages.forEach(m => {
     if (m.role === 'assistant' && m.tool_calls) {
-      (m.tool_calls as unknown as RuntimeToolCall[]).forEach((tc) => {
-        const id = tc.id;
-        const name = tc.name || tc.function?.name;
-        if (id && name) toolIdToName.set(id, name);
+      m.tool_calls.forEach((tc) => {
+        if (tc.id && tc.function.name) toolIdToName.set(tc.id, tc.function.name);
       });
     }
   });
@@ -222,11 +217,9 @@ export async function callGemini(
 
     // Tool calls
     if (m.role === 'assistant' && m.tool_calls) {
-      (m.tool_calls as unknown as RuntimeToolCall[]).forEach((tc) => {
-        // Handle both our internal format (tc.name/tc.arguments) and OpenAI wire
-        // format (tc.function.name/tc.function.arguments) which agent-runtime uses at runtime.
-        const name = tc.name || tc.function?.name;
-        const rawArgs = (tc as unknown as { arguments?: Record<string, unknown> }).arguments ?? tc.function?.arguments;
+      m.tool_calls.forEach((tc) => {
+        const name = tc.function.name;
+        const rawArgs = tc.function.arguments;
         const args = typeof rawArgs === 'string'
           ? (() => { try { return JSON.parse(rawArgs); } catch { return { _parse_error: 'Invalid JSON arguments' }; } })()
           : rawArgs;
@@ -291,7 +284,7 @@ export async function callGemini(
   if (antigravity) {
     const gw = buildGatewayRequest(antigravity, model, geminiPayload);
     const result = await (await import('../electron')).default.antigravity.callGateway(gw.url, gw.headers, gw.body as string);
-    data = unwrapGatewayResponse(result) as unknown as Record<string, unknown>;
+    data = unwrapGatewayResponse(result as any) as unknown as Record<string, unknown>;
   } else if (apiKey) {
     const response = await fetch(`${baseUrl}/models/${model}:generateContent?key=${apiKey}`, {
       method: 'POST',
