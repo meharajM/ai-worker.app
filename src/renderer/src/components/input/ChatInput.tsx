@@ -198,7 +198,13 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
       if (prompt) {
         setTextInput(prompt)
         setText(prompt)
-        if (textareaRef.current) {
+
+        if (!disabled) {
+          onSubmit(prompt, [], isHeadless)
+          setTextInput('')
+          setAttachments([])
+          resetTranscript()
+        } else if (textareaRef.current) {
           textareaRef.current.focus()
           setTimeout(() => {
             if (textareaRef.current) {
@@ -217,7 +223,7 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
         'populate-chat-input',
         handlePopulate as EventListener
       )
-  }, [setText])
+  }, [setText, disabled, isHeadless, onSubmit, resetTranscript])
 
   const hasContent = textInput.trim().length > 0 || attachments.length > 0
 

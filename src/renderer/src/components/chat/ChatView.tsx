@@ -30,16 +30,17 @@ export function ChatView({ onClearChat }: ChatViewProps) {
   const {
     sessions,
     activeSessionId,
-    isSessionProcessing,
     removeMessage,
     clearMessages,
   } = useChatStore()
 
   const activeSession = sessions.find(s => s.id === activeSessionId)
   const messages = activeSession?.messages || []
-  const isProcessing = activeSessionId
-    ? isSessionProcessing(activeSessionId)
-    : false
+  
+
+  const isProcessing = useChatStore(s => 
+    activeSessionId ? s._processingSessions.has(activeSessionId) : false
+  )
 
   const {
     scrollContainerRef,

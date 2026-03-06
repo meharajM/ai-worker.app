@@ -89,16 +89,6 @@ export function useAgent(): UseAgentReturn {
             const { addMessage, startProcessing, addSessionMessage, updateSessionProgress } =
                 useChatStore.getState();
 
-            // ── CRITICAL: Capture originSessionId before any await ─────────────
-            // This is determined once at submit time and is used for ALL callbacks,
-            // error handlers, and cleanup. Switching sessions after this point will
-            // NOT affect which session receives messages or whose progress is cleared.
-            const originSessionId = useChatStore.getState().activeSessionId ?? "default";
-
-            // Start per-session processing — returns an AbortSignal scoped only to
-            // this session. Other sessions' signals are unaffected.
-            const abortSignal = startProcessing(originSessionId);
-
             // Map File objects to plain metadata. Electron exposes `.path` on File
             // objects, which is not part of the standard Web File API.
             const attachmentData = attachments?.map((file) => ({
@@ -109,7 +99,20 @@ export function useAgent(): UseAgentReturn {
 
             // Add the user's message to the store immediately so it appears in the
             // chat UI before the agent starts processing.
+            // This also auto-creates a session and sets activeSessionId if none exists!
             addMessage({ role: "user", content, attachments: attachmentData });
+
+            // ── CRITICAL: Capture originSessionId before any await ─────────────
+            // This is determined once at submit time and is used for ALL callbacks,
+            // error handlers, and cleanup. Switching sessions after this point will
+            // NOT affect which session receives messages or whose progress is cleared.
+            // We capture this AFTER addMessage to ensure we get the real session ID
+            // for brand new chats, rather than "default".
+            const originSessionId = useChatStore.getState().activeSessionId ?? "default";
+
+            // Start per-session processing — returns an AbortSignal scoped only to
+            // this session. Other sessions' signals are unaffected.
+            const abortSignal = startProcessing(originSessionId);
 
             // Build a plain settings object to pass to AgentRuntime.
             // WHY not pass the full Zustand store: AgentRuntime lives in lib/ and
@@ -151,10 +154,8 @@ export function useAgent(): UseAgentReturn {
                         msg.tool_calls = m.toolCalls.map((tc) => ({
                             id: tc.id,
                             type: "function",
-                            function: {
-                                name: tc.name,
-                                arguments: tc.arguments,
-                            },
+                            name: tc.name,
+                            arguments: tc.arguments,
                         }));
                     }
 
@@ -222,8 +223,8 @@ export function useAgent(): UseAgentReturn {
                             if (msg.tool_calls) {
                                 storeMsg.toolCalls = msg.tool_calls.map((tc) => ({
                                     id: tc.id,
-                                    name: tc.function.name,
-                                    arguments: tc.function.arguments as Record<string, unknown>,
+                                    name: tc.name,
+                                    arguments: tc.arguments as Record<string, unknown>,
                                 }));
                             }
 
