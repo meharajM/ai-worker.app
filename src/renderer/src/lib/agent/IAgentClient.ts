@@ -45,10 +45,9 @@ export interface IAgentClient {
      * Run the agent with the given user message and optional file attachments.
      *
      * The agent will:
-     * 1. Analyze the task (if `requireConfirmation` is enabled)
-     * 2. Decompose it (if complex enough)
-     * 3. Execute an LLM + tool call loop until done or max iterations reached
-     * 4. Call `onMessage` for every message produced during execution
+     * 1. Decompose the task (if complex enough for sub-agent orchestration)
+     * 2. Execute an LLM + tool call loop until done or max iterations reached
+     * 3. Call `onMessage` for every message produced during execution
      *
      * @param content - The user's text message.
      * @param attachments - Optional file attachments. Each has `name`, `path`, `type`.

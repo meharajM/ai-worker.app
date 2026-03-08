@@ -27,9 +27,8 @@
 import { chat } from "./llm";
 import { LLMMessage, LLMTool, ServerInfo, type LLMResponse } from "./types";
 import { pruneContext } from "./dcp";
-import { executeToolCall, getAllTools, getServers, parseTabIdFromResult } from "./mcp";
+import { getAllTools, getServers } from "./mcp";
 import { CLIENT_TOOLS } from "./client-tools";
-import { analyzeTask } from "./confirmation-message";
 import type { IAgentClient } from "./agent/IAgentClient";
 import {
   initializeSessionState,
@@ -44,7 +43,6 @@ import {
   formatToolResult,
   truncateToolOutput,
   reportFinding,
-  MAX_IDENTICAL_CALLS,
 } from "./agent/ToolExecutionService";
 import {
   executeParallelSubAgents,
@@ -59,6 +57,19 @@ import { MemoryReflector } from "./memory-reflector";
 // Files that import AgentRuntimeOptions from this module continue to work.
 export type { AgentRuntimeOptions, AgentStatusCallback } from "./agent/types";
 import type { AgentRuntimeOptions, AgentCheckpoint, ExecutionPlan } from "./agent/types";
+
+/**
+ * A single tool call entry in the master accumulator for the live UI bubble.
+ * Typed explicitly to satisfy the no-any policy (typescript-standards.md).
+ */
+interface AccumulatedToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  result?: string;
+  isPresentable?: boolean;
+  finding?: string;
+}
 
 /**
  * AgentRuntime — Local implementation of IAgentClient.
@@ -88,8 +99,11 @@ export class AgentRuntime implements IAgentClient {
   private readonly ABSOLUTE_MAX_ITERATIONS = 150;
   private toolCallHistory = new Set<string>();
   private agentInstanceId: string;
+  private taskStartTimeMs: number;
   private lastCheckpoint: AgentCheckpoint | null = null;
   private specialHandlers: SpecialToolHandlers;
+  /** Tracks last emitted progress % for incremental orchestration ticks */
+  private _lastProgressPct = 0;
 
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
     this.options = options;
@@ -106,6 +120,12 @@ export class AgentRuntime implements IAgentClient {
     this.maxIterations = options.isSubAgent ? 15 : 50;
     if (options.taskCategory) this.taskCategory = options.taskCategory;
 
+    if (options.taskCategory) {
+      this.taskCategory = options.taskCategory;
+    }
+
+    this.agentInstanceId = options.agentInstanceId || globalThis.crypto.randomUUID();
+    this.taskStartTimeMs = Date.now();
     this.specialHandlers = new SpecialToolHandlers(
       this.agentInstanceId,
       this.options,
@@ -119,7 +139,7 @@ export class AgentRuntime implements IAgentClient {
     userContent: string,
     attachments?: { name: string; path: string; type: string }[]
   ): Promise<LLMMessage> {
-    let finalPrompt = userContent;
+    const finalPrompt = userContent;
 
     let attachmentContext = "";
     if (attachments && attachments.length > 0) {
@@ -140,6 +160,24 @@ export class AgentRuntime implements IAgentClient {
       if (parentContextMsg) this.messages.push(parentContextMsg);
     }
 
+    // ── Check tasks.json for crash recovery ────────────────────────────────
+    if (!this.executionPlan && !this.options.isSubAgent && this.options.workspacePath) {
+      try {
+        const electron = (await import('./electron')).default;
+        const result = await electron.fs.readInternalFile(this.options.workspacePath, 'tasks.json');
+        if (result.success && result.content) {
+          this.executionPlan = JSON.parse(result.content);
+          console.log('[AgentRuntime] Recovered execution plan from tasks.json');
+
+          // Sync recovered plan to tasks.json to ensure file is up-to-date
+          import('./task-manager').then(m => m.syncPlanToFile(this.options.workspacePath, this.executionPlan!));
+        }
+      } catch (e) {
+        console.warn('[AgentRuntime] Failed to recover tasks.json:', e);
+      }
+    }
+
+    // ── Handoff detection (AgentStateService) ────────────────────────────────
     if (!this.options.isSubAgent) {
       const handoff = await detectHandoff(this.options.activeSessionId);
       if (handoff.found) {
@@ -152,34 +190,6 @@ export class AgentRuntime implements IAgentClient {
       }
     }
 
-    let taskComplexity: "simple" | "moderate" | "complex" = "moderate";
-
-    if (this.options.requireConfirmation && this.options.onConfirmationNeeded) {
-      try {
-        const isSimpleReply = /^(yes|no|ok|okay|sure|nope|continue|stop|proceed|go ahead|skip|next|back)$/i.test(userContent.trim());
-        const lastMessage = this.messages[this.messages.length - 1];
-        const lastContent = typeof lastMessage?.content === "string" ? lastMessage.content : "";
-        const isReplyToQuestion = lastMessage?.role === "assistant" && lastContent.includes("?");
-
-        if (isSimpleReply && isReplyToQuestion) {
-          taskComplexity = "simple";
-        } else {
-          const analysis = await analyzeTask(userContent, this.options.settings, attachments);
-          if (analysis.category) this.taskCategory = analysis.category;
-          if (analysis.complexity) taskComplexity = analysis.complexity.level;
-
-          if (analysis.shouldConfirm) {
-            const enrichedPrompt = await this.options.onConfirmationNeeded(analysis);
-            if (enrichedPrompt === null) {
-              return { role: "assistant", content: "Task cancelled. Let me know when you want to try again!" };
-            }
-            finalPrompt = enrichedPrompt;
-          }
-        }
-      } catch (error) {
-        console.error("[AgentRuntime] Confirmation analysis failed:", error);
-      }
-    }
 
     const lastMsg = this.messages[this.messages.length - 1];
     const isConfirmingHandoff =
@@ -193,7 +203,9 @@ export class AgentRuntime implements IAgentClient {
         this.messages.find((m) => m.role === "user")?.content?.toString() || "Complete the task";
       const stepsTaken = Math.floor(this.messages.length / 2);
       const progressContext = this.lastCheckpoint ? `Last Checkpoint: ${this.lastCheckpoint.summary}` : "No detailed progress recorded yet.";
-      return continueWithSubAgent(
+      // ── Emit progress for continuation handoff path ──────────────────────
+      this._emitProgress(5);
+      const continuationResult = await continueWithSubAgent(
         originalGoal,
         stepsTaken,
         progressContext,
@@ -202,32 +214,74 @@ export class AgentRuntime implements IAgentClient {
         (msg) => this.addMessage(msg),
         this._makeSubAgentFactory()
       );
+      this._emitProgress(100);
+      return continuationResult;
     }
 
-    if (!this.options.isSubAgent && taskComplexity !== "simple") {
-      const decomposition = await analyzeTaskForDecomposition(finalPrompt, this.options.settings);
+    if (!this.options.isSubAgent) {
+      // ── Trivially-short prompt guard ────────────────────────────────────────
+      // Skip the decomposition LLM call entirely for very short inputs.
+      // "yes", "ok", "continue", "no" etc. should never spawn sub-agents — they
+      // are conversational replies that belong in _runLoop directly.
+      // The task-decomposer already has a follow-up guard (< 80 chars) for
+      // prompts with conversation history, but this fires even with empty history.
+      const TRIVIAL_PROMPT_LENGTH = 20;
+      const isTrivialPrompt = finalPrompt.trim().length <= TRIVIAL_PROMPT_LENGTH;
+
+      const decomposition = isTrivialPrompt
+        ? { shouldFork: false, type: 'single_context' as const, contexts: ['current_page'], estimatedActions: 1 }
+        : await analyzeTaskForDecomposition(
+          finalPrompt,
+          this.options.settings,
+          undefined,
+          this.messages
+            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .map(m => ({
+              role: m.role,
+              content: typeof m.content === 'string' ? m.content : ''
+            }))
+        );
+
       if (decomposition.shouldFork && decomposition.type === "multi_context") {
+        // ── Emit progress for parallel orchestration path ────────────────────
+        const ctxCount = decomposition.contexts?.length || 1;
+        this._emitProgress(5);
         const result = await executeParallelSubAgents(
           finalPrompt,
           decomposition,
           this.options,
           this.agentInstanceId,
-          (msg) => this.addMessage(msg),
+          (msg) => {
+            // Tick progress forward as each sub-agent message arrives
+            this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (ctxCount * 3))));
+            return this.addMessage(msg);
+          },
           this._makeSubAgentFactory()
         );
+        this._emitProgress(100);
         MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
         return result;
       }
 
       if (decomposition.shouldFork && decomposition.type === "single_context") {
-        return executeSequentialSubAgents(
+        // ── Emit progress for sequential orchestration path ──────────────────
+        const stepCount = decomposition.contexts?.length || 3;
+        this._emitProgress(5);
+        const seqResult = await executeSequentialSubAgents(
           finalPrompt,
           decomposition,
           this.options,
           this.agentInstanceId,
-          (msg) => this.addMessage(msg),
+          (msg) => {
+            // Advance progress by one step slice as each step message arrives
+            this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (stepCount * 2))));
+            return this.addMessage(msg);
+          },
           this._makeSubAgentFactory()
         );
+        this._emitProgress(100);
+        MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+        return seqResult;
       }
     }
 
@@ -255,6 +309,11 @@ export class AgentRuntime implements IAgentClient {
     let iterationCount = 0;
     let consecutiveErrors = 0;
     const recentToolCalls: string[] = [];
+    // Tracks the single live UI bubble created for ALL tool-calling iterations.
+    // Only one bubble is ever created per agent run; all tool calls accumulate into it.
+    let activeAssistantMessageId: string | undefined;
+    // Master list of all tool calls across every iteration — merged into the one bubble.
+    const accumulatedToolCalls: AccumulatedToolCall[] = [];
 
     while (iterationCount < this.maxIterations) {
       this.totalIterations++;
@@ -291,7 +350,20 @@ export class AgentRuntime implements IAgentClient {
 
         const assistantMsg: LLMMessage = { role: "assistant", content: response.content };
         this._appendCheckpointReport(assistantMsg);
-        this.addMessage(assistantMsg);
+
+        if (activeAssistantMessageId && this.options.onMessageUpdate) {
+          // ── Final response: update the live bubble in-place (no new bubble created) ──
+          // Push to internal history without firing onMessage (which would add a new bubble).
+          this.messages.push(assistantMsg);
+          const finalUpdates: any = { content: assistantMsg.content };
+          if (accumulatedToolCalls.length > 0) {
+            finalUpdates.toolCalls = accumulatedToolCalls;
+          }
+          this.options.onMessageUpdate(activeAssistantMessageId, finalUpdates);
+        } else {
+          // No live bubble yet (agent answered immediately without tools) — create one normally.
+          this.addMessage(assistantMsg);
+        }
 
         await cleanupState(this.agentInstanceId);
         return assistantMsg;
@@ -306,7 +378,41 @@ export class AgentRuntime implements IAgentClient {
           function: { name: tc.name, arguments: tc.arguments },
         })) as any,
       };
-      this.addMessage(assistantMsg);
+
+      // Build tool call entries for this iteration (no result yet — pending)
+      const iterationToolCalls: AccumulatedToolCall[] = response.toolCalls.map(tc => ({
+        id: tc.id,
+        name: tc.name,
+        arguments: tc.arguments
+      }));
+
+      if (!activeAssistantMessageId) {
+        // ── First tool-calling iteration: create the single live UI bubble ──
+        // assistantMsg carries this iteration's tool_calls so the LLM history is correct.
+        // We also attach the store-format toolCalls so onMessage can persist them.
+        (assistantMsg as any).toolCalls = iterationToolCalls;
+        const messageIdResult = this.addMessage(assistantMsg);
+        if (typeof messageIdResult === "string") {
+          activeAssistantMessageId = messageIdResult;
+        }
+        // Seed the accumulator with this iteration's calls
+        accumulatedToolCalls.push(...iterationToolCalls);
+      } else {
+        // ── Subsequent iterations: do NOT create a new bubble ──
+        // Push to internal LLM history silently (no onMessage callback).
+        this.messages.push(assistantMsg);
+        // Merge new tool calls into the accumulator
+        accumulatedToolCalls.push(...iterationToolCalls);
+        // Immediately update the live bubble to show the new pending tool calls
+        if (this.options.onMessageUpdate) {
+          this.options.onMessageUpdate(activeAssistantMessageId, {
+            toolCalls: [...accumulatedToolCalls]
+          } as any);
+        }
+      }
+
+      // Keep local assistantMsg.toolCalls in sync for the tool execution block below
+      (assistantMsg as any).toolCalls = iterationToolCalls;
 
       const toolPromises = response.toolCalls.map(async (call) => {
         if (this.options.signal?.aborted) return null;
@@ -370,8 +476,74 @@ export class AgentRuntime implements IAgentClient {
         const truncated = truncateToolOutput(call.name, resultStr);
         this.addMessage({ role: "tool", content: truncated, tool_call_id: call.id });
 
+        // ── Update UI with tool result ─────────────────────────────────────
+        if (activeAssistantMessageId && this.options.onMessageUpdate) {
+          // Update the result on the matching tool call in the master accumulator
+          const tcIndex = accumulatedToolCalls.findIndex(t => t.id === call.id);
+          if (tcIndex !== -1) {
+            accumulatedToolCalls[tcIndex] = { ...accumulatedToolCalls[tcIndex], result: truncated };
+          }
+          // Also update the local assistantMsg for finding reporting below
+          const currentToolCalls = (assistantMsg as any).toolCalls as AccumulatedToolCall[] || [];
+          const updatedLocal = currentToolCalls.map(t =>
+            t.id === call.id ? { ...t, result: truncated } : t
+          );
+          (assistantMsg as any).toolCalls = updatedLocal;
+          this.options.onMessageUpdate(activeAssistantMessageId, {
+            toolCalls: [...accumulatedToolCalls]
+          } as any);
+        }
+
+        // ── Progress calculation (Gap 2 fix) ──────────────────────────────
+        // Runs unconditionally — not just when there's presentable data.
+        // This ensures the progress bar advances for every tool call,
+        // including browser_navigate, browser_click, fs_read, etc.
+        if (!this.options.isSubAgent && this.options.onProgressUpdate) {
+          // Crude iteration-based estimate as the floor
+          let progress = Math.min(Math.round(((iterationCount + 1) / this.maxIterations) * 100), 95);
+
+          // If we have an execution plan, use the more accurate step-based progress
+          if (this.executionPlan && this.executionPlan.steps.length > 0) {
+            const totalSteps = this.executionPlan.steps.length;
+            const completedSteps = this.executionPlan.steps.filter(s => s.status === 'completed').length;
+            const activeSteps = this.executionPlan.steps.filter(s => s.status === 'active').length;
+            // Active steps count as 50% done for progress calculation
+            const rawProgress = ((completedSteps + (activeSteps * 0.5)) / totalSteps) * 100;
+            progress = Math.min(Math.max(Math.round(rawProgress), progress), 98);
+          }
+
+          let etaSeconds: number | undefined;
+          if (progress > 0) {
+            const elapsedMs = Date.now() - this.taskStartTimeMs;
+            const rate = progress / elapsedMs;
+            const remainingMs = Math.max(0, (100 - progress) / rate);
+            etaSeconds = Math.round(remainingMs / 1000);
+          }
+
+          this.options.onProgressUpdate(progress, etaSeconds, this.executionPlan ?? undefined);
+        }
+
+        // ── Incremental finding reporting ──────────────────────────────────
+        // Only surfaces data-rich tool outputs (e.g. page content, file reads)
+        // as annotated findings on the tool call card. Does NOT update progress.
         if (!this.options.isSubAgent) {
-          reportFinding(call.name, resultStr, (msg) => this.addMessage(msg));
+          const findingSummary = reportFinding(call.name, resultStr);
+          if (findingSummary && activeAssistantMessageId && this.options.onMessageUpdate) {
+            // Mark the tool call as presentable in the master accumulator
+            const tcIdx = accumulatedToolCalls.findIndex(t => t.id === call.id);
+            if (tcIdx !== -1) {
+              accumulatedToolCalls[tcIdx] = { ...accumulatedToolCalls[tcIdx], isPresentable: true, finding: findingSummary.summary };
+            }
+            // Also keep local assistantMsg in sync for any downstream use
+            const currentToolCalls = (assistantMsg as any).toolCalls as AccumulatedToolCall[] || [];
+            const updatedLocal = currentToolCalls.map(t =>
+              t.id === call.id ? { ...t, isPresentable: true, finding: findingSummary.summary } : t
+            );
+            (assistantMsg as any).toolCalls = updatedLocal;
+            this.options.onMessageUpdate(activeAssistantMessageId, {
+              toolCalls: [...accumulatedToolCalls]
+            } as any);
+          }
         }
         return undefined;
       });
@@ -386,6 +558,33 @@ export class AgentRuntime implements IAgentClient {
 
     return this._handleMaxIterations(finalPrompt);
   }
+
+  /**
+   * Emits a progress update to the UI via onProgressUpdate.
+   * Stores `lastPct` on itself so orchestration path callbacks can increment ticks.
+   * Passing 100 clears the progress bar (sends undefined — the store's reset signal).
+   * No-op for sub-agents or when onProgressUpdate is not wired.
+   */
+  private _emitProgress(pct: number, etaSeconds?: number): void {
+    if (this.options.isSubAgent || !this.options.onProgressUpdate) return;
+    const clamped = Math.max(0, Math.min(100, pct));
+    this._lastProgressPct = clamped;
+    let eta = etaSeconds;
+    if (eta === undefined && clamped > 0 && clamped < 100) {
+      const elapsedMs = Math.max(1, Date.now() - this.taskStartTimeMs);
+      const rate = clamped / elapsedMs;
+      if (rate > 0 && Number.isFinite(rate)) {
+        const remainingMs = Math.max(0, (100 - clamped) / rate);
+        eta = Math.round(remainingMs / 1000);
+      } else {
+        eta = 0;
+      }
+    }
+    // Sending undefined for progress clears the bar (matches useAgent.ts finally-block behaviour)
+    this.options.onProgressUpdate(clamped === 100 ? undefined : clamped, clamped === 100 ? undefined : eta, this.executionPlan ?? undefined);
+  }
+
+  // ── Private: Helpers ───────────────────────────────────────────────────────
 
   private async _handleContextLimits() {
     const contextText = JSON.stringify(this.messages);
@@ -407,8 +606,8 @@ export class AgentRuntime implements IAgentClient {
     const mcpTools = getAllTools();
     const toolMap = new Map<string, LLMTool>();
     const all = [
-      ...mcpTools.map(t => ({ name: t.name, description: t.description, parameters: t.inputSchema })),
-      ...CLIENT_TOOLS.map(t => ({ name: t.name, description: t.description, parameters: t.inputSchema }))
+      ...mcpTools.map((t) => ({ name: t.name, description: t.description, parameters: t.inputSchema })),
+      ...CLIENT_TOOLS.map((t) => ({ name: t.name, description: t.description, parameters: t.inputSchema })),
     ];
     for (const tool of all) {
       if (!toolMap.has(tool.name)) toolMap.set(tool.name, tool);
@@ -417,12 +616,15 @@ export class AgentRuntime implements IAgentClient {
   }
 
   private _getServerInfo(): ServerInfo[] {
-    return getServers().filter(s => s.connected).map(s => ({
-      name: s.name,
-      description: s.description.substring(0, 40),
-      toolCount: s.tools.length,
-      isReasoningServer: s.name.includes("sequential") || s.description.toLowerCase().includes("reasoning")
-    }));
+    return getServers()
+      .filter((s) => s.connected)
+      .map((s) => ({
+        name: s.name,
+        description: s.description.substring(0, 40),
+        toolCount: s.tools.length,
+        isReasoningServer:
+          s.name.includes("sequential") || s.description.toLowerCase().includes("reasoning"),
+      }));
   }
 
   private async _getDynamicRules(): Promise<string | undefined> {
@@ -433,12 +635,27 @@ export class AgentRuntime implements IAgentClient {
   }
 
   private _handleModelRefusal(response: LLMResponse): boolean {
-    const refusalPatterns = [/don't have access to/i, /can't (?:access|check|fetch|get)/i, /unable to (?:browse|access)/i];
-    if (refusalPatterns.some(p => p.test(response.content || "")) && !this.messages.some(m => m.content?.toString().includes("[AUTO-CORRECT]"))) {
-      const query = this.messages.filter(m => m.role === "user").pop()?.content?.toString() || "the request";
+    const refusalPatterns = [
+      /don't have access to/i,
+      /can't (?:access|check|fetch|get)/i,
+      /I (?:am|'m) (?:just|only) a/i,
+      /unable to (?:browse|access)/i,
+      /you(?:'ll)? need to check/i,
+    ];
+    const isRefusal = refusalPatterns.some((p) => p.test(response.content || ""));
+    const alreadyCorrected = this.messages.some(
+      (m) => typeof m.content === "string" && m.content.includes("[AUTO-CORRECT]")
+    );
+
+    if (isRefusal && !alreadyCorrected) {
+      console.warn("[AgentRuntime] Model refused tool use. Auto-correcting...");
+      const userQuery = this.messages.filter((m) => m.role === "user").pop();
+      const query = typeof userQuery?.content === "string" ? userQuery.content : "the request";
       this.addMessage({
         role: "user",
-        content: `[AUTO-CORRECT] You refused to help. You HAVE browser tools. Use navigate to search for "${query}".`
+        content: `[AUTO-CORRECT] You refused to help. This is wrong — you HAVE browser tools.\n            \nFor "${query}", use: navigate({"url": "https://google.com/search?q=${encodeURIComponent(
+          query
+        )}"})`,
       });
       return true;
     }
@@ -454,11 +671,11 @@ export class AgentRuntime implements IAgentClient {
 
   private async _handleCheckpoints(iterationCount: number) {
     if (this.options.isSubAgent) return;
-    const INTERVAL = 15;
-    if (iterationCount % INTERVAL === 0) {
+    const CHECKPOINT_INTERVAL = 15;
+    if (iterationCount % CHECKPOINT_INTERVAL === 0) {
       this.addMessage({
         role: "user",
-        content: `[CHECKPOINT ${iterationCount}] Please call update_progress_summary now.`
+        content: `[CHECKPOINT ${iterationCount}] Please call update_progress_summary now to summarize your progress so far. This will help prevent context overflow.`,
       });
     }
   }
@@ -467,11 +684,19 @@ export class AgentRuntime implements IAgentClient {
     if (this.options.isSubAgent) throw new Error("Max iterations reached");
     const handoffMsg: LLMMessage = {
       role: "assistant",
-      content: `I've worked for ${this.maxIterations} steps. Current summary: ${this.lastCheckpoint?.summary || "Working..."}. Continue?`,
+      content: `I've worked for ${this.maxIterations} steps on this task. To ensure accuracy and prevent context issues, I've saved a checkpoint of my progress. Should I continue with a fresh context or stop here?`,
       actions: [
-        { type: "continue", label: "▶️ Continue Task", payload: { goal: finalPrompt } },
-        { type: "cancel", label: "⏹️ Stop Here", payload: {} }
-      ]
+        {
+          type: "continue",
+          label: "▶️ Continue Task",
+          payload: { goal: finalPrompt },
+        },
+        {
+          type: "cancel",
+          label: "⏹️ Stop Here",
+          payload: {},
+        },
+      ],
     };
     this.addMessage(handoffMsg);
     return handoffMsg;
@@ -483,6 +708,18 @@ export class AgentRuntime implements IAgentClient {
   }
 
   private _makeSubAgentFactory(): SubAgentFactory {
-    return (overrides) => new AgentRuntime({ ...this.options, ...overrides });
+    return (overrides) => {
+      const subAgentOptions: AgentRuntimeOptions = {
+        ...this.options,
+        ...overrides,
+        // WHY always strip onProgressUpdate for sub-agents:
+        // Sub-agents must NEVER fire global UI progress updates. Progress is
+        // managed by the parent agent only. Stripping it here is an explicit
+        // boundary, not just relying on the `!isSubAgent` guard in _runLoop.
+        onProgressUpdate: undefined,
+        onMessageUpdate: undefined,
+      };
+      return new AgentRuntime(subAgentOptions);
+    };
   }
 }

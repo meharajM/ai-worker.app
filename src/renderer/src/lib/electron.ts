@@ -1,6 +1,4 @@
-/// <reference path="../env.d.ts" />
-
-// Platform detection and Electron API wrapper
+import '../env.d.ts'
 // Provides fallbacks for browser environment
 
 export const isElectron = (): boolean => {
@@ -159,9 +157,43 @@ export const electron = {
 
     },
 
+    // FS operations
+    fs: {
+        getPendingChanges: async () => {
+            if (isElectron() && window.electron?.fs) {
+                return await window.electron.fs.getPendingChanges()
+            }
+            return []
+        },
+        approveChange: async (changeId: string) => {
+            if (isElectron() && window.electron?.fs) {
+                return await window.electron.fs.approveChange(changeId)
+            }
+            return { success: false }
+        },
+        rejectChange: async (changeId: string) => {
+            if (isElectron() && window.electron?.fs) {
+                return await window.electron.fs.rejectChange(changeId)
+            }
+            return { success: false }
+        },
+        writeInternalFile: async (workspacePath: string | undefined, filename: string, content: string) => {
+            if (isElectron() && window.electron?.fs && window.electron.fs.writeInternalFile) {
+                return await window.electron.fs.writeInternalFile(workspacePath, filename, content)
+            }
+            return { success: false, error: 'Not supported in browser' }
+        },
+        readInternalFile: async (workspacePath: string | undefined, filename: string) => {
+            if (isElectron() && window.electron?.fs && window.electron.fs.readInternalFile) {
+                return await window.electron.fs.readInternalFile(workspacePath, filename)
+            }
+            return { success: false, error: 'Not supported in browser' }
+        }
+    },
+
     // Memory operations
     memory: {
-        callTool: async (name: string, args: any) => {
+        callTool: async (name: string, args: Record<string, unknown>) => {
             if (isElectron() && window.electron?.memory) {
                 return await window.electron.memory.callTool(name, args)
             }
@@ -214,7 +246,7 @@ export const electron = {
             }
             return { signedIn: false, email: null, projectId: null }
         },
-        callGateway: async (url: string, headers: Record<string, string>, body: string): Promise<any> => {
+        callGateway: async (url: string, headers: Record<string, string>, body: string): Promise<unknown> => {
             if (isElectron() && window.electron?.antigravity) {
                 return await window.electron.antigravity.callGateway(url, headers, body)
             }
@@ -224,7 +256,7 @@ export const electron = {
 
     // Log operations
     logs: {
-        add: async (entry: any) => {
+        add: async (entry: unknown) => {
             if (isElectron() && window.electron?.logs) {
                 return await window.electron.logs.add(entry)
             }

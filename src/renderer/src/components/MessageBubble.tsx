@@ -1,4 +1,4 @@
-import {  Bot, User, History, AlertCircle, CheckCircle2, Circle, ChevronRight, Save, Copy, RotateCcw, File, FileAudio, FileImage, FileText, FileSpreadsheet } from 'lucide-react'
+import { Bot, User, History, AlertCircle, CheckCircle2, Circle, ChevronRight, Save, Copy, RotateCcw, File, FileAudio, FileImage, FileText, FileSpreadsheet } from 'lucide-react'
 import { Message, useChatStore, ToolCall } from '../stores/chatStore'
 import { motion } from 'framer-motion';
 import { AgentPlan, parseAgentPlan } from './AgentPlan'
@@ -24,28 +24,34 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
         })
     }
 
+    const formatETA = (etaSeconds?: number) => {
+        if (etaSeconds === undefined || etaSeconds < 0) return null;
+        if (etaSeconds < 60) return `< 1m remaining`;
+        const m = Math.floor(etaSeconds / 60);
+        if (m >= 60) {
+            const h = Math.floor(m / 60);
+            return `~${h}h ${m % 60}m remaining`;
+        }
+        return `~${m}m remaining`;
+    };
+
     // Helper to get icon for file type
     const getFileIcon = (type: string, name: string) => {
         const lowerType = type.toLowerCase();
         const lowerName = name.toLowerCase();
-        
-        if (lowerType.includes('audio') || lowerName.endsWith('.mp3') || lowerName.endsWith('.wav') || lowerName.endsWith('.m4a')) 
+
+        if (lowerType.includes('audio') || lowerName.endsWith('.mp3') || lowerName.endsWith('.wav') || lowerName.endsWith('.m4a'))
             return <FileAudio size={14} className="text-blue-400" />;
-        if (lowerType.includes('image') || lowerName.endsWith('.png') || lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) 
+        if (lowerType.includes('image') || lowerName.endsWith('.png') || lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg'))
             return <FileImage size={14} className="text-purple-400" />;
         if (lowerType.includes('sheet') || lowerType.includes('excel') || lowerType.includes('csv') || lowerName.endsWith('.csv') || lowerName.endsWith('.xlsx'))
-             return <FileSpreadsheet size={14} className="text-green-400" />;
+            return <FileSpreadsheet size={14} className="text-green-400" />;
         if (lowerType.includes('text') || lowerType.includes('pdf') || lowerName.endsWith('.txt') || lowerName.endsWith('.md') || lowerName.endsWith('.pdf'))
             return <FileText size={14} className="text-orange-400" />;
-            
+
         return <File size={14} className="text-gray-400" />;
     }
 
-    // Check for agent plan in tool calls (New Method)
-    const planToolCall = message.toolCalls?.find(tc => tc.name === 'create_execution_plan');
-    const toolPlanData = planToolCall ? parseAgentPlan(planToolCall.arguments) : null;
-
-    const agentPlan = toolPlanData;
 
     // Filter out internal tools from the standard checklist view
     const visibleToolCalls = message.toolCalls?.filter(tc =>
@@ -83,7 +89,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
     }
 
     return (
-        <motion.div 
+        <motion.div
             initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             transition={{ duration: 0.3, ease: 'easeOut' }}
@@ -104,7 +110,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                 "relative max-w-[80%] min-w-0 flex flex-col gap-1.5",
                 isUser ? "items-end" : "items-start"
             )}>
-                
+
                 {/* 1. Attachments (Rendered OUTSIDE the bubble for "Gemini-style" look) */}
                 {message.attachments && message.attachments.length > 0 && (
                     <div className={cn(
@@ -112,8 +118,8 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                         isUser ? "justify-end" : "justify-start"
                     )}>
                         {message.attachments.map((att, idx) => (
-                            <div 
-                                key={idx} 
+                            <div
+                                key={idx}
                                 className="group/card flex items-center gap-3 bg-[#1e1e24] border border-white/10 rounded-2xl p-3 pr-5 transition-all hover:bg-[#25252b] hover:border-white/20 shadow-sm"
                                 title={att.path}
                             >
@@ -137,13 +143,11 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                 <div
                     className={cn(
                         "rounded-2xl px-4 py-3 shadow-sm",
-                        isUser 
-                            ? "bg-[#4fd1c5] text-white" 
+                        isUser
+                            ? "bg-[#4fd1c5] text-white"
                             : "bg-[#1a1d23] border border-white/10 text-white/90"
                     )}
                 >
-                    {/* Render Agent Plan if present */}
-                    {agentPlan && <AgentPlan plan={agentPlan} />}
 
                     {/* Render Thinking Block (Universal - works with all LLMs) */}
                     {(() => {
@@ -183,7 +187,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                     {message.content && (() => {
                         const { cleanedContent: initialCleaned } = filterThinkBlocks(message.content);
                         let cleanedContent = initialCleaned;
-                        
+
                         // Clean up leaked reasoning and artifacts
                         const hasLeak = hasLeakedReasoning(cleanedContent);
                         if (hasLeak) {
@@ -218,51 +222,93 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                         </div>
                     )}
 
-                    {/* Tool calls display */}
+                    {/* Tool calls display (Collapsible for cleaner UI) */}
                     {visibleToolCalls && visibleToolCalls.length > 0 && (
                         <div className="mt-3">
-                            {/* ... Tool Rendering Logic (Simplified for readability in diff, kept same logic) ... */}
                             {(() => {
-                                // ... helper logic ...
+                                const allToolsDone = visibleToolCalls.every(tc => !!tc.result);
+
                                 const groupedByAgent = visibleToolCalls.reduce((acc, tool) => {
                                     let agentName = 'SystemAgent';
                                     if (tool.name.startsWith('browser_') || tool.name.startsWith('playwright_')) agentName = 'NavigationAgent';
                                     else if (tool.name.startsWith('fs_') || tool.name.startsWith('file_')) agentName = 'FilesystemAgent';
-                                    else if (tool.name.startsWith('mcp_')) agentName = 'MCPAgent';
+                                    else if (tool.name.startsWith('mcp_') || tool.name.includes('_')) agentName = 'MCPAgent';
                                     else if (tool.name === 'create_execution_plan') agentName = 'PlannerAgent';
+
                                     if (!acc[agentName]) acc[agentName] = [];
                                     acc[agentName].push(tool);
                                     return acc;
                                 }, {} as Record<string, ToolCall[]>);
 
                                 return (
-                                    <div className="space-y-4">
-                                        {Object.entries(groupedByAgent).map(([agentName, tools]) => (
-                                            <div key={agentName} className="space-y-1.5">
-                                                <div className="flex items-center justify-between px-1">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className={`w-1.5 h-1.5 rounded-full ${tools.every(t=>!!t.result) ? 'bg-green-400' : 'bg-[#4fd1c5] animate-pulse'}`} />
-                                                        <span className="text-[11px] font-bold text-white/50 uppercase tracking-wider">{agentName}</span>
+                                    <details className="group" open={!allToolsDone}>
+                                        <summary className="text-[10px] text-white/40 cursor-pointer hover:text-white/60 transition-colors list-none flex items-center gap-1.5 font-medium select-none mb-1">
+                                            <div className={`w-1 h-3 rounded-full ${allToolsDone ? 'bg-green-500' : 'bg-[#4fd1c5] animate-pulse'}`} />
+                                            <span>
+                                                {allToolsDone
+                                                    ? `${visibleToolCalls.length} Agent Actions`
+                                                    : `Agent working... (${visibleToolCalls.filter(t => t.result).length}/${visibleToolCalls.length})`}
+                                            </span>
+                                            <ChevronRight size={10} className="group-open:rotate-90 transition-transform text-white/20" />
+                                        </summary>
+
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            transition={{ duration: 0.3, ease: 'easeOut' }}
+                                            className="overflow-hidden space-y-4 pt-2"
+                                        >
+                                            {/* Presentable tools summary (Findings) */}
+                                            {visibleToolCalls.some(tc => tc.isPresentable) && (
+                                                <div className="space-y-1.5 border-b border-white/5 pb-3">
+                                                    <div className="text-[11px] font-bold text-[#4fd1c5] uppercase tracking-wider px-1">Key Findings</div>
+                                                    <div className="space-y-1">
+                                                        {visibleToolCalls.filter(tc => tc.isPresentable).map(tool => (
+                                                            <div key={tool.id} className="flex flex-col gap-1.5 p-2 rounded-lg bg-[#4fd1c5]/5 border border-[#4fd1c5]/10">
+                                                                <div className="flex items-start gap-2.5">
+                                                                    <CheckCircle2 size={14} className="text-[#4fd1c5] mt-0.5" />
+                                                                    <div className="text-[12px] leading-tight text-white/90 font-medium">
+                                                                        {tool.name}
+                                                                    </div>
+                                                                </div>
+                                                                {tool.finding && (
+                                                                    <div className="text-[11.5px] leading-relaxed text-white/70 pl-6 border-l border-[#4fd1c5]/20 ml-1.5 py-0.5 whitespace-pre-wrap">
+                                                                        <FormattedText content={tool.finding} />
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        ))}
                                                     </div>
                                                 </div>
-                                                <div className="space-y-1">
-                                                    {tools.map((tool) => {
-                                                        const isDone = !!tool.result;
-                                                        return (
-                                                            <div key={tool.id} className="flex items-start gap-2.5 p-2 rounded-lg bg-black/20 border border-white/5">
-                                                                <div className="mt-0.5 flex-shrink-0">
-                                                                     {isDone ? <CheckCircle2 size={14} className="text-green-400" /> : <Circle size={14} className="text-[#4fd1c5] animate-pulse" />}
+                                            )}
+
+                                            {Object.entries(groupedByAgent).map(([agentName, tools]) => (
+                                                <div key={agentName} className="space-y-1.5">
+                                                    <div className="flex items-center justify-between px-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className={`w-1.5 h-1.5 rounded-full ${tools.every(t => !!t.result) ? 'bg-green-400' : 'bg-[#4fd1c5] animate-pulse'}`} />
+                                                            <span className="text-[11px] font-bold text-white/50 uppercase tracking-wider">{agentName}</span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        {tools.map((tool) => {
+                                                            const isDone = !!tool.result;
+                                                            return (
+                                                                <div key={tool.id} className="flex items-start gap-2.5 p-2 rounded-lg bg-black/20 border border-white/5">
+                                                                    <div className="mt-0.5 flex-shrink-0">
+                                                                        {isDone ? <CheckCircle2 size={14} className="text-green-400" /> : <Circle size={14} className="text-[#4fd1c5] animate-pulse" />}
+                                                                    </div>
+                                                                    <div className="text-[12.5px] leading-tight text-white/90 font-medium">
+                                                                        {tool.name}
+                                                                    </div>
                                                                 </div>
-                                                                <div className="text-[12.5px] leading-tight text-white/90 font-medium">
-                                                                     {tool.name}
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })}
+                                                            );
+                                                        })}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        ))}
-                                    </div>
+                                            ))}
+                                        </motion.div>
+                                    </details>
                                 );
                             })()}
                         </div>
@@ -285,8 +331,8 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                             ))}
                         </div>
                     )}
-                    
-                     <p className={`text-[10px] mt-1 ${isUser ? 'text-white/60' : 'text-white/30'}`}>
+
+                    <p className={`text-[10px] mt-1 ${isUser ? 'text-white/60' : 'text-white/30'}`}>
                         {formatTime(message.timestamp)}
                     </p>
                 </div>
@@ -294,7 +340,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
                 {/* Action Footer */}
                 {!isUser && !isSystem && (
                     <div className="flex items-center gap-2 mt-1 ml-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                         <CopyButton content={message.content || ''} />
+                        <CopyButton content={message.content || ''} />
                         <button
                             onClick={() => window.dispatchEvent(new CustomEvent('agent-action', { detail: { type: 'regenerate', messageId: message.id } }))}
                             className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"

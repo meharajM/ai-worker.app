@@ -20,6 +20,9 @@ import { executeToolCall } from "../mcp";
 import type { AgentRuntimeOptions, AgentCheckpoint, ExecutionPlan } from "./types";
 import { parseTabIdFromResult } from "../mcp";
 import type { SubAgentFactory } from "./OrchestrationService";
+import { analyzeToolOutput } from "../result-reporter";
+import { laneManager } from "../execution-lanes";
+
 
 /**
  * Handlers for "system" or "special" tools like create_execution_plan,
@@ -206,7 +209,6 @@ export class SpecialToolHandlers {
             isSubAgent: true,
             tabId: subAgentTabId,
             taskCategory: this.taskCategory,
-            requireConfirmation: false,
             onMessage: (msg: LLMMessage) => {
                 const contentStr = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
                 console.log(`[SubAgent Tab:${subAgentTabId ?? "default"}] ${msg.role}: ${contentStr?.substring(0, 50)}`);
@@ -218,18 +220,49 @@ export class SpecialToolHandlers {
             const finalRes = await subAgent.chat(prompt);
             const finalContent = typeof finalRes.content === "string" ? finalRes.content : JSON.stringify(finalRes.content);
 
+            // ── Detect sub-agent bailout vs clean completion ──────────────────────
+            const isBailout = finalContent.includes("consecutive errors") ||
+                finalContent.includes("stopping to prevent an infinite loop");
+
+            let salvagedResult = finalContent;
+            let updatedPlan: ExecutionPlan | undefined;
+
+            if (isBailout) {
+                console.warn(`[SpecialToolHandlers] Sub-agent bailout detected. Salvaging partial data for: ${instruction.substring(0, 50)}...`);
+
+                // Access history to salvage tool outputs
+                const subAgentHistory = (subAgent as any).getHistory?.() as LLMMessage[] | undefined;
+                if (subAgentHistory) {
+                    const partialFindings: string[] = [];
+                    for (const m of subAgentHistory) {
+                        if (m.role === 'tool' && m.content) {
+                            const analysis = analyzeToolOutput(m.name || 'unknown', m.content);
+                            if (analysis.hasPresentableData && analysis.summary) {
+                                partialFindings.push(analysis.summary);
+                            }
+                        }
+                    }
+
+                    if (partialFindings.length > 0) {
+                        salvagedResult = `Sub-agent encountered errors and stopped. Partial data collected before failure:\n\n${partialFindings.join('\n')}`;
+                        console.log(`[SpecialToolHandlers] Salvaged ${partialFindings.length} findings from failed sub-agent.`);
+                    }
+                }
+            }
+
             if (subAgentTabId !== undefined) {
                 try {
                     const { browserLock } = await import("../resource-lock");
                     await browserLock.runExclusive(async () =>
                         executeToolCall("close_tab", { tabId: subAgentTabId })
                     );
+                    // Clean up the execution lane to prevent memory leaks
+                    laneManager.cleanupTabLane(subAgentTabId);
                 } catch (e) {
                     console.warn(`[SpecialToolHandlers] Failed to close sub-agent tab ${subAgentTabId}`, e);
                 }
             }
 
-            let updatedPlan: ExecutionPlan | undefined;
             if (executionPlan) {
                 updatedPlan = { ...executionPlan };
                 const matchingStep = updatedPlan.steps.find(
@@ -239,13 +272,25 @@ export class SpecialToolHandlers {
                             s.description.toLowerCase().includes(instruction.toLowerCase().substring(0, 20)))
                 );
                 if (matchingStep) {
-                    matchingStep.status = "completed";
-                    matchingStep.result = finalContent.substring(0, 200);
+                    matchingStep.status = isBailout ? "failed" : "completed";
+                    matchingStep.result = salvagedResult.substring(0, 500);
                 }
             }
 
-            return { result: finalContent.trim(), planUpdate: updatedPlan };
+            return { result: salvagedResult.trim(), planUpdate: updatedPlan };
         } catch (err: any) {
+            // Best-effort tab cleanup on hard failure to prevent leaks
+            if (subAgentTabId !== undefined) {
+                try {
+                    const { browserLock } = await import("../resource-lock");
+                    await browserLock.runExclusive(async () =>
+                        executeToolCall("close_tab", { tabId: subAgentTabId })
+                    );
+                    laneManager.cleanupTabLane(subAgentTabId);
+                } catch (e) {
+                    console.warn(`[SpecialToolHandlers] Failed to close sub-agent tab ${subAgentTabId} after error`, e);
+                }
+            }
             return { result: `Sub-agent failed: ${err.message}` };
         }
     }

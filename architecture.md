@@ -244,22 +244,48 @@ graph TD
 ```mermaid
 graph LR
     subgraph "Zustand Stores"
-        ChatStore[chatStore<br/>Messages & Processing]
+        ChatStore["chatStore<br/>Sessions, Messages<br/>Per-Session Processing"]
         SettingsStore[settingsStore<br/>User Preferences]
         AuthStore[authStore<br/>Authentication]
     end
 
-    subgraph "Persistence"
+    subgraph "Persistence (ai-worker-chat-v3)"
         LocalStorage[localStorage<br/>Browser Storage]
         ElectronStore[electron-store<br/>Main Process]
     end
 
-    ChatStore -->|Persist| LocalStorage
+    subgraph "Ephemeral (not persisted)"
+        ProcessingMap["_processingSessions<br/>Map&lt;sessionId, AbortController&gt;"]
+    end
+
+    ChatStore -->|Persist sessions + prefs| LocalStorage
+    ChatStore --- ProcessingMap
     SettingsStore -->|Persist| LocalStorage
     AuthStore -->|Persist| LocalStorage
 
     SettingsStore -.->|Sync API Keys| ElectronStore
 ```
+
+#### chatStore — Per-Session Processing (v3)
+
+The chat store manages multiple independent sessions concurrently. The key design change is the `_processingSessions` Map:
+
+| API | Description |
+|-----|-------------|
+| `startProcessing(sessionId)` | Creates a new `AbortController` for the session, returns its `AbortSignal`. |
+| `stopProcessing(sessionId)` | Removes the session from the Map (agent completed normally). |
+| `abortSession(sessionId)` | Calls `.abort()` then removes the session (user-initiated cancel). |
+| `isSessionProcessing(sessionId)` | Returns `true` if the session has an active controller. |
+
+**Why this matters:**
+- Switching sessions never cancels a background agent
+- Each session has its own `AbortSignal` — aborting Session A does not affect Session B
+- `_processingSessions` is excluded from `partialize` and always resets on page load
+
+> [!NOTE]
+> Storage key bumped from `ai-worker-chat-v2` → `ai-worker-chat-v3`.
+> Old persisted flat fields (`isProcessing`, `abortController`) no longer exist in the state shape.
+
 
 ---
 
@@ -627,6 +653,7 @@ graph TD
     subgraph "Core Services"
         Orchestration[OrchestrationService<br/>Task Decomposition]
         Tools[ToolExecutionService<br/>Loop Handling & Self-Healing]
+        SpecialHandlers[SpecialToolHandlers<br/>High-level Tools]
         LLMOrchestrator[llm.ts<br/>Provider Selection]
         State[AgentStateService<br/>Memory & Checkpoints]
     end
@@ -637,6 +664,7 @@ graph TD
     Runtime --> LLMOrchestrator
     LLMOrchestrator --> Providers[llm/ Providers<br/>OpenAI, Gemini, Ollama, Browser]
     Runtime --> Tools
+    Runtime --> SpecialHandlers
     
     Tools --> MCP[MCP Tools]
     State --> Memory[Memory DB]
@@ -644,7 +672,7 @@ graph TD
 
 #### 1. AgentRuntime Facade
 - **Role**: Entry point for the UI (`useAgent.ts`).
-- **Responsibility**: Coordinates the high-level loop (Think -> Act -> Observe).
+- **Responsibility**: Coordinates the high-level loop (Think -> Act -> Observe) and manages context limits.
 - **Interface**: Implements `IAgentClient`, ensuring the UI is decoupled from the implementation (ready for remote execution).
 
 #### 2. AgentStateService
@@ -654,14 +682,22 @@ graph TD
   - **Context Loading**: Loads parent context for sub-agents to share knowledge.
   - **Handoff Detection**: Automatically prompts for user intervention if the context limit is reached.
 
-#### 3. OrchestrationService
+#### 3. SpecialToolHandlers
+- **Responsibility**: Owns inline handlers for complex "agent-specific" logic.
+- **Key Features**:
+  - Coordinates multi-step execution plans (`create_execution_plan`).
+  - Spawns sub-agents for isolated research (`delegate_sub_task`) and salvages partial data on failure.
+  - Generates progress checkpoints for context preservation (`update_progress_summary`).
+  - Runs advanced browser analysis like semantic accessibility trees (`scan_page_accessibility`).
+
+#### 4. OrchestrationService
 - **Responsibility**: Spawns and manages sub-agents.
 - **Patterns**:
   - **Parallel Orchestration**: Spawns N sub-agents for independent contexts (e.g., comparing 3 websites).
   - **Sequential Orchestration**: Executes multi-step plans where step N+1 depends on step N.
   - **Sub-Agent Factory**: Uses a factory pattern to create new `AgentRuntime` instances, breaking circular dependencies.
 
-#### 4. ToolExecutionService
+#### 5. ToolExecutionService
 - **Responsibility**: Safely executes tools and robustly handles errors.
 - **Loop Detection**: Prevents infinite loops by detecting repetitive arguments or similar patterns (same tool N times in a row).
 - **Self-Healing**: Automatically retries failed actions with context-aware recovery strategies:
@@ -678,11 +714,12 @@ The system supports recursive task delegation through the `delegate_sub_task` to
 #### How It Works
 
 1.  **Main Agent Decides**: The main agent determines a sub-task is too complex or requires isolation.
-2.  **Tool Call**: Calls `delegate_sub_task` with specific instructions and context.
+2.  **Tool Call**: Calls `delegate_sub_task` with specific instructions and context. The `SpecialToolHandlers` service intercepts this.
 3.  **Recursive Runtime**: The system instantiates a *new* `AgentRuntime` (the "Sub-Agent").
 4.  **Context Inheritance**: The Sub-Agent inherits the parent's `taskCategory`, ensuring it loads the correct safety protocols (e.g., a Shopping sub-agent also knows not to buy things).
 5.  **Isolated Execution**: The Sub-Agent runs its own loop (Plan -> Act -> Verify) with a fresh context window.
-6.  **Result Aggregation**: The Sub-Agent returns a final summary string, which becomes the tool result for the Main Agent.
+6.  **Bailout & Salvage**: If the Sub-Agent fails (e.g. consecutive errors), `SpecialToolHandlers` detects the bailout and scans the Sub-Agent's history to salvage any useful partial data found before failure.
+7.  **Result Aggregation**: The `SpecialToolHandlers` returns the final summary (or salvaged data) string, which becomes the tool result for the Main Agent.
 
 ```mermaid
 sequenceDiagram
@@ -721,7 +758,12 @@ sequenceDiagram
 To support parallel execution of sub-agents and tool calls while maintaining internal state consistency, AI-Worker implements a granular resource locking system.
 
 #### 1. Hybrid Execution Engine
-Tools are classified into three categories by the `laneManager`:
+Tools are classified into three categories by the `laneManager` (singleton in `execution-lanes.ts`):
+
+- **Stateful Browser Tools**: Tools that modify the browser state (e.g., `navigate`, `click`). These share a global **Browser Lock** via a serial execution lane.
+- **Tab-Scoped Tools**: Tools bound to a specific tab (e.g., `screenshot(tabId)`). These run in a **Tab Serial Lane**, allowing parallel work across different tabs.
+- **Stateful File Tools**: Tools that modify the filesystem. These use **Granular Locks** (Keyed Mutexes) keyed by absolute file path.
+
 
 - **Stateful Browser Tools**: Tools that modify the browser state (e.g., `navigate`, `click`). These share a global **Browser Lock** via a serial execution lane.
 - **Tab-Scoped Tools**: Tools bound to a specific tab (e.g., `screenshot(tabId)`). These run in a **Tab Serial Lane**, allowing parallel work across different tabs.
@@ -730,7 +772,39 @@ Tools are classified into three categories by the `laneManager`:
 
 #### 2. Isolation Strategy
 - **Sub-Agent Tabs**: Each sub-agent is provisioned with a **dedicated browser tab** (`tabId`). This ensures that one sub-agent's navigation does not interrupt another's workflow.
-- **Auto-Cleanup**: Tabs are automatically closed upon sub-task completion to prevent memory leaks.
+
+- **Auto-Cleanup**: After each sub-agent completes, its tab is closed *and* `laneManager.cleanupTabLane(tabId)` is called to remove the stale `LaneQueue` from memory. Without this, long sessions accumulate leaked queues.
+- **Multi-Session Abort Isolation**: Each chat session has its own `AbortController` stored in `chatStore._processingSessions`. Calling `abortSession(sessionA)` only cancels Session A — Session B continues unaffected.
+
+#### 3. Multi-Session Concurrency Model
+
+Users can run tasks in multiple chat sessions simultaneously. Here is the lifecycle:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Sidebar as ChatSidebar
+    participant StoreA as chatStore (Session A)
+    participant StoreB as chatStore (Session B)
+    participant AgentA as AgentRuntime (A)
+    participant AgentB as AgentRuntime (B)
+
+    User->>StoreA: handleSubmit() on Session A
+    StoreA->>AgentA: startProcessing(A) → AbortSignal_A
+    Note over StoreA: _processingSessions: {A: ctrl_A}
+    User->>Sidebar: Switch to Session B
+    User->>StoreB: handleSubmit() on Session B
+    StoreB->>AgentB: startProcessing(B) → AbortSignal_B
+    Note over StoreA: _processingSessions: {A: ctrl_A, B: ctrl_B}
+    Note over Sidebar: Shows spinner next to both A and B
+    User->>Sidebar: Click ✕ on Session A
+    StoreA->>AgentA: abortSession(A) → ctrl_A.abort()
+    Note over StoreA: _processingSessions: {B: ctrl_B}
+    AgentB->>StoreB: stopProcessing(B) when done
+    Note over StoreA: _processingSessions: {} (empty)
+```
+
+
 
 ### Universal Self-Healing Architecture
 

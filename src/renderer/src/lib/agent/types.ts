@@ -13,7 +13,6 @@
  */
 
 import { type LLMMessage } from "../types";
-import { type TaskAnalysis } from "../confirmation-message";
 
 // ── Callback Types ─────────────────────────────────────────────────────────────
 
@@ -69,20 +68,6 @@ export interface AgentRuntimeOptions {
     signal?: AbortSignal;
 
     /**
-     * If true, the agent will analyze the user's task and ask for confirmation
-     * before executing complex or potentially destructive actions.
-     * Always false for sub-agents (they receive specific instructions, not open-ended tasks).
-     */
-    requireConfirmation?: boolean;
-
-    /**
-     * Called when the agent determines a task needs user confirmation.
-     * @param analysis - The task analysis result (intent, complexity, risks).
-     * @returns A promise that resolves to the enriched prompt (if confirmed) or null (if cancelled).
-     */
-    onConfirmationNeeded?: (analysis: TaskAnalysis) => Promise<string | null>;
-
-    /**
      * If true, this agent is a sub-agent spawned by a parent agent.
      * Sub-agents: start with empty context, get 15 iterations (not 50),
      * skip confirmation, skip task decomposition.
@@ -103,6 +88,11 @@ export interface AgentRuntimeOptions {
      * @param updates - Partial message fields to merge into the existing message.
      */
     onMessageUpdate?: (id: string, updates: Partial<LLMMessage>) => void;
+
+    /**
+     * Called to update the global active session progress.
+     */
+    onProgressUpdate?: (progress?: number, eta?: number, plan?: ExecutionPlan) => void;
 
     /**
      * Dedicated browser tab ID for this agent instance.
@@ -157,7 +147,7 @@ export interface ExecutionPlan {
         id: number;
         description: string;
         /** 'pending' | 'completed' | 'failed' */
-        status: string;
+        status: 'pending' | 'active' | 'completed' | 'failed';
         /** Brief result summary (first 200 chars of the step's output). */
         result?: string;
         /** Which sub-agent is assigned to this step (for parallel plans). */

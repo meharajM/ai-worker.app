@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
 import electron from '../lib/electron'
 import { STORAGE_KEYS } from '../lib/constants'
 
@@ -64,14 +63,6 @@ function getPersistenceKey(uid: string | null) {
 
 const DEFAULT_MCP_SERVERS = [
     {
-        name: 'sequential-thinking',
-        description: 'Sequential Thinking MCP Server - Enables step-by-step reasoning for complex tasks',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
-        autoConnect: true
-    },
-    {
         name: 'playwright',
         description: 'Native Playwright Service - Browser automation (Internal)',
         type: 'stdio',
@@ -128,7 +119,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
 
             if (stored && Array.isArray(stored)) {
                 initialServers = stored.map(s => {
-                    let updated = { ...s };
+                    const updated = { ...s };
 
                     // Migration: Fix servers that have "internal" command placeholder
                     if (updated.command === 'internal') {
@@ -163,7 +154,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                             id: generateId(),
                             connected: false,
                             tools: [],
-                            type: def.type as any,
+                            type: def.type as 'stdio' | 'sse' | 'http',
                         });
                         hasNewDefaults = true;
                     }
@@ -307,7 +298,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
             })
 
             if (result.success) {
-                const toolsResult = await electron.mcp.listTools(id) as { tools: any[], error?: string }
+                const toolsResult = await electron.mcp.listTools(id) as { tools: { name: string; description: string; inputSchema?: Record<string, unknown> }[], error?: string }
 
                 set(state => ({
                     servers: state.servers.map(s =>
@@ -421,7 +412,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                     id: generateId(), // Generate new local ID
                     name: remote.name,
                     description: remote.description || '',
-                    type: remote.type as any,
+                    type: remote.type as 'stdio' | 'sse' | 'http',
                     command: remote.command,
                     args: remote.args,
                     url: remote.url,

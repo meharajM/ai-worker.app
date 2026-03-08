@@ -3,7 +3,15 @@
  *
  * Architecture: This is the ONLY place in the UI that knows how to run an agent.
  *   It sits between App.tsx (pure UI) and AgentRuntime (pure business logic).
- *   App.tsx calls `useAgent()` and gets back `handleSubmit` + `pendingConfirmation`.
+ *   App.tsx calls `useAgent()` and gets back `handleSubmit`.
+ *
+ * Session isolation fix:
+ *   `originSessionId` is captured at the START of each `handleSubmit` call and
+ *   used for EVERY callback, error-handler, and cleanup throughout the lifecycle.
+ *   This means switching to a different session while an agent is running does NOT:
+ *     - Write error messages to the wrong session
+ *     - Clear the wrong session's progress bar
+ *     - Feed wrong history to the MemoryReflector
  *
  * Phase 3 readiness: When we migrate to a backend server, ONLY this file changes.
  *   Replace `new AgentRuntime(...)` with `new RemoteAgentClient(...)` — both
@@ -11,7 +19,7 @@
  *
  * Dependencies:
  *   - agent-runtime.ts: AgentRuntime (the local implementation of IAgentClient)
- *   - chatStore: message history, session management, abort signal
+ *   - chatStore: message history, session management, per-session abort signal
  *   - settingsStore: LLM provider configuration
  *   - memory-reflector.ts: background memory extraction (fire-and-forget)
  *
@@ -20,15 +28,14 @@
  *     WHY: Callbacks are closures. If we used `useChatStore()` reactive hook,
  *     the closure would capture a stale snapshot of messages. `getState()` always
  *     reads the latest store value at call time.
- *   - `AgentRuntime` is dynamically imported (lazy) to avoid loading the 1800-line
+ *   - `AgentRuntime` is dynamically imported (lazy) to avoid loading the heavy
  *     module on app startup. It only loads when the user first submits a message.
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useChatStore } from "../stores/chatStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { type LLMMessage } from "../lib/llm";
-import { type TaskAnalysis } from "../lib/confirmation-message";
 
 /**
  * State returned by `useAgent`.
@@ -42,75 +49,61 @@ export interface UseAgentReturn {
      *
      * @param content - The user's text message.
      * @param attachments - Optional file attachments (Electron exposes `.path`).
+     * @param isHeadless - If true, suppresses browser UI during task execution.
      */
     handleSubmit: (content: string, attachments?: File[], isHeadless?: boolean) => Promise<void>;
-
-    /**
-     * Non-null when AgentRuntime has paused and is waiting for the user to
-     * confirm or cancel a task before proceeding.
-     * Pass this to `<TaskConfirmationDialog>`.
-     */
-    pendingConfirmation: {
-        analysis: TaskAnalysis;
-        resolve: (enrichedPrompt: string | null) => void;
-    } | null;
-
-    /**
-     * Clears the pending confirmation state. Call this after the dialog
-     * resolves (confirm, cancel, or bypass).
-     */
-    clearConfirmation: () => void;
 }
 
 /**
  * Encapsulates all agent execution logic, extracted from App.tsx.
  *
- * @returns `{ handleSubmit, pendingConfirmation, clearConfirmation }`
+ * @returns `{ handleSubmit }`
  *
  * @example
  * // In App.tsx:
- * const { handleSubmit, pendingConfirmation, clearConfirmation } = useAgent();
+ * const { handleSubmit } = useAgent();
  * // Pass handleSubmit to <VoiceInput onSubmit={handleSubmit} />
- * // Pass pendingConfirmation to <TaskConfirmationDialog open={!!pendingConfirmation} />
  */
 export function useAgent(): UseAgentReturn {
     const settings = useSettingsStore();
-
-    // `pendingConfirmation` is set by AgentRuntime when it needs user approval
-    // before executing a potentially destructive or complex task.
-    const [pendingConfirmation, setPendingConfirmation] = useState<{
-        analysis: TaskAnalysis;
-        resolve: (enrichedPrompt: string | null) => void;
-    } | null>(null);
 
     /**
      * Main entry point: processes user input, runs the agent, handles errors.
      *
      * Flow:
      * 1. Guard: ignore empty submissions
-     * 2. Mark store as processing (shows spinner, disables input)
-     * 3. Add user message to store
-     * 4. Reconstruct LLM-format history from store messages (with tool results)
-     * 5. Dynamically import AgentRuntime (lazy load)
-     * 6. Run agent with callbacks that write back to the store
-     * 7. Fire-and-forget: trigger MemoryReflector in background
-     * 8. On error: add error message to store
-     * 9. Always: mark store as done processing
+     * 2. Capture `originSessionId` — the session that owns this entire execution
+     * 3. Start per-session processing (creates a new AbortController just for this session)
+     * 4. Add user message to store
+     * 5. Reconstruct LLM-format history from store messages
+     * 6. Dynamically import AgentRuntime (lazy load)
+     * 7. Run agent with callbacks that write back to `originSessionId` — never the active session
+     * 8. Fire-and-forget: trigger MemoryReflector against `originSessionId`'s messages
+     * 9. On error: add error message to `originSessionId`
+     * 10. Always: stop per-session processing state, clear session-level progress
      */
     const handleSubmit = useCallback(
         async (content: string, attachments?: File[], isHeadless?: boolean) => {
             if (!content.trim() && (!attachments || attachments.length === 0)) return;
 
-            // Destructure store actions. We call setProcessing(true) first so the
-            // UI immediately shows the loading state before any async work begins.
-            const { addMessage, setProcessing } = useChatStore.getState();
-            setProcessing(true);
+            const { addMessage, startProcessing, addSessionMessage, updateSessionProgress } =
+                useChatStore.getState();
+
+            // ── CRITICAL: Capture originSessionId before any await ─────────────
+            // This is determined once at submit time and is used for ALL callbacks,
+            // error handlers, and cleanup. Switching sessions after this point will
+            // NOT affect which session receives messages or whose progress is cleared.
+            const originSessionId = useChatStore.getState().activeSessionId ?? "default";
+
+            // Start per-session processing — returns an AbortSignal scoped only to
+            // this session. Other sessions' signals are unaffected.
+            const abortSignal = startProcessing(originSessionId);
 
             // Map File objects to plain metadata. Electron exposes `.path` on File
             // objects, which is not part of the standard Web File API.
             const attachmentData = attachments?.map((file) => ({
                 name: file.name,
-                path: (file as any).path || "",
+                path: (file as File & { path?: string }).path ?? "",
                 type: file.type,
             }));
 
@@ -120,8 +113,7 @@ export function useAgent(): UseAgentReturn {
 
             // Build a plain settings object to pass to AgentRuntime.
             // WHY not pass the full Zustand store: AgentRuntime lives in lib/ and
-            // should not depend on the store shape. Plain objects are also easier
-            // to serialize for Phase 3 (sending to a backend).
+            // should not depend on the store shape.
             const settingsForLLM = {
                 preferredProvider: settings.preferredProvider,
                 ollamaModel: settings.ollamaModel,
@@ -138,14 +130,14 @@ export function useAgent(): UseAgentReturn {
             try {
                 // ── Step 1: Reconstruct LLM message history ────────────────────────
                 // WHY getState() here: We need the freshest messages AFTER addMessage()
-                // has been committed to the store. Using the reactive `messages` from
-                // the hook closure would give us the pre-addMessage snapshot.
+                // has been committed to the store.
+                // WHY read originSessionId's messages specifically: Not the active
+                // session's messages, since the user could have switched by now.
                 const freshMessages =
-                    useChatStore.getState().getActiveSession()?.messages || [];
+                    useChatStore.getState().sessions.find(s => s.id === originSessionId)?.messages ?? [];
                 const reconstructedHistory: LLMMessage[] = [];
 
                 for (const m of freshMessages) {
-                    // Build the base message object
                     const msg: LLMMessage = {
                         role: m.role as "user" | "assistant" | "system",
                         content: m.content,
@@ -155,7 +147,6 @@ export function useAgent(): UseAgentReturn {
                         ...(m.thought_signature ? { thought_signature: m.thought_signature } : {}),
                     };
 
-                    // Attach tool_calls if this message triggered any tool executions
                     if (m.toolCalls) {
                         msg.tool_calls = m.toolCalls.map((tc) => ({
                             id: tc.id,
@@ -171,8 +162,7 @@ export function useAgent(): UseAgentReturn {
 
                     // WHY synthetic tool messages: The LLM API requires that every
                     // tool_call in an assistant message is followed by a corresponding
-                    // tool result message. The store keeps results on the toolCall object,
-                    // so we synthesize the required `role: "tool"` messages here.
+                    // tool result message.
                     if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
                         for (const tc of m.toolCalls) {
                             if (tc.result !== undefined && tc.result !== null) {
@@ -187,53 +177,45 @@ export function useAgent(): UseAgentReturn {
                 }
 
                 // ── Step 2: Get session context ────────────────────────────────────
-                const { activeSessionId, sessions } = useChatStore.getState();
-                const activeSession = sessions.find((s) => s.id === activeSessionId);
+                // Read from originSessionId — not activeSessionId — for the same reason.
+                const activeSession = useChatStore.getState().sessions.find(
+                    (s) => s.id === originSessionId
+                );
 
                 // ── Step 3: Dynamically import AgentRuntime ────────────────────────
-                // WHY dynamic import: AgentRuntime is ~1800 lines and imports many
-                // heavy dependencies (LLM clients, MCP, task-decomposer). Lazy loading
-                // keeps the initial app bundle small and fast to parse.
                 const { AgentRuntime } = await import("../lib/agent-runtime");
 
-                // Track the ID of the "live" assistant message so we can update it
-                // in-place as the agent streams partial responses.
+                // Tracks the ID of the "live" assistant message for in-place updates.
                 let activeAssistantMessageId: string | null = null;
 
-                // ── Step 4: Instantiate and run the agent ──────────────────────────
+                // ── Step 4: Instantiate the agent ──────────────────────────────────
                 const runtime = new AgentRuntime(
                     {
-                        activeSessionId: activeSessionId || "default",
+                        activeSessionId: originSessionId,
                         workspacePath: activeSession?.workspacePath,
                         settings: settingsForLLM,
                         isHeadless,
-                        // Get the abort signal from the store. The store creates a new
-                        // AbortController when setProcessing(true) is called.
-                        signal: useChatStore.getState().getAbortSignal() || undefined,
-                        requireConfirmation: true,
+                        // The abort signal is scoped to THIS session only.
+                        signal: abortSignal,
 
-                        // Called by AgentRuntime when it needs user approval before
-                        // executing a task. We surface a dialog and wait for the user's choice.
-                        onConfirmationNeeded: async (analysis) => {
-                            return new Promise((resolve) => {
-                                setPendingConfirmation({ analysis, resolve });
-                            });
-                        },
-
-                        // Called by AgentRuntime for every new message (user, assistant, tool).
-                        // We write each message to the session so it appears in the chat UI
-                        // even if the user has navigated to another tab.
+                        /**
+                         * Called by AgentRuntime for every new message (user, assistant, tool).
+                         * Always writes to `originSessionId` — never the currently-active session.
+                         */
                         onMessage: (msg: LLMMessage) => {
-                            const { addSessionMessage } = useChatStore.getState();
+                            // Do not add raw tool execution results as standalone chat bubbles.
+                            if (msg.role === "tool") return undefined;
+
+                            const { addSessionMessage: addMsg } = useChatStore.getState();
 
                             // Map LLMMessage → store message shape
-                            const storeMsg: any = {
-                                role: msg.role,
+                            const storeMsg: Omit<import('../stores/chatStore').Message, 'id' | 'timestamp'> = {
+                                role: msg.role as "user" | "assistant" | "system",
                                 content:
                                     typeof msg.content === "string"
                                         ? msg.content
                                         : Array.isArray(msg.content)
-                                            ? msg.content.map((c: any) => c.text || "").join("")
+                                            ? (msg.content as Array<{ text?: string }>).map((c) => c.text ?? "").join("")
                                             : "",
                             };
 
@@ -241,55 +223,70 @@ export function useAgent(): UseAgentReturn {
                                 storeMsg.toolCalls = msg.tool_calls.map((tc) => ({
                                     id: tc.id,
                                     name: tc.function.name,
-                                    arguments: tc.function.arguments,
+                                    arguments: tc.function.arguments as Record<string, unknown>,
                                 }));
                             }
 
-                            // Persist thought/thought_signature so they are included in the
-                            // next API call to Gemini — required for tool-calling with reasoning.
+                            // Persist thought signatures for Gemini 2.0 tool-calling.
                             if (msg.thought) storeMsg.thought = msg.thought;
                             if (msg.thought_signature) storeMsg.thought_signature = msg.thought_signature;
 
-                            // addSessionMessage returns the new Message object
-                            const newMsg = addSessionMessage(activeSessionId || "default", storeMsg);
+                            // Write to originSessionId — not the currently-active session
+                            const newMsg = addMsg(originSessionId, storeMsg);
                             if (msg.role === "assistant") {
                                 activeAssistantMessageId = newMsg.id;
                             }
                             return newMsg.id;
                         },
 
-                        // Called by AgentRuntime to update an existing message in-place
-                        // (e.g., updating the parallel execution status card as sub-agents complete).
+                        /**
+                         * Called by AgentRuntime to update an existing message in-place
+                         * (e.g., updating the parallel execution status card).
+                         * Always targets `originSessionId`.
+                         */
                         onMessageUpdate: (id: string, updates: Partial<LLMMessage>) => {
                             const { updateSessionMessage } = useChatStore.getState();
-                            const storeUpdates: any = { ...updates };
+                            const storeUpdates: Partial<import('../stores/chatStore').Message> = {
+                                ...updates as Partial<import('../stores/chatStore').Message>
+                            };
 
                             // Flatten content arrays to strings for the store
                             if (Array.isArray(storeUpdates.content)) {
-                                storeUpdates.content = storeUpdates.content
-                                    .map((c: any) => c.text || "")
+                                storeUpdates.content = (storeUpdates.content as Array<{ text?: string }>)
+                                    .map((c) => c.text ?? "")
                                     .join("");
                             }
 
-                            // The store doesn't have a "tool" role concept — skip role updates
-                            if (storeUpdates.role === "tool") delete storeUpdates.role;
+                            // The store doesn't have a "tool" role — skip role updates
+                            if ((storeUpdates as { role?: string }).role === "tool") {
+                                delete (storeUpdates as { role?: string }).role;
+                            }
 
-                            updateSessionMessage(activeSessionId || "default", id, storeUpdates);
+                            updateSessionMessage(originSessionId, id, storeUpdates);
+                        },
+
+                        /**
+                         * Called by AgentRuntime to update progress.
+                         * Always targets `originSessionId`.
+                         */
+                        onProgressUpdate: (progress?: number, eta?: number, plan?: unknown) => {
+                            useChatStore.getState().updateSessionProgress(
+                                originSessionId, progress, eta, plan
+                            );
                         },
                     },
-                    reconstructedHistory // Pass reconstructed history as initial context
+                    reconstructedHistory
                 );
 
                 // ── Step 5: Fire-and-forget background memory reflection ───────────
-                // WHY concurrent: We start the reflector BEFORE awaiting runtime.chat()
-                // so it captures the user's intent even if the agent gets stuck in a
-                // confirmation loop or fails early.
-                // WHY dynamic import: Same reason as AgentRuntime — lazy load to keep
-                // the initial bundle small.
+                // WHY started BEFORE awaiting runtime.chat(): Captures the user's intent
+                // even if the agent gets stuck or fails early.
+                // WHY read originSessionId's messages: The user may have switched to
+                // another session by the time the dynamic import resolves.
                 import("../lib/memory-reflector").then(({ MemoryReflector }) => {
-                    const currentMessages =
-                        useChatStore.getState().getActiveSession()?.messages || [];
-                    const historyForReflector: LLMMessage[] = currentMessages.map((m) => ({
+                    const sessionMessages =
+                        useChatStore.getState().sessions.find(s => s.id === originSessionId)?.messages ?? [];
+                    const historyForReflector: LLMMessage[] = sessionMessages.map((m) => ({
                         role: m.role as "user" | "assistant" | "system",
                         content: m.content,
                     }));
@@ -298,17 +295,22 @@ export function useAgent(): UseAgentReturn {
 
                 // ── Step 6: Run the agent ──────────────────────────────────────────
                 await runtime.chat(content, attachmentData);
+
             } catch (error) {
                 console.error("[useAgent] Handler error:", error);
-                const { activeSessionId, addSessionMessage } = useChatStore.getState();
-                addSessionMessage(activeSessionId || "default", {
+                // Write the error to originSessionId — not whatever is currently active
+                const { addSessionMessage: addMsg } = useChatStore.getState();
+                addMsg(originSessionId, {
                     role: "assistant",
                     content: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
                 });
             } finally {
-                // Always clear the processing state, even on error, so the UI
-                // re-enables the input and hides the spinner.
-                useChatStore.getState().setProcessing(false);
+                // Always clear the processing state for originSessionId.
+                // This does NOT affect any other session that might be running.
+                const store = useChatStore.getState();
+                store.stopProcessing(originSessionId);
+                // Clear the session-level progress bar so it never lingers
+                store.updateSessionProgress(originSessionId, undefined, undefined, undefined);
             }
         },
         // WHY settings in deps: If the user changes LLM provider mid-session,
@@ -321,22 +323,18 @@ export function useAgent(): UseAgentReturn {
     // custom DOM events when clicked. We listen here and delegate to handleSubmit.
     //
     // WHY DOM events instead of props: MessageBubble is deep in the component
-    // tree and doesn't have direct access to handleSubmit. Custom events let
-    // it communicate upward without prop drilling.
+    // tree and doesn't have direct access to handleSubmit.
     useEffect(() => {
         const handleAgentAction = (e: CustomEvent) => {
-            const { type, content } = e.detail;
-            const { isProcessing } = useChatStore.getState();
+            const { type, content } = e.detail as { type: string; content: string };
+            const { activeSessionId, isSessionProcessing } = useChatStore.getState();
 
-            if (type === "continue" && !isProcessing) {
+            if (type === "continue" && activeSessionId && !isSessionProcessing(activeSessionId)) {
                 handleSubmit(content);
             }
 
-            if (type === "regenerate" && !isProcessing) {
-                // Regenerate: remove the last assistant + user message pair, then
-                // re-submit the user's original content.
-                const { sessions, activeSessionId, removeMessage } =
-                    useChatStore.getState();
+            if (type === "regenerate" && activeSessionId && !isSessionProcessing(activeSessionId)) {
+                const { sessions, removeMessage } = useChatStore.getState();
                 const session = sessions.find((s) => s.id === activeSessionId);
                 if (!session || session.messages.length === 0) return;
 
@@ -356,17 +354,8 @@ export function useAgent(): UseAgentReturn {
         };
 
         window.addEventListener("agent-action", handleAgentAction as EventListener);
-        return () =>
-            window.removeEventListener("agent-action", handleAgentAction as EventListener);
+        return () => window.removeEventListener("agent-action", handleAgentAction as EventListener);
     }, [handleSubmit]);
 
-    /**
-     * Clears the pending confirmation state after the dialog has been resolved.
-     * Call this in the dialog's onConfirm, onCancel, and onBypass handlers.
-     */
-    const clearConfirmation = useCallback(() => {
-        setPendingConfirmation(null);
-    }, []);
-
-    return { handleSubmit, pendingConfirmation, clearConfirmation };
+    return { handleSubmit };
 }
