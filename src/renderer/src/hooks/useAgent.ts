@@ -99,13 +99,19 @@ export function useAgent(): UseAgentReturn {
             // this session. Other sessions' signals are unaffected.
             const abortSignal = startProcessing(originSessionId);
 
-            // Map File objects to plain metadata. Electron exposes `.path` on File
-            // objects, which is not part of the standard Web File API.
-            const attachmentData = attachments?.map((file) => ({
-                name: file.name,
-                path: (file as File & { path?: string }).path ?? "",
-                type: file.type,
-            }));
+            // Map File objects to plain metadata. Electron natively hides `.path` on
+            // files dragging into the window due to context isolation. We use the
+            // explicitly exposed webUtils wrapper to retrieve the reliable OS path.
+            const attachmentData = attachments?.map((file) => {
+                const nativePath = (window as any).electron?.utils?.getPathForFile(file)
+                    || (file as File & { path?: string }).path
+                    || "";
+                return {
+                    name: file.name,
+                    path: nativePath,
+                    type: file.type,
+                };
+            });
 
             // Add the user's message to the store immediately so it appears in the
             // chat UI before the agent starts processing.

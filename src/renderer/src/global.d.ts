@@ -72,6 +72,14 @@ interface ElectronAPI {
         onResult: (callback: (result: { text: string; final: boolean }) => void) => () => void
         onDownloadProgress: (callback: (data: { modelId: string; progress: number }) => void) => () => void
     }
+
+    clipboard: {
+        readFilePaths: () => string[]
+    }
+
+    utils: {
+        getPathForFile: (file: File) => string
+    }
 }
 
 // Extend the Window interface globally

@@ -150,15 +150,34 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
         }
     }, [addLog])
 
+    // Derive workspace from file path if none is set
+    const maybeSetWorkspaceFromFiles = useCallback((files: File[]) => {
+        if (workspacePath) return // Already set — don't override
+        const firstFile = files[0]
+        const firstPath = (window as any).electron?.utils?.getPathForFile(firstFile) || (firstFile as any).path as string | undefined
+        if (!firstPath) return
+        // Parent directory of the first file becomes the implicit workspace
+        const parentDir = firstPath.includes('/') ? firstPath.substring(0, firstPath.lastIndexOf('/')) : null
+        if (!parentDir) return
+        setWorkspacePath(parentDir)
+        const { createSession, activeSessionId: currentSessionId, updateSessionWorkspace } = useChatStore.getState()
+        if (!currentSessionId) {
+            createSession(parentDir)
+        } else {
+            updateSessionWorkspace(currentSessionId, parentDir)
+        }
+    }, [workspacePath])
+
     // Handle file selection
     const handleSelectFiles = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
             const selectedFiles = Array.from(e.target.files)
             setAttachments(prev => [...prev, ...selectedFiles])
-            
+            maybeSetWorkspaceFromFiles(selectedFiles)
+
             // Focus textarea for user to edit/send
             textareaRef.current?.focus()
-            
+
             addLog({
                 eventType: 'STATE_CHANGE',
                 sessionId: activeSessionId || 'unknown',
@@ -169,23 +188,24 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
             // Reset value so same files can be selected again
             e.target.value = ''
         }
-    }, [addLog, activeSessionId])
+    }, [addLog, activeSessionId, maybeSetWorkspaceFromFiles])
 
     // Handle file drag-and-drop
     const handleFilesDropped = useCallback((files: File[]) => {
         // Add new files to existing attachments
         setAttachments(prev => [...prev, ...files])
-        
+        maybeSetWorkspaceFromFiles(files)
+
         // Focus textarea for user to edit/send
         textareaRef.current?.focus()
-        
+
         addLog({
             eventType: 'STATE_CHANGE',
             sessionId: activeSessionId || 'unknown',
             component: 'VoiceInput',
             details: { metadata: { action: 'files_dropped', count: files.length } }
         })
-    }, [addLog, activeSessionId])
+    }, [addLog, activeSessionId, maybeSetWorkspaceFromFiles])
 
     const removeAttachment = useCallback((index: number) => {
         setAttachments(prev => prev.filter((_, i) => i !== index))
@@ -212,7 +232,7 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
     const handleTextSubmit = useCallback(() => {
         const message = textInput.trim()
         const hasAttachments = attachments.length > 0
-        
+
         if ((message || hasAttachments) && !disabled) {
             // Pass attachments to onSubmit
             onSubmit(message, attachments, isHeadless)
@@ -271,10 +291,10 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
                         {attachments.map((file, index) => (
                             <div key={index} className="flex items-center gap-2 bg-white/10 rounded-full px-3 py-1 text-xs text-white/90 border border-white/10 animate-in fade-in zoom-in-95 duration-200">
                                 <FileIcon size={12} className="text-emerald-400" />
-                                <span className="max-w-[200px] truncate" title={(file as any).path || file.name}>
+                                <span className="max-w-[200px] truncate" title={(window as any).electron?.utils?.getPathForFile(file) || (file as any).path || file.name}>
                                     {file.name}
                                 </span>
-                                <button 
+                                <button
                                     onClick={() => removeAttachment(index)}
                                     className="hover:text-red-400 transition-colors"
                                 >
@@ -308,10 +328,9 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
                     )}
 
                     {/* Text Input - Auto-expanding Textarea with Drag-and-Drop */}
-                    <div 
-                        className={`flex-1 relative min-h-[44px] flex items-center transition-all duration-200 rounded-lg ${
-                            isDragging ? 'ring-2 ring-emerald-500/50 bg-emerald-500/10' : ''
-                        }`}
+                    <div
+                        className={`flex-1 relative min-h-[44px] flex items-center transition-all duration-200 rounded-lg ${isDragging ? 'ring-2 ring-emerald-500/50 bg-emerald-500/10' : ''
+                            }`}
                         {...dragHandlers}
                     >
                         {/* Drag Overlay */}
@@ -322,7 +341,7 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
                                 </div>
                             </div>
                         )}
-                        
+
                         <textarea
                             ref={textareaRef}
                             value={textInput}
@@ -359,12 +378,11 @@ export function VoiceInput({ onSubmit, disabled = false, onAbort }: VoiceInputPr
                         <button
                             onClick={() => setShowContextMenu(!showContextMenu)}
                             disabled={disabled}
-                            className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${
-                                workspacePath
-                                    ? 'bg-[#00a896]/20 text-[#00a896] hover:bg-[#00a896]/30'
-                                    : attachments.length > 0
-                                        ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
-                                        : 'bg-transparent text-white/40 hover:text-white/60 hover:bg-white/5'
+                            className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${workspacePath
+                                ? 'bg-[#00a896]/20 text-[#00a896] hover:bg-[#00a896]/30'
+                                : attachments.length > 0
+                                    ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                                    : 'bg-transparent text-white/40 hover:text-white/60 hover:bg-white/5'
                                 } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                             title={workspacePath ? `Workspace: ${workspacePath}` : 'Select workspace or files'}
                         >
