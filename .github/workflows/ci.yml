@@ -29,6 +29,9 @@ jobs:
           npx playwright install
           npx playwright install-deps
       
+      - name: Lint
+        run: npm run lint
+
       - name: Typecheck
         run: npm run typecheck
       

@@ -1,8 +1,10 @@
-import React, { useRef, useEffect } from 'react'
+import React from 'react'
+import { motion } from 'framer-motion'
 import { Trash2, Bot } from 'lucide-react'
-import { motion, AnimatePresence } from 'framer-motion'
 import { useChatStore } from '../stores/chatStore'
+import { useAutoScroll } from '../hooks/useAutoScroll'
 import { MessageBubble } from './MessageBubble'
+import { JumpToBottom } from './JumpToBottom'
 import { WorkflowTiles } from './WorkflowTiles'
 import { AgentPlan } from './AgentPlan'
 
@@ -22,16 +24,21 @@ interface ChatViewProps {
 }
 
 export function ChatView({ onClearChat }: ChatViewProps) {
-    const { sessions, activeSessionId, isProcessing, processingSessionId, removeMessage, clearMessages } = useChatStore()
-    const messagesEndRef = useRef<HTMLDivElement>(null)
+    const { sessions, activeSessionId, isSessionProcessing, removeMessage, clearMessages } = useChatStore()
 
     const activeSession = sessions.find(s => s.id === activeSessionId)
     const messages = activeSession?.messages || []
+    // Per-session processing state — true only if THIS session is actively running
+    const isProcessing = activeSessionId ? isSessionProcessing(activeSessionId) : false
 
-    // Auto-scroll to bottom when new messages arrive
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }, [messages, isProcessing])
+    const {
+        scrollContainerRef,
+        messagesEndRef,
+        handleScroll,
+        isAtBottom,
+        hasUnread,
+        scrollToBottom
+    } = useAutoScroll(messages, isProcessing)
 
     const handleClear = () => {
         if (window.confirm('Clear all messages? This cannot be undone.')) {
@@ -57,7 +64,11 @@ export function ChatView({ onClearChat }: ChatViewProps) {
             )}
 
             {/* Messages area */}
-            <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 space-y-4 min-w-0">
+            <div
+                ref={scrollContainerRef}
+                onScroll={handleScroll}
+                className="flex-1 overflow-y-auto overflow-x-hidden p-6 space-y-4 min-w-0"
+            >
                 {messages.length === 0 ? (
                     // Welcome message
                     <div className="flex flex-col gap-8 max-w-5xl mx-auto w-full pt-12">
@@ -93,8 +104,8 @@ export function ChatView({ onClearChat }: ChatViewProps) {
                     ))
                 )}
 
-                {/* Processing indicator - Hide if last message is a dynamic status update */}
-                {isProcessing && processingSessionId === activeSessionId && !messages[messages.length - 1]?.content.includes('Parallel Execution') && (
+                {/* Processing indicator - shown only when this session is actively processing */}
+                {isProcessing && !messages[messages.length - 1]?.content.includes('Parallel Execution') && (
                     <div className="flex gap-3 justify-start">
                         <div className="w-8 h-8 rounded-lg bg-[#00a896] flex items-center justify-center flex-shrink-0">
                             <Bot size={18} className="text-white" />
@@ -159,6 +170,13 @@ export function ChatView({ onClearChat }: ChatViewProps) {
                 {/* Scroll anchor */}
                 <div ref={messagesEndRef} />
             </div>
+
+            {/* Jump to bottom overlay */}
+            <JumpToBottom
+                isAtBottom={isAtBottom}
+                hasUnread={hasUnread}
+                onScrollToBottom={scrollToBottom}
+            />
         </div>
     )
 }
