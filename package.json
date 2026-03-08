@@ -61,6 +61,7 @@
         "fix-path": "^5.0.0",
         "formik": "^2.4.9",
         "framer-motion": "^12.26.2",
+        "ghost-cursor": "^1.4.2",
         "lucide-react": "^0.468.0",
         "playwright": "^1.57.0",
         "playwright-core": "^1.58.2",

@@ -286,14 +286,50 @@ export class BrowserManager {
                     '--disable-blink-features=AutomationControlled',
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
-                    '--disable-infobars'
+                    '--disable-infobars',
+                    '--ignore-certificate-errors',
+                    '--disable-accelerated-2d-canvas',
+                    '--disable-gpu',
+                    '--disable-dev-shm-usage',
+                    '--window-size=1920,1080',
+                    '--disable-software-rasterizer',
+                    '--disable-web-security'
                 ]
             });
         }
         if (!this.headlessContext) {
             this.headlessContext = await this.headlessBrowser!.newContext({
                 viewport: { width: 1920, height: 1080 },
-                locale: 'en-US'
+                locale: 'en-US',
+                timezoneId: 'America/New_York',
+                geolocation: { longitude: -74.0060, latitude: 40.7128 },
+                permissions: ['geolocation'],
+                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                colorScheme: 'dark',
+                deviceScaleFactor: 2,
+                hasTouch: false,
+                isMobile: false
+            });
+
+            // Inject stealth init scripts to bypass further detection
+            await this.headlessContext.addInitScript(() => {
+                // Remove webdriver property
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined,
+                });
+
+                // Mock languages
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en'],
+                });
+
+                // Mock hardware properties
+                Object.defineProperty(navigator, 'hardwareConcurrency', {
+                    get: () => 8,
+                });
+                Object.defineProperty(navigator, 'deviceMemory', {
+                    get: () => 8,
+                });
             });
         }
         if (!this.headlessPage || this.headlessPage.isClosed()) {
