@@ -91,7 +91,8 @@ export class PlaywrightService {
                 registerPage: (p) => this.browserManager.registerPage(p),
                 setPage: (p) => this.browserManager.setPage(p),
                 callTool: (n, a) => this.callTool(n, a),
-                validateAndCorrectSelector: (s, t, p) => this.validateAndCorrectSelector(s, t, p || page)
+                validateAndCorrectSelector: (s, t, p) => this.validateAndCorrectSelector(s, t, p || page),
+                surfaceBrowser: () => this.browserManager.surfaceBrowser()
             };
 
             return await tool.execute(page, args, context);
@@ -470,6 +471,17 @@ export class PlaywrightService {
                             selector: { type: 'string', description: 'Optional CSS selector to target specific area' }
                         },
                         required: ['url', 'extractType']
+                    }
+                },
+                {
+                    name: 'request_human_intervention',
+                    description: 'FALLBACK: Use this when you are completely blocked by a CAPTCHA, Turnstile, or OTP that you cannot bypass. This surfaces the invisible browser window to the human user so they can manually solve it for you.',
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            reason: { type: 'string', description: 'Why you are stuck (e.g. "Cloudflare Turnstile CAPTCHA detected")' }
+                        },
+                        required: ['reason']
                     }
                 },
                 ...BROWSER_TURBO_SCHEMAS
