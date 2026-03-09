@@ -1,0 +1,61 @@
+/**
+ * Design Tokens — CSS custom properties for the ai-worker UI.
+ *
+ * WHY: Centralizing visual values here lets experiments swap them at runtime
+ * via `document.documentElement.style.setProperty('--token', value)` without
+ * touching any component code or Tailwind config.
+ *
+ * Usage in Tailwind:  `bg-[var(--color-primary)]`
+ * Usage in plain CSS:  `color: var(--color-primary);`
+ */
+
+:root {
+  /* ── Colors ──────────────────────────────────────────────────────── */
+  /* ── Colors ──────────────────────────────────────────────────────── */
+  --color-primary: #4facfe;
+  --color-primary-hover: #00f2fe;
+  --color-accent: #3b82f6;
+  --color-bg-dark: #0b0c0f;      /* Very dark, almost black background */
+  --color-card-dark: #16171a;    /* Elevated cards and sidebar */
+  --color-surface: #222328;      /* Lighter hover states */
+  --color-border: rgba(255, 255, 255, 0.05);
+  --color-border-hover: rgba(255, 255, 255, 0.1);
+
+  /* Gradient for Co-Worker Hub typography */
+  --gradient-text: linear-gradient(135deg, #00f2fe 0%, #4facfe 50%, #8b5cf6 100%);
+
+  /* Text */
+  --color-text-primary: rgba(255, 255, 255, 0.9);
+  --color-text-secondary: rgba(255, 255, 255, 0.6);
+  --color-text-muted: rgba(255, 255, 255, 0.4);
+  --color-text-dim: rgba(255, 255, 255, 0.2);
+
+  /* Status */
+  --color-success: #22c55e;
+  --color-warning: #facc15;
+  --color-error: #ef4444;
+
+  /* ── Radii ─────────────────────────────────────────────────────── */
+  --radius-bubble: 1rem;
+  --radius-button: 0.5rem;
+  --radius-avatar: 0.5rem;
+  --radius-card: 0.75rem;
+  --radius-pill: 9999px;
+
+  /* ── Spacing ────────────────────────────────────────────────────── */
+  --space-message-gap: 0.75rem;
+  --space-bubble-px: 1rem;
+  --space-bubble-py: 0.75rem;
+
+  /* ── Typography ─────────────────────────────────────────────────── */
+  --font-size-message: 0.875rem;
+  --font-size-meta: 0.625rem;
+  --font-size-tool: 0.75rem;
+  --font-size-label: 0.6875rem;
+
+  /* ── Animation ──────────────────────────────────────────────────── */
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+  --duration-slow: 500ms;
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+}
