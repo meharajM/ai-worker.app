@@ -223,7 +223,7 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
   const hasContent = textInput.trim().length > 0 || attachments.length > 0
 
   return (
-    <div className="bg-[var(--color-surface)]/90 backdrop-blur-xl border border-[var(--color-border)] rounded-[24px] p-3 shadow-2xl shadow-black/50 transition-all duration-300 relative group hover:border-[var(--color-border-hover)]">
+    <div className="bg-[var(--color-surface)]/90 backdrop-blur-xl border border-[var(--color-border)] rounded-[24px] p-2 px-3 shadow-2xl shadow-black/50 transition-all duration-300 relative group hover:border-[var(--color-border-hover)]">
       {/* Notification Toast */}
       {notification && (
         <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-emerald-500/90 text-white text-xs px-3 py-1.5 rounded-full shadow-lg whitespace-nowrap animate-in fade-in slide-in-from-bottom-2 duration-300 pointer-events-none border border-emerald-400/50 backdrop-blur-sm">
@@ -249,9 +249,8 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
 
           {/* Text input with drag-and-drop */}
           <div
-            className={`flex-1 relative min-h-[44px] flex items-center transition-all duration-200 rounded-lg ${
-              isDragging ? 'ring-2 ring-emerald-500/50 bg-emerald-500/10' : ''
-            }`}
+            className={`flex-1 relative min-h-[36px] flex items-center transition-all duration-200 rounded-lg ${isDragging ? 'ring-2 ring-emerald-500/50 bg-emerald-500/10' : ''
+              }`}
             {...dragHandlers}
           >
             {/* Drag overlay */}

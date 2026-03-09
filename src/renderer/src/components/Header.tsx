@@ -15,8 +15,8 @@ export function Header({ status }: HeaderProps) {
     return (
         <header className="h-12 flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0">
             <div className="flex items-center gap-4">
-                 {/* User Auth Section */}
-                 {FEATURE_FLAGS.AUTH_ENABLED && (
+                {/* User Auth Section */}
+                {FEATURE_FLAGS.AUTH_ENABLED && (
                     <>
                         {user ? (
                             <div className="flex items-center gap-3">
@@ -26,7 +26,7 @@ export function Header({ status }: HeaderProps) {
                                     </div>
                                     <span className="hidden sm:inline">{user.displayName || user.email?.split('@')[0]}</span>
                                 </div>
-                                <button 
+                                <button
                                     onClick={() => signOut()}
                                     className="p-1.5 text-white/40 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
                                     title="Sign Out"
@@ -48,7 +48,7 @@ export function Header({ status }: HeaderProps) {
                 )}
             </div>
 
-            <div className="text-[10px] uppercase tracking-widest text-white/20 flex items-center gap-2">
+            <div className="text-[10px] uppercase tracking-widest text-white/20 hidden sm:flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                 local-session: active
             </div>
