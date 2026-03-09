@@ -13,8 +13,11 @@ export interface LLMMessage {
   content: string | LLMContentPart[];
   tool_calls?: {
     id: string;
-    name: string;
-    arguments: Record<string, unknown>;
+    type: "function";
+    function: {
+      name: string;
+      arguments: Record<string, unknown>;
+    };
   }[];
   tool_call_id?: string;
   name?: string; // For Gemini/OpenAI tool names

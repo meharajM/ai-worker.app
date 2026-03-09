@@ -18,7 +18,6 @@
 import React, { useState, useEffect } from "react";
 import { VoiceInput } from "./components/VoiceInput";
 import { ChatView } from "./components/ChatView";
-import { ChatSidebar } from "./components/ChatSidebar";
 import { ConnectionsPanel } from "./components/ConnectionsPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { FileChangeReview } from "./components/FileChangeReview";
@@ -33,6 +32,7 @@ import { useSettingsSync } from "./hooks/useSettingsSync";
 import { useAgent } from "./hooks/useAgent";
 import { useLLMStatus } from "./hooks/useLLMStatus";
 import { MissingDependenciesScreen } from "./components/MissingDependenciesScreen";
+import { ExperimentProvider } from "./lib/experiments/experimentProvider";
 
 function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
@@ -78,22 +78,25 @@ function App() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-screen bg-[#0f1115] text-white font-sans overflow-hidden">
-      <CommandPalette />
+    <ExperimentProvider>
+    <div className="flex h-screen bg-[var(--color-bg-dark)] text-white font-sans overflow-hidden">
+      <CommandPalette onViewChange={setCurrentView} />
       {!dependenciesResolved && <MissingDependenciesScreen onResolved={() => setDependenciesResolved(true)} />}
-      <Sidebar currentView={currentView} onViewChange={setCurrentView} />
+      
+      {currentView !== "settings" && (
+        <Sidebar currentView={currentView} onViewChange={setCurrentView} />
+      )}
 
       <div className="flex-1 flex flex-col relative min-w-0">
         <Header status={llmStatus} />
 
         <main className="flex-1 flex flex-col overflow-hidden min-w-0">
           {currentView === "chat" && (
-            <div className="flex-1 flex overflow-hidden min-w-0">
-              <ChatSidebar />
-              <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-                <ChatView />
+            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+              <ChatView />
 
-                <div className="p-4 flex-shrink-0 border-t border-white/5">
+              <div className="absolute bottom-6 left-0 right-0 px-6 pointer-events-none flex justify-center z-10">
+                <div className="w-full max-w-3xl pointer-events-auto">
                   <VoiceInput
                     onSubmit={handleSubmit}
                     // Only disable input while THIS session is the one processing
@@ -106,12 +109,13 @@ function App() {
           )}
 
           {currentView === "connections" && <ConnectionsPanel />}
-          {currentView === "settings" && <SettingsPanel />}
+          {currentView === "settings" && <SettingsPanel onClose={() => setCurrentView("chat")} />}
         </main>
       </div>
 
       <FileChangeReview />
     </div>
+    </ExperimentProvider>
   );
 }
 

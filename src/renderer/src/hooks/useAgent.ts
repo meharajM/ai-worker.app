@@ -86,23 +86,13 @@ export function useAgent(): UseAgentReturn {
         async (content: string, attachments?: File[], isHeadless?: boolean) => {
             if (!content.trim() && (!attachments || attachments.length === 0)) return;
 
-            const { addMessage, startProcessing, addSessionMessage, updateSessionProgress } =
-                useChatStore.getState();
-
-            // ── CRITICAL: Capture originSessionId before any await ─────────────
-            // This is determined once at submit time and is used for ALL callbacks,
-            // error handlers, and cleanup. Switching sessions after this point will
-            // NOT affect which session receives messages or whose progress is cleared.
-            const originSessionId = useChatStore.getState().activeSessionId ?? "default";
-
-            // Start per-session processing — returns an AbortSignal scoped only to
-            // this session. Other sessions' signals are unaffected.
-            const abortSignal = startProcessing(originSessionId);
+            const { addMessage, startProcessing } = useChatStore.getState();
 
             // Map File objects to plain metadata. Electron natively hides `.path` on
             // files dragging into the window due to context isolation. We use the
             // explicitly exposed webUtils wrapper to retrieve the reliable OS path.
             const attachmentData = attachments?.map((file) => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const nativePath = (window as any).electron?.utils?.getPathForFile(file)
                     || (file as File & { path?: string }).path
                     || "";
@@ -115,7 +105,20 @@ export function useAgent(): UseAgentReturn {
 
             // Add the user's message to the store immediately so it appears in the
             // chat UI before the agent starts processing.
+            // This also auto-creates a session and sets activeSessionId if none exists!
             addMessage({ role: "user", content, attachments: attachmentData });
+
+            // ── CRITICAL: Capture originSessionId before any await ─────────────
+            // This is determined once at submit time and is used for ALL callbacks,
+            // error handlers, and cleanup. Switching sessions after this point will
+            // NOT affect which session receives messages or whose progress is cleared.
+            // We capture this AFTER addMessage to ensure we get the real session ID
+            // for brand new chats, rather than "default".
+            const originSessionId = useChatStore.getState().activeSessionId ?? "default";
+
+            // Start per-session processing — returns an AbortSignal scoped only to
+            // this session. Other sessions' signals are unaffected.
+            const abortSignal = startProcessing(originSessionId);
 
             // Build a plain settings object to pass to AgentRuntime.
             // WHY not pass the full Zustand store: AgentRuntime lives in lib/ and
@@ -157,10 +160,7 @@ export function useAgent(): UseAgentReturn {
                         msg.tool_calls = m.toolCalls.map((tc) => ({
                             id: tc.id,
                             type: "function",
-                            function: {
-                                name: tc.name,
-                                arguments: tc.arguments,
-                            },
+                            function: { name: tc.name, arguments: tc.arguments },
                         }));
                     }
 
@@ -190,9 +190,6 @@ export function useAgent(): UseAgentReturn {
 
                 // ── Step 3: Dynamically import AgentRuntime ────────────────────────
                 const { AgentRuntime } = await import("../lib/agent-runtime");
-
-                // Tracks the ID of the "live" assistant message for in-place updates.
-                let activeAssistantMessageId: string | null = null;
 
                 // ── Step 4: Instantiate the agent ──────────────────────────────────
                 const runtime = new AgentRuntime(
@@ -229,7 +226,7 @@ export function useAgent(): UseAgentReturn {
                                 storeMsg.toolCalls = msg.tool_calls.map((tc) => ({
                                     id: tc.id,
                                     name: tc.function.name,
-                                    arguments: tc.function.arguments as Record<string, unknown>,
+                                    arguments: tc.function.arguments,
                                 }));
                             }
 
@@ -239,9 +236,6 @@ export function useAgent(): UseAgentReturn {
 
                             // Write to originSessionId — not the currently-active session
                             const newMsg = addMsg(originSessionId, storeMsg);
-                            if (msg.role === "assistant") {
-                                activeAssistantMessageId = newMsg.id;
-                            }
                             return newMsg.id;
                         },
 

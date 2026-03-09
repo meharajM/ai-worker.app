@@ -8,6 +8,8 @@
         "electron-vite.config.ts"
     ],
     "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
         "composite": true,
         "types": [
             "electron-vite/node"

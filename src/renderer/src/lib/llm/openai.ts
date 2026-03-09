@@ -259,27 +259,16 @@ function formatMessagesForOpenAI(messages: LLMMessage[]): Record<string, unknown
 
     // Add tool_calls if present (and strictly stringify arguments)
     if (m.tool_calls && m.tool_calls.length > 0) {
-      // At runtime, tool_calls can be in OpenAI wire format { function: { name, arguments } }
-      // (set by agent-runtime via `as any`) or our internal LLMMessage format { name, arguments }.
-      // We handle both gracefully.
-      type RuntimeToolCall = {
-        id: string;
-        name?: string;
-        arguments?: Record<string, unknown>;
-        function?: { name: string; arguments: string | Record<string, unknown> };
-      };
-      formatted.tool_calls = (m.tool_calls as unknown as RuntimeToolCall[]).map((tc) => {
-        const name = tc.name ?? tc.function?.name ?? '';
-        const rawArgs = tc.arguments ?? tc.function?.arguments ?? {};
-        return {
-          id: tc.id,
-          type: 'function',
-          function: {
-            name,
-            arguments: typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs)
-          }
-        };
-      });
+      formatted.tool_calls = m.tool_calls.map((tc) => ({
+        id: tc.id,
+        type: 'function',
+        function: {
+          name: tc.function.name,
+          arguments: typeof tc.function.arguments === 'string'
+            ? tc.function.arguments
+            : JSON.stringify(tc.function.arguments)
+        }
+      }));
     }
 
     // Add tool_call_id if it's a tool response

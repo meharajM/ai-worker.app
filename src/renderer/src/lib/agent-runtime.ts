@@ -392,7 +392,7 @@ export class AgentRuntime implements IAgentClient {
           id: tc.id,
           type: "function",
           function: { name: tc.name, arguments: tc.arguments },
-        })) as any,
+        })),
       };
 
       // Build tool call entries for this iteration (no result yet — pending)
