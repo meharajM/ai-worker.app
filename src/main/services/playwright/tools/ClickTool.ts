@@ -9,9 +9,10 @@ export class ClickTool extends PlaywrightTool {
         const clickError = this.requireParam(args, 'selector');
         if (clickError) return { result: null, error: clickError };
 
+        const cursor = createCursor(page);
+
         try {
             await page.waitForSelector(args.selector, { state: 'attached', timeout: 5000 });
-            const cursor = createCursor(page);
             await cursor.click(args.selector);
             return { result: `Clicked ${args.selector} with humanized cursor` };
         } catch (error) {
@@ -23,7 +24,6 @@ export class ClickTool extends PlaywrightTool {
                 try {
                     const textWithQuotes = `text="${args.selector}"`;
                     await page.waitForSelector(textWithQuotes, { state: 'attached', timeout: 5000 });
-                    const cursor = createCursor(page);
                     await cursor.click(textWithQuotes);
                     return { result: `Clicked by Text "${args.selector}" (Fallback from failed selector)` };
                 } catch (e2) {

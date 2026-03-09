@@ -67,6 +67,8 @@ export class BrowserManager {
     async surfaceBrowser(): Promise<void> {
         if (!this.context) return;
         console.log('[BrowserManager] Surfacing browser for human intervention...');
+        const currentUrl = this.page?.url();
+
         await this.close();
         
         // This forces ensureBrowser to use headless: false on the next launch
@@ -74,6 +76,12 @@ export class BrowserManager {
         
         // Relaunch immediately
         await this.ensureBrowser();
+
+        if (currentUrl && currentUrl !== 'about:blank') {
+            await this.page?.goto(currentUrl, { waitUntil: 'domcontentloaded' }).catch(() => {});
+        }
+
+        this.headlessOverride = null;
     }
 
     /**
@@ -311,8 +319,7 @@ export class BrowserManager {
                     '--disable-gpu',
                     '--disable-dev-shm-usage',
                     '--window-size=1920,1080',
-                    '--disable-software-rasterizer',
-                    '--disable-web-security'
+                    '--disable-software-rasterizer'
                 ]
             });
         }
@@ -321,8 +328,6 @@ export class BrowserManager {
                 viewport: { width: 1920, height: 1080 },
                 locale: 'en-US',
                 timezoneId: 'America/New_York',
-                geolocation: { longitude: -74.0060, latitude: 40.7128 },
-                permissions: ['geolocation'],
                 userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 colorScheme: 'dark',
                 deviceScaleFactor: 2,

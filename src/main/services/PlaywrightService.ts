@@ -473,17 +473,6 @@ export class PlaywrightService {
                         required: ['url', 'extractType']
                     }
                 },
-                {
-                    name: 'request_human_intervention',
-                    description: 'FALLBACK: Use this when you are completely blocked by a CAPTCHA, Turnstile, or OTP that you cannot bypass. This surfaces the invisible browser window to the human user so they can manually solve it for you.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            reason: { type: 'string', description: 'Why you are stuck (e.g. "Cloudflare Turnstile CAPTCHA detected")' }
-                        },
-                        required: ['reason']
-                    }
-                },
                 ...BROWSER_TURBO_SCHEMAS
             ] as ToolSchema[]
         };
