@@ -191,24 +191,30 @@ export class SpecialToolHandlers {
             { instruction: instruction.substring(0, 200) }
         );
 
+        const useHeadless = this.options.isHeadless === true;
         let subAgentTabId: number | undefined;
-        try {
-            const { browserLock } = await import("../resource-lock");
-            const tabResult = await browserLock.runExclusive(async () =>
-                executeToolCall("new_tab", { url: "about:blank" })
-            );
-            const subAgentTabIdResult = parseTabIdFromResult(tabResult);
-            if (subAgentTabIdResult !== undefined) {
-                subAgentTabId = subAgentTabIdResult;
+        if (!useHeadless) {
+            try {
+                const { browserLock } = await import("../resource-lock");
+                const tabResult = await browserLock.runExclusive(async () =>
+                    executeToolCall("new_tab", { url: "about:blank" })
+                );
+                const subAgentTabIdResult = parseTabIdFromResult(tabResult);
+                if (subAgentTabIdResult !== undefined) {
+                    subAgentTabId = subAgentTabIdResult;
+                }
+            } catch (e) {
+                console.warn("[SpecialToolHandlers] Failed to provision tab for sub-agent", e);
             }
-        } catch (e) {
-            console.warn("[SpecialToolHandlers] Failed to provision tab for sub-agent", e);
+        } else {
+            console.log(`[SpecialToolHandlers] Headless mode — skipping visible tab for delegate_sub_task`);
         }
 
         const subAgent = this.makeSubAgentFactory()({
             agentInstanceId: subAgentId,
             parentAgentId: this.agentInstanceId,
             isSubAgent: true,
+            isHeadless: useHeadless,
             tabId: subAgentTabId,
             taskCategory: this.taskCategory,
             onMessage: (msg: LLMMessage) => {
