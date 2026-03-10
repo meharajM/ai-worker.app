@@ -11,6 +11,7 @@ export function RecentSessionsList() {
     deleteSession,
     setActiveSession,
     updateSessionTitle,
+    _processingSessions,
   } = useChatStore()
   
   const { addLog } = useLogStore()
@@ -68,6 +69,7 @@ export function RecentSessionsList() {
       <div className="flex flex-col gap-0.5">
         {sessions.map((session) => {
           const isActive = session.id === activeSessionId
+          const isProcessing = _processingSessions.has(session.id)
           return (
             <div
               key={session.id}
@@ -96,6 +98,15 @@ export function RecentSessionsList() {
                   <span className="text-xs font-medium truncate">
                     {session.title}
                   </span>
+                )}
+
+                {/* Pulsing indicator for actively running sessions */}
+                {isProcessing && (
+                  <span
+                    className="flex-shrink-0 w-2 h-2 rounded-full bg-[var(--color-primary)]"
+                    style={{ animation: 'pulse-dot 1.4s ease-in-out infinite' }}
+                    title="Processing..."
+                  />
                 )}
               </div>
 

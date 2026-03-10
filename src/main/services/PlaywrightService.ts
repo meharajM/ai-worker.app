@@ -91,7 +91,8 @@ export class PlaywrightService {
                 registerPage: (p) => this.browserManager.registerPage(p),
                 setPage: (p) => this.browserManager.setPage(p),
                 callTool: (n, a) => this.callTool(n, a),
-                validateAndCorrectSelector: (s, t, p) => this.validateAndCorrectSelector(s, t, p || page)
+                validateAndCorrectSelector: (s, t, p) => this.validateAndCorrectSelector(s, t, p || page),
+                surfaceBrowser: () => this.browserManager.surfaceBrowser()
             };
 
             return await tool.execute(page, args, context);

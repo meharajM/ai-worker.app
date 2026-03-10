@@ -115,6 +115,20 @@ export const FILL_FORM_SCHEMA: ToolSchema = {
     }
 }
 
+// ─── request_human_intervention ────────────────────────────────────────
+
+export const REQUEST_HUMAN_INTERVENTION_SCHEMA: ToolSchema = {
+    name: 'request_human_intervention',
+    description: 'FALLBACK: Use this when you are completely blocked by a CAPTCHA, Turnstile, or OTP that you cannot bypass. This surfaces the invisible browser window to the human user so they can manually solve it for you.',
+    inputSchema: {
+        type: 'object',
+        properties: {
+            reason: { type: 'string', description: 'Why you are stuck (e.g. "Cloudflare Turnstile CAPTCHA detected")' }
+        },
+        required: ['reason']
+    }
+}
+
 /**
  * All browser turbo/recipe tool schemas in one array.
  * Use this for easy iteration in listTools() or client-tools exports.
@@ -123,4 +137,5 @@ export const BROWSER_TURBO_SCHEMAS: ToolSchema[] = [
     BROWSER_ACTION_SEQUENCE_SCHEMA,
     WEB_SEARCH_SCHEMA,
     FILL_FORM_SCHEMA,
+    REQUEST_HUMAN_INTERVENTION_SCHEMA,
 ]

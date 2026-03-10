@@ -461,9 +461,12 @@ AI-Worker comes with two pre-configured MCP servers that are automatically initi
 1. **Playwright Server** (`playwright`)
 
    - Purpose: Browser automation and web interaction
-   - Mode: **Internal Service** (Zero-latency, in-process)
+   - Mode: **Internal Service** (Zero-latency, in-process, stealth-enabled)
    - Configuration: `command: 'internal'` (Automatically routed by `mcp.ts`)
-   - Tools: 30+ tools including navigate, click, fill, screenshot, get_state, evaluate, background_scrape (headless)
+   - Capabilities:
+     - 30+ tools including navigate, click, fill, screenshot, get_state, evaluate.
+     - **Advanced Headless Evasion**: Built-in stealth flags, network TLS impersonation, and rich context mocking (User-Agent, Locale, Hardware).
+     - **Human-Like Inputs**: Utilizes `ghost-cursor` for Bezier-curve mouse movements and variable typing delays to bypass behavioral biometrics (e.g., Turnstile).
 
 2. **Sequential Thinking Server** (`sequential-thinking`)
    - Purpose: Step-by-step reasoning for complex tasks
@@ -572,8 +575,8 @@ graph LR
   - Type: `stdio`
   - Command: `npx`
   - Args: `-y @modelcontextprotocol/server-playwright`
-  - Description: Browser automation and web interaction tools (includes headless `background_scrape` for background extraction)
-
+  - Description: Browser automation and web interaction tools (includes headless `background_scrape` for background extraction). Now reinforced with advanced headless evasion natively in the `BrowserManager`.
+  
 - **Sequential Thinking** (`sequential-thinking`)
   - Type: `stdio`
   - Command: `npx`

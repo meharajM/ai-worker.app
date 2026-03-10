@@ -35,6 +35,7 @@ export interface PlaywrightContext {
     setPage(page: Page): void;
     callTool(name: string, args: any): Promise<ToolResult>;
     validateAndCorrectSelector(selector: string, text?: string, page?: Page): Promise<{ valid: boolean; correction?: string; error?: string }>;
+    surfaceBrowser?: () => Promise<void>;
 }
 
 /**
