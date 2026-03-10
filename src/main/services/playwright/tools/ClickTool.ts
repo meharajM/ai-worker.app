@@ -1,6 +1,6 @@
 import { Page } from 'playwright-core';
 import { PlaywrightTool, ToolResult } from '../PlaywrightTool';
-import { createCursor } from 'ghost-cursor';
+import { humanizedClick } from '../humanMouse';
 
 export class ClickTool extends PlaywrightTool {
     name = 'click';
@@ -9,11 +9,9 @@ export class ClickTool extends PlaywrightTool {
         const clickError = this.requireParam(args, 'selector');
         if (clickError) return { result: null, error: clickError };
 
-        const cursor = createCursor(page);
-
         try {
             await page.waitForSelector(args.selector, { state: 'attached', timeout: 5000 });
-            await cursor.click(args.selector);
+            await humanizedClick(page, args.selector);
             return { result: `Clicked ${args.selector} with humanized cursor` };
         } catch (error) {
             const errorStr = String(error);
@@ -24,7 +22,7 @@ export class ClickTool extends PlaywrightTool {
                 try {
                     const textWithQuotes = `text="${args.selector}"`;
                     await page.waitForSelector(textWithQuotes, { state: 'attached', timeout: 5000 });
-                    await cursor.click(textWithQuotes);
+                    await humanizedClick(page, textWithQuotes);
                     return { result: `Clicked by Text "${args.selector}" (Fallback from failed selector)` };
                 } catch (e2) {
                     // Fallback failed
