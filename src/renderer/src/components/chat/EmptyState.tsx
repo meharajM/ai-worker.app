@@ -6,7 +6,7 @@ import { WorkflowTiles } from '../WorkflowTiles'
  */
 export function EmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center min-h-full max-w-4xl mx-auto w-full pt-12 pb-60">
+    <div className="flex flex-col items-center justify-center min-h-full max-w-4xl mx-auto w-full pt-8 pb-32">
       
       {/* System Active Badge */}
       <div className="mb-8 px-3 py-1 rounded-full border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 text-[var(--color-primary)] text-[10px] font-bold tracking-widest uppercase">
@@ -24,7 +24,7 @@ export function EmptyState() {
       </div>
 
       {/* Subtitle */}
-      <p className="text-[var(--color-text-secondary)] text-lg text-center max-w-2xl mb-12">
+      <p className="text-[var(--color-text-secondary)] text-md text-center max-w-2xl mb-8">
         Your Co-Worker is ready. Delegate tasks across connected systems right here or press <span className="font-mono bg-white/10 px-1 py-0.5 rounded text-white/90 text-sm">Cmd+K</span> to quickly search.
       </p>
 

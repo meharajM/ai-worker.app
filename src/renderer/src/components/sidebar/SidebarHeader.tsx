@@ -9,10 +9,10 @@ export function SidebarHeader() {
       </div>
       <div className="flex flex-col">
         <span className="text-sm font-bold tracking-tight text-white/90">
-          CO-WORKER HUB
+          AI-WORKER
         </span>
         <span className="text-[10px] uppercase font-bold text-white/40 tracking-wider">
-          MCP Orchestrator
+          Your AI Co-Worker Hub
         </span>
       </div>
     </div>

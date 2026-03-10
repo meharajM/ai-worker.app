@@ -251,17 +251,18 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         console.log('✅ Window Loaded');
 
         try {
-            console.log('Checking for Missing Dependencies modal...');
-            const modalVisible = await window.locator('text=Missing Dependencies').isVisible({ timeout: 10000 }).catch(() => false);
+            console.log('Checking for Missing Dependencies screen...');
+            const skipBtn = window.locator('text=Skip for now').first();
+            const modalVisible = await skipBtn.isVisible({ timeout: 20000 }).catch(() => false);
             if (modalVisible) {
-                console.log('Found Missing Dependencies modal, dismissing...');
-                const skipBtn = window.locator('text=Skip for now').first();
+                console.log('Found Missing Dependencies screen, dismissing...');
                 await skipBtn.click();
-                await window.locator('text=Missing Dependencies').waitFor({ state: 'hidden', timeout: 5000 });
-                console.log('✅ Dismissed Missing Dependencies modal');
+                console.log('✅ Dismissed Missing Dependencies screen');
+            } else {
+                console.log('ℹ️ No Missing Dependencies screen detected after 20s');
             }
         } catch (e) {
-            console.log('ℹ️ Error modal check:', e.message);
+            console.log('ℹ️ Error screen check:', e.message);
         }
 
         // Configure OpenAI
