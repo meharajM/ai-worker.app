@@ -47,7 +47,7 @@ export function WorkflowTiles() {
                     key={template.id}
                     onClick={() => handleTileClick(template.prompt)}
                     className={`
-                        flex flex-col items-start text-left p-5 rounded-3xl border 
+                        flex flex-col items-start text-left p-4 rounded-2xl border 
                         bg-[var(--color-surface)] border-[var(--color-border)]
                         hover:border-[var(--color-border-hover)] hover:bg-[var(--color-card-dark)]
                         hover:shadow-2xl hover:shadow-black/40 
@@ -57,9 +57,9 @@ export function WorkflowTiles() {
                     {/* Glassmorphism Background Effect */}
                     <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
 
-                    <div className={`mb-4 p-3 rounded-2xl bg-white/5 group-hover:bg-white/10 transition-colors duration-500`}>
+                    <div className={`mb-3 p-2.5 rounded-xl bg-white/5 group-hover:bg-white/10 transition-colors duration-500`}>
                         <div className={`${template.color.split(' ')[0]} group-hover:scale-110 transition-transform duration-500`}>
-                           {ICON_MAP[template.iconName] || <Zap size={20} />}
+                           {ICON_MAP[template.iconName] || <Zap size={18} />}
                         </div>
                     </div>
 

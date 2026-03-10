@@ -41,14 +41,21 @@ export function SendButton({
   // Send button
   return (
     <button
-      onClick={onSubmit}
-      disabled={disabled || !hasContent}
+      type="button"
+      onClick={(e) => {
+        if (disabled || !hasContent) {
+          e.preventDefault()
+          return
+        }
+        onSubmit()
+      }}
+      aria-disabled={disabled || !hasContent}
+      aria-label="Send message"
       data-testid="send-button"
-      className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${
-        hasContent && !disabled
+      className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${hasContent && !disabled
           ? 'bg-white text-black hover:bg-gray-200'
           : 'bg-transparent text-white/20 cursor-not-allowed'
-      }`}
+        }`}
     >
       <Send size={18} />
     </button>
