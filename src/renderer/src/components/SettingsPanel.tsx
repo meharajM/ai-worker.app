@@ -113,7 +113,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             {/* Sidebar styling matched exactly to Co-Worker Hub */}
             <div className="w-64 flex-shrink-0 bg-[var(--color-card-dark)] flex flex-col h-full border-r border-[var(--color-border)] transition-all duration-300">
                 <SidebarHeader />
-                
+
                 <div className="flex-1 overflow-y-auto px-5 py-4">
                     <h3 className="text-[10px] font-bold text-white/40 tracking-wider uppercase mb-3">
                         Settings
@@ -140,6 +140,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <div className="px-5 py-4 border-t border-[var(--color-border)]">
                     <button
                         onClick={onClose}
+                        title="Chat"
                         className="w-full flex items-center justify-between py-2 px-2 -mx-2 rounded-lg transition-colors group cursor-pointer text-white/50 hover:bg-[var(--color-surface)] hover:text-white"
                     >
                         <div className="flex items-center gap-3">

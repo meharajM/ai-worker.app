@@ -43,21 +43,23 @@ export class SpecialToolHandlers {
      * @param args - Object containing `goal` (string) and `steps` (array of step objects).
      * @returns The formatted response for the LLM and the structured plan object.
      */
-    handleCreateExecutionPlan(args: any): { result: string; plan: ExecutionPlan } {
-        const steps = args.steps || [];
+    handleCreateExecutionPlan(args: Record<string, unknown>): { result: string; plan: ExecutionPlan } {
+        const steps = (args.steps as Array<Record<string, unknown>>) || [];
+        // Support both 'goal' (agent-generated) and 'original_request' (test mock / older LLM pattern)
+        const goal = (args.goal as string) || (args.original_request as string) || 'Unknown goal';
         const plan: ExecutionPlan = {
-            goal: args.goal || "Unknown goal",
-            steps: steps.map((s: any) => ({
-                id: s.id,
-                description: s.description,
-                status: s.status || "pending",
-                assigned_agent: s.assigned_agent,
+            goal,
+            steps: steps.map((s) => ({
+                id: s.id as number,
+                description: s.description as string,
+                status: (s.status as ExecutionPlan['steps'][number]['status']) || 'pending',
+                assigned_agent: s.assigned_agent as string | undefined,
             })),
         };
-        console.log(`[SpecialToolHandlers] Plan created with ${steps.length} steps:`, args.goal);
-        const result = `Execution plan created: ${args.goal}\n\nSteps:\n${steps
-            .map((s: any) => `${s.id}. ${s.description} [${s.assigned_agent}]`)
-            .join("\n")}\n\nI will now execute each step sequentially.`;
+        console.log(`[SpecialToolHandlers] Plan created with ${steps.length} steps:`, goal);
+        const result = `Execution plan created: ${goal}\n\nSteps:\n${steps
+            .map((s) => `${s.id}. ${s.description} [${s.assigned_agent ?? 'agent'}]`)
+            .join('\n')}\n\nI will now execute each step sequentially.`;
         return { result, plan };
     }
 
@@ -189,24 +191,30 @@ export class SpecialToolHandlers {
             { instruction: instruction.substring(0, 200) }
         );
 
+        const useHeadless = this.options.isHeadless === true;
         let subAgentTabId: number | undefined;
-        try {
-            const { browserLock } = await import("../resource-lock");
-            const tabResult = await browserLock.runExclusive(async () =>
-                executeToolCall("new_tab", { url: "about:blank" })
-            );
-            const subAgentTabIdResult = parseTabIdFromResult(tabResult);
-            if (subAgentTabIdResult !== undefined) {
-                subAgentTabId = subAgentTabIdResult;
+        if (!useHeadless) {
+            try {
+                const { browserLock } = await import("../resource-lock");
+                const tabResult = await browserLock.runExclusive(async () =>
+                    executeToolCall("new_tab", { url: "about:blank" })
+                );
+                const subAgentTabIdResult = parseTabIdFromResult(tabResult);
+                if (subAgentTabIdResult !== undefined) {
+                    subAgentTabId = subAgentTabIdResult;
+                }
+            } catch (e) {
+                console.warn("[SpecialToolHandlers] Failed to provision tab for sub-agent", e);
             }
-        } catch (e) {
-            console.warn("[SpecialToolHandlers] Failed to provision tab for sub-agent", e);
+        } else {
+            console.log(`[SpecialToolHandlers] Headless mode — skipping visible tab for delegate_sub_task`);
         }
 
         const subAgent = this.makeSubAgentFactory()({
             agentInstanceId: subAgentId,
             parentAgentId: this.agentInstanceId,
             isSubAgent: true,
+            isHeadless: useHeadless,
             tabId: subAgentTabId,
             taskCategory: this.taskCategory,
             onMessage: (msg: LLMMessage) => {

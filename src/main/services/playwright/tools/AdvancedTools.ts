@@ -4,8 +4,12 @@ import { PlaywrightTool, ToolResult } from '../PlaywrightTool';
 export class EvaluateTool extends PlaywrightTool {
     name = 'evaluate';
     async execute(page: Page, args: any): Promise<ToolResult> {
-        const result = await page.evaluate(args.script);
-        return { result };
+        try {
+            const result = await page.evaluate(args.script);
+            return { result };
+        } catch (error) {
+            return { result: null, error: `Script execution failed: ${String(error)}` };
+        }
     }
 }
 

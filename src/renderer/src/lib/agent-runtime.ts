@@ -700,7 +700,7 @@ export class AgentRuntime implements IAgentClient {
     if (this.options.isSubAgent) throw new Error("Max iterations reached");
     const handoffMsg: LLMMessage = {
       role: "assistant",
-      content: `I've worked for ${this.maxIterations} steps on this task. To ensure accuracy and prevent context issues, I've saved a checkpoint of my progress. Should I continue with a fresh context or stop here?`,
+      content: `I've reached the maximum number of steps (${this.maxIterations}) for this context. To ensure accuracy and prevent context issues, I've saved a checkpoint of my progress. Should I continue with a fresh context or stop here?`,
       actions: [
         {
           type: "continue",

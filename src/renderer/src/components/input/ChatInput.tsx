@@ -266,62 +266,66 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
         {/* Attachment chips */}
         <AttachmentBar attachments={attachments} onRemove={removeAttachment} />
 
-        <div className="flex items-end gap-3">
-          {/* Voice controls */}
-          <VoiceButton
-            isListening={isListening}
-            isInitializing={isInitializing}
-            isFirstSetup={isFirstSetup}
-            setupProgress={setupProgress}
-            sttSupported={sttSupported}
-            disabled={disabled}
-            onClick={handleMicClick}
-          />
-
-          {/* Text input with drag-and-drop */}
-          <div
-            className={`flex-1 relative min-h-[44px] flex items-center transition-all duration-200 rounded-lg ${isDragging ? 'ring-2 ring-emerald-500/50 bg-emerald-500/10' : ''
-              }`}
-            {...dragHandlers}
-          >
-            {/* Drag overlay */}
-            {isDragging && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-                <div className="bg-emerald-500/20 backdrop-blur-sm border border-emerald-500/50 rounded-lg px-4 py-2 text-emerald-400 text-sm font-medium shadow-lg">
-                  📄 Drop file to convert
-                </div>
+        <div
+          className={`relative min-h-[44px] flex items-center transition-all duration-200 rounded-lg ${isDragging ? 'ring-2 ring-emerald-500/50 bg-emerald-500/10' : ''
+            }`}
+          {...dragHandlers}
+        >
+          {/* Drag overlay */}
+          {isDragging && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+              <div className="bg-emerald-500/20 backdrop-blur-sm border border-emerald-500/50 rounded-lg px-4 py-2 text-emerald-400 text-sm font-medium shadow-lg">
+                📄 Drop file to convert
               </div>
-            )}
+            </div>
+          )}
 
-            <TextArea
-              value={textInput}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              disabled={disabled && !onAbort}
+          <TextArea
+            value={textInput}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            disabled={disabled && !onAbort}
+            isListening={isListening}
+            isFirstSetup={isFirstSetup}
+            textareaRef={textareaRef}
+          />
+        </div>
+
+        {/* Action Row */}
+        <div className="flex items-center justify-between mt-1">
+          <div className="flex items-center gap-2">
+            {/* Voice controls */}
+            <VoiceButton
               isListening={isListening}
+              isInitializing={isInitializing}
               isFirstSetup={isFirstSetup}
-              textareaRef={textareaRef}
+              setupProgress={setupProgress}
+              sttSupported={sttSupported}
+              disabled={disabled}
+              onClick={handleMicClick}
             />
           </div>
 
-          {/* Toolbar buttons */}
-          <InputToolbar
-            workspacePath={workspacePath}
-            isHeadless={isHeadless}
-            onToggleHeadless={() => setIsHeadless(!isHeadless)}
-            onSelectFolder={handleSelectFolder}
-            onSelectFiles={handleSelectFiles}
-            hasAttachments={attachments.length > 0}
-            disabled={disabled}
-          />
+          <div className="flex items-center gap-2">
+            {/* Toolbar buttons */}
+            <InputToolbar
+              workspacePath={workspacePath}
+              isHeadless={isHeadless}
+              onToggleHeadless={() => setIsHeadless(!isHeadless)}
+              onSelectFolder={handleSelectFolder}
+              onSelectFiles={handleSelectFiles}
+              hasAttachments={attachments.length > 0}
+              disabled={disabled}
+            />
 
-          {/* Send / Stop button */}
-          <SendButton
-            disabled={disabled}
-            onAbort={onAbort}
-            onSubmit={handleTextSubmit}
-            hasContent={hasContent}
-          />
+            {/* Send / Stop button */}
+            <SendButton
+              disabled={disabled}
+              onAbort={onAbort}
+              onSubmit={handleTextSubmit}
+              hasContent={hasContent}
+            />
+          </div>
         </div>
       </div>
     </div>

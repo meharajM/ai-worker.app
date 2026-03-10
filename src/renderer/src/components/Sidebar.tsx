@@ -18,21 +18,21 @@ interface SidebarProps {
  */
 export function Sidebar({ currentView, onViewChange }: SidebarProps) {
   const { sidebarOpen } = useChatStore()
-  
+
   if (!sidebarOpen) return null
 
   return (
-    <div className="w-64 flex-shrink-0 bg-[var(--color-card-dark)] flex flex-col h-full border-r border-[var(--color-border)] transition-all duration-300">
+    <div className="w-64 flex-shrink-0 bg-[var(--color-card-dark)] hidden md:flex flex-col h-full border-r border-[var(--color-border)] transition-all duration-300">
       {/* 1. Header with Logo */}
       <SidebarHeader />
 
       {/* 2. Scrollable Body containing Agents & Sessions */}
       <div className="flex-1 overflow-y-auto flex flex-col">
         {/* ActiveAgentsList removed as per user request to simplify sidebar */}
-        
+
         {/* Divider */}
         <div className="mx-5 my-2 border-t border-white/5" />
-        
+
         <RecentSessionsList />
       </div>
 
