@@ -92,11 +92,13 @@ function App() {
 
         <main className="flex-1 flex flex-col overflow-hidden min-w-0">
           {currentView === "chat" && (
-            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-              <ChatView />
+            <div className="flex-1 flex flex-col overflow-hidden min-w-0 relative">
+              <div className="flex-1 overflow-hidden flex flex-col relative w-full h-full pb-0 bg-[var(--color-bg-dark)] z-0">
+                <ChatView />
+              </div>
 
-              <div className="absolute bottom-6 left-0 right-0 px-6 pointer-events-none flex justify-center z-10">
-                <div className="w-full max-w-3xl pointer-events-auto">
+              <div className="pt-2 pb-6 px-6 flex justify-center w-full z-10 bg-[var(--color-bg-dark)] shrink-0 shadow-[0_-10px_20px_rgba(0,0,0,0.2)]">
+                <div className="w-full max-w-2xl">
                   <VoiceInput
                     onSubmit={handleSubmit}
                     // Only disable input while THIS session is the one processing

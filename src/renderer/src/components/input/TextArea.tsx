@@ -38,8 +38,12 @@ export function TextArea({
   // Auto-resize on content change
   useEffect(() => {
     if (ref.current) {
-      ref.current.style.height = 'auto'
-      ref.current.style.height = ref.current.scrollHeight + 'px'
+      if (!value) {
+        ref.current.style.height = '44px'
+      } else {
+        ref.current.style.height = 'auto'
+        ref.current.style.height = ref.current.scrollHeight + 'px'
+      }
     }
   }, [value, ref])
 
@@ -58,15 +62,16 @@ export function TextArea({
             ? 'Downloading model...'
             : 'Message... (Shift+Enter for new line, or drag files here)'
       }
-      rows={5}
+      rows={1}
       style={{
         resize: 'none',
-        minHeight: '120px',
-        maxHeight: '400px',
+        minHeight: '44px',
+        height: '44px',
+        maxHeight: '200px',
       }}
       className={`
         w-full bg-transparent border-none outline-none
-        text-base py-2 transition-colors scrollbar-hide
+        text-base py-3 px-2 leading-relaxed transition-colors custom-scrollbar overflow-y-auto
         ${
           isListening
             ? 'text-white/90 placeholder-white/50'
