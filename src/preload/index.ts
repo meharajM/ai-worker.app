@@ -147,6 +147,23 @@ const electronAPI = {
             return paths
         }
     },
+    // General utils
+    utils: {
+        getPathForFile: (file: File): string => {
+            const { webUtils } = require('electron')
+            if (webUtils && webUtils.getPathForFile) {
+                try {
+                    const result = webUtils.getPathForFile(file)
+                    // webUtils may return an empty string if it fails
+                    if (result) return result
+                } catch (e) {
+                    console.error('webUtils.getPathForFile failed:', e)
+                }
+            }
+            // Fallback to internal path property if webUtils isn't available
+            return (file as any).path || ''
+        }
+    }
 }
 
 // Expose APIs to renderer

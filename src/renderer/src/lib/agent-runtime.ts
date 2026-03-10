@@ -139,13 +139,29 @@ export class AgentRuntime implements IAgentClient {
     userContent: string,
     attachments?: { name: string; path: string; type: string }[]
   ): Promise<LLMMessage> {
-    const finalPrompt = userContent;
+    let finalPrompt = userContent;
 
-    let attachmentContext = "";
     if (attachments && attachments.length > 0) {
-      const resourceList = attachments.map((a) => `- ${a.name} (Path: ${a.path})`).join("\n");
-      const toolHint = `\n\n[To analyze these files, use the 'convert_to_markdown' tool with file:// URIs. Example: convert_to_markdown(uri="file:///absolute/path")]`;
-      attachmentContext = `\n\n[System Note: User attached the following files. Use absolute paths to access them.]\n${resourceList}${toolHint}`;
+      // Filter out files that have no native path (non-Electron environments or
+      // files that were selected in a way that didn't expose .path).
+      const validAttachments = attachments.filter(a => a.path && a.path.trim() !== "");
+
+      if (validAttachments.length > 0) {
+        // Build one explicit tool-call line per file so the model cannot
+        // accidentally reconstruct a URI from just the filename.
+        const callLines = validAttachments.map((a, i) => {
+          // Ensure triple-slash absolute URI — a.path always starts with '/' on macOS/Linux
+          const uri = a.path.startsWith("file://") ? a.path : `file://${a.path}`;
+          return `${i + 1}. ${a.name}\n   → convert_to_markdown(uri="${uri}")`;
+        }).join("\n");
+
+        finalPrompt +=
+          `\n\n[ATTACHED FILES — act on these immediately and read each one NOW using the exact call shown]\n` +
+          `${callLines}\n\n` +
+          `CRITICAL: Copy the uri argument CHARACTER-FOR-CHARACTER from above. ` +
+          `Do NOT use just the filename. Do NOT construct a URI yourself. ` +
+          `Reading attached files does NOT require a workspace to be selected.`;
+      }
     }
 
     const { restoredCheckpoint } = await initializeSessionState(
@@ -198,7 +214,7 @@ export class AgentRuntime implements IAgentClient {
       /^(yes|continue|proceed|go ahead|sure)$/i.test(userContent.trim());
 
     if (isConfirmingHandoff) {
-      this.addMessage({ role: "user", content: userContent });
+      this.addMessage({ role: "user", content: finalPrompt });
       const originalGoal =
         this.messages.find((m) => m.role === "user")?.content?.toString() || "Complete the task";
       const stepsTaken = Math.floor(this.messages.length / 2);
@@ -289,9 +305,9 @@ export class AgentRuntime implements IAgentClient {
     const alreadyHasMessage = lastMessage?.role === "user" && lastMessage?.content === finalPrompt;
 
     if (alreadyHasMessage && lastMessage) {
-      lastMessage.content = finalPrompt + attachmentContext;
+      lastMessage.content = finalPrompt;
     } else {
-      this.addMessage({ role: "user", content: finalPrompt + attachmentContext });
+      this.addMessage({ role: "user", content: finalPrompt });
     }
 
     return this._runLoop(finalPrompt);

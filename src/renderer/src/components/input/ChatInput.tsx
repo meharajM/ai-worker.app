@@ -57,7 +57,6 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
     resetTranscript,
     setText,
     isInitializing,
-    audioLevel,
     isFirstSetup,
     setupProgress,
     notification,
@@ -73,7 +72,7 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
     ) {
       setTextInput(speechText)
     }
-  }, [transcript, interimTranscript, isListening])
+  }, [transcript, interimTranscript, isListening, textInput])
 
   // Handle manual input
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -146,10 +145,42 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
     }
   }, [addLog])
 
+  // Derive workspace from file path if none is set
+  const maybeSetWorkspaceFromFiles = useCallback((files: File[]) => {
+    if (workspacePath) return // Already set
+    const firstFile = files[0]
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const firstPath = (window as any).electron?.utils?.getPathForFile(firstFile) || (firstFile as any).path as string | undefined
+    if (!firstPath) return
+    const parentDir = firstPath.includes('/') ? firstPath.substring(0, firstPath.lastIndexOf('/')) : null
+    if (!parentDir) return
+    setWorkspacePath(parentDir)
+    const { createSession, activeSessionId: currentSessionId, updateSessionWorkspace } = useChatStore.getState()
+    if (!currentSessionId) {
+      createSession(parentDir)
+    } else {
+      updateSessionWorkspace(currentSessionId, parentDir)
+    }
+  }, [workspacePath])
+
+  // Handle files selected via toolbar dropdown
+  const handleSelectFiles = useCallback((files: File[]) => {
+    setAttachments(prev => [...prev, ...files])
+    maybeSetWorkspaceFromFiles(files)
+    textareaRef.current?.focus()
+    addLog({
+      eventType: 'STATE_CHANGE',
+      sessionId: activeSessionId || 'unknown',
+      component: 'ChatInput',
+      details: { metadata: { action: 'files_selected', count: files.length } },
+    })
+  }, [addLog, activeSessionId, maybeSetWorkspaceFromFiles])
+
   // Handle file drops
   const handleFilesDropped = useCallback(
     (files: File[]) => {
       setAttachments(prev => [...prev, ...files])
+      maybeSetWorkspaceFromFiles(files)
       textareaRef.current?.focus()
       addLog({
         eventType: 'STATE_CHANGE',
@@ -158,7 +189,7 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
         details: { metadata: { action: 'files_dropped', count: files.length } },
       })
     },
-    [addLog, activeSessionId]
+    [addLog, activeSessionId, maybeSetWorkspaceFromFiles]
   )
 
   const removeAttachment = useCallback((index: number) => {
@@ -236,9 +267,8 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
         <AttachmentBar attachments={attachments} onRemove={removeAttachment} />
 
         <div
-          className={`relative min-h-[44px] flex items-center transition-all duration-200 rounded-lg ${
-            isDragging ? 'ring-2 ring-emerald-500/50 bg-emerald-500/10' : ''
-          }`}
+          className={`relative min-h-[44px] flex items-center transition-all duration-200 rounded-lg ${isDragging ? 'ring-2 ring-emerald-500/50 bg-emerald-500/10' : ''
+            }`}
           {...dragHandlers}
         >
           {/* Drag overlay */}
@@ -283,6 +313,8 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
               isHeadless={isHeadless}
               onToggleHeadless={() => setIsHeadless(!isHeadless)}
               onSelectFolder={handleSelectFolder}
+              onSelectFiles={handleSelectFiles}
+              hasAttachments={attachments.length > 0}
               disabled={disabled}
             />
 

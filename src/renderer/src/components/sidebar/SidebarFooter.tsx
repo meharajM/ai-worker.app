@@ -21,7 +21,6 @@ export function SidebarFooter({ currentView, onViewChange }: SidebarFooterProps)
           <span className="text-xs font-medium">Hub Chat</span>
         </div>
       </button>
-
       <button
         onClick={() => onViewChange('connections')}
         title="MCP Connections"

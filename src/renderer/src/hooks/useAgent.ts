@@ -86,16 +86,22 @@ export function useAgent(): UseAgentReturn {
         async (content: string, attachments?: File[], isHeadless?: boolean) => {
             if (!content.trim() && (!attachments || attachments.length === 0)) return;
 
-            const { addMessage, startProcessing, addSessionMessage, updateSessionProgress } =
-                useChatStore.getState();
+            const { addMessage, startProcessing } = useChatStore.getState();
 
-            // Map File objects to plain metadata. Electron exposes `.path` on File
-            // objects, which is not part of the standard Web File API.
-            const attachmentData = attachments?.map((file) => ({
-                name: file.name,
-                path: (file as File & { path?: string }).path ?? "",
-                type: file.type,
-            }));
+            // Map File objects to plain metadata. Electron natively hides `.path` on
+            // files dragging into the window due to context isolation. We use the
+            // explicitly exposed webUtils wrapper to retrieve the reliable OS path.
+            const attachmentData = attachments?.map((file) => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const nativePath = (window as any).electron?.utils?.getPathForFile(file)
+                    || (file as File & { path?: string }).path
+                    || "";
+                return {
+                    name: file.name,
+                    path: nativePath,
+                    type: file.type,
+                };
+            });
 
             // Add the user's message to the store immediately so it appears in the
             // chat UI before the agent starts processing.
@@ -185,9 +191,6 @@ export function useAgent(): UseAgentReturn {
                 // ── Step 3: Dynamically import AgentRuntime ────────────────────────
                 const { AgentRuntime } = await import("../lib/agent-runtime");
 
-                // Tracks the ID of the "live" assistant message for in-place updates.
-                let activeAssistantMessageId: string | null = null;
-
                 // ── Step 4: Instantiate the agent ──────────────────────────────────
                 const runtime = new AgentRuntime(
                     {
@@ -233,9 +236,6 @@ export function useAgent(): UseAgentReturn {
 
                             // Write to originSessionId — not the currently-active session
                             const newMsg = addMsg(originSessionId, storeMsg);
-                            if (msg.role === "assistant") {
-                                activeAssistantMessageId = newMsg.id;
-                            }
                             return newMsg.id;
                         },
 

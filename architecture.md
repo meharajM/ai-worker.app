@@ -317,28 +317,38 @@ sequenceDiagram
 
 ### Attachment Processing Flow
 
+When a user attaches a file (via the paperclip button, drag-and-drop, or paste), the system follows a zero-friction pipeline that no longer requires a workspace to be pre-selected.
+
 ```mermaid
 sequenceDiagram
     participant User
-    participant DragDrop as useFileDragDrop
+    participant VoiceInput as VoiceInput (UI)
     participant ChatStore
+    participant AgentRuntime
     participant MarkItDown as MarkItDown MCP
-    participant LLMLib
 
-    User->>DragDrop: Drop File (PDF/Image)
-    DragDrop->>ChatStore: addMessage(user + attachments)
-    Note over ChatStore: Attachments stored with path & type
-    
-    ChatStore->>LLMLib: prepareContext()
-    
-    alt Needs Conversion
-        LLMLib->>MarkItDown: convert(file_path)
-        MarkItDown-->>LLMLib: Return Markdown Content
-    end
+    User->>VoiceInput: Attach file (button / drag-drop / paste)
+    VoiceInput->>VoiceInput: maybeSetWorkspaceFromFiles()<br/>auto-derives parent dir as workspace
+    VoiceInput->>ChatStore: addMessage(user + attachmentData)
+    Note over ChatStore: Attachments stored with name, path, type
 
-    LLMLib->>LLMLib: Inject Content into Context
-    LLMLib->>LLM Provider: Send Prompt + File Content
+    User->>VoiceInput: Submit message
+    VoiceInput->>AgentRuntime: chat(content, attachments)
+
+    Note over AgentRuntime: Builds [ATTACHED FILES] block<br/>with file:// URIs + immediate instruction
+    AgentRuntime->>AgentRuntime: Append attachmentContext to user prompt
+
+    AgentRuntime->>MarkItDown: convert_to_markdown(uri="file:///path")
+    MarkItDown-->>AgentRuntime: Markdown content
+    AgentRuntime->>AgentRuntime: Inject content into LLM context
+    AgentRuntime->>LLM Provider: Send prompt + file content
 ```
+
+**Key design decisions:**
+
+- **Auto-workspace derivation** (`VoiceInput.tsx` → `maybeSetWorkspaceFromFiles`): When a file is attached and no workspace is set, the parent directory of the first file is silently set as the session workspace. This applies to button selection and drag-and-drop.
+- **Attachment context format** (`agent-runtime.ts`): The `[ATTACHED FILES]` block now includes ready-to-use `file://` URIs and an explicit instruction to call `convert_to_markdown` immediately — removing any ambiguity.
+- **Scoped workspace requirement** (`prompts.ts`): The system prompt now distinguishes *read* operations (attached files — no workspace needed) from *write/create* operations (which do require a workspace). The AI is explicitly told not to ask for a workspace just because a file was attached.
 
 ### MCP Connection Flow
 
@@ -1892,13 +1902,18 @@ ai-worker-app/
 
 ---
 
-**Last Updated:** 2026-02-27  
+**Last Updated:** 2026-03-06  
 **Version:** 0.1.0  
-**Architecture Version:** 1.1
+**Architecture Version:** 1.2
 
-**Recent Updates:**
+- **File Attachment UX Fix**: Resolved the AI asking users to select a workspace when analyzing attached files.
+  - `VoiceInput.tsx`: Added `maybeSetWorkspaceFromFiles()` — auto-derives workspace from the parent directory of the first attached file (applied to button-select and drag-and-drop).
+  - `agent-runtime.ts`: Strengthened the `attachmentContext` block injected into the user prompt; now provides ready-to-use `file://` URIs and an explicit directive to call `convert_to_markdown` immediately.
+  - `prompts.ts`: Scoped the "no workspace selected" system prompt instruction to apply only to write/create filesystem operations — reading attached files no longer triggers the workspace prompt.
+- **Sequential Step Failure Handling**: Stops agent execution flow on critical step failures, preventing inconsistent state from subsequent step execution.
+- **Lane Memory Leak Fix**: Added `cleanupTabLane` to `LaneManager`, called after sub-agent tab closure in both parallel and sequential orchestration flows.
+- **Agent Architecture Modularisation** (Phase 2): `AgentRuntime` refactored into `AgentStateService`, `ToolExecutionService`, `OrchestrationService`, and `SpecialToolHandlers` services.
 
-- Added default MCP server configuration (Playwright, Sequential Thinking)
 - Implemented automatic server initialization on first run
 - Added form pre-filling with Sequential Thinking defaults
 - Enhanced server management with automatic default restoration
