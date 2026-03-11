@@ -265,6 +265,8 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             console.log('ℹ️ Error screen check:', e.message);
         }
 
+        await window.setViewportSize({ width: 1280, height: 900 });
+
         // Configure OpenAI
         await window.click('button[title="Settings"]');
         await window.click('text=OpenAI');

@@ -1,5 +1,5 @@
 const { _electron: electron } = require('playwright');
-delete process.env.ELECTRON_RUN_AS_NODE;const path = require('path');
+delete process.env.ELECTRON_RUN_AS_NODE; const path = require('path');
 const fs = require('fs');
 
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');

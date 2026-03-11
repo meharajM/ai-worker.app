@@ -393,6 +393,8 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             console.log('ℹ️ Error while checking/dismissing modal:', e.message);
         }
 
+        await window.setViewportSize({ width: 1280, height: 900 });
+
         // Switch to OpenAI (Mocked)
         console.log('⚙️ Configuring OpenAI Provider...');
         await window.click('button[title="Settings"]');
@@ -418,7 +420,6 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         const chatInput = window.locator('[data-testid="chat-textarea"]');
         await chatInput.waitFor({ state: 'attached' });
 
-        await window.setViewportSize({ width: 1280, height: 900 });
 
         // Helper to send message
         const sendMessage = async (text) => {
