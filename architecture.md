@@ -866,6 +866,9 @@ sequenceDiagram
 
 #### 2. Runtime Preconditions (Pre-Validation & Auto-Fallback)
 The `PlaywrightService` implements proactive validation for multi-step tools (`browser_action_sequence` and `fill_form`) to prevent hallucinated selectors from causing partial executions or long timeouts.
+
+### Browser Lifecycle (Idle Timeout)
+To prevent the Chromium process from holding hundreds of megabytes of RAM while the application is idle, `BrowserManager.ts` implements an automatic idle timeout. If no browser tools are requested for 5 minutes, the Chromium process is gracefully terminated. It will seamlessly relaunch (JIT) the next time the agent requires browser capabilities.
 - **Auto-Observation Guard**: Automatically checks `page.$(selector)` implicitly before executing any step.
 - **Fail-Fast Sequence Validation**: Validates all selectors in a sequence *before* running. If a selector is missing, the sequence aborts instantly (~50ms) instead of waiting for a 30s timeout, saving tokens and time. 
 - **Smart Auto-Fallback**: If a `click` selector is invalid but acts like or is accompanied by valid `text`, the runtime automatically upgrades the action to `click_text` on the fly.
