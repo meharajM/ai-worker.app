@@ -114,9 +114,11 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
         try {
             if (envToSave) {
                 await updateServer(whatsappServer.id, { env: envToSave, autoConnect: true });
-                await new Promise(res => setTimeout(res, 2000)) // Wait for server to autoConnect and init
+                await new Promise(res => setTimeout(res, 3000)) // Wait for server to autoConnect and init
+                await connectServer(whatsappServer.id).catch(console.error) // Explicit connect just in case
             } else {
                 await connectServer(whatsappServer.id).catch(console.error)
+                await new Promise(res => setTimeout(res, 1000))
             }
             fetchQrCode()
         } catch (e) {
