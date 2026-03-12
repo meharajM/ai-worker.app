@@ -11,8 +11,8 @@ interface WhatsAppConnectionDialogProps {
 
 type ConnectionState = 'idle' | 'connecting' | 'qr' | 'connected'
 
-export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnectionDialogProps) {
-    const { servers, connectServer, updateServer } = useMcpStore()
+export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnectionDialogProps): React.JSX.Element | null {
+    const { servers, connectServer, disconnectServer, updateServer } = useMcpStore()
     const whatsappServer = servers.find(s => s.name === 'whatsapp-mcp')
     const [targetNumber, setTargetNumber] = useState('')
     const [connectionState, setConnectionState] = useState<ConnectionState>('idle')
@@ -113,6 +113,9 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
         
         try {
             if (envToSave) {
+                // To force a completely clean boot with new env vars, we explicitly disconnect first
+                await disconnectServer(whatsappServer.id).catch(console.error);
+
                 // When autoConnect: true is set, updateServer automatically calls connectServer.
                 // updateServer does not return the internal promise of connectServer, so we 
                 // must explicitly await connectServer ourselves right after to guarantee tools are loaded.
@@ -122,8 +125,8 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
             // and actually await it so the tools array gets populated.
             await connectServer(whatsappServer.id)
 
-            // Let the state settle 
-            await new Promise(res => setTimeout(res, 500))
+            // Extremely defensive sleep just to let the stdio pipe stabilize completely 
+            await new Promise(res => setTimeout(res, 2000))
             
             await fetchQrCode()
         } catch (e) {
