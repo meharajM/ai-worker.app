@@ -122,6 +122,8 @@ graph TB
         ShellAPI[Shell Operations]
         AppAPI[App Info]
         SpeechAPI[Speech Operations]
+        ClipboardAPI[Clipboard Operations]
+        UtilsAPI[Utils — webUtils wrapper]
     end
 
     ContextBridge --> MCPAPI
@@ -130,6 +132,8 @@ graph TB
     ContextBridge --> ShellAPI
     ContextBridge --> AppAPI
     ContextBridge --> SpeechAPI
+    ContextBridge --> ClipboardAPI
+    ContextBridge --> UtilsAPI
     IPCInvoke --> ContextBridge
 ```
 
@@ -138,6 +142,8 @@ graph TB
 - Expose secure APIs to renderer via `contextBridge`
 - Translate renderer calls to IPC invocations
 - Maintain security boundaries (no direct Node.js access)
+- `electron.clipboard.readFilePaths()` — reads macOS clipboard for copied file paths
+- `electron.utils.getPathForFile(file)` — wraps Electron `webUtils.getPathForFile` with a `.path` fallback, resolving native OS paths from `File` objects dragged or selected in the renderer
 
 ### Renderer Process
 
@@ -155,7 +161,7 @@ graph TB
 
     subgraph "Components"
         ChatView[ChatView]
-        VoiceInput[VoiceInput]
+        ChatInputComp[ChatInput<br/>Full Input Orchestrator]
         ConnectionsPanel[ConnectionsPanel]
         SettingsPanel[SettingsPanel]
         Header[Header]
@@ -227,17 +233,23 @@ graph TD
     Main --> ConnectionsPanel[ConnectionsPanel<br/>MCP Management]
     Main --> SettingsPanel[SettingsPanel<br/>Configuration]
     Main --> FeatureFlagsPanel[FeatureFlagsPanel<br/>Dev Mode Flags]
-    
+
     ChatView --> MessageBubble[MessageBubble<br/>Message Display]
-    ChatView --> VoiceInput[VoiceInput<br/>Input Component]
+    ChatView --> ChatInput[ChatInput<br/>Full Input Orchestrator]
 
     ConnectionsPanel --> McpServerForm[McpServerForm<br/>Server Configuration]
     ConnectionsPanel --> McpServerCard[McpServerCard<br/>Server Display]
 
-    VoiceInput --> SpeechRecognition[useSpeechRecognition<br/>STT Hook]
-    VoiceInput --> SpeechSynthesis[useSpeechSynthesis<br/>TTS Hook with Dynamic Controls]
-    ChatView --> UseFileDragDrop[useFileDragDrop<br/>Attachment Handling]
+    ChatInput --> InputToolbar[InputToolbar<br/>Unified File+Workspace Picker]
+    ChatInput --> VoiceButton[VoiceButton<br/>Mic Toggle]
+    ChatInput --> AttachmentBar[AttachmentBar<br/>File Chips]
+    ChatInput --> SendButton[SendButton<br/>Submit / Stop]
+    ChatInput --> SpeechRecognition[useSpeechRecognition<br/>STT Hook]
+    ChatInput --> SpeechSynthesis[useSpeechSynthesis<br/>TTS Hook with Dynamic Controls]
+    ChatInput --> UseFileDragDrop[useFileDragDrop<br/>Drag-and-Drop Attachment]
 ```
+
+> **Note:** `ChatInput.tsx` is the full orchestrator for the input bar (formerly `VoiceInput`). It owns all state: text, attachments, workspace path, headless mode, and speech recognition. Sub-components (`InputToolbar`, `VoiceButton`, `AttachmentBar`, `SendButton`) are purely presentational.
 
 ### State Management Architecture
 
@@ -322,21 +334,23 @@ When a user attaches a file (via the paperclip button, drag-and-drop, or paste),
 ```mermaid
 sequenceDiagram
     participant User
-    participant VoiceInput as VoiceInput (UI)
+    participant ChatInput as ChatInput (UI)
     participant ChatStore
     participant AgentRuntime
     participant MarkItDown as MarkItDown MCP
 
-    User->>VoiceInput: Attach file (button / drag-drop / paste)
-    VoiceInput->>VoiceInput: maybeSetWorkspaceFromFiles()<br/>auto-derives parent dir as workspace
-    VoiceInput->>ChatStore: addMessage(user + attachmentData)
+    User->>ChatInput: Attach file (Paperclip dropdown / drag-drop / paste)
+    Note over ChatInput: InputToolbar dropdown offers<br/>"Select Workspace" or "Select Files"
+    ChatInput->>ChatInput: maybeSetWorkspaceFromFiles()<br/>auto-derives parent dir as workspace (if none set)
+    ChatInput->>ChatStore: addMessage(user + attachmentData)
     Note over ChatStore: Attachments stored with name, path, type
 
-    User->>VoiceInput: Submit message
-    VoiceInput->>AgentRuntime: chat(content, attachments)
+    User->>ChatInput: Submit message
+    ChatInput->>AgentRuntime: chat(content, attachments)
 
+    Note over AgentRuntime: Resolves native path via<br/>window.electron.utils.getPathForFile(file)
     Note over AgentRuntime: Builds [ATTACHED FILES] block<br/>with file:// URIs + immediate instruction
-    AgentRuntime->>AgentRuntime: Append attachmentContext to user prompt
+    AgentRuntime->>AgentRuntime: Append attachment block to finalPrompt
 
     AgentRuntime->>MarkItDown: convert_to_markdown(uri="file:///path")
     MarkItDown-->>AgentRuntime: Markdown content
@@ -346,9 +360,12 @@ sequenceDiagram
 
 **Key design decisions:**
 
-- **Auto-workspace derivation** (`VoiceInput.tsx` → `maybeSetWorkspaceFromFiles`): When a file is attached and no workspace is set, the parent directory of the first file is silently set as the session workspace. This applies to button selection and drag-and-drop.
-- **Attachment context format** (`agent-runtime.ts`): The `[ATTACHED FILES]` block now includes ready-to-use `file://` URIs and an explicit instruction to call `convert_to_markdown` immediately — removing any ambiguity.
-- **Scoped workspace requirement** (`prompts.ts`): The system prompt now distinguishes *read* operations (attached files — no workspace needed) from *write/create* operations (which do require a workspace). The AI is explicitly told not to ask for a workspace just because a file was attached.
+- **Unified attachment entry-point** (`InputToolbar.tsx`): The old folder-only button is replaced by a Paperclip (📎) icon that opens a dropdown with two options — *Select Workspace* (folder picker) and *Select Files* (multi-file input). Both paths ultimately feed into the same `handleSelectFiles` / `handleSelectFolder` callbacks in `ChatInput`.
+- **Native path resolution** (`preload/index.ts` → `electron.utils.getPathForFile`): Electron's `webUtils.getPathForFile` is wrapped in the preload with a `.path` fallback. This solves the context-isolation limitation where drag-and-drop `File` objects don't expose `.path` in the renderer.
+- **Auto-workspace derivation** (`ChatInput.tsx` → `maybeSetWorkspaceFromFiles`): When a file is attached and no workspace is set, the parent directory of the first file is silently set as the session workspace. Applies to button selection and drag-and-drop.
+- **Attachment context format** (`agent-runtime.ts`): The `[ATTACHED FILES]` block provides ready-to-use `file://` URIs and a CRITICAL directive to call `convert_to_markdown` immediately — removing LLM ambiguity. Files with empty paths are filtered out before building the block.
+- **Scoped workspace requirement** (`prompts.ts`): System prompt distinguishes *read* operations (attached files — no workspace needed) from *write/create* ops (require a workspace). AI is explicitly told not to ask for a workspace just because a file was attached.
+- **Hardened URI validation** (`mcp.ts`): `convert_to_markdown` now rejects empty, `file://`-only, or relative URIs with a descriptive error. `fs_*` gate now permits absolute target paths even with no `wsPath` (supports auto-derived workspaces from file attachments), but path-traversal check only engages when both `wsPath` and `targetPath` are present.
 
 ### MCP Connection Flow
 
@@ -598,6 +615,13 @@ graph LR
   - Command: `uvx`
   - Args: `markitdown-mcp`
   - Description: Convert documents (PDF, Word, Excel, Images) to Markdown
+  - **Auto-Connect**: Enabled by default
+
+- **WhatsApp** (`whatsapp-mcp`)
+  - Type: `stdio`
+  - Command: `npx`
+  - Args: `-y @mhrj/whatsapp-mcp`
+  - Description: Human-in-the-Loop for AI Agents via WhatsApp (Ask/Reply logic)
   - **Auto-Connect**: Enabled by default
 
 **Initialization Logic:**
@@ -1902,36 +1926,52 @@ ai-worker-app/
 
 ---
 
-**Last Updated:** 2026-03-06  
+**Last Updated:** 2026-03-12  
 **Version:** 0.1.0  
-**Architecture Version:** 1.2
+**Architecture Version:** 1.3
 
-- **File Attachment UX Fix**: Resolved the AI asking users to select a workspace when analyzing attached files.
-  - `VoiceInput.tsx`: Added `maybeSetWorkspaceFromFiles()` — auto-derives workspace from the parent directory of the first attached file (applied to button-select and drag-and-drop).
-  - `agent-runtime.ts`: Strengthened the `attachmentContext` block injected into the user prompt; now provides ready-to-use `file://` URIs and an explicit directive to call `convert_to_markdown` immediately.
-  - `prompts.ts`: Scoped the "no workspace selected" system prompt instruction to apply only to write/create filesystem operations — reading attached files no longer triggers the workspace prompt.
-- **Sequential Step Failure Handling**: Stops agent execution flow on critical step failures, preventing inconsistent state from subsequent step execution.
-- **Lane Memory Leak Fix**: Added `cleanupTabLane` to `LaneManager`, called after sub-agent tab closure in both parallel and sequential orchestration flows.
-- **Agent Architecture Modularisation** (Phase 2): `AgentRuntime` refactored into `AgentStateService`, `ToolExecutionService`, `OrchestrationService`, and `SpecialToolHandlers` services.
+### v1.3 — Unified File Attachment & Input Toolbar Refactor
 
-- Implemented automatic server initialization on first run
+- **Unified Attachment Entry-Point** (`InputToolbar.tsx`): Replaced the standalone folder-picker button with a Paperclip dropdown offering both *Select Workspace* and *Select Files*. `InputToolbar` now accepts two new required props: `onSelectFiles` and `hasAttachments`.
+- **Native Path Resolution** (`preload/index.ts`): Added `electron.utils.getPathForFile(file)` — wraps Electron `webUtils.getPathForFile` with a `.path` fallback. Typed in `global.d.ts` as `ElectronAPI.utils`.
+- **Auto-Workspace Derivation** (`ChatInput.tsx`): `maybeSetWorkspaceFromFiles()` silently derives workspace from the parent directory of the first attached file — applied to both toolbar file picker and drag-and-drop.
+  - *Post-review fix*: Replaced the stale-closure anti-pattern with `useChatStore.getState()` live reads + a `useRef` idempotency guard to prevent double-workspace-writes on rapid concurrent drop events.
+- **Attachment Prompt Hardening** (`agent-runtime.ts`): `[ATTACHED FILES]` block now provides ready-to-use `file://` URIs with a CRITICAL directive; files with empty paths are filtered before the block is built. `finalPrompt` is now the single prompt variable (no more `+ attachmentContext` concatenation).
+- **System Prompt Scoping** (`prompts.ts`): "No workspace" message now only triggers for write/create operations; reading attached files is explicitly allowed without a workspace.
+- **MCP Validator Hardening** (`mcp.ts`)
+  - `convert_to_markdown`: Rejects empty, bare `file://`, and all relative URI forms with descriptive errors.
+  - `fs_*`: Allows absolute target paths even when no `wsPath` is set (supports auto-derived workspaces); traversal check only runs when both `wsPath` and `targetPath` are present.
+  - *Post-review fix*: Added `SAFE_ABSOLUTE_PREFIXES` allowlist — absolute paths outside user home directories (`/Users/`, `/home/`) are now blocked when no workspace is set, closing the `/etc/passwd`-style traversal bypass.
+- **Component Rename**: `VoiceInput` is now `ChatInput` — the full input orchestrator.
+- **Dead Code Removal** (`useAgent.ts`): Removed unused `activeAssistantMessageId` tracker; in-place message updates flow through the `onMessageUpdate` callback.
+- **`useFileDragDrop` path fix**: `generateFileConversionPrompt` now uses `window.electron.utils.getPathForFile` instead of raw `.path`.
+- **Repo Hygiene**: Removed accidental `test_file_path.js` from repo root. Added `test_*.js`, `debug_*.js`, `scratch_*.js` (and `.ts` variants) to `.gitignore` to prevent recurrence.
+
+### v1.2 — File Attachment UX Fix & Agent Modularisation
+
+- **File Attachment UX Fix**: Resolved AI asking for workspace when analysing attached files.
+- **Sequential Step Failure Handling**: Stops agent execution on critical step failures.
+- **Lane Memory Leak Fix**: Added `cleanupTabLane` to `LaneManager`.
+- **Agent Architecture Modularisation** (Phase 2): `AgentRuntime` refactored into `AgentStateService`, `ToolExecutionService`, `OrchestrationService`, and `SpecialToolHandlers`.
+
+### v1.1 — Earlier Milestones
+
+- Implemented automatic MCP server initialization on first run
 - Added form pre-filling with Sequential Thinking defaults
 - Enhanced server management with automatic default restoration
-- **Prompt Engineering**: Updated System Prompt with "Global Friendly" communication style and screenshot rules.
-- **Task Analysis**: Enhanced confirmation logic for high-risk and ambiguous tasks (shopping, payments).
-- **Universal Resilience**: Implemented Global Self-Healing middleware for automated recovery from flaky web pages.
-- **Concurrency Safety**: Implemented Keyed Resource Locking for safe parallel tool execution.
-- **Sub-Agent Isolation**: Added dedicated tab provisioning and session scoping for browser sub-tasks.
-- **Parallel Dispatch**: Enhanced `AgentRuntime` and `prompt-library` to support and enforce concurrent sub-agent execution.
-- **Gemini Stability**: Refactored `llm.ts` with role-merging and name-tracking logic to resolve Gemini API strictly-alternating role requirements.
-- **Progress Checkpoints**: Standardized increment reporting via `update_progress_summary` mandatory checkpoints every 5-15 steps.
-- **Token Resilience**: Implemented 5,000ch tool output truncation with automated "Strategic Tips" for agent self-correction.
-- **Session Privacy**: Finalized session-level data isolation and auto-cleanup architecture.
-- **Antigravity Gateway**: Integrated Google OAuth flow and Cloud Code Assist API for high-limit Gemini access.
-- **Modular LLM Refactor**: Transitioned to a provider-based directory structure (`lib/llm/`) with isolated logic for Gemini, OpenAI, and Ollama.
-- **Universal Reasoning Filter**: Added `thinkBlockFilter` to strip internal thinking blocks from all LLM outputs.
-- **Self-Healing Tool Loop**: Enhanced `ToolExecutionService` with 8 context-aware recovery strategies for browser automation.
-- **Secure Storage**: Implemented user-scoped, OS-level encrypted storage for all LLM API keys and OAuth tokens.
+- **Prompt Engineering**: Updated System Prompt with "Global Friendly" style and screenshot rules.
+- **Universal Resilience**: Global Self-Healing middleware for flaky web recovery.
+- **Concurrency Safety**: Keyed Resource Locking for safe parallel tool execution.
+- **Sub-Agent Isolation**: Dedicated tab provisioning and session scoping.
+- **Parallel Dispatch**: Concurrent sub-agent execution.
+- **Gemini Stability**: Role-merging and name-tracking for alternating-role API requirement.
+- **Progress Checkpoints**: Mandatory `update_progress_summary` every 5–15 steps.
+- **Token Resilience**: 5,000ch tool output truncation with recovery hints.
+- **Antigravity Gateway**: Google OAuth + Cloud Code Assist API integration.
+- **Modular LLM Refactor**: Provider-based `lib/llm/` directory structure.
+- **Universal Reasoning Filter**: `thinkBlockFilter` strips thinking blocks from LLM outputs.
+- **Self-Healing Tool Loop**: 8 context-aware recovery strategies in `ToolExecutionService`.
+- **Secure Storage**: OS-level encrypted storage for API keys and OAuth tokens.
 
 ---
 

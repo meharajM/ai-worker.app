@@ -173,10 +173,13 @@ export async function executeToolCall(
     // Block filesystem access when BOTH conditions are true:
     //   (a) no workspace path has been set for this session, AND
     //   (b) the target path itself is not already absolute.
-    // This allows: auto-set workspaces (from file attachment), absolute paths.
-    // This blocks:  relative paths with no workspace context.
+    // This allows: auto-set workspaces (from file attachment), absolute paths under
+    //   safe user-home prefixes (see SAFE_ABSOLUTE_PREFIXES below).
+    // This blocks: relative paths with no workspace context AND absolute paths
+    //   targeting system directories (/etc, /usr, /var, /bin, /sbin, /dev, /proc).
     const wsPath = args?.workspacePath as string | undefined;
     const targetPath = args?.path as string | undefined;
+
     const targetIsAbsolute =
       !!targetPath &&
       (targetPath.startsWith('/') || !!targetPath.match(/^[a-zA-Z]:[\\/]/));
@@ -185,6 +188,29 @@ export async function executeToolCall(
       return {
         result: null,
         error: 'WORKSPACE REQUIRED: Please select a workspace folder using the folder icon in the UI before performing filesystem operations.'
+      };
+    }
+
+    // When there is no workspace boundary, we still must restrict absolute paths
+    // to safe user-home prefixes. Without this, a rogue agent could read system
+    // files (/etc/passwd, /usr/bin/, etc.) by constructing an absolute path.
+    //
+    // Allowed when wsPath is absent:
+    //   macOS: /Users/<name>/...
+    //   Linux: /home/<name>/...
+    //   Windows: C:\Users\<name>\... (or any drive:\Users\...)
+    const SAFE_ABSOLUTE_PREFIXES = ['/Users/', '/home/', '\\Users\\'];
+    const isSafeAbsolute = (p: string): boolean =>
+      SAFE_ABSOLUTE_PREFIXES.some(prefix => p.startsWith(prefix)) ||
+      !!p.match(/^[a-zA-Z]:[/\\]Users[/\\]/);
+
+    if (!wsPath && targetIsAbsolute && targetPath && !isSafeAbsolute(targetPath)) {
+      return {
+        result: null,
+        error:
+          `SECURITY VIOLATION: Access denied. The path '${targetPath}' targets a system directory. ` +
+          `Only user home directory paths (/Users/…, /home/…) are permitted without a workspace. ` +
+          `Select a workspace folder in the UI to work with files in other locations.`
       };
     }
 

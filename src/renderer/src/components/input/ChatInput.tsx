@@ -145,23 +145,60 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
     }
   }, [addLog])
 
-  // Derive workspace from file path if none is set
+  // Derive workspace from file path if none is set.
+  //
+  // WHY useRef guard: Two rapid drop/select events may both enter this callback
+  // before a re-render propagates the updated `workspacePath` state. Without a
+  // guard, both would read null from the store and double-write the workspace —
+  // the second file's parent dir would silently win. The ref is reset whenever
+  // `workspacePath` actually changes (via the effect below).
+  const workspaceSetInProgress = useRef(false)
+
+  useEffect(() => {
+    // When the real workspace state changes (either user-selected or auto-derived),
+    // reset the in-progress guard so future file drops can check again.
+    workspaceSetInProgress.current = false
+  }, [workspacePath])
+
   const maybeSetWorkspaceFromFiles = useCallback((files: File[]) => {
-    if (workspacePath) return // Already set
+    // Read the live workspace from the store — NOT from the closed-over component
+    // state, which may be stale inside a useCallback closure.
+    const { sessions, activeSessionId: currentSessionId, createSession, updateSessionWorkspace } =
+      useChatStore.getState()
+    const liveWorkspace =
+      sessions.find((s) => s.id === currentSessionId)?.workspacePath ?? null
+
+    if (liveWorkspace || workspaceSetInProgress.current) return
+
     const firstFile = files[0]
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const firstPath = (window as any).electron?.utils?.getPathForFile(firstFile) || (firstFile as any).path as string | undefined
+    if (!firstFile) return
+
+    // `window.electron` is typed for most usages via global.d.ts, but `.utils`
+    // causes a TS resolution conflict between the global interface and the preload's
+    // exported type in some component contexts. Matching pattern used in useAgent.ts
+    // and useFileDragDrop.ts.
+    const firstPath: string | undefined =
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).electron?.utils?.getPathForFile(firstFile) ||
+      (firstFile as File & { path?: string }).path
     if (!firstPath) return
-    const parentDir = firstPath.includes('/') ? firstPath.substring(0, firstPath.lastIndexOf('/')) : null
+
+    const parentDir = firstPath.includes('/')
+      ? firstPath.substring(0, firstPath.lastIndexOf('/'))
+      : null
     if (!parentDir) return
+
+    // Mark as in-progress BEFORE the state update so a second concurrent call
+    // sees the guard and bails out.
+    workspaceSetInProgress.current = true
     setWorkspacePath(parentDir)
-    const { createSession, activeSessionId: currentSessionId, updateSessionWorkspace } = useChatStore.getState()
+
     if (!currentSessionId) {
       createSession(parentDir)
     } else {
       updateSessionWorkspace(currentSessionId, parentDir)
     }
-  }, [workspacePath])
+  }, []) // No deps — reads live state via getState(), ref guard handles idempotency
 
   // Handle files selected via toolbar dropdown
   const handleSelectFiles = useCallback((files: File[]) => {
@@ -240,16 +277,36 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
         }
       }
     }
+
+    const handleSubmit = (e: CustomEvent) => {
+      const { prompt } = e.detail
+      if (prompt && !disabled) {
+        onSubmit(prompt, attachments, isHeadless)
+        setTextInput('')
+        setAttachments([])
+        resetTranscript()
+      }
+    }
+
     window.addEventListener(
       'populate-chat-input',
       handlePopulate as EventListener
     )
-    return () =>
+    window.addEventListener(
+      'submit-chat-input',
+      handleSubmit as EventListener
+    )
+    return () => {
       window.removeEventListener(
         'populate-chat-input',
         handlePopulate as EventListener
       )
-  }, [setText, disabled, isHeadless, onSubmit, resetTranscript])
+      window.removeEventListener(
+        'submit-chat-input',
+        handleSubmit as EventListener
+      )
+    }
+  }, [setText, disabled, isHeadless, onSubmit, resetTranscript, attachments])
 
   const hasContent = textInput.trim().length > 0 || attachments.length > 0
 

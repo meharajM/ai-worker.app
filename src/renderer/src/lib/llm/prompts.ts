@@ -113,7 +113,6 @@ export // Build robust but token-efficient system prompt
   }
 
   const toolCount = tools?.length || 0;
-  const serverCount = servers?.length || 0;
 
   if (toolCount === 0) {
     return `You are AI - Worker, a helpful voice - first assistant.When tools become available, use them to perform actions instead of providing manual instructions.Be concise for voice output.`;
@@ -145,7 +144,6 @@ export // Build robust but token-efficient system prompt
           })`
           : "";
 
-        const server = servers?.find(s => s.toolCount > 0 && tools?.some(t => t.name.startsWith(tool.name.split('_')[0])));
         // Heuristic: check if we can query mcp.ts directly or pass server mapping. 
         // Since we don't have direct mapping here, we can rely on grouping by server context below or just hint.
         // Better: The 'servers' list passed to this function usually contains aggregate info. 
@@ -205,7 +203,12 @@ Example: "search for nike shoes on Google" requires:
 
 DO NOT stop after just navigating - complete the entire workflow!`;
   }
-
+  // Detect WhatsApp server by server name (more reliable than checking tool names)
+  const hasWhatsApp = servers?.some(s => s.name === 'whatsapp-mcp') || toolNamesLower.includes("ask_question");
+  let whatsappNote = "";
+  if (hasWhatsApp) {
+    whatsappNote = `\n\n**HUMAN-IN-THE-LOOP (WHATSAPP)**: You are connected to the user via the \`whatsapp-mcp\` server. Use its tools (\`connect\`, \`get_status\`, \`send_message\`, \`ask_question\`) for all WhatsApp operations. **NEVER navigate the browser to web.whatsapp.com.** For any significant or destructive action, use \`ask_question\` to get the user's approval on WhatsApp before proceeding.`;
+  }
   const userContext = await getUserEnvironmentContext();
 
   return `You are AI-Worker, an autonomous agent with ${toolCount} tools for browser automation, web navigation, and task execution.${jsonFormatNote}
@@ -252,7 +255,7 @@ RULES:
 
 
 # AVAILABLE TOOLS
-${toolsDescription}${serverContext}${browserCapabilityNote}
+${toolsDescription}${serverContext}${browserCapabilityNote}${whatsappNote}
 
 ${dynamicRules ? `\n# TASK-SPECIFIC PROTOCOLS\n${dynamicRules}\n` : ''}
 
@@ -307,12 +310,9 @@ ${dynamicRules ? `\n# TASK-SPECIFIC PROTOCOLS\n${dynamicRules}\n` : ''}
 
 # PROGRESS TRACKING
 **MANDATORY**: Call \`update_progress_summary\` every ~15 steps to record your findings.
-- At checkpoints (steps 15, 30, 45, 60...), you MUST summarize progress.
-- **CRITICAL**: Do NOT generate any conversational text during this step. ONLY call the tool.
-**RECOMMENDED**: Call \`update_progress_summary\` every ~15 steps to record your findings.
-- At checkpoints (steps 15, 30, 45, 60...), you should summarize progress when requested.
+- At checkpoints (steps 15, 30, 45, 60...), you MUST summarize progress. ONLY call the tool — no conversational text.
 - Focus on RESULTS and DATA, not tool names.
-- Examples: "Extracted 50 user records with email/phone" or "Completed automation: filled 3 forms, downloaded 2 reports" or "Research findings: analyzed 5 articles, key insight is X"
+- Examples: "Extracted 50 user records with email/phone" or "Completed automation: filled 3 forms, downloaded 2 reports"
 - Keep it concise and incremental (only NEW findings since last update).
 
 # KEY REMINDERS

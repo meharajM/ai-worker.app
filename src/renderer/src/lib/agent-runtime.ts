@@ -72,6 +72,15 @@ interface AccumulatedToolCall {
 }
 
 /**
+ * LLMMessage extended with UI-only fields that are attached during the agent loop.
+ * These fields are NOT part of the LLM protocol — they carry bubble-rendering
+ * metadata and are stripped before any network call.
+ */
+interface RichAssistantMessage extends LLMMessage {
+  toolCalls?: AccumulatedToolCall[];
+}
+
+/**
  * AgentRuntime — Local implementation of IAgentClient.
  *
  * Owns:
@@ -107,7 +116,9 @@ export class AgentRuntime implements IAgentClient {
 
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
     this.options = options;
+    // Assign once — avoids generating a second random UUID that discards the first.
     this.agentInstanceId = options.agentInstanceId || globalThis.crypto.randomUUID();
+    this.taskStartTimeMs = Date.now();
 
     if (options.isSubAgent) {
       this.messages = [];
@@ -120,12 +131,6 @@ export class AgentRuntime implements IAgentClient {
     this.maxIterations = options.isSubAgent ? 15 : 50;
     if (options.taskCategory) this.taskCategory = options.taskCategory;
 
-    if (options.taskCategory) {
-      this.taskCategory = options.taskCategory;
-    }
-
-    this.agentInstanceId = options.agentInstanceId || globalThis.crypto.randomUUID();
-    this.taskStartTimeMs = Date.now();
     this.specialHandlers = new SpecialToolHandlers(
       this.agentInstanceId,
       this.options,
@@ -371,11 +376,11 @@ export class AgentRuntime implements IAgentClient {
           // ── Final response: update the live bubble in-place (no new bubble created) ──
           // Push to internal history without firing onMessage (which would add a new bubble).
           this.messages.push(assistantMsg);
-          const finalUpdates: any = { content: assistantMsg.content };
+          const finalUpdates: Partial<RichAssistantMessage> = { content: assistantMsg.content };
           if (accumulatedToolCalls.length > 0) {
             finalUpdates.toolCalls = accumulatedToolCalls;
           }
-          this.options.onMessageUpdate(activeAssistantMessageId, finalUpdates);
+          this.options.onMessageUpdate(activeAssistantMessageId, finalUpdates as LLMMessage);
         } else {
           // No live bubble yet (agent answered immediately without tools) — create one normally.
           this.addMessage(assistantMsg);
@@ -406,7 +411,7 @@ export class AgentRuntime implements IAgentClient {
         // ── First tool-calling iteration: create the single live UI bubble ──
         // assistantMsg carries this iteration's tool_calls so the LLM history is correct.
         // We also attach the store-format toolCalls so onMessage can persist them.
-        (assistantMsg as any).toolCalls = iterationToolCalls;
+        (assistantMsg as RichAssistantMessage).toolCalls = iterationToolCalls;
         const messageIdResult = this.addMessage(assistantMsg);
         if (typeof messageIdResult === "string") {
           activeAssistantMessageId = messageIdResult;
@@ -423,12 +428,12 @@ export class AgentRuntime implements IAgentClient {
         if (this.options.onMessageUpdate) {
           this.options.onMessageUpdate(activeAssistantMessageId, {
             toolCalls: [...accumulatedToolCalls]
-          } as any);
+          } as RichAssistantMessage);
         }
       }
 
       // Keep local assistantMsg.toolCalls in sync for the tool execution block below
-      (assistantMsg as any).toolCalls = iterationToolCalls;
+      (assistantMsg as RichAssistantMessage).toolCalls = iterationToolCalls;
 
       const toolPromises = response.toolCalls.map(async (call) => {
         if (this.options.signal?.aborted) return null;
@@ -474,8 +479,9 @@ export class AgentRuntime implements IAgentClient {
             const { resultStr: formatted, isError } = formatToolResult(call.name, rawResult);
             resultStr = formatted;
             consecutiveErrors = isError ? consecutiveErrors + 1 : 0;
-          } catch (err: any) {
-            resultStr = JSON.stringify({ error: err.message || "Unknown error" });
+          } catch (err: unknown) {
+            const catchMsg = err instanceof Error ? err.message : String(err);
+            resultStr = JSON.stringify({ error: catchMsg || "Unknown error" });
             consecutiveErrors++;
           }
 
@@ -500,14 +506,14 @@ export class AgentRuntime implements IAgentClient {
             accumulatedToolCalls[tcIndex] = { ...accumulatedToolCalls[tcIndex], result: truncated };
           }
           // Also update the local assistantMsg for finding reporting below
-          const currentToolCalls = (assistantMsg as any).toolCalls as AccumulatedToolCall[] || [];
+          const currentToolCalls = (assistantMsg as RichAssistantMessage).toolCalls ?? [];
           const updatedLocal = currentToolCalls.map(t =>
             t.id === call.id ? { ...t, result: truncated } : t
           );
-          (assistantMsg as any).toolCalls = updatedLocal;
+          (assistantMsg as RichAssistantMessage).toolCalls = updatedLocal;
           this.options.onMessageUpdate(activeAssistantMessageId, {
             toolCalls: [...accumulatedToolCalls]
-          } as any);
+          } as RichAssistantMessage);
         }
 
         // ── Progress calculation (Gap 2 fix) ──────────────────────────────
@@ -551,14 +557,14 @@ export class AgentRuntime implements IAgentClient {
               accumulatedToolCalls[tcIdx] = { ...accumulatedToolCalls[tcIdx], isPresentable: true, finding: findingSummary.summary };
             }
             // Also keep local assistantMsg in sync for any downstream use
-            const currentToolCalls = (assistantMsg as any).toolCalls as AccumulatedToolCall[] || [];
+            const currentToolCalls = (assistantMsg as RichAssistantMessage).toolCalls ?? [];
             const updatedLocal = currentToolCalls.map(t =>
               t.id === call.id ? { ...t, isPresentable: true, finding: findingSummary.summary } : t
             );
-            (assistantMsg as any).toolCalls = updatedLocal;
+            (assistantMsg as RichAssistantMessage).toolCalls = updatedLocal;
             this.options.onMessageUpdate(activeAssistantMessageId, {
               toolCalls: [...accumulatedToolCalls]
-            } as any);
+            } as RichAssistantMessage);
           }
         }
         return undefined;
