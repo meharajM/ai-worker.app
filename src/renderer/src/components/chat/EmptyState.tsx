@@ -27,15 +27,12 @@ export function EmptyState() {
       }
 
       // If already configured, proceed immediately
-      if (whatsappServer) {
-        connectServer(whatsappServer.id).catch(console.error)
+      connectServer(whatsappServer.id).catch(console.error)
 
-        // Submit chat with a helpful command to trigger the QR code if needed
-        const event = new CustomEvent('submit-chat-input', {
-          detail: { prompt: "Connect to WhatsApp and show me the QR code if I need to scan it." }
-        })
-        window.dispatchEvent(event)
-      }
+      const event = new CustomEvent('submit-chat-input', {
+        detail: { prompt: "Connect to WhatsApp using the whatsapp-mcp tools and check the connection status." }
+      })
+      window.dispatchEvent(event)
     }
   }
 

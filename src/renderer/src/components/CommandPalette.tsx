@@ -42,8 +42,10 @@ export function CommandPalette({ onViewChange }: CommandPaletteProps) {
 
   const handleClearWhatsApp = async () => {
     if (whatsappServer) {
-      handleDisconnectWhatsApp();
-      await updateServer(whatsappServer.id, { env: {} });
+      // Await disconnect before updating — updateServer triggers auto-reconnect
+      // when autoConnect is true, so we explicitly disable it during a clear.
+      await disconnectServer(whatsappServer.id).catch(console.error);
+      await updateServer(whatsappServer.id, { env: {}, autoConnect: false });
     }
   };
 

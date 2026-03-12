@@ -251,6 +251,19 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
       )
   }, [setText, disabled, isHeadless, onSubmit, resetTranscript])
 
+  // Listen for auto-submit events (e.g. from WhatsApp connect flow).
+  // Unlike populate-chat-input which only fills the textarea, this submits immediately.
+  useEffect(() => {
+    const handleAutoSubmit = (e: CustomEvent) => {
+      const { prompt } = e.detail
+      if (prompt && !disabled) {
+        onSubmit(prompt.trim(), [], false)
+      }
+    }
+    window.addEventListener('submit-chat-input', handleAutoSubmit as EventListener)
+    return () => window.removeEventListener('submit-chat-input', handleAutoSubmit as EventListener)
+  }, [disabled, onSubmit])
+
   const hasContent = textInput.trim().length > 0 || attachments.length > 0
 
   return (

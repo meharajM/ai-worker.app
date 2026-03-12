@@ -645,8 +645,6 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             // As long as we hit this state without failing, the flow works.
 
             console.log('✅ WhatsApp connection flow through Command Palette succeeded');
-
-            console.log('✅ WhatsApp connection flow through Command Palette succeeded');
         } catch (e) {
             console.error('❌ WhatsApp Integration test failed:', e);
             throw e;

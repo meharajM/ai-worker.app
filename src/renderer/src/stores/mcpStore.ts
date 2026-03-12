@@ -100,7 +100,9 @@ const DEFAULT_MCP_SERVERS = [
         type: 'stdio',
         command: 'npx',
         args: ['-y', '@mhrj/whatsapp-mcp'],
-        autoConnect: true
+        // Do NOT auto-connect: user must configure a target phone number first
+        // via the Command Palette or the EmptyState CTA.
+        autoConnect: false
     }
 ]
 

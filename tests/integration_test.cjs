@@ -66,6 +66,9 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await window.waitForLoadState('domcontentloaded');
         console.log('✅ Window Loaded');
 
+        // Set viewport size early to ensure Sidebar (md:flex) is visible
+        await window.setViewportSize({ width: 1280, height: 900 });
+
         // Screenshot initial state
         await window.waitForTimeout(3000);
         await window.screenshot({ path: path.join(SCREENSHOT_DIR, 'test-start.png') });

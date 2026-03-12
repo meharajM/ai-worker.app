@@ -600,6 +600,13 @@ graph LR
   - Description: Convert documents (PDF, Word, Excel, Images) to Markdown
   - **Auto-Connect**: Enabled by default
 
+- **WhatsApp** (`whatsapp-mcp`)
+  - Type: `stdio`
+  - Command: `npx`
+  - Args: `-y @mhrj/whatsapp-mcp`
+  - Description: Human-in-the-Loop for AI Agents via WhatsApp. Allows agents to securely beam notifications and request approvals to a specified phone number.
+  - **Auto-Connect**: Disabled by default (requires user to input a phone number before it will auto-connect).
+
 **Initialization Logic:**
 
 - Default servers are automatically created on first run (when localStorage is empty)

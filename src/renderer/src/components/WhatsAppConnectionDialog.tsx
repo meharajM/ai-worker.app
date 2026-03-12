@@ -22,12 +22,17 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
     const proceedWithConnection = async (envToSave?: Record<string, string>) => {
         if (whatsappServer) {
             if (envToSave) {
-                await updateServer(whatsappServer.id, { env: envToSave });
+                // Persist env AND flip autoConnect: true so the server starts automatically
+                // on every subsequent cold start (as long as a phone number is configured).
+                // updateServer calls connectServer internally when autoConnect is true,
+                // so we do NOT call connectServer explicitly here to avoid double-connecting.
+                await updateServer(whatsappServer.id, { env: envToSave, autoConnect: true });
+            } else {
+                // env already saved from a prior session — just connect
+                connectServer(whatsappServer.id).catch(console.error)
             }
-            connectServer(whatsappServer.id).catch(console.error)
 
-            // Keep the prompt simple — the whatsapp-mcp tool descriptions are self-explanatory.
-            // The only critical constraint: do NOT use the browser/Playwright for this.
+            // Ask the agent to verify the connection / show QR if needed.
             const event = new CustomEvent('submit-chat-input', {
                 detail: { prompt: "Connect to WhatsApp using the whatsapp-mcp tools and check the connection status." }
             })

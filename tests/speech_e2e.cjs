@@ -75,6 +75,9 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await window.waitForLoadState('domcontentloaded');
         console.log('✅ Window Loaded');
 
+        // Set viewport size early to ensure Sidebar (md:flex) is visible
+        await window.setViewportSize({ width: 1280, height: 900 });
+
         // Handling Missing Dependencies screen if it appears
         try {
             console.log('Checking for Missing Dependencies screen...');
