@@ -113,14 +113,19 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
         
         try {
             if (envToSave) {
+                // When autoConnect: true is set, updateServer automatically calls connectServer.
+                // updateServer does not return the internal promise of connectServer, so we 
+                // must explicitly await connectServer ourselves right after to guarantee tools are loaded.
                 await updateServer(whatsappServer.id, { env: envToSave, autoConnect: true });
-                await new Promise(res => setTimeout(res, 3000)) // Wait for server to autoConnect and init
-                await connectServer(whatsappServer.id).catch(console.error) // Explicit connect just in case
-            } else {
-                await connectServer(whatsappServer.id).catch(console.error)
-                await new Promise(res => setTimeout(res, 1000))
             }
-            fetchQrCode()
+            // Always explicitly call connectServer (it's safe if already connected, mcpStore handles it)
+            // and actually await it so the tools array gets populated.
+            await connectServer(whatsappServer.id)
+
+            // Let the state settle 
+            await new Promise(res => setTimeout(res, 500))
+            
+            await fetchQrCode()
         } catch (e) {
             console.error('Failed to connect server:', e)
             setConnectionState('idle')
