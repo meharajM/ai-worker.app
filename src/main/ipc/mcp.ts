@@ -2,11 +2,8 @@ import { ipcMain } from 'electron'
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
-import { ChildProcess, exec } from 'child_process'
-import { promisify } from 'util'
+import { ChildProcess } from 'child_process'
 import { PlaywrightService } from '../services/PlaywrightService'
-
-const execAsync = promisify(exec)
 import { MemoryService } from '../services/MemoryService'
 import { FileSystemService } from '../services/FileSystemService'
 
@@ -30,29 +27,6 @@ function isPlaywrightServer(serverConfig: { id?: string; name?: string; command?
     // 2. Args containing '@playwright/mcp' (legacy external), OR
     // 3. Command is 'internal' (new internal service marker)
     return idOrName.includes('playwright') || argsStr.includes('@playwright/mcp') || command === 'internal'
-}
-
-// Helper to detect if a server config is for WhatsApp
-function isWhatsAppServer(serverConfig: { id?: string; name?: string; args?: string[] }): boolean {
-    const { name, args } = serverConfig
-    const nameStr = (name || '').toLowerCase()
-    const argsStr = (args || []).join(' ').toLowerCase()
-
-    return nameStr.includes('whatsapp-mcp') || argsStr.includes('whatsapp-mcp')
-}
-
-// Helper to kill orphaned WhatsApp MCP instances
-async function killOrphanedWhatsAppInstances(): Promise<void> {
-    const platform = process.platform
-    try {
-        if (platform === 'darwin' || platform === 'linux') {
-            await execAsync('pkill -f "whatsapp-mcp"')
-        } else if (platform === 'win32') {
-            await execAsync('wmic process where "commandline like \'%whatsapp-mcp%\'" call terminate')
-        }
-    } catch {
-        // Ignore error if no processes were found to kill
-    }
 }
 
 // Logging utility for MCP operations
@@ -354,30 +328,7 @@ export function registerMcpHandlers(): void {
                 }
             })
 
-            const connectPromise = client.connect(transport)
-
-            if (isWhatsAppServer(serverConfig)) {
-                // Set a 15-second timeout for WhatsApp connection
-                const timeoutPromise = new Promise((_, reject) => {
-                    setTimeout(() => reject(new Error('WhatsApp connection timed out (likely due to orphaned instances)')), 15000)
-                })
-
-                try {
-                    await Promise.race([connectPromise, timeoutPromise])
-                } catch (err: unknown) {
-                    const errMsg = err instanceof Error ? err.message : String(err)
-                    logMcpOperation('warn', 'WhatsApp connection failed or timed out, killing orphaned instances...', {
-                        operation: 'connect-timeout',
-                        serverId: id,
-                        error: errMsg
-                    })
-
-                    await killOrphanedWhatsAppInstances()
-                    throw err // Rethrow to let the UI show the error and retry
-                }
-            } else {
-                await connectPromise
-            }
+            await client.connect(transport)
 
             const duration = Date.now() - startTime
 
