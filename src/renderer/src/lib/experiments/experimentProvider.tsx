@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 /**
  * experimentProvider.tsx — React context + declarative A/B testing components.
  *

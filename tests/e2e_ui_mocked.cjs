@@ -49,6 +49,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
     try {
         const window = await electronApp.firstWindow();
+        await window.setViewportSize({ width: 1280, height: 900 });
         window.on('console', msg => console.log(`[Renderer]: ${msg.text()}`));
 
         // Mocking at the window level is more reliable than network interception for localhost in Electron
@@ -417,8 +418,6 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         const chatInput = window.locator('[data-testid="chat-textarea"]');
         await chatInput.waitFor({ state: 'attached' });
-
-        await window.setViewportSize({ width: 1280, height: 900 });
 
         // Helper to send message
         const sendMessage = async (text) => {
