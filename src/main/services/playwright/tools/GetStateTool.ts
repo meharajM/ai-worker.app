@@ -16,6 +16,23 @@ import { PlaywrightTool, ToolResult } from '../PlaywrightTool';
  */
 export class GetStateTool extends PlaywrightTool {
     name = 'get_state';
+    aliases = ['browser_snapshot'];
+
+    getSchema() {
+        return {
+            name: 'get_state',
+            description: 'PERCEPTION: Understand what is on the current page. Use this AFTER navigation to see page elements. Modes: "fast"=quick text list (recommended), "full"=detailed DOM tree, "vision"=screenshot with labeled elements.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    mode: { type: 'string', enum: ['fast', 'full', 'vision'], description: 'fast=elements only (fastest, lowest tokens), full=elements+DOM tree, vision=screenshot+numbered elements' },
+                    screenshot: { type: 'boolean', description: 'Force include screenshot (auto in vision mode)' },
+                    tree: { type: 'boolean', description: 'Force include DOM tree (auto in full mode)' },
+                    highlight: { type: 'boolean', description: 'Draw numbered boxes on interactive elements in screenshot' }
+                }
+            }
+        };
+    }
 
     async execute(page: Page, args: any): Promise<ToolResult> {
         const mode = args.mode || 'fast';
