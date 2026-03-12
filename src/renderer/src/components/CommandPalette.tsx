@@ -16,21 +16,13 @@ export function CommandPalette({ onViewChange }: CommandPaletteProps) {
   const [showPhoneDialog, setShowPhoneDialog] = useState(false);
 
   const { clearMessages, toggleSidebar } = useChatStore();
-  const { servers, connectServer, disconnectServer, updateServer } = useMcpStore();
+  const { servers, disconnectServer, updateServer } = useMcpStore();
   const whatsappServer = servers.find(s => s.name === 'whatsapp-mcp');
   const isWhatsAppConnected = whatsappServer?.connected || false;
 
   const handleConnectWhatsApp = async () => {
     if (whatsappServer) {
-      if (!whatsappServer.env?.WHATSAPP_TARGET_NUMBER) {
         setShowPhoneDialog(true);
-        return;
-      }
-      connectServer(whatsappServer.id).catch(console.error);
-      const event = new CustomEvent('submit-chat-input', {
-        detail: { prompt: "Connect to WhatsApp and check the connection status." }
-      });
-      window.dispatchEvent(event);
     }
   };
 

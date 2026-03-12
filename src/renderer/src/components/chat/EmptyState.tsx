@@ -9,7 +9,7 @@ import { WhatsAppConnectionDialog } from '../WhatsAppConnectionDialog';
  * Co-Worker Hub Welcome Screen
  */
 export function EmptyState() {
-  const { servers, connectServer } = useMcpStore()
+  const { servers } = useMcpStore()
   const whatsappServer = servers.find(s => s.name === 'whatsapp-mcp')
   const isWhatsAppConnected = whatsappServer?.connected || false
 
@@ -18,21 +18,7 @@ export function EmptyState() {
 
   const handleConnectWhatsApp = async () => {
     if (whatsappServer) {
-      const targetEnv = whatsappServer.env || {};
-
-      // If the user hasn't configured a target number, prompt them with the custom dialog
-      if (!targetEnv.WHATSAPP_TARGET_NUMBER) {
-        setShowPhoneDialog(true);
-        return; // Halt here. The dialog's submit button will call proceedWithConnection if successful.
-      }
-
-      // If already configured, proceed immediately
-      connectServer(whatsappServer.id).catch(console.error)
-
-      const event = new CustomEvent('submit-chat-input', {
-        detail: { prompt: "Connect to WhatsApp using the whatsapp-mcp tools and check the connection status." }
-      })
-      window.dispatchEvent(event)
+      setShowPhoneDialog(true);
     }
   }
 
