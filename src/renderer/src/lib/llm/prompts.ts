@@ -206,6 +206,13 @@ Example: "search for nike shoes on Google" requires:
 DO NOT stop after just navigating - complete the entire workflow!`;
   }
 
+  // Detect WhatsApp server by server name (more reliable than checking tool names)
+  const hasWhatsApp = servers?.some(s => s.name === 'whatsapp-mcp') || toolNamesLower.includes("ask_question");
+  let whatsappNote = "";
+  if (hasWhatsApp) {
+    whatsappNote = `\n\n**HUMAN-IN-THE-LOOP (WHATSAPP)**: You are connected to the user via the \`whatsapp-mcp\` server. Use its tools (\`connect\`, \`get_status\`, \`send_message\`, \`ask_question\`) for all WhatsApp operations. **NEVER navigate the browser to web.whatsapp.com.** For any significant or destructive action, use \`ask_question\` to get the user's approval on WhatsApp before proceeding.`;
+  }
+
   const userContext = await getUserEnvironmentContext();
 
   return `You are AI-Worker, an autonomous agent with ${toolCount} tools for browser automation, web navigation, and task execution.${jsonFormatNote}
@@ -252,7 +259,7 @@ RULES:
 
 
 # AVAILABLE TOOLS
-${toolsDescription}${serverContext}${browserCapabilityNote}
+${toolsDescription}${serverContext}${browserCapabilityNote}${whatsappNote}
 
 ${dynamicRules ? `\n# TASK-SPECIFIC PROTOCOLS\n${dynamicRules}\n` : ''}
 
