@@ -93,6 +93,14 @@ const DEFAULT_MCP_SERVERS = [
         command: 'uvx',
         args: ['markitdown-mcp'],
         autoConnect: true // Enable auto-connect (requires uv/python)
+    },
+    {
+        name: 'whatsapp-mcp',
+        description: 'WhatsApp MCP Server - Human-in-the-Loop for AI Agents via WhatsApp',
+        type: 'stdio',
+        command: 'npx',
+        args: ['-y', '@mhrj/whatsapp-mcp'],
+        autoConnect: true
     }
 ]
 

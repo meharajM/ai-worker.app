@@ -171,24 +171,32 @@ function extractNavigation(output: unknown): ExtractedNavigation | null {
  * Try to extract text from MCP-style content objects
  */
 function extractMcpContent(output: unknown): string | null {
-    // Handle {"content": [{"type": "text", "text": "..."}]} pattern
+    // Handle {"content": [{"type": "text", "text": "..."}, {"type": "image", "data": "...", "mimeType": "..."}]} pattern
     if (output && typeof output === 'object' && 'content' in output && Array.isArray(output.content)) {
-        const textParts = (output.content as Array<{ type: string; text?: string }>)
-            .filter((c) => c.type === 'text' && c.text)
-            .map((c) => c.text as string)
-            .join('\n');
+        const parts: string[] = [];
+
+        for (const c of (output as { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> }).content) {
+            if (c.type === 'text' && c.text) {
+                parts.push(c.text);
+            } else if (c.type === 'image' && c.data) {
+                const mime = c.mimeType || 'image/png';
+                parts.push(`![QR Code](data:${mime};base64,${c.data})`);
+            }
+        }
+
+        const combined = parts.join('\n');
 
         // If the extracted text itself is JSON, try to parse it
-        if (textParts.trim().startsWith('[') || textParts.trim().startsWith('{')) {
+        if (combined.trim().startsWith('[') || combined.trim().startsWith('{')) {
             try {
-                const parsed = JSON.parse(textParts);
+                const parsed = JSON.parse(combined);
                 // If it's a list of products/objects, let extractProducts handle it
                 if (Array.isArray(parsed)) return null;
                 // Otherwise return as is (to be flattened later) or just text
             } catch { /* ignore */ }
         }
 
-        return textParts.length > 0 ? textParts : null;
+        return combined.length > 0 ? combined : null;
     }
     return null;
 }
@@ -305,7 +313,9 @@ export function analyzeToolOutput(
     }
 
     // Check for meaningful text content (not too short, not too long)
-    if (outputStr.length > 20 && outputStr.length < 500) {
+    // QR codes/images can be long, so we increase the limit if it contains data:image
+    const maxLen = outputStr.includes('data:image') ? 10000 : 500;
+    if (outputStr.length > 20 && outputStr.length < maxLen) {
         // BLOCK RAW JSON: If it looks like JSON and wasn't handled above, try to flatten or ignore
         if (outputStr.trim().startsWith('{') || outputStr.trim().startsWith('[')) {
             try {
