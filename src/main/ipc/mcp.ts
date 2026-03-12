@@ -357,9 +357,9 @@ export function registerMcpHandlers(): void {
             const connectPromise = client.connect(transport)
 
             if (isWhatsAppServer(serverConfig)) {
-                // Set a 15-second timeout for WhatsApp connection
+                // Set a 45-second timeout for WhatsApp connection execution via npx (can take a while to download to cache)
                 const timeoutPromise = new Promise((_, reject) => {
-                    setTimeout(() => reject(new Error('WhatsApp connection timed out (likely due to orphaned instances)')), 15000)
+                    setTimeout(() => reject(new Error('WhatsApp connection timed out (likely due to orphaned instances)')), 45000)
                 })
 
                 try {
@@ -720,10 +720,14 @@ export function registerMcpHandlers(): void {
                 ? (args as Record<string, unknown>)
                 : (typeof args === 'string' ? { input: args } : { value: args });
 
-            const result = await client.callTool({
-                name: toolName,
-                arguments: finalArgs || {}
-            })
+            const result = await client.callTool(
+                {
+                    name: toolName,
+                    arguments: finalArgs || {}
+                }, 
+                undefined, 
+                { timeout: 300000 } // 5 minutes timeout for long running tools (e.g puppeteer)
+            )
 
             const duration = Date.now() - startTime
             const resultStr = JSON.stringify(result)
