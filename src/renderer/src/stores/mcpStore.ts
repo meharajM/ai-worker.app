@@ -185,15 +185,23 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                         }
                     }
                 }
+                const beforeDedup = initialServers.length;
                 initialServers = Array.from(seen.values());
+                const deduplicated = initialServers.length !== beforeDedup;
 
                 // Enforce: whatsapp-mcp must never autoConnect (requires explicit user action)
-                initialServers = initialServers.map(s =>
-                    s.name === 'whatsapp-mcp' ? { ...s, autoConnect: false } : s
-                );
+                let fixedAutoConnect = false;
+                initialServers = initialServers.map(s => {
+                    if (s.name === 'whatsapp-mcp' && s.autoConnect) {
+                        fixedAutoConnect = true;
+                        return { ...s, autoConnect: false };
+                    }
+                    return s;
+                });
 
-                if (hasNewDefaults || initialServers.some((s, i) => JSON.stringify(s) !== JSON.stringify(stored[i]))) {
+                if (hasNewDefaults || deduplicated || fixedAutoConnect) {
                     await electron.store.set(storageKey, initialServers);
+                    console.log(`[mcpStore] Persisted ${hasNewDefaults ? '+defaults' : ''}${deduplicated ? ' +dedup' : ''}${fixedAutoConnect ? ' +wa-no-autoconnect' : ''}`);
                 }
             } else {
                 // Defaults (only for anonymous or empty user profile? Maybe always safe to default?)

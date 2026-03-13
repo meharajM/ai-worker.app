@@ -260,7 +260,7 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
                         <div className="flex flex-col items-center justify-center py-8 animate-in fade-in duration-300">
                             <Loader2 size={32} className="text-[#4fd1c5] animate-spin mb-4" />
                             <p className="text-white/70 font-medium">Starting server &amp; generating QR code...</p>
-                            <p className="text-white/40 text-xs mt-2 text-center max-w-xs">This may take up to 60–90 seconds the first time — a Chromium session is being created to fetch your QR code.</p>
+                            <p className="text-white/40 text-xs mt-2 text-center max-w-xs">Opening a secure WebSocket connection to WhatsApp. This usually takes 3–10 seconds.</p>
                         </div>
                     )}
 
