@@ -53,8 +53,8 @@ export function SendButton({
       aria-label="Send message"
       data-testid="send-button"
       className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${hasContent && !disabled
-          ? 'bg-white text-black hover:bg-gray-200'
-          : 'bg-transparent text-white/20 cursor-not-allowed'
+          ? 'bg-[var(--color-text-primary)] text-[var(--color-bg-dark)] hover:opacity-80'
+          : 'bg-transparent text-[var(--color-text-dim)] cursor-not-allowed'
         }`}
     >
       <Send size={18} />

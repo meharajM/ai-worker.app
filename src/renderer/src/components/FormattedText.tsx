@@ -125,7 +125,7 @@ const CodeBlock = ({ inline, className, children, ...props }: any) => {
   return (
     <code 
         className={cn(
-            "px-1.5 py-0.5 rounded bg-white/10 text-[var(--color-brand-teal)] font-mono text-[0.9em]",
+            "px-1.5 py-0.5 rounded bg-[var(--color-surface-hover)] border border-[var(--color-border)] text-[var(--color-brand-teal)] font-mono text-[0.9em]",
             className
         )} 
         {...props}
@@ -148,20 +148,20 @@ export function FormattedText({ content, className = '' }: FormattedTextProps) {
         remarkPlugins={[remarkGfm]}
         components={{
           // Headers - Gemini style: clear separation
-          h1: ({ children }) => <h1 className="text-lg font-bold text-white mt-4 mb-2 first:mt-0">{children}</h1>,
-          h2: ({ children }) => <h2 className="text-base font-bold text-white mt-4 mb-2 first:mt-0">{children}</h2>,
-          h3: ({ children }) => <h3 className="text-[13px] font-bold text-white/90 mt-3 mb-1.5 uppercase tracking-wide">{children}</h3>,
+          h1: ({ children }) => <h1 className="text-lg font-bold text-[var(--color-text-primary)] mt-4 mb-2 first:mt-0">{children}</h1>,
+          h2: ({ children }) => <h2 className="text-base font-bold text-[var(--color-text-primary)] mt-4 mb-2 first:mt-0">{children}</h2>,
+          h3: ({ children }) => <h3 className="text-[13px] font-bold text-[var(--color-text-secondary)] mt-3 mb-1.5 uppercase tracking-wide">{children}</h3>,
           
           // Lists - proper spacing and bullets
-          ul: ({ children }) => <ul className="list-disc pl-4 space-y-1 my-2 text-white/90">{children}</ul>,
-          ol: ({ children }) => <ol className="list-decimal pl-4 space-y-1 my-2 text-white/90">{children}</ol>,
-          li: ({ children }) => <li className="pl-1 text-white/80">{children}</li>,
+          ul: ({ children }) => <ul className="list-disc pl-4 space-y-1 my-2 text-[var(--color-text-secondary)]">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal pl-4 space-y-1 my-2 text-[var(--color-text-secondary)]">{children}</ol>,
+          li: ({ children }) => <li className="pl-1 text-[var(--color-text-secondary)]">{children}</li>,
           
           // Text formatting
-          strong: ({ children }) => <strong className="font-bold text-white">{children}</strong>,
-          em: ({ children }) => <em className="italic text-white/80">{children}</em>,
-          p: ({ children }) => <p className="mb-2 last:mb-0 text-white/90">{children}</p>,
-          blockquote: ({ children }) => <blockquote className="border-l-2 border-[#00a896] pl-4 italic text-white/60 my-2">{children}</blockquote>,
+          strong: ({ children }) => <strong className="font-bold text-[var(--color-text-primary)]">{children}</strong>,
+          em: ({ children }) => <em className="italic text-[var(--color-text-secondary)]">{children}</em>,
+          p: ({ children }) => <p className="mb-2 last:mb-0 text-[var(--color-text-primary)] leading-relaxed">{children}</p>,
+          blockquote: ({ children }) => <blockquote className="border-l-2 border-[var(--color-brand-teal)] pl-4 italic text-[var(--color-text-muted)] my-2">{children}</blockquote>,
           
           // Links
           a: ({ href, children }) => (
@@ -184,15 +184,15 @@ export function FormattedText({ content, className = '' }: FormattedTextProps) {
           // Code with Copy Button
           code: CodeBlock,
           
-          table: ({ children }) => <div className="overflow-x-auto my-3"><table className="min-w-full divide-y divide-white/10 border border-white/10 rounded-lg text-left">{children}</table></div>,
-          thead: ({ children }) => <thead className="bg-white/5">{children}</thead>,
-          tbody: ({ children }) => <tbody className="divide-y divide-white/5">{children}</tbody>,
+          table: ({ children }) => <div className="overflow-x-auto my-3"><table className="min-w-full divide-y divide-[var(--color-border)] border border-[var(--color-border)] rounded-lg text-left">{children}</table></div>,
+          thead: ({ children }) => <thead className="bg-[var(--color-surface)]">{children}</thead>,
+          tbody: ({ children }) => <tbody className="divide-y divide-[var(--color-border)]">{children}</tbody>,
           tr: ({ children }) => <tr>{children}</tr>,
-          th: ({ children }) => <th className="px-3 py-2 text-xs font-semibold text-white/70 uppercase tracking-wider">{children}</th>,
-          td: ({ children }) => <td className="px-3 py-2 text-xs text-white/80 whitespace-nowrap">{children}</td>,
+          th: ({ children }) => <th className="px-3 py-2 text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">{children}</th>,
+          td: ({ children }) => <td className="px-3 py-2 text-xs text-[var(--color-text-primary)] whitespace-nowrap">{children}</td>,
           
           // Horizontal Rule
-          hr: () => <hr className="border-white/10 my-4" />
+          hr: () => <hr className="border-[var(--color-border)] my-4" />
         }}
       >
         {content}

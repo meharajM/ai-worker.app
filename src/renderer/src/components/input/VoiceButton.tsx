@@ -51,7 +51,7 @@ export function VoiceButton({
               stroke="currentColor"
               strokeWidth="3"
               fill="transparent"
-              className="text-white/10"
+              className="text-[var(--color-text-dim)]"
             />
             <circle
               cx="16"
@@ -92,7 +92,7 @@ export function VoiceButton({
     <button
       onClick={onClick}
       disabled={disabled || !sttSupported}
-      className={`p-3 mb-[1px] rounded-xl flex items-center justify-center transition-all active:scale-95 shadow-lg group bg-white/5 hover:bg-white/10 text-white/80 hover:text-white h-[44px] w-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${
+      className={`p-3 mb-[1px] rounded-xl flex items-center justify-center transition-all active:scale-95 shadow-lg group bg-[var(--color-surface)] hover:bg-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] h-[44px] w-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${
         disabled || !sttSupported ? 'opacity-50 cursor-not-allowed' : ''
       }`}
       title="Start Voice Mode"

@@ -59,12 +59,12 @@ export function RecentSessionsList({ onViewChange }: RecentSessionsListProps) {
     <div className="flex-1 overflow-y-auto px-5 py-4">
       {/* Header section with + Icon */}
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-[10px] font-bold text-white/40 tracking-wider uppercase">
+        <h3 className="text-[10px] font-bold text-[var(--color-text-muted)] tracking-wider uppercase">
           Recent Sessions
         </h3>
         <button
           onClick={handleCreateSession}
-          className="text-white/40 hover:text-white transition-colors p-1"
+          className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors p-1"
           title="New Chat Session"
         >
           <Plus size={14} />
@@ -84,8 +84,8 @@ export function RecentSessionsList({ onViewChange }: RecentSessionsListProps) {
               }}
               className={`group relative flex items-center justify-between py-2 px-2 -mx-2 rounded-lg cursor-pointer transition-all
                 ${isActive 
-                  ? 'bg-white/5 text-white shadow-sm' 
-                  : 'text-white/50 hover:bg-white/5 hover:text-white/80'
+                  ? 'bg-[var(--color-surface)] text-[var(--color-text-primary)] shadow-sm' 
+                  : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text-primary)]'
                 }`}
             >
               <div className="flex items-center gap-3 overflow-hidden">
@@ -100,7 +100,7 @@ export function RecentSessionsList({ onViewChange }: RecentSessionsListProps) {
                     onBlur={() => saveTitle(session.id)}
                     onKeyDown={(e) => handleKeyDown(e, session.id)}
                     onClick={(e) => e.stopPropagation()}
-                    className="flex-1 bg-[var(--color-bg-dark)] text-white text-xs px-2 py-1 rounded outline-none border border-[var(--color-primary)] w-full"
+                    className="flex-1 bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs px-2 py-1 rounded outline-none border border-[var(--color-primary)] w-full"
                   />
                 ) : (
                   <span className="text-xs font-medium truncate">
@@ -120,10 +120,10 @@ export function RecentSessionsList({ onViewChange }: RecentSessionsListProps) {
 
               {editingId !== session.id && (
                 <div className={`flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ${isActive ? 'opacity-100' : ''}`}>
-                  <button onClick={(e) => startEditing(e, session)} className="p-1 text-white/40 hover:text-white rounded">
+                  <button onClick={(e) => startEditing(e, session)} className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded">
                     <Edit2 size={12} />
                   </button>
-                  <button onClick={(e) => handleDelete(e, session.id)} className="p-1 text-white/40 hover:text-red-400 rounded">
+                  <button onClick={(e) => handleDelete(e, session.id)} className="p-1 text-[var(--color-text-muted)] hover:text-red-400 rounded">
                     <Trash2 size={12} />
                   </button>
                 </div>
@@ -133,7 +133,7 @@ export function RecentSessionsList({ onViewChange }: RecentSessionsListProps) {
         })}
 
         {sessions.length === 0 && (
-          <div className="text-center py-6 text-xs text-white/20">
+          <div className="text-center py-6 text-xs text-[var(--color-text-dim)]">
             No active sessions.
           </div>
         )}

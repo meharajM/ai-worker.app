@@ -97,20 +97,19 @@ export function ModelSelect({ value, onChange, models, placeholder = 'Select or 
         <div ref={containerRef} className="relative w-full">
             <div className="relative">
                 <div
-                    onClick={() => !disabled && setIsOpen(!isOpen)}
                     className={`
-                        w-full bg-black/30 border rounded-lg px-3 py-2 text-sm
+                        w-full bg-[var(--color-surface)] border rounded-lg px-3 py-2 text-sm
                         flex items-center gap-2 cursor-pointer
                         ${disabled 
-                            ? 'border-white/5 text-white/30 cursor-not-allowed' 
+                            ? 'border-[var(--color-border)] text-[var(--color-text-dim)] cursor-not-allowed opacity-50' 
                             : isOpen
-                                ? 'border-[var(--color-brand-teal)]/50 bg-black/40'
-                                : 'border-white/10 text-white hover:border-white/20'
+                                ? 'border-[var(--color-brand-teal)]/50 bg-[var(--color-surface-hover)]'
+                                : 'border-[var(--color-border)] text-[var(--color-text-primary)] hover:border-[var(--color-border-hover)]'
                         }
                         transition-colors
                     `}
                 >
-                    <Search size={16} className="text-white/40 shrink-0" />
+                    <Search size={16} className="text-[var(--color-text-muted)] shrink-0" />
                     <input
                         ref={inputRef}
                         type="text"
@@ -121,27 +120,27 @@ export function ModelSelect({ value, onChange, models, placeholder = 'Select or 
                         disabled={disabled}
                         placeholder={placeholder}
                         aria-label={ariaLabel || 'Model selection'}
-                        className="flex-1 bg-transparent outline-none text-white placeholder-white/30"
+                        className="flex-1 bg-transparent outline-none text-[var(--color-text-primary)] placeholder-[var(--color-text-dim)]"
                         onClick={(e) => e.stopPropagation()}
                     />
                     {value && !disabled && (
                         <button
                             onClick={handleClear}
-                            className="p-0.5 hover:bg-white/10 rounded transition-colors"
+                            className="p-0.5 hover:bg-[var(--color-surface-hover)] rounded transition-colors"
                             aria-label="Clear selection"
                         >
-                            <X size={14} className="text-white/40" />
+                            <X size={14} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]" />
                         </button>
                     )}
                     <ChevronDown 
                         size={16} 
-                        className={`text-white/40 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                        className={`text-[var(--color-text-muted)] transition-transform ${isOpen ? 'rotate-180' : ''}`}
                     />
                 </div>
             </div>
 
             {isOpen && !disabled && (
-                <div className="absolute z-50 w-full mt-1 bg-[var(--color-card-elevated)] border border-white/10 rounded-lg shadow-lg max-h-60 overflow-auto">
+                <div className="absolute z-50 w-full mt-1 bg-[var(--color-card-elevated)] border border-[var(--color-border)] rounded-lg shadow-lg max-h-60 overflow-auto">
                     {filteredModels.length > 0 ? (
                         <>
                             {filteredModels.map((model) => (
@@ -151,8 +150,8 @@ export function ModelSelect({ value, onChange, models, placeholder = 'Select or 
                                     onClick={() => handleSelect(model)}
                                     className={`
                                         px-3 py-2 text-sm cursor-pointer
-                                        hover:bg-white/10 transition-colors
-                                        ${value === model ? 'bg-[var(--color-brand-teal)]/10 text-[var(--color-brand-teal)]' : 'text-white'}
+                                        hover:bg-[var(--color-surface-hover)] transition-colors
+                                        ${value === model ? 'bg-[var(--color-brand-teal)]/10 text-[var(--color-brand-teal)]' : 'text-[var(--color-text-primary)]'}
                                     `}
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter' || e.key === ' ') {
@@ -169,7 +168,7 @@ export function ModelSelect({ value, onChange, models, placeholder = 'Select or 
                                 <div
                                     role="option"
                                     onClick={() => handleSelect(searchTerm)}
-                                    className="px-3 py-2 text-sm cursor-pointer hover:bg-white/10 transition-colors text-white/60 border-t border-white/5"
+                                    className="px-3 py-2 text-sm cursor-pointer hover:bg-[var(--color-surface-hover)] transition-colors text-[var(--color-text-muted)] border-t border-[var(--color-border)]"
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter' || e.key === ' ') {
                                             e.preventDefault()
@@ -186,7 +185,7 @@ export function ModelSelect({ value, onChange, models, placeholder = 'Select or 
                         <div
                             role="option"
                             onClick={() => handleSelect(searchTerm)}
-                            className="px-3 py-2 text-sm cursor-pointer hover:bg-white/10 transition-colors text-white/60"
+                            className="px-3 py-2 text-sm cursor-pointer hover:bg-[var(--color-surface-hover)] transition-colors text-[var(--color-text-muted)]"
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
                                     e.preventDefault()
@@ -198,7 +197,7 @@ export function ModelSelect({ value, onChange, models, placeholder = 'Select or 
                             <span className="text-[#4fd1c5]">Use custom:</span> {searchTerm}
                         </div>
                     ) : (
-                        <div className="px-3 py-2 text-sm text-white/40">
+                        <div className="px-3 py-2 text-sm text-[var(--color-text-dim)]">
                             No models found. Type to enter custom model name.
                         </div>
                     )}

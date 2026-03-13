@@ -130,17 +130,17 @@ export function LLMProviderSettings() {
             <div className="space-y-4">
 
                 {/* Provider pill selector */}
-                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
-                    <label className="block text-sm text-white/60 mb-3">Preferred Provider</label>
+                <div className="bg-[var(--color-card-elevated)] border border-[var(--color-border)] rounded-xl p-4">
+                    <label className="block text-sm text-[var(--color-text-muted)] mb-3">Preferred Provider</label>
                     <div className="flex gap-2 flex-wrap">
                         {PROVIDERS.map(({ id, label }) => (
                             <button
                                 key={id}
                                 onClick={() => settings.setPreferredProvider(id)}
                                 aria-label={`Select ${label} provider`}
-                                className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-colors ${settings.preferredProvider === id
-                                        ? 'bg-[#4fd1c5] text-white'
-                                        : 'bg-white/5 text-white/60 hover:bg-white/10'
+                                className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium transition-colors border ${settings.preferredProvider === id
+                                        ? 'bg-[var(--color-brand-teal)]/20 text-[var(--color-brand-teal)] border-[var(--color-brand-teal)]/50'
+                                        : 'bg-[var(--color-surface)] text-[var(--color-text-secondary)] border-transparent hover:bg-[var(--color-border)]'
                                     }`}
                             >
                                 {label}

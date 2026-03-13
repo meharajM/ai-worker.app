@@ -20,7 +20,7 @@ export function Header({ status }: HeaderProps) {
                     <>
                         {user ? (
                             <div className="flex items-center gap-3">
-                                <div className="flex items-center gap-2 text-sm text-white/80">
+                                <div className="flex items-center gap-2 text-sm text-[var(--color-text-primary)]">
                                     <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-[var(--color-brand-teal)] to-blue-500 flex items-center justify-center text-[10px] font-bold text-white uppercase">
                                         {user.displayName ? user.displayName[0] : user.email?.[0] || 'U'}
                                     </div>
@@ -28,7 +28,7 @@ export function Header({ status }: HeaderProps) {
                                 </div>
                                 <button
                                     onClick={() => signOut()}
-                                    className="p-1.5 text-white/40 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                                    className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface)] rounded-lg transition-colors"
                                     title="Sign Out"
                                 >
                                     <LogOut size={14} />
@@ -48,13 +48,13 @@ export function Header({ status }: HeaderProps) {
                 )}
             </div>
 
-            <div className="text-[10px] uppercase tracking-widest text-white/20 hidden sm:flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            <div className="text-[10px] uppercase tracking-widest text-[var(--color-text-dim)] hidden sm:flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] animate-pulse" />
                 local-session: active
             </div>
 
             {/* LLM Status */}
-            <div className={`flex items-center gap-1.5 text-[10px] ${status.available ? 'text-green-400' : 'text-yellow-400'
+            <div className={`flex items-center gap-1.5 text-[10px] font-medium ${status.available ? 'text-[var(--color-success)]' : 'text-[var(--color-warning)]'
                 }`}>
                 {status.available ? <Wifi size={12} /> : <WifiOff size={12} />}
                 <span className="uppercase tracking-wide">

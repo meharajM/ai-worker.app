@@ -68,13 +68,13 @@ export function GeminiSettings({ available, models, checking, onRefresh }: Gemin
             checking={checking}
             headerActions={
                 <>
-                    <div className="h-4 w-px bg-white/10 mx-1" />
+                    <div className="h-4 w-px bg-[var(--color-border)] mx-1" />
                     <AntigravityLinkButton variant="compact" />
                     <a
                         href="https://aistudio.google.com/app/apikey"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="px-2 py-1 text-[10px] bg-white/5 text-white/60 rounded border border-white/10 hover:bg-white/10 transition-colors"
+                        className="px-2 py-1 text-[10px] bg-[var(--color-surface)] text-[var(--color-text-secondary)] rounded border border-[var(--color-border)] hover:bg-[var(--color-border)] transition-colors"
                     >
                         Get API Key
                     </a>
@@ -87,21 +87,21 @@ export function GeminiSettings({ available, models, checking, onRefresh }: Gemin
         >
             {/* API Key */}
             <div>
-                <label className="block text-xs text-white/40 mb-1">
+                <label className="block text-xs text-[var(--color-text-muted)] mb-1">
                     API Key {antigravitySignedIn && '(Optional — linked via Google)'}
                 </label>
                 <input
                     type="password"
-                    value={settings.geminiApiKey}
+                    value={settings.geminiApiKey || ''}
                     onChange={(e) => settings.setGeminiApiKey(e.target.value)}
                     placeholder={antigravitySignedIn ? 'Linked to Google Account' : 'Enter Gemini API Key...'}
-                    className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm placeholder-white/30 focus:border-white/20 focus:outline-none"
+                    className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--color-text-dim)] text-[var(--color-text-primary)] focus:border-[var(--color-primary)] focus:outline-none"
                 />
             </div>
 
             {/* Model */}
             <div>
-                <label className="block text-xs text-white/40 mb-1">Model</label>
+                <label className="block text-xs text-[var(--color-text-muted)] mb-1">Model</label>
                 <ModelSelect
                     value={settings.geminiModel}
                     onChange={(value) => settings.setGeminiModel(value)}

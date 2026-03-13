@@ -193,18 +193,13 @@ export function McpServerCard({
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={() => onToggleAutoConnect(!server.autoConnect)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${server.autoConnect ? "bg-[#4fd1c5]" : "bg-white/20"
-                    }`}
-                  role="switch"
-                  aria-checked={server.autoConnect}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${server.autoConnect ? "translate-x-6" : "translate-x-1"
-                      }`}
-                  />
-                </button>
+                <input
+                  type="checkbox"
+                  className="toggle toggle-success toggle-sm"
+                  checked={server.autoConnect}
+                  onChange={() => onToggleAutoConnect(!server.autoConnect)}
+                  title="Toggle auto-connect"
+                />
               </div>
 
               {/* Tools List */}

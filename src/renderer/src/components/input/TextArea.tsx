@@ -74,8 +74,8 @@ export function TextArea({
         text-base py-3 px-2 leading-relaxed transition-colors custom-scrollbar overflow-y-auto
         ${
           isListening
-            ? 'text-white/90 placeholder-white/50'
-            : 'text-white placeholder-white/30'
+            ? 'text-[var(--color-text-primary)] placeholder-[var(--color-text-secondary)]'
+            : 'text-[var(--color-text-primary)] placeholder-[var(--color-text-dim)]'
         }
       `}
     />

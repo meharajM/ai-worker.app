@@ -55,26 +55,26 @@ export function WorkflowTiles() {
                     `}
                 >
                     {/* Glassmorphism Background Effect */}
-                    <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-slow" />
+                    <div className="absolute inset-0 bg-gradient-to-br from-[var(--color-surface)] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-slow" />
 
-                    <div className={`mb-3 p-2.5 rounded-xl bg-white/5 group-hover:bg-white/10 transition-colors duration-slow`}>
+                    <div className={`mb-3 p-2.5 rounded-xl bg-[var(--color-surface)] group-hover:bg-[var(--color-border)] transition-colors duration-slow`}>
                         <div className={`${template.color.split(' ')[0]} group-hover:scale-110 transition-transform duration-slow`}>
                            {ICON_MAP[template.iconName] || <Zap size={18} />}
                         </div>
                     </div>
 
                     <div className="flex-1 w-full">
-                        <h3 className="font-bold text-sm text-white/90 mb-1.5 group-hover:translate-x-1 transition-transform duration-slow">
+                        <h3 className="font-bold text-sm text-[var(--color-text-primary)] mb-1.5 group-hover:translate-x-1 transition-transform duration-slow">
                             {template.title}
                         </h3>
-                        <p className="text-[11px] text-white/40 line-clamp-2 leading-relaxed group-hover:text-white/50 transition-colors duration-slow">
+                        <p className="text-[11px] text-[var(--color-text-muted)] line-clamp-2 leading-relaxed group-hover:text-[var(--color-text-secondary)] transition-colors duration-slow">
                             {template.description}
                         </p>
                     </div>
 
                     {/* Subtle arrow indicator */}
                     <div className="absolute top-5 right-5 opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all duration-slow">
-                        <ChevronRight size={14} className="text-white/40" />
+                        <ChevronRight size={14} className="text-[var(--color-text-muted)]" />
                     </div>
                     
                     {/* Bottom accent line */}
