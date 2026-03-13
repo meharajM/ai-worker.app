@@ -71,8 +71,8 @@ export function InputToolbar({
         <button
           onClick={() => setShowContextMenu(!showContextMenu)}
           disabled={disabled}
-          className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${workspacePath
-              ? 'bg-[#00a896]/20 text-[#00a896] hover:bg-[#00a896]/30'
+          className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${workspacePath
+              ? 'bg-[var(--color-brand-teal)]/20 text-[var(--color-brand-teal)] hover:bg-[var(--color-brand-teal)]/30'
               : hasAttachments
                 ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
                 : 'bg-transparent text-white/40 hover:text-white/60 hover:bg-white/5'
@@ -84,7 +84,7 @@ export function InputToolbar({
 
         {/* Dropdown Menu */}
         {showContextMenu && (
-          <div className="absolute bottom-full mb-2 -right-4 bg-[#1e2028] border border-white/15 rounded-xl shadow-2xl overflow-hidden min-w-[200px] animate-in fade-in slide-in-from-bottom-2 duration-150 z-50">
+          <div className="absolute bottom-full mb-2 -right-4 bg-[var(--color-card-elevated)] border border-white/15 rounded-xl shadow-glass overflow-hidden min-w-[200px] animate-in fade-in slide-in-from-bottom-2 duration-fast z-50">
             {/* Select Workspace */}
             <button
               onClick={() => {
@@ -95,12 +95,12 @@ export function InputToolbar({
             >
               <FolderOpen
                 size={16}
-                className={workspacePath ? 'text-[#00a896]' : 'text-white/50'}
+                className={workspacePath ? 'text-[var(--color-brand-teal)]' : 'text-white/50'}
               />
               <div className="flex flex-col items-start">
                 <span className="font-medium">Select Workspace</span>
                 {workspacePath && (
-                  <span className="text-[10px] text-[#00a896]/70 max-w-[160px] truncate">
+                  <span className="text-[10px] text-[var(--color-brand-teal)]/70 max-w-[160px] truncate">
                     {workspacePath.split(/[/\\]/).pop()}
                   </span>
                 )}
@@ -129,7 +129,7 @@ export function InputToolbar({
       <button
         onClick={onToggleHeadless}
         disabled={disabled}
-        className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${isHeadless
+        className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${isHeadless
             ? 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30'
             : 'bg-transparent text-white/40 hover:text-white/60 hover:bg-white/5'
           } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}

@@ -179,7 +179,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                             <h3 className="text-xl font-bold mb-6">Speech Recognition</h3>
 
                             {/* Speech Recognition Settings */}
-                            <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
+                            <div className="bg-[var(--color-card-elevated)] border border-white/10 rounded-xl p-4">
                                 <div className="flex items-center justify-between mb-4">
                                     <div>
                                         <p className="font-medium">Speech Recognition Engine</p>
@@ -230,12 +230,12 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                             </p>
 
                             {/* Browser Selection */}
-                            <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4 mb-4">
+                            <div className="bg-[var(--color-card-elevated)] border border-white/10 rounded-xl p-4 mb-4">
                                 <label className="block text-sm text-white/60 mb-3">Browser Engine</label>
                                 <select
                                     value={settings.playwrightBrowser || 'auto'}
                                     onChange={(e) => settings.setPlaywrightBrowser(e.target.value as any)}
-                                    className="w-full bg-[#0f1115] border border-white/10 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[#4fd1c5]"
+                                    className="w-full bg-[#0f1115] border border-white/10 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-[var(--color-brand-teal)]"
                                 >
                                     <option value="auto">Auto (OS Default)</option>
                                     <option value="chrome">Google Chrome</option>
@@ -250,7 +250,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                             </div>
 
                             {/* Headless Mode */}
-                            <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4 mb-4">
+                            <div className="bg-[var(--color-card-elevated)] border border-white/10 rounded-xl p-4 mb-4">
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <label className="block text-sm text-white mb-1">Show Browser Window</label>
@@ -260,7 +260,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                                     </div>
                                     <button
                                         onClick={() => settings.setPlaywrightHeadless(!settings.playwrightHeadless)}
-                                        className={`relative w-12 h-6 rounded-full transition-colors ${!settings.playwrightHeadless ? 'bg-[#4fd1c5]' : 'bg-white/20'
+                                        className={`relative w-12 h-6 rounded-full transition-colors ${!settings.playwrightHeadless ? 'bg-[var(--color-brand-teal)]' : 'bg-white/20'
                                             }`}
                                     >
                                         <span
@@ -272,9 +272,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                             </div>
 
                             {/* Info Box */}
-                            <div className="bg-[#4fd1c5]/10 border border-[#4fd1c5]/30 rounded-xl p-4">
+                            <div className="bg-[var(--color-brand-teal)]/10 border border-[var(--color-brand-teal)]/30 rounded-xl p-4">
                                 <div className="flex items-start gap-3">
-                                    <Info size={20} className="text-[#4fd1c5] flex-shrink-0 mt-0.5" />
+                                    <Info size={20} className="text-[var(--color-brand-teal)] flex-shrink-0 mt-0.5" />
                                     <div className="text-sm text-white/70">
                                         <p className="font-medium text-white mb-1">Session Persistence</p>
                                         <p>
@@ -294,7 +294,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                         <div>
                             <h3 className="text-xl font-bold mb-6">Appearance</h3>
 
-                            <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
+                            <div className="bg-[var(--color-card-elevated)] border border-white/10 rounded-xl p-4">
                                 <label className="block text-sm text-white/60 mb-3">Theme</label>
                                 <div className="flex gap-2">
                                     {(['dark', 'light', 'system'] as Theme[]).map((theme) => (
@@ -302,7 +302,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                                             key={theme}
                                             onClick={() => settings.setTheme(theme)}
                                             className={`flex-1 py-2 px-4 rounded-lg text-sm capitalize transition-colors ${settings.theme === theme
-                                                ? 'bg-[#4fd1c5] text-white'
+                                                ? 'bg-[var(--color-brand-teal)] text-white'
                                                 : 'bg-white/5 text-white/60 hover:bg-white/10'
                                                 }`}
                                         >

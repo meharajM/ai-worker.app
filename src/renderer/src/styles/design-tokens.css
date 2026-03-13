@@ -15,8 +15,10 @@
   --color-primary: #4facfe;
   --color-primary-hover: #00f2fe;
   --color-accent: #3b82f6;
+  --color-brand-teal: #00a896;    /* Secondary brand teal used for CTAs */
   --color-bg-dark: #0b0c0f;      /* Very dark, almost black background */
   --color-card-dark: #16171a;    /* Elevated cards and sidebar */
+  --color-card-elevated: #1a1d23; /* Settings cards, dropdowns */
   --color-surface: #222328;      /* Lighter hover states */
   --color-border: rgba(255, 255, 255, 0.05);
   --color-border-hover: rgba(255, 255, 255, 0.1);
@@ -40,6 +42,8 @@
   --radius-button: 0.5rem;
   --radius-avatar: 0.5rem;
   --radius-card: 0.75rem;
+  --radius-input: 1.5rem;
+  --radius-tile: 1.25rem;
   --radius-pill: 9999px;
 
   /* ── Spacing ────────────────────────────────────────────────────── */
@@ -58,4 +62,7 @@
   --duration-normal: 300ms;
   --duration-slow: 500ms;
   --ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  /* ── Shadows ────────────────────────────────────────────────────── */
+  --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
 }

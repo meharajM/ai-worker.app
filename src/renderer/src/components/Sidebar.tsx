@@ -33,7 +33,7 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
         {/* Divider */}
         <div className="mx-5 my-2 border-t border-white/5" />
 
-        <RecentSessionsList />
+        <RecentSessionsList onViewChange={onViewChange} />
       </div>
 
       {/* 3. Footer with quick settings link */}

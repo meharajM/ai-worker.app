@@ -60,7 +60,7 @@ export function VoiceButton({
               stroke="currentColor"
               strokeWidth="3"
               fill="transparent"
-              className="text-emerald-500 transition-all duration-300 ease-out"
+              className="text-emerald-500 transition-all duration-normal ease-out"
               strokeDasharray={88}
               strokeDashoffset={88 - (88 * setupProgress) / 100}
               strokeLinecap="round"
@@ -79,7 +79,7 @@ export function VoiceButton({
     return (
       <button
         onClick={onClick}
-        className="p-3 mb-[1px] rounded-xl flex items-center justify-center transition-all active:scale-95 bg-red-500/20 hover:bg-red-500/30 text-red-400 animate-pulse ring-1 ring-red-500/50 h-[44px] w-[44px]"
+        className="p-3 mb-[1px] rounded-xl flex items-center justify-center transition-all active:scale-95 bg-red-500/20 hover:bg-red-500/30 text-red-400 animate-pulse ring-1 ring-red-500/50 h-[44px] w-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
         title="Stop Recording"
       >
         <Square size={16} className="fill-current" />
@@ -92,7 +92,7 @@ export function VoiceButton({
     <button
       onClick={onClick}
       disabled={disabled || !sttSupported}
-      className={`p-3 mb-[1px] rounded-xl flex items-center justify-center transition-all active:scale-95 shadow-lg group bg-white/5 hover:bg-white/10 text-white/80 hover:text-white h-[44px] w-[44px] ${
+      className={`p-3 mb-[1px] rounded-xl flex items-center justify-center transition-all active:scale-95 shadow-lg group bg-white/5 hover:bg-white/10 text-white/80 hover:text-white h-[44px] w-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${
         disabled || !sttSupported ? 'opacity-50 cursor-not-allowed' : ''
       }`}
       title="Start Voice Mode"

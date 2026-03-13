@@ -2,8 +2,13 @@ import React, { useState } from 'react'
 import { MessageSquare, Plus, Edit2, Trash2 } from 'lucide-react'
 import { useChatStore, ChatSession } from '../../stores/chatStore'
 import { useLogStore } from '../../stores/logStore'
+import { View } from '../Sidebar'
 
-export function RecentSessionsList() {
+interface RecentSessionsListProps {
+  onViewChange?: (view: View) => void
+}
+
+export function RecentSessionsList({ onViewChange }: RecentSessionsListProps) {
   const {
     sessions,
     activeSessionId,
@@ -73,7 +78,10 @@ export function RecentSessionsList() {
           return (
             <div
               key={session.id}
-              onClick={() => setActiveSession(session.id)}
+              onClick={() => {
+                setActiveSession(session.id)
+                onViewChange?.('chat')
+              }}
               className={`group relative flex items-center justify-between py-2 px-2 -mx-2 rounded-lg cursor-pointer transition-all
                 ${isActive 
                   ? 'bg-white/5 text-white shadow-sm' 

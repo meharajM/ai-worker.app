@@ -21,7 +21,7 @@ export function Header({ status }: HeaderProps) {
                         {user ? (
                             <div className="flex items-center gap-3">
                                 <div className="flex items-center gap-2 text-sm text-white/80">
-                                    <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-[#4fd1c5] to-blue-500 flex items-center justify-center text-[10px] font-bold text-white uppercase">
+                                    <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-[var(--color-brand-teal)] to-blue-500 flex items-center justify-center text-[10px] font-bold text-white uppercase">
                                         {user.displayName ? user.displayName[0] : user.email?.[0] || 'U'}
                                     </div>
                                     <span className="hidden sm:inline">{user.displayName || user.email?.split('@')[0]}</span>
@@ -37,7 +37,7 @@ export function Header({ status }: HeaderProps) {
                         ) : (
                             <button
                                 onClick={() => setIsAuthModalOpen(true)}
-                                className="flex items-center gap-2 px-3 py-1.5 bg-[#4fd1c5]/10 text-[#4fd1c5] rounded-lg text-xs font-medium hover:bg-[#4fd1c5]/20 transition-colors"
+                                className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-brand-teal)]/10 text-[var(--color-brand-teal)] rounded-lg text-xs font-medium hover:bg-[var(--color-brand-teal)]/20 transition-colors"
                             >
                                 <UserIcon size={14} />
                                 <span>Sign In</span>

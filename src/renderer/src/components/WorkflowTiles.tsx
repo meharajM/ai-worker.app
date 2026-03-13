@@ -41,44 +41,44 @@ export function WorkflowTiles() {
     const templates = templatesData as WorkflowTemplate[]
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-8 animate-in fade-in slide-in-from-bottom-4 duration-slow">
             {templates.map((template) => (
                 <button
                     key={template.id}
                     onClick={() => handleTileClick(template.prompt)}
                     className={`
-                        flex flex-col items-start text-left p-4 rounded-2xl border 
+                        flex flex-col items-start text-left p-4 rounded-tile border 
                         bg-[var(--color-surface)] border-[var(--color-border)]
                         hover:border-[var(--color-border-hover)] hover:bg-[var(--color-card-dark)]
-                        hover:shadow-2xl hover:shadow-black/40 
-                        transition-all duration-500 group relative overflow-hidden
+                        hover:shadow-glass 
+                        transition-all duration-slow group relative overflow-hidden
                     `}
                 >
                     {/* Glassmorphism Background Effect */}
-                    <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-slow" />
 
-                    <div className={`mb-3 p-2.5 rounded-xl bg-white/5 group-hover:bg-white/10 transition-colors duration-500`}>
-                        <div className={`${template.color.split(' ')[0]} group-hover:scale-110 transition-transform duration-500`}>
+                    <div className={`mb-3 p-2.5 rounded-xl bg-white/5 group-hover:bg-white/10 transition-colors duration-slow`}>
+                        <div className={`${template.color.split(' ')[0]} group-hover:scale-110 transition-transform duration-slow`}>
                            {ICON_MAP[template.iconName] || <Zap size={18} />}
                         </div>
                     </div>
 
                     <div className="flex-1 w-full">
-                        <h3 className="font-bold text-sm text-white/90 mb-1.5 group-hover:translate-x-1 transition-transform duration-500">
+                        <h3 className="font-bold text-sm text-white/90 mb-1.5 group-hover:translate-x-1 transition-transform duration-slow">
                             {template.title}
                         </h3>
-                        <p className="text-[11px] text-white/40 line-clamp-2 leading-relaxed group-hover:text-white/50 transition-colors duration-500">
+                        <p className="text-[11px] text-white/40 line-clamp-2 leading-relaxed group-hover:text-white/50 transition-colors duration-slow">
                             {template.description}
                         </p>
                     </div>
 
                     {/* Subtle arrow indicator */}
-                    <div className="absolute top-5 right-5 opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all duration-500">
+                    <div className="absolute top-5 right-5 opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all duration-slow">
                         <ChevronRight size={14} className="text-white/40" />
                     </div>
                     
                     {/* Bottom accent line */}
-                    <div className="absolute bottom-0 left-0 h-[2px] w-0 bg-[var(--color-primary)] group-hover:w-full transition-all duration-500" />
+                    <div className="absolute bottom-0 left-0 h-[2px] w-0 bg-[var(--color-primary)] group-hover:w-full transition-all duration-slow" />
                 </button>
             ))}
         </div>

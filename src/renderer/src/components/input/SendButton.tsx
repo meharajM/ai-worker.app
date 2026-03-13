@@ -30,7 +30,7 @@ export function SendButton({
     return (
       <button
         onClick={onAbort}
-        className="p-2 mb-[1px] rounded-lg transition-all bg-red-500/20 hover:bg-red-500/30 text-red-400 h-[44px] w-[36px] flex items-center justify-center"
+        className="p-2 mb-[1px] rounded-lg transition-all bg-red-500/20 hover:bg-red-500/30 text-red-400 h-[44px] w-[36px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
         title="Stop Generation"
       >
         <Square size={18} className="fill-current" />
@@ -52,7 +52,7 @@ export function SendButton({
       aria-disabled={disabled || !hasContent}
       aria-label="Send message"
       data-testid="send-button"
-      className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${hasContent && !disabled
+      className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${hasContent && !disabled
           ? 'bg-white text-black hover:bg-gray-200'
           : 'bg-transparent text-white/20 cursor-not-allowed'
         }`}

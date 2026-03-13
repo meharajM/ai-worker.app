@@ -1,5 +1,5 @@
 import React from 'react'
-import { CheckCircle2, Clock, AlertTriangle, ChevronRight, Activity } from 'lucide-react'
+import { CheckCircle2, AlertTriangle, ChevronRight, Activity } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { ToolCall } from '../../stores/chatStore'
 import { FormattedText } from '../FormattedText'
@@ -47,15 +47,14 @@ function determineAgentName(toolName: string): string {
 export function ToolCallList({ toolCalls }: ToolCallListProps) {
   if (!toolCalls || toolCalls.length === 0) return null
 
-  // In a real execution, we'd have exact token/timing metrics, but we mock them or omit them based on available data
   const renderAgentBlock = (agentName: string, tools: ToolCall[]) => {
     // If ANY tool is still processing, the whole block is 'processing'
     const isDone = tools.every(t => !!t.result)
     const hasError = tools.some(t => t.result && String(t.result).toLowerCase().includes('error'))
     
     // In the mockup, there's a left border strip indicating status.
-    const statusColor = hasError ? 'bg-orange-500' : (isDone ? 'bg-emerald-500' : 'bg-blue-500 animate-pulse')
-    const StatusIcon = hasError ? AlertTriangle : (isDone ? CheckCircle2 : Clock)
+    const statusColor = hasError ? 'bg-orange-500' : (isDone ? 'bg-emerald-500' : 'bg-blue-500')
+    const StatusIcon = hasError ? AlertTriangle : (isDone ? CheckCircle2 : Activity)
     const iconColor = hasError ? 'text-orange-500' : (isDone ? 'text-emerald-500' : 'text-blue-500')
     const Theme = getAgentTheme(agentName)
 
@@ -74,12 +73,8 @@ export function ToolCallList({ toolCalls }: ToolCallListProps) {
               </span>
             </div>
             
-            {/* Metrics (Mocked/Derived for mockup fidelity) */}
+            {/* Metrics */}
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 px-2 py-1 bg-white/5 rounded-md text-[10px] text-white/50 font-mono">
-                <Clock size={10} />
-                <span>{isDone ? '223ms' : '...'}</span>
-              </div>
               <div className="flex items-center gap-1.5 px-2 py-1 bg-white/5 rounded-md text-[10px] text-white/50 font-mono">
                 <span className="px-1 py-0.5 rounded-sm bg-white/10 text-[8px] leading-none">⚙️</span>
                 <span>{tools.length} actions</span>
@@ -96,7 +91,7 @@ export function ToolCallList({ toolCalls }: ToolCallListProps) {
                  <div key={tool.id} className="flex flex-col gap-1">
                    <div className="flex items-start gap-2.5">
                      <div className="mt-1 flex-shrink-0 opacity-50">
-                       <ChevronRight size={14} className={toolError ? 'text-orange-400' : (toolDone ? 'text-emerald-400' : 'text-blue-400 animate-pulse')} />
+                       <ChevronRight size={14} className={toolError ? 'text-orange-400' : (toolDone ? 'text-emerald-400' : 'text-blue-400')} />
                      </div>
                      <div className="flex-1">
                        <span className={`text-[13px] font-medium leading-tight ${toolError ? 'text-orange-200' : 'text-white/80'}`}>

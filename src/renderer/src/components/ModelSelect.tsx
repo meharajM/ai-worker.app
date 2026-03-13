@@ -104,7 +104,7 @@ export function ModelSelect({ value, onChange, models, placeholder = 'Select or 
                         ${disabled 
                             ? 'border-white/5 text-white/30 cursor-not-allowed' 
                             : isOpen
-                                ? 'border-[#4fd1c5]/50 bg-black/40'
+                                ? 'border-[var(--color-brand-teal)]/50 bg-black/40'
                                 : 'border-white/10 text-white hover:border-white/20'
                         }
                         transition-colors
@@ -141,7 +141,7 @@ export function ModelSelect({ value, onChange, models, placeholder = 'Select or 
             </div>
 
             {isOpen && !disabled && (
-                <div className="absolute z-50 w-full mt-1 bg-[#1a1d23] border border-white/10 rounded-lg shadow-lg max-h-60 overflow-auto">
+                <div className="absolute z-50 w-full mt-1 bg-[var(--color-card-elevated)] border border-white/10 rounded-lg shadow-lg max-h-60 overflow-auto">
                     {filteredModels.length > 0 ? (
                         <>
                             {filteredModels.map((model) => (
@@ -152,7 +152,7 @@ export function ModelSelect({ value, onChange, models, placeholder = 'Select or 
                                     className={`
                                         px-3 py-2 text-sm cursor-pointer
                                         hover:bg-white/10 transition-colors
-                                        ${value === model ? 'bg-[#4fd1c5]/10 text-[#4fd1c5]' : 'text-white'}
+                                        ${value === model ? 'bg-[var(--color-brand-teal)]/10 text-[var(--color-brand-teal)]' : 'text-white'}
                                     `}
                                     onKeyDown={(e) => {
                                         if (e.key === 'Enter' || e.key === ' ') {
@@ -178,7 +178,7 @@ export function ModelSelect({ value, onChange, models, placeholder = 'Select or 
                                     }}
                                     tabIndex={0}
                                 >
-                                    <span className="text-[#4fd1c5]">Use custom:</span> {searchTerm}
+                                    <span className="text-[var(--color-brand-teal)]">Use custom:</span> {searchTerm}
                                 </div>
                             )}
                         </>

@@ -125,7 +125,7 @@ const CodeBlock = ({ inline, className, children, ...props }: any) => {
   return (
     <code 
         className={cn(
-            "px-1.5 py-0.5 rounded bg-white/10 text-[#4fd1c5] font-mono text-[0.9em]",
+            "px-1.5 py-0.5 rounded bg-white/10 text-[var(--color-brand-teal)] font-mono text-[0.9em]",
             className
         )} 
         {...props}
@@ -169,7 +169,7 @@ export function FormattedText({ content, className = '' }: FormattedTextProps) {
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[#4fd1c5] hover:underline cursor-pointer font-medium"
+              className="text-[var(--color-brand-teal)] hover:underline cursor-pointer font-medium"
               onClick={(e) => {
                 if (window.electron?.shell?.openExternal && href) {
                   e.preventDefault();
