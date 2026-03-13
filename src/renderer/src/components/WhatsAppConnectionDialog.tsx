@@ -73,31 +73,76 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
             const res = await executeToolCall('connect', null) as { result: { content?: Array<{ type: string, data?: string, mimeType?: string, text?: string }> }, error?: string }
             if (res.error) throw new Error(res.error)
 
-            let base64 = null
-            let mime = 'image/png'
-
+            // The connect tool returns a text response, not an image.
+            // We need to parse the text to find the QR code data.
             if (res.result?.content && Array.isArray(res.result.content)) {
                 for (const c of res.result.content) {
-                    if (c.type === 'image' && c.data) {
-                        base64 = c.data
-                        if (c.mimeType) mime = c.mimeType
-                    } else if (c.type === 'text' && c.text) {
+                    // Case 1: Already connected — text says "connected"
+                    if (c.type === 'text' && c.text) {
                         const txt = c.text.toLowerCase()
-                        if (txt.includes('connected') && !txt.includes('not connected')) {
+                        if (txt.includes('connected successfully')) {
                             setConnectionState('connected')
-                            setTimeout(() => {
-                                onOpenChange(false)
-                            }, 2500)
+                            setTimeout(() => onOpenChange(false), 2500)
                             return
                         }
+                        if (txt.includes('connection is being restored')) {
+                            // Session restoring — poll for completion
+                            setConnectionState('qr')
+                            startPolling()
+                            return
+                        }
+                    }
+                    // Case 2: Direct base64 image (future-proof if the tool upgrades)
+                    if (c.type === 'image' && c.data) {
+                        const mime = c.mimeType || 'image/png'
+                        setConnectionState('qr')
+                        setQrCodeData(`data:${mime};base64,${c.data}`)
+                        startPolling()
+                        return
+                    }
+                }
+
+                // Case 3: Text response with qr.html path — the current format
+                const textContent = res.result.content.find(c => c.type === 'text' && c.text)
+                if (textContent?.text) {
+                    // Extract the file path from the text: e.g. file:///Users/xxx/.whatsapp-mcp/qr.html
+                    const fileMatch = textContent.text.match(/file:\/\/([^\s]+?\.html)/)
+                    const rawMatch = textContent.text.match(/(\/[^\s]+?\.html)/)
+                    const htmlFilePath = fileMatch ? fileMatch[1] : rawMatch ? rawMatch[1] : null
+
+                    if (htmlFilePath) {
+                        // Fetch the HTML file directly — Electron renderer allows file:// fetches
+                        try {
+                            const fileUrl = htmlFilePath.startsWith('/') ? `file://${htmlFilePath}` : htmlFilePath
+                            const resp = await fetch(fileUrl)
+                            const htmlContent = await resp.text()
+                            // Extract the base64 src from the <img> tag
+                            const srcMatch = htmlContent.match(/src="(data:image\/[^"]+)"/)
+                            if (srcMatch && srcMatch[1]) {
+                                setConnectionState('qr')
+                                setQrCodeData(srcMatch[1])
+                                startPolling()
+                                return
+                            }
+                        } catch (fsErr) {
+                            console.warn('Could not read QR HTML file, falling back to no-image qr state:', fsErr)
+                        }
+                    }
+
+                    // Fallback: if we got a qr text response but couldn't read the file, 
+                    // still enter qr state and just show that we're waiting for scan
+                    if (textContent.text.toLowerCase().includes('authentication required') ||
+                        textContent.text.toLowerCase().includes('qr') ||
+                        textContent.text.toLowerCase().includes('scan')) {
+                        setConnectionState('qr')
+                        startPolling()
+                        return
                     }
                 }
             }
 
+            // If we reach here with no actionable result, stay in connecting state and poll
             setConnectionState('qr')
-            if (base64) {
-                setQrCodeData(`data:${mime};base64,${base64}`)
-            }
             startPolling()
 
         } catch (e) {
