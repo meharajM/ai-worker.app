@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Smartphone, Loader2, CheckCircle2 } from 'lucide-react'
 import { useMcpStore } from '../stores/mcpStore'
-import { executeToolCall } from '../lib/mcp'
+import { executeToolCall, findServerForTool } from '../lib/mcp'
 
 interface WhatsAppConnectionDialogProps {
     open: boolean
@@ -172,8 +172,17 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
             // Explicitly connect and await it — this is the single source of truth for connection
             await connectServer(whatsappServer.id)
 
-            // Small defensive pause so the tools array settles in the store
-            await new Promise(res => setTimeout(res, 500))
+            // Wait defensively until the tools array actually settles in the store before calling the tool.
+            // Zustand updates might take a tick or two to propagate through the getter used by executeToolCall.
+            let retries = 0;
+            while (!findServerForTool('connect') && retries < 20) {
+                await new Promise(res => setTimeout(res, 250));
+                retries++;
+            }
+
+            if (!findServerForTool('connect')) {
+                throw new Error("Timeout waiting for WhatsApp tools to register in the client.");
+            }
 
             await fetchQrCode()
         } catch (e) {
@@ -183,6 +192,9 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
     }
 
     const submitPhoneNumber = () => {
+        // Prevent double-clicks / races
+        if (connectionState !== 'idle') return;
+
         if (targetNumber && targetNumber.trim().length > 0 && whatsappServer) {
             const formattedNumber = targetNumber.replace(/[^0-9+]/g, '');
             const targetEnv = { ...(whatsappServer.env || {}), WHATSAPP_TARGET_NUMBER: formattedNumber };
