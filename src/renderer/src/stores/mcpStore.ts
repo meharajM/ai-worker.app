@@ -170,6 +170,28 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                     }
                 });
 
+                // Deduplicate by name — keep the entry with the most config (e.g. has env)
+                const seen = new Map<string, MCPServer>();
+                for (const s of initialServers) {
+                    const existing = seen.get(s.name);
+                    if (!existing) {
+                        seen.set(s.name, s);
+                    } else {
+                        // Prefer the one that has env configured (e.g. WHATSAPP_TARGET_NUMBER)
+                        const existingHasEnv = existing.env && Object.keys(existing.env).length > 0;
+                        const sHasEnv = s.env && Object.keys(s.env).length > 0;
+                        if (!existingHasEnv && sHasEnv) {
+                            seen.set(s.name, s);
+                        }
+                    }
+                }
+                initialServers = Array.from(seen.values());
+
+                // Enforce: whatsapp-mcp must never autoConnect (requires explicit user action)
+                initialServers = initialServers.map(s =>
+                    s.name === 'whatsapp-mcp' ? { ...s, autoConnect: false } : s
+                );
+
                 if (hasNewDefaults || initialServers.some((s, i) => JSON.stringify(s) !== JSON.stringify(stored[i]))) {
                     await electron.store.set(storageKey, initialServers);
                 }

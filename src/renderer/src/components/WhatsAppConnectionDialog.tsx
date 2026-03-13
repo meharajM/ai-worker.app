@@ -42,7 +42,7 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
         pollIntervalRef.current = setInterval(async () => {
             if (!whatsappServer) return
             attempts++
-            
+
             if (attempts > MAX_POLLS) {
                 if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
                 setConnectionState('idle')
@@ -54,7 +54,7 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
                 const res = await executeToolCall('get_status', {})
                 // Example expected structure: { result: { content: [{ type: 'text', text: 'connected' }] } }
                 const resString = JSON.stringify(res).toLowerCase()
-                
+
                 if (resString.includes('connected') && !resString.includes('not connected') && !resString.includes('disconnected')) {
                     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
                     setConnectionState('connected')
@@ -75,7 +75,7 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
 
             let base64 = null
             let mime = 'image/png'
-            
+
             if (res.result?.content && Array.isArray(res.result.content)) {
                 for (const c of res.result.content) {
                     if (c.type === 'image' && c.data) {
@@ -99,7 +99,7 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
                 setQrCodeData(`data:${mime};base64,${base64}`)
             }
             startPolling()
-            
+
         } catch (e) {
             console.error('Connection tool error:', e)
             setConnectionState('idle')
@@ -110,24 +110,26 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
         if (!whatsappServer) return
 
         setConnectionState('connecting')
-        
-        try {
-            if (envToSave) {
-                // To force a completely clean boot with new env vars, we explicitly disconnect first
-                await disconnectServer(whatsappServer.id).catch(console.error);
 
-                // When autoConnect: true is set, updateServer automatically calls connectServer.
-                // updateServer does not return the internal promise of connectServer, so we 
-                // must explicitly await connectServer ourselves right after to guarantee tools are loaded.
-                await updateServer(whatsappServer.id, { env: envToSave, autoConnect: true });
+        try {
+            // Always start with a clean disconnected state
+            await disconnectServer(whatsappServer.id).catch(() => { /* ignore if not connected */ })
+
+            if (envToSave) {
+                // Save env WITHOUT autoConnect — we will trigger the connect ourselves.
+                // Using autoConnect:true here causes a fire-and-forget race inside updateServer.
+                await updateServer(whatsappServer.id, { env: envToSave, autoConnect: false })
+
+                // Small pause to let the store persist to disk
+                await new Promise(res => setTimeout(res, 300))
             }
-            // Always explicitly call connectServer (it's safe if already connected, mcpStore handles it)
-            // and actually await it so the tools array gets populated.
+
+            // Explicitly connect and await it — this is the single source of truth for connection
             await connectServer(whatsappServer.id)
 
-            // Extremely defensive sleep just to let the stdio pipe stabilize completely 
-            await new Promise(res => setTimeout(res, 2000))
-            
+            // Small defensive pause so the tools array settles in the store
+            await new Promise(res => setTimeout(res, 500))
+
             await fetchQrCode()
         } catch (e) {
             console.error('Failed to connect server:', e)
@@ -150,12 +152,12 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
             <Dialog.Portal>
                 <Dialog.Overlay className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 animate-in fade-in" />
                 <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-md bg-[#1a1d23] border border-[#2d323b] rounded-2xl shadow-2xl z-50 p-6 animate-in zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:zoom-out-95">
-                    
+
                     <Dialog.Title className={`text-xl font-bold text-white flex items-center gap-2 ${connectionState === 'idle' ? 'mb-2' : 'mb-6 justify-center'}`}>
                         <Smartphone size={20} className="text-[#4fd1c5]" />
                         WhatsApp Setup
                     </Dialog.Title>
-                    
+
                     {connectionState === 'idle' && (
                         <>
                             <Dialog.Description className="text-white/60 text-sm mb-6 leading-relaxed">
@@ -200,8 +202,8 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
                     {connectionState === 'connecting' && (
                         <div className="flex flex-col items-center justify-center py-8 animate-in fade-in duration-300">
                             <Loader2 size={32} className="text-[#4fd1c5] animate-spin mb-4" />
-                            <p className="text-white/70 font-medium">Starting server & generating QR code...</p>
-                            <p className="text-white/40 text-xs mt-2 text-center max-w-xs">This may take up to 15 seconds as a new isolated connection is established.</p>
+                            <p className="text-white/70 font-medium">Starting server &amp; generating QR code...</p>
+                            <p className="text-white/40 text-xs mt-2 text-center max-w-xs">This may take up to 60–90 seconds the first time — a Chromium session is being created to fetch your QR code.</p>
                         </div>
                     )}
 
