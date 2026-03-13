@@ -69,8 +69,10 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
     }
 
     const fetchQrCode = async () => {
+        console.log(`[WhatsApp] fetchQrCode: calling 'connect' tool...`);
         try {
             const res = await executeToolCall('connect', null) as { result: { content?: Array<{ type: string, data?: string, mimeType?: string, text?: string }> }, error?: string }
+            console.log(`[WhatsApp] fetchQrCode: raw response`, JSON.stringify(res).substring(0, 400));
             if (res.error) throw new Error(res.error)
 
             // The connect tool returns a text response, not an image.
@@ -154,15 +156,17 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
     const proceedWithConnection = async (envToSave?: Record<string, string>) => {
         if (!whatsappServer) return
 
+        console.log(`[WhatsApp] proceedWithConnection start — server id=${whatsappServer.id} connected=${whatsappServer.connected} tools=${whatsappServer.tools.length}`);
         setConnectionState('connecting')
 
         try {
             // Always start with a clean disconnected state
-            await disconnectServer(whatsappServer.id).catch(() => { /* ignore if not connected */ })
+            console.log(`[WhatsApp] Step 1: disconnecting...`);
+            await disconnectServer(whatsappServer.id).catch((e) => console.warn('[WhatsApp] disconnect ignored:', e))
 
             if (envToSave) {
                 // Save env WITHOUT autoConnect — we will trigger the connect ourselves.
-                // Using autoConnect:true here causes a fire-and-forget race inside updateServer.
+                console.log(`[WhatsApp] Step 2: updateServer with env (autoConnect=false)...`);
                 await updateServer(whatsappServer.id, { env: envToSave, autoConnect: false })
 
                 // Small pause to let the store persist to disk
@@ -170,12 +174,15 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
             }
 
             // Explicitly connect and await it — this is the single source of truth for connection
+            console.log(`[WhatsApp] Step 3: connectServer id=${whatsappServer.id}...`);
             await connectServer(whatsappServer.id)
+            console.log(`[WhatsApp] Step 3 done: connectServer returned`);
 
             // Wait defensively until the tools array actually settles in the store before calling the tool.
             // Zustand updates might take a tick or two to propagate through the getter used by executeToolCall.
             let retries = 0;
             while (!findServerForTool('connect') && retries < 20) {
+                console.log(`[WhatsApp] Step 4: waiting for 'connect' tool in store (attempt ${retries + 1}/20)...`);
                 await new Promise(res => setTimeout(res, 250));
                 retries++;
             }
@@ -183,10 +190,11 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
             if (!findServerForTool('connect')) {
                 throw new Error("Timeout waiting for WhatsApp tools to register in the client.");
             }
+            console.log(`[WhatsApp] Step 4 done: 'connect' tool found in store after ${retries * 250}ms`);
 
             await fetchQrCode()
         } catch (e) {
-            console.error('Failed to connect server:', e)
+            console.error('[WhatsApp] proceedWithConnection failed:', e)
             setConnectionState('idle')
         }
     }

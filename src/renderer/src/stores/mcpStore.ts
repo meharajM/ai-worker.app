@@ -112,9 +112,12 @@ export const useMcpStore = create<McpState>()((set, get) => ({
     activeUserId: null,
 
     initialize: async (uid = null) => {
-        // Force re-initialization if uid changes or if not initialized
-        // const currentUid = get().activeUserId
-        // if (get().initialized && currentUid === uid) return
+        // Guard against double-initialization (React StrictMode double-invokes effects)
+        const currentState = get()
+        if (currentState.initialized && currentState.activeUserId === uid) {
+            console.log(`[mcpStore] Already initialized for user: ${uid || 'anonymous'}, skipping`)
+            return
+        }
 
         set({ activeUserId: uid })
         const storageKey = getPersistenceKey(uid)
@@ -124,6 +127,10 @@ export const useMcpStore = create<McpState>()((set, get) => ({
 
             // Load from electron-store
             const stored = await electron.store.get<MCPServer[]>(storageKey)
+            console.log(`[mcpStore] Loaded ${stored?.length ?? 0} servers from store`)
+            if (stored) {
+                stored.forEach((s, i) => console.log(`[mcpStore]   [${i}] ${s.name} id=${s.id} autoConnect=${s.autoConnect} hasEnv=${!!(s.env && Object.keys(s.env).length)}`))
+            }
 
             let initialServers: MCPServer[] = []
 
@@ -156,7 +163,6 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                 });
 
                 // Also ensure all current defaults exist if they are missing
-                let hasNewDefaults = false;
                 DEFAULT_MCP_SERVERS.forEach(def => {
                     if (!initialServers.some(s => s.name === def.name)) {
                         initialServers.push({
@@ -166,64 +172,63 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                             tools: [],
                             type: def.type as 'stdio' | 'sse' | 'http',
                         });
-                        hasNewDefaults = true;
+                        console.log(`[mcpStore] Added missing default server: ${def.name}`);
                     }
                 });
 
-                // Deduplicate by name — keep the entry with the most config (e.g. has env)
+                // Deduplicate by name — keep the entry with env configured
                 const seen = new Map<string, MCPServer>();
                 for (const s of initialServers) {
                     const existing = seen.get(s.name);
                     if (!existing) {
                         seen.set(s.name, s);
                     } else {
-                        // Prefer the one that has env configured (e.g. WHATSAPP_TARGET_NUMBER)
                         const existingHasEnv = existing.env && Object.keys(existing.env).length > 0;
                         const sHasEnv = s.env && Object.keys(s.env).length > 0;
                         if (!existingHasEnv && sHasEnv) {
+                            console.log(`[mcpStore] Dedup: keeping ${s.name} id=${s.id} (has env) over id=${existing.id}`);
                             seen.set(s.name, s);
+                        } else {
+                            console.log(`[mcpStore] Dedup: dropping ${s.name} id=${s.id} (keeping id=${existing.id})`);
                         }
                     }
                 }
-                const beforeDedup = initialServers.length;
+                const beforeLen = initialServers.length;
                 initialServers = Array.from(seen.values());
-                const deduplicated = initialServers.length !== beforeDedup;
+                if (initialServers.length !== beforeLen) {
+                    console.log(`[mcpStore] Dedup removed ${beforeLen - initialServers.length} duplicate(s)`);
+                }
 
-                // Enforce: whatsapp-mcp must never autoConnect (requires explicit user action)
-                let fixedAutoConnect = false;
+                // ENFORCE: whatsapp-mcp must NEVER autoConnect — requires explicit user action
                 initialServers = initialServers.map(s => {
-                    if (s.name === 'whatsapp-mcp' && s.autoConnect) {
-                        fixedAutoConnect = true;
+                    if (s.name === 'whatsapp-mcp') {
+                        if (s.autoConnect) console.log(`[mcpStore] Enforcing autoConnect=false for whatsapp-mcp (was true)`);
                         return { ...s, autoConnect: false };
                     }
                     return s;
                 });
 
-                if (hasNewDefaults || deduplicated || fixedAutoConnect) {
-                    await electron.store.set(storageKey, initialServers);
-                    console.log(`[mcpStore] Persisted ${hasNewDefaults ? '+defaults' : ''}${deduplicated ? ' +dedup' : ''}${fixedAutoConnect ? ' +wa-no-autoconnect' : ''}`);
-                }
+                // Always persist clean state back to disk
+                await electron.store.set(storageKey, initialServers);
+                console.log(`[mcpStore] Persisted clean state: ${initialServers.map(s => `${s.name}(${s.autoConnect ? 'auto' : 'manual'})`).join(', ')}`);
             } else {
-                // Defaults (only for anonymous or empty user profile? Maybe always safe to default?)
-                // If user has NO servers, maybe we should give them defaults?
-                // Let's stick to defaults for now.
                 initialServers = DEFAULT_MCP_SERVERS.map(s => ({
                     ...s,
                     id: generateId(),
                     connected: false,
                     tools: [],
                     type: s.type as 'stdio' | 'sse' | 'http',
-                    activeUserId: uid // Not strictly needed on server obj but harmless
                 }))
                 await electron.store.set(storageKey, initialServers)
+                console.log(`[mcpStore] Created fresh defaults: ${initialServers.map(s => s.name).join(', ')}`);
             }
 
             set({ servers: initialServers, initialized: true })
 
-            // Auto-connect
+            // Auto-connect only explicitly marked servers
             const autoConnectServers = initialServers.filter(s => s.autoConnect)
+            console.log(`[mcpStore] Auto-connecting ${autoConnectServers.length} server(s): ${autoConnectServers.map(s => s.name).join(', ') || '(none)'}`)
             for (const server of autoConnectServers) {
-                // Connect sequentially to avoid overwhelming
                 get().connectServer(server.id).catch(console.error)
             }
 
