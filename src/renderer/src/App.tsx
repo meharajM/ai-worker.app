@@ -26,7 +26,6 @@ import { Sidebar, View } from "./components/Sidebar";
 import { Header } from "./components/Header";
 
 import { useChatStore } from "./stores/chatStore";
-import { useMcpStore } from "./stores/mcpStore";
 import { useAuthPersistence } from "./hooks/useAuthPersistence";
 import { useSettingsSync } from "./hooks/useSettingsSync";
 import { useAgent } from "./hooks/useAgent";
@@ -47,27 +46,15 @@ function App() {
   // ── Store subscriptions ───────────────────────────────────────────────────
   const {
     activeSessionId,
-    sessions,
     isSessionProcessing,
     abortSession,
   } = useChatStore();
-
-  const activeSession = sessions.find((s) => s.id === activeSessionId);
   // Whether the currently-active session is processing (used to disable the input)
   const activeIsProcessing = activeSessionId ? isSessionProcessing(activeSessionId) : false;
 
   // ── Side-effect hooks ─────────────────────────────────────────────────────
   useAuthPersistence();
   useSettingsSync();
-
-  // Ensure MCP is initialized for the chat view. ConnectionsPanel also calls
-  // initialize(), but we need it ready before the user opens that panel.
-  useEffect(() => {
-    const mcp = useMcpStore.getState();
-    if (!mcp.initialized) {
-      mcp.initialize();
-    }
-  }, []);
 
   // ── Business logic hooks ──────────────────────────────────────────────────
   // All agent execution logic lives in useAgent. All LLM status polling lives
