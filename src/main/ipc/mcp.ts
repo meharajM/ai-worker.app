@@ -329,6 +329,7 @@ export function registerMcpHandlers(): void {
             })
 
             await client.connect(transport)
+
             const duration = Date.now() - startTime
 
             logMcpOperation('info', 'MCP server connected successfully', {

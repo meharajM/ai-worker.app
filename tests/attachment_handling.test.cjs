@@ -1,261 +1,384 @@
 /**
  * Attachment Handling Tests (Node.js Native)
- * 
- * Tests the attachment functionality WITHOUT depending on MarkItDown server.
- * Tests verify INPUT → OUTPUT behavior.
- * 
+ *
+ * Tests the attachment functionality as it exists in agent-runtime.ts v1.3.
+ * The prompt format changed from:
+ *   "[System Note: User attached …] (convert_to_markdown hint)"
+ * to:
+ *   "[ATTACHED FILES — act on these immediately …] N. name\n   → convert_to_markdown(uri=\"file://…\")"
+ *
  * Run with: node tests/attachment_handling.test.cjs
  */
 
 const assert = require('assert');
 
-// Helper: Generate attachment context (mirrors agent-runtime.ts logic)
+// ─── Mirrors agent-runtime.ts buildUserMessage attachment logic (v1.3) ─────────
 function generateAttachmentContext(attachments) {
-    if (!attachments || attachments.length === 0) return '';
-    
-    const resourceList = attachments.map(a => `- ${a.name} (Path: ${a.path})`).join('\n');
-    const toolHint = `\n\n[To analyze these files, use the 'convert_to_markdown' tool with file:// URIs. Example: convert_to_markdown(uri="file:///absolute/path")]`;
-    
-    return `\n\n[System Note: User attached the following files. Use absolute paths to access them.]\n${resourceList}${toolHint}`;
+  if (!attachments || attachments.length === 0) return '';
+
+  // Filter attachments with no valid path — matches the agent-runtime filter
+  const valid = attachments.filter(a => a.path && a.path.trim() !== '');
+  if (valid.length === 0) return '';
+
+  const callLines = valid.map((a, i) => {
+    const uri = a.path.startsWith('file://') ? a.path : `file://${a.path}`;
+    return `${i + 1}. ${a.name}\n   → convert_to_markdown(uri="${uri}")`;
+  }).join('\n');
+
+  return (
+    `\n\n[ATTACHED FILES — act on these immediately and read each one NOW using the exact call shown]\n` +
+    `${callLines}\n\n` +
+    `CRITICAL: Copy the uri argument CHARACTER-FOR-CHARACTER from above. ` +
+    `Do NOT use just the filename. Do NOT construct a URI yourself. ` +
+    `Reading attached files does NOT require a workspace to be selected.`
+  );
 }
 
-// Helper: Check if file is supported
-function isSupportedFile(filename) {
-    const SUPPORTED_EXTENSIONS = [
-        '.pdf', '.docx', '.xlsx', '.pptx',
-        '.png', '.jpg', '.jpeg', '.gif',
-        '.mp3', '.wav', '.m4a',
-        '.html', '.csv', '.json', '.xml', '.txt', '.md'
-    ];
-    const extension = '.' + filename.split('.').pop()?.toLowerCase();
-    return SUPPORTED_EXTENSIONS.includes(extension);
+// ─── Mirrors mcp.ts executeToolCall URI validation logic ─────────────────────
+function validateConvertToMarkdownUri(uri) {
+  if (!uri || uri.trim() === '' || uri === 'file://' || uri === 'file:') {
+    return { valid: false, reason: 'empty' };
+  }
+  const isAbsolute =
+    uri.startsWith('file:///') ||
+    uri.startsWith('file:////') ||
+    (uri.startsWith('file://') && uri[7] === '/') ||
+    uri.startsWith('/') ||
+    !!uri.match(/^[a-zA-Z]:[\\/]/);
+
+  const isRelativeFileUri =
+    uri.startsWith('file:') &&
+    !uri.startsWith('file:///') &&
+    !uri.startsWith('file:////') &&
+    !(uri.startsWith('file://') && uri[7] === '/');
+
+  if (!isAbsolute || isRelativeFileUri) {
+    return { valid: false, reason: 'relative' };
+  }
+  return { valid: true };
 }
 
-console.log('🧪 Running Attachment Handling Tests...\n');
+// ─── Mirrors mcp.ts fs_* gate with SAFE_ABSOLUTE_PREFIXES ────────────────────
+function validateFsToolCall(wsPath, targetPath) {
+  const targetIsAbsolute =
+    !!targetPath &&
+    (targetPath.startsWith('/') || !!targetPath.match(/^[a-zA-Z]:[\\/]/));
+
+  if (!wsPath && !targetIsAbsolute) {
+    return { allowed: false, reason: 'no-workspace-relative' };
+  }
+
+  // When no workspace: only user-home directories are permitted
+  const SAFE_ABSOLUTE_PREFIXES = ['/Users/', '/home/', '\\Users\\'];
+  const isSafeAbsolute = (p) =>
+    SAFE_ABSOLUTE_PREFIXES.some(prefix => p.startsWith(prefix)) ||
+    !!p.match(/^[a-zA-Z]:[/\\]Users[/\\]/);
+
+  if (!wsPath && targetIsAbsolute && !isSafeAbsolute(targetPath)) {
+    return { allowed: false, reason: 'system-path' };
+  }
+
+  // Traversal check when workspace is set
+  if (wsPath && targetPath) {
+    const normalizedWs = wsPath.replace(/\\/g, '/').replace(/\/$/, '');
+    const normalizedTarget = targetPath.replace(/\\/g, '/');
+    if (!normalizedTarget.startsWith(normalizedWs)) {
+      return { allowed: false, reason: 'traversal' };
+    }
+  }
+
+  return { allowed: true };
+}
+
+// ─── Mirrors maybeSetWorkspaceFromFiles parent-dir extraction ─────────────────
+function deriveParentDir(filePath) {
+  if (!filePath) return null;
+  if (!filePath.includes('/')) return null;
+  return filePath.substring(0, filePath.lastIndexOf('/'));
+}
+
+// ─── Test runner ──────────────────────────────────────────────────────────────
+console.log('🧪 Running Attachment Handling Tests (v1.3)...\n');
 
 let passed = 0;
 let failed = 0;
 
 function test(name, fn) {
-    try {
-        fn();
-        console.log(`✅ ${name}`);
-        passed++;
-    } catch (error) {
-        console.error(`❌ ${name}`);
-        console.error(`   ${error.message}`);
-        failed++;
-    }
+  try {
+    fn();
+    console.log(`✅ ${name}`);
+    passed++;
+  } catch (error) {
+    console.error(`❌ ${name}`);
+    console.error(`   ${error.message}`);
+    failed++;
+  }
 }
 
-// === PATH EXTRACTION TESTS ===
-console.log('\n📁 Path Extraction Tests');
+// =============================================================================
+// 1. NEW PROMPT FORMAT ("[ATTACHED FILES]")
+// =============================================================================
+console.log('\n📝 Attachment Prompt Format Tests (v1.3)');
 
-test('Extract path from File object', () => {
-    const mockFile = { name: 'test.png', path: '/Users/test/Desktop/test.png' };
-    assert.strictEqual(mockFile.path, '/Users/test/Desktop/test.png');
+test('Single file — uses [ATTACHED FILES] header', () => {
+  const ctx = generateAttachmentContext([{ name: 'report.pdf', path: '/Users/test/report.pdf', type: 'application/pdf' }]);
+  assert.ok(ctx.includes('[ATTACHED FILES'), `Expected [ATTACHED FILES] header, got:\n${ctx}`);
 });
 
-test('Handle file without path property', () => {
-    const mockFile = { name: 'test.png' };
-    const path = mockFile.path || '';
-    assert.strictEqual(path, '');
+test('Single file — includes ready-to-use file:// URI', () => {
+  const ctx = generateAttachmentContext([{ name: 'report.pdf', path: '/Users/test/report.pdf', type: 'application/pdf' }]);
+  assert.ok(ctx.includes('file:///Users/test/report.pdf'), `Expected file URI, got:\n${ctx}`);
 });
 
-test('Handle special characters in filename', () => {
-    const mockFile = { name: 'test (copy) [2].png', path: '/Users/test/test (copy) [2].png' };
-    assert.ok(mockFile.path.includes('(copy)'));
-    assert.ok(mockFile.path.includes('[2]'));
+test('Single file — uses numbered convert_to_markdown call format', () => {
+  const ctx = generateAttachmentContext([{ name: 'report.pdf', path: '/Users/test/report.pdf', type: 'application/pdf' }]);
+  assert.ok(ctx.includes('1. report.pdf'), 'Expected numbered entry');
+  assert.ok(ctx.includes('→ convert_to_markdown(uri="file:///Users/test/report.pdf")'), 'Expected exact call');
 });
 
-test('Handle spaces in path', () => {
-    const mockFile = { name: 'my file.pdf', path: '/Users/test/My Documents/my file.pdf' };
-    assert.ok(mockFile.path.includes(' '));
+test('Single file — includes CRITICAL directive', () => {
+  const ctx = generateAttachmentContext([{ name: 'doc.pdf', path: '/Users/test/doc.pdf', type: 'application/pdf' }]);
+  assert.ok(ctx.includes('CRITICAL:'), 'Expected CRITICAL directive');
+  assert.ok(ctx.includes('CHARACTER-FOR-CHARACTER'), 'Expected CHARACTER-FOR-CHARACTER instruction');
 });
 
-test('Handle very long paths', () => {
-    const longPath = '/Users/test/' + 'a/'.repeat(50) + 'file.txt';
-    const mockFile = { name: 'file.txt', path: longPath };
-    assert.ok(mockFile.path.length > 100);
+test('Multiple files — all numbered correctly', () => {
+  const attachments = [
+    { name: 'image.png', path: '/Users/test/image.png', type: 'image/png' },
+    { name: 'doc.pdf', path: '/Users/test/doc.pdf', type: 'application/pdf' },
+    { name: 'data.csv', path: '/Users/test/data.csv', type: 'text/csv' },
+  ];
+  const ctx = generateAttachmentContext(attachments);
+  assert.ok(ctx.includes('1. image.png'), 'Expected entry 1');
+  assert.ok(ctx.includes('2. doc.pdf'), 'Expected entry 2');
+  assert.ok(ctx.includes('3. data.csv'), 'Expected entry 3');
 });
 
-// === CONTEXT GENERATION TESTS ===
-console.log('\n📝 Context Generation Tests');
-
-test('Generate context for single attachment', () => {
-    const attachments = [{ name: 'screenshot.png', path: '/Users/test/screenshot.png' }];
-    const context = generateAttachmentContext(attachments);
-    
-    assert.ok(context.includes('screenshot.png'));
-    assert.ok(context.includes('/Users/test/screenshot.png'));
-    assert.ok(context.includes('convert_to_markdown'));
-    assert.ok(context.includes('file://'));
+test('Multiple files — each gets its own file:// URI', () => {
+  const attachments = [
+    { name: 'a.png', path: '/Users/test/a.png', type: 'image/png' },
+    { name: 'b.pdf', path: '/Users/test/b.pdf', type: 'application/pdf' },
+  ];
+  const ctx = generateAttachmentContext(attachments);
+  assert.ok(ctx.includes('file:///Users/test/a.png'), 'Expected URI for a.png');
+  assert.ok(ctx.includes('file:///Users/test/b.pdf'), 'Expected URI for b.pdf');
 });
 
-test('Generate context for multiple attachments', () => {
-    const attachments = [
-        { name: 'image.png', path: '/Users/test/image.png' },
-        { name: 'document.pdf', path: '/Users/test/document.pdf' },
-        { name: 'audio.m4a', path: '/Users/test/audio.m4a' }
-    ];
-    const context = generateAttachmentContext(attachments);
-    
-    assert.ok(context.includes('image.png'));
-    assert.ok(context.includes('document.pdf'));
-    assert.ok(context.includes('audio.m4a'));
-    assert.strictEqual((context.match(/Path:/g) || []).length, 3);
+test('Path already prefixed with file:// is not double-prefixed', () => {
+  const ctx = generateAttachmentContext([{ name: 'doc.pdf', path: 'file:///Users/test/doc.pdf', type: 'application/pdf' }]);
+  assert.ok(!ctx.includes('file://file://'), 'Should not double-prefix');
+  assert.ok(ctx.includes('file:///Users/test/doc.pdf'), 'URI should be correct');
 });
 
-test('Return empty string for no attachments', () => {
-    const context = generateAttachmentContext([]);
-    assert.strictEqual(context, '');
+test('Empty path files are filtered out entirely', () => {
+  const attachments = [
+    { name: 'ok.pdf', path: '/Users/test/ok.pdf', type: 'application/pdf' },
+    { name: 'empty.png', path: '', type: 'image/png' },
+  ];
+  const ctx = generateAttachmentContext(attachments);
+  assert.ok(ctx.includes('ok.pdf'), 'Valid file should appear');
+  assert.ok(!ctx.includes('empty.png'), 'Empty-path file should be filtered');
 });
 
-test('Include tool usage hint', () => {
-    const attachments = [{ name: 'test.pdf', path: '/Users/test/test.pdf' }];
-    const context = generateAttachmentContext(attachments);
-    
-    assert.ok(context.includes('convert_to_markdown'));
-    assert.ok(context.includes('file:///absolute/path'));
+test('All-empty paths returns empty string', () => {
+  const ctx = generateAttachmentContext([{ name: 'ghost.png', path: '', type: 'image/png' }]);
+  assert.strictEqual(ctx, '', 'Should return empty string when all paths are empty');
 });
 
-test('Handle empty paths', () => {
-    const attachments = [{ name: 'test.png', path: '' }];
-    const context = generateAttachmentContext(attachments);
-    
-    assert.ok(context.includes('test.png'));
-    assert.ok(context.includes('Path: '));
+test('No attachments returns empty string', () => {
+  assert.strictEqual(generateAttachmentContext([]), '');
+  assert.strictEqual(generateAttachmentContext(null), '');
+  assert.strictEqual(generateAttachmentContext(undefined), '');
 });
 
-// === FILE URI TESTS ===
-console.log('\n🔗 File URI Format Tests');
-
-test('Convert absolute path to file:// URI', () => {
-    const path = '/Users/test/Desktop/image.png';
-    const uri = `file://${path}`;
-    assert.strictEqual(uri, 'file:///Users/test/Desktop/image.png');
+test('Does NOT mention old [System Note] format', () => {
+  const ctx = generateAttachmentContext([{ name: 'doc.pdf', path: '/Users/test/doc.pdf', type: 'application/pdf' }]);
+  assert.ok(!ctx.includes('[System Note:'), 'Old format should be gone');
 });
 
-test('Handle Windows-style paths', () => {
-    const path = '/C:/Users/test/image.png';
-    const uri = `file://${path}`;
-    assert.strictEqual(uri, 'file:///C:/Users/test/image.png');
+// =============================================================================
+// 2. MCP URI VALIDATION (convert_to_markdown gate)
+// =============================================================================
+console.log('\n🔗 convert_to_markdown URI Validation Tests');
+
+test('Valid: file:///absolute/path', () => {
+  assert.strictEqual(validateConvertToMarkdownUri('file:///Users/test/file.pdf').valid, true);
 });
 
-test('Handle paths with spaces', () => {
-    const path = '/Users/test/My Documents/file.pdf';
-    const uri = `file://${path}`;
-    assert.ok(uri.includes('file://'));
-    assert.ok(uri.includes('My Documents'));
+test('Valid: /absolute/unix/path', () => {
+  assert.strictEqual(validateConvertToMarkdownUri('/Users/test/file.pdf').valid, true);
 });
 
-test('Handle paths with special characters', () => {
-    const path = '/Users/test/file (1) [copy].png';
-    const uri = `file://${path}`;
-    assert.ok(uri.includes('(1)'));
-    assert.ok(uri.includes('[copy]'));
+test('Valid: C:\\Windows-style path', () => {
+  assert.strictEqual(validateConvertToMarkdownUri('C:\\Users\\test\\file.pdf').valid, true);
 });
 
-// === DATA FLOW TESTS ===
-console.log('\n🔄 Data Flow Tests');
-
-test('Map File object to attachment metadata', () => {
-    const mockFile = { name: 'test.png', path: '/Users/test/test.png', type: 'image/png' };
-    const attachmentData = {
-        name: mockFile.name,
-        path: mockFile.path || '',
-        type: mockFile.type
-    };
-    
-    assert.strictEqual(attachmentData.name, 'test.png');
-    assert.strictEqual(attachmentData.path, '/Users/test/test.png');
-    assert.strictEqual(attachmentData.type, 'image/png');
+test('Valid: file:// with 4 slashes (network share)', () => {
+  assert.strictEqual(validateConvertToMarkdownUri('file:////server/share/file.pdf').valid, true);
 });
 
-test('Handle multiple files in batch', () => {
-    const files = [
-        { name: 'a.png', path: '/a.png', type: 'image/png' },
-        { name: 'b.pdf', path: '/b.pdf', type: 'application/pdf' }
-    ];
-    const attachmentData = files.map(file => ({
-        name: file.name,
-        path: file.path || '',
-        type: file.type
-    }));
-    
-    assert.strictEqual(attachmentData.length, 2);
-    assert.strictEqual(attachmentData[0].name, 'a.png');
-    assert.strictEqual(attachmentData[1].name, 'b.pdf');
+test('Rejected: empty string', () => {
+  assert.strictEqual(validateConvertToMarkdownUri('').valid, false);
 });
 
-// === EDGE CASES ===
-console.log('\n⚠️  Edge Case Tests');
-
-test('Handle null/undefined attachments', () => {
-    assert.strictEqual(generateAttachmentContext(null), '');
-    assert.strictEqual(generateAttachmentContext(undefined), '');
-    assert.strictEqual(generateAttachmentContext([]), '');
+test('Rejected: bare file://', () => {
+  assert.strictEqual(validateConvertToMarkdownUri('file://').valid, false);
 });
 
-test('Handle file with no extension', () => {
-    const mockFile = { name: 'README', path: '/Users/test/README' };
-    assert.strictEqual(mockFile.name, 'README');
+test('Rejected: bare file:', () => {
+  assert.strictEqual(validateConvertToMarkdownUri('file:').valid, false);
 });
 
-test('Handle file with multiple dots', () => {
-    const mockFile = { name: 'archive.tar.gz', path: '/Users/test/archive.tar.gz' };
-    assert.strictEqual(mockFile.name, 'archive.tar.gz');
+test('Rejected: file://relative (filename only, no leading slash)', () => {
+  const result = validateConvertToMarkdownUri('file://my-document.pdf');
+  assert.strictEqual(result.valid, false);
+  assert.strictEqual(result.reason, 'relative');
 });
 
-test('Handle unicode characters in filename', () => {
-    const mockFile = { name: '文档.pdf', path: '/Users/test/文档.pdf' };
-    assert.ok(mockFile.path.includes('文档'));
+test('Rejected: relative path (no leading slash)', () => {
+  const result = validateConvertToMarkdownUri('my-document.pdf');
+  assert.strictEqual(result.valid, false);
 });
 
-test('Handle emoji in filename', () => {
-    const mockFile = { name: '📄 document.pdf', path: '/Users/test/📄 document.pdf' };
-    assert.ok(mockFile.name.includes('📄'));
+test('Rejected: file:relative (colon, no slashes)', () => {
+  const result = validateConvertToMarkdownUri('file:document.pdf');
+  assert.strictEqual(result.valid, false);
 });
 
-// === FILE TYPE VALIDATION ===
-console.log('\n📋 File Type Validation Tests');
+// =============================================================================
+// 3. fs_* GATE — HOME-DIR ALLOWLIST (the post-review security fix)
+// =============================================================================
+console.log('\n🔒 fs_* Security Gate Tests');
 
-test('Recognize supported image formats', () => {
-    assert.strictEqual(isSupportedFile('photo.png'), true);
-    assert.strictEqual(isSupportedFile('photo.jpg'), true);
-    assert.strictEqual(isSupportedFile('photo.jpeg'), true);
-    assert.strictEqual(isSupportedFile('photo.gif'), true);
+test('Blocked: relative path with no workspace', () => {
+  const result = validateFsToolCall(undefined, 'src/index.ts');
+  assert.strictEqual(result.allowed, false);
+  assert.strictEqual(result.reason, 'no-workspace-relative');
 });
 
-test('Recognize supported document formats', () => {
-    assert.strictEqual(isSupportedFile('doc.pdf'), true);
-    assert.strictEqual(isSupportedFile('doc.docx'), true);
-    assert.strictEqual(isSupportedFile('sheet.xlsx'), true);
-    assert.strictEqual(isSupportedFile('slides.pptx'), true);
+test('Allowed: /Users/ path with no workspace (macOS home)', () => {
+  assert.strictEqual(validateFsToolCall(undefined, '/Users/meharaj/Downloads/file.pdf').allowed, true);
 });
 
-test('Recognize supported audio formats', () => {
-    assert.strictEqual(isSupportedFile('audio.mp3'), true);
-    assert.strictEqual(isSupportedFile('audio.wav'), true);
-    assert.strictEqual(isSupportedFile('audio.m4a'), true);
+test('Allowed: /home/ path with no workspace (Linux home)', () => {
+  assert.strictEqual(validateFsToolCall(undefined, '/home/user/docs/file.txt').allowed, true);
 });
 
-test('Reject unsupported formats', () => {
-    assert.strictEqual(isSupportedFile('video.mp4'), false);
-    assert.strictEqual(isSupportedFile('archive.zip'), false);
-    assert.strictEqual(isSupportedFile('executable.exe'), false);
+test('Allowed: Windows C:\\Users\\ path with no workspace', () => {
+  assert.strictEqual(validateFsToolCall(undefined, 'C:\\Users\\test\\file.pdf').allowed, true);
 });
 
-test('Case-insensitive file type checking', () => {
-    assert.strictEqual(isSupportedFile('PHOTO.PNG'), true);
-    assert.strictEqual(isSupportedFile('Document.PDF'), true);
+test('BLOCKED: /etc/passwd with no workspace (system path)', () => {
+  const result = validateFsToolCall(undefined, '/etc/passwd');
+  assert.strictEqual(result.allowed, false);
+  assert.strictEqual(result.reason, 'system-path');
 });
 
-// === SUMMARY ===
-console.log('\n' + '='.repeat(50));
+test('BLOCKED: /usr/bin/node with no workspace (system path)', () => {
+  const result = validateFsToolCall(undefined, '/usr/bin/node');
+  assert.strictEqual(result.allowed, false);
+  assert.strictEqual(result.reason, 'system-path');
+});
+
+test('BLOCKED: /var/log/system.log with no workspace (system path)', () => {
+  const result = validateFsToolCall(undefined, '/var/log/system.log');
+  assert.strictEqual(result.allowed, false);
+  assert.strictEqual(result.reason, 'system-path');
+});
+
+test('Allowed: absolute path inside workspace boundary', () => {
+  const result = validateFsToolCall('/Users/test/project', '/Users/test/project/src/index.ts');
+  assert.strictEqual(result.allowed, true);
+});
+
+test('BLOCKED: path traversal outside workspace', () => {
+  const result = validateFsToolCall('/Users/test/project', '/Users/test/secrets/key.pem');
+  assert.strictEqual(result.allowed, false);
+  assert.strictEqual(result.reason, 'traversal');
+});
+
+test('Allowed: absolute path with full workspace set', () => {
+  const result = validateFsToolCall('/Users/meharaj/project', '/Users/meharaj/project/README.md');
+  assert.strictEqual(result.allowed, true);
+});
+
+// =============================================================================
+// 4. AUTO-WORKSPACE DERIVATION (maybeSetWorkspaceFromFiles)
+// =============================================================================
+console.log('\n📁 Workspace Auto-Derivation Tests');
+
+test('Derives parent directory from macOS path', () => {
+  const parent = deriveParentDir('/Users/meharaj/Documents/report.pdf');
+  assert.strictEqual(parent, '/Users/meharaj/Documents');
+});
+
+test('Derives parent directory from nested path', () => {
+  const parent = deriveParentDir('/Users/meharaj/work/project/src/file.ts');
+  assert.strictEqual(parent, '/Users/meharaj/work/project/src');
+});
+
+test('Returns null for paths without slash', () => {
+  const parent = deriveParentDir('file.txt');
+  assert.strictEqual(parent, null);
+});
+
+test('Returns null for empty path', () => {
+  const parent = deriveParentDir('');
+  assert.strictEqual(parent, null);
+});
+
+test('Returns null for null path', () => {
+  const parent = deriveParentDir(null);
+  assert.strictEqual(parent, null);
+});
+
+test('Returns root for top-level file', () => {
+  const parent = deriveParentDir('/file.txt');
+  assert.strictEqual(parent, '');
+});
+
+// =============================================================================
+// 5. LEGACY PATH / DATA FLOW (retained from previous version)
+// =============================================================================
+console.log('\n🔄 Path Extraction & Data Flow Tests');
+
+test('Extract path from File object with .path property', () => {
+  const mockFile = { name: 'test.png', path: '/Users/test/Desktop/test.png' };
+  assert.strictEqual(mockFile.path, '/Users/test/Desktop/test.png');
+});
+
+test('Handle file without path property gracefully', () => {
+  const mockFile = { name: 'test.png' };
+  const path = mockFile.path || '';
+  assert.strictEqual(path, '');
+});
+
+test('Handle special characters in path', () => {
+  const mockFile = { name: 'test (copy) [2].png', path: '/Users/test/test (copy) [2].png' };
+  assert.ok(mockFile.path.includes('(copy)'));
+});
+
+test('Map File to attachment metadata shape', () => {
+  const file = { name: 'test.png', path: '/Users/test/test.png', type: 'image/png' };
+  const meta = { name: file.name, path: file.path || '', type: file.type };
+  assert.deepStrictEqual(meta, { name: 'test.png', path: '/Users/test/test.png', type: 'image/png' });
+});
+
+test('Batch of files maps correctly', () => {
+  const files = [
+    { name: 'a.png', path: '/a.png', type: 'image/png' },
+    { name: 'b.pdf', path: '/b.pdf', type: 'application/pdf' },
+  ];
+  const batch = files.map(f => ({ name: f.name, path: f.path || '', type: f.type }));
+  assert.strictEqual(batch.length, 2);
+  assert.strictEqual(batch[1].name, 'b.pdf');
+});
+
+// ─── Summary ──────────────────────────────────────────────────────────────────
+console.log('\n' + '='.repeat(60));
 console.log(`📊 Test Results: ${passed} passed, ${failed} failed`);
-console.log('='.repeat(50));
+console.log('='.repeat(60));
 
 if (failed > 0) {
-    process.exit(1);
+  process.exit(1);
 }

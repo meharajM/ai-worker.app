@@ -74,3 +74,11 @@ Thumbs.db
 
 # Build artifacts
 *.tsbuildinfo
+
+# Debug / Scratch Scripts (never commit one-off test scripts to the repo)
+test_*.js
+test_*.ts
+debug_*.js
+debug_*.ts
+scratch_*.js
+scratch_*.ts
