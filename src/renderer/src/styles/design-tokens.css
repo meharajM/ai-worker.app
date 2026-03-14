@@ -36,10 +36,13 @@
   --color-text-muted: rgba(255, 255, 255, 0.4);
   --color-text-dim: rgba(255, 255, 255, 0.2);
 
-  /* Status */
+  /* Status & Agents */
   --color-success: #22c55e;
   --color-warning: #facc15;
   --color-error: #ef4444;
+  --color-agent-fs: #a855f7;
+  --color-agent-mcp: #3b82f6;
+  --color-agent-default: #6b7280;
 
   /* ── ToolCallList tokens ───────────────────────────────────────── */
   --color-tool-bg: #16171a;
@@ -110,10 +113,13 @@
   --color-text-muted: #64748b;     /* Medium gray for muted text */
   --color-text-dim: #94a3b8;       /* Lighter gray for dim text */
 
-  /* Status */
+  /* Status & Agents */
   --color-success: #16a34a;
   --color-warning: #ea580c;
   --color-error: #dc2626;
+  --color-agent-fs: #9333ea;    /* Slightly deeper purple for light mode */
+  --color-agent-mcp: #2563eb;   /* Deeper blue for light mode */
+  --color-agent-default: #64748b; /* Slate-500 for light mode */
 
   /* ── ToolCallList tokens ─────────────────────────────────────── */
   --color-tool-bg: #ffffff;

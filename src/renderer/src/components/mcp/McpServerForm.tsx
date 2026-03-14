@@ -114,7 +114,7 @@ export function McpServerForm({
     <div className="bg-[var(--color-card-elevated)] border border-[var(--color-brand-teal)]/30 rounded-xl p-6 mb-6 animate-in slide-in-from-top-2 border-l-4">
       <h3 className="text-lg font-medium mb-4 flex items-center justify-between">
         <span className="flex items-center gap-2">
-          <Server size={20} className="text-[#4fd1c5]" />
+          <Server size={20} className="text-[var(--color-brand-teal)]" />
           {editingServer ? `Edit ${name}` : "New MCP Connection"}
         </span>
         {editingServer && (
@@ -188,7 +188,7 @@ export function McpServerForm({
               />
             </div>
             <div className="md:col-span-1">
-              <label className="block text-xs text-white/40 mb-1.5 uppercase tracking-wider">
+              <label className="block text-xs text-[var(--color-text-muted)] mb-1.5 uppercase tracking-wider">
                 Arguments
               </label>
               <input

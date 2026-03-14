@@ -14,13 +14,13 @@ import { cn } from '../../lib/utils'
 const AGENT_CONFIG: Record<string, { label: string; accent: string }> = {
   browser_:     { label: 'Browser Agent',     accent: 'var(--color-primary)' },
   playwright_:  { label: 'Browser Agent',     accent: 'var(--color-primary)' },
-  fs_:          { label: 'Filesystem Agent',  accent: '#a855f7' },
-  file_:        { label: 'Filesystem Agent',  accent: '#a855f7' },
-  mcp_:         { label: 'Research MCP',      accent: '#3b82f6' },
+  fs_:          { label: 'Filesystem Agent',  accent: 'var(--color-agent-fs)' },
+  file_:        { label: 'Filesystem Agent',  accent: 'var(--color-agent-fs)' },
+  mcp_:         { label: 'Research MCP',      accent: 'var(--color-agent-mcp)' },
 }
 
 /** Default agent for tools that don't match any prefix */
-const DEFAULT_AGENT = { label: 'Tool Execution', accent: '#6b7280' }
+const DEFAULT_AGENT = { label: 'Tool Execution', accent: 'var(--color-agent-default)' }
 
 /** Special tool names with their own agent identity */
 const SPECIAL_TOOLS: Record<string, { label: string; accent: string }> = {

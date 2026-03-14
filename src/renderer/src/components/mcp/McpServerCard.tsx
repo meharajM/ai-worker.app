@@ -46,24 +46,24 @@ export function McpServerCard({
   return (
     <div
       data-testid={`mcp-server-card-${server.name.toLowerCase().replace(/\s+/g, '-')}`}
-      className={`bg-[#1a1d23] border rounded-xl overflow-hidden shadow-sm hover:border-white/20 transition-colors ${isEditing
-          ? "border-[#4fd1c5]/50 ring-1 ring-[#4fd1c5]/20"
-          : "border-white/10"
+      className={`bg-[var(--color-card-elevated)] border rounded-xl overflow-hidden shadow-sm hover:border-[var(--color-brand-teal)]/30 transition-colors ${isEditing
+          ? "border-[var(--color-brand-teal)]/50 ring-1 ring-[var(--color-brand-teal)]/20"
+          : "border-[var(--color-border)]"
         }`}
     >
       {/* Server Header */}
       <div className="flex items-center gap-4 p-4">
         <button
           onClick={onToggleExpand}
-          className="p-1 text-white/40 hover:text-white transition-colors"
+          className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
         >
           {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
         </button>
 
         <div
           className={`p-2.5 rounded-lg ${server.connected
-              ? "bg-[#4fd1c5]/10 text-[#4fd1c5]"
-              : "bg-white/5 text-white/40"
+              ? "bg-[var(--color-brand-teal)]/10 text-[var(--color-brand-teal)]"
+              : "bg-[var(--color-surface-hover)] text-[var(--color-text-muted)]"
             }`}
         >
           {getServerIcon(server.type)}
@@ -71,7 +71,7 @@ export function McpServerCard({
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3">
-            <h3 className="font-medium text-white/90 truncate">
+            <h3 className="font-medium text-[var(--color-text-primary)] truncate">
               {server.name}
             </h3>
             {server.connected ? (
@@ -87,7 +87,7 @@ export function McpServerCard({
               <span className="text-xs text-white/30">Offline</span>
             )}
           </div>
-          <p className="text-xs text-white/40 mt-0.5 truncate font-mono">
+          <p className="text-xs text-[var(--color-text-muted)] mt-0.5 truncate font-mono">
             {server.type === "stdio"
               ? `${server.command} ${(server.args || []).join(" ")}`
               : server.url}
@@ -98,8 +98,8 @@ export function McpServerCard({
           <button
             onClick={onEdit}
             className={`p-2 rounded-lg transition-all ${isEditing
-                ? "bg-[#4fd1c5] text-white"
-                : "bg-white/5 text-white/40 hover:bg-white/10 hover:text-white"
+                ? "bg-[var(--color-brand-teal)] text-white"
+                : "bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] hover:bg-[var(--color-brand-teal)]/10 hover:text-[var(--color-brand-teal)]"
               }`}
             title="Edit configuration"
           >
@@ -124,8 +124,8 @@ export function McpServerCard({
 
           <button
             onClick={onRemove}
-            className="p-2 rounded-lg bg-white/5 text-white/40 
-                           hover:bg-red-500/10 hover:text-red-400 transition-all border border-transparent hover:border-red-500/20"
+            className="p-2 rounded-lg bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] 
+                           hover:bg-[var(--color-error)]/10 hover:text-[var(--color-error)] transition-all border border-transparent hover:border-[var(--color-error)]/20"
             title="Remove server"
           >
             <Trash2 size={18} />
@@ -135,7 +135,7 @@ export function McpServerCard({
 
       {/* Details & Error Message */}
       {(isExpanded || server.error) && (
-        <div className="border-t border-white/5 bg-black/20">
+        <div className="border-t border-[var(--color-border)] bg-[var(--color-input-bg)]">
           {server.error && (
             <div className="p-4 bg-red-500/5 border-b border-red-500/10">
               <div className="flex items-start gap-3">
@@ -162,7 +162,7 @@ export function McpServerCard({
 
                   <button
                     onClick={onTroubleshoot}
-                    className="mt-4 flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-[11px] text-[#4fd1c5] hover:bg-[#4fd1c5]/10 hover:border-[#4fd1c5]/30 transition-all font-medium"
+                    className="mt-4 flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface-hover)] border border-[var(--color-border)] rounded-lg text-[11px] text-[var(--color-brand-teal)] hover:bg-[var(--color-brand-teal)]/10 hover:border-[var(--color-brand-teal)]/30 transition-all font-medium"
                   >
                     <MessageSquare size={14} />
                     Troubleshoot with AI
@@ -179,14 +179,14 @@ export function McpServerCard({
                 <div className="flex items-center gap-3">
                   <Zap
                     size={16}
-                    className={`${server.autoConnect ? "text-[#4fd1c5]" : "text-white/40"
+                    className={`${server.autoConnect ? "text-[var(--color-brand-teal)]" : "text-[var(--color-text-muted)]"
                       }`}
                   />
                   <div>
-                    <p className="text-white/90 text-sm font-medium">
+                    <p className="text-[var(--color-text-primary)] text-sm font-medium">
                       Auto-connect on startup
                     </p>
-                    <p className="text-white/40 text-xs">
+                    <p className="text-[var(--color-text-muted)] text-xs">
                       {server.autoConnect
                         ? "This server will automatically connect when the app starts"
                         : "This server requires manual connection"}
@@ -205,7 +205,7 @@ export function McpServerCard({
               {/* Tools List */}
               {server.connected && server.tools.length > 0 ? (
                 <div>
-                  <p className="text-white/40 text-xs mb-3 uppercase tracking-wider font-medium">
+                  <p className="text-[var(--color-text-muted)] text-xs mb-3 uppercase tracking-wider font-medium">
                     Available Tools ({server.tools.length})
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -214,10 +214,10 @@ export function McpServerCard({
                         key={tool.name}
                         className="p-2 rounded bg-white/5 border border-white/5 flex flex-col gap-1"
                       >
-                        <span className="text-[#4fd1c5] text-xs font-mono font-medium">
+                        <span className="text-[var(--color-brand-teal)] text-xs font-mono font-medium">
                           {tool.name}
                         </span>
-                        <span className="text-white/40 text-[10px] truncate">
+                        <span className="text-[var(--color-text-muted)] text-[10px] truncate">
                           {tool.description}
                         </span>
                       </div>
@@ -232,11 +232,11 @@ export function McpServerCard({
                   {(server.name.includes("sequential-thinking") ||
                     server.name.includes("sequential") ||
                     server.description.toLowerCase().includes("reasoning")) && (
-                      <div className="p-3 rounded-lg bg-[#4fd1c5]/10 border border-[#4fd1c5]/20">
-                        <p className="text-[#4fd1c5] text-xs font-medium mb-1">
+                      <div className="p-3 rounded-lg bg-[var(--color-brand-teal)]/10 border border-[var(--color-brand-teal)]/20">
+                        <p className="text-[var(--color-brand-teal)] text-xs font-medium mb-1">
                           ℹ️ Reasoning Server
                         </p>
-                        <p className="text-white/60 text-[11px] leading-relaxed">
+                        <p className="text-[var(--color-text-secondary)] text-[11px] leading-relaxed">
                           This server works differently - it provides reasoning
                           capabilities rather than traditional tools. It will be
                           used automatically by the AI for complex multi-step
