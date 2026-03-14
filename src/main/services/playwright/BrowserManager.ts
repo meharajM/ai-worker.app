@@ -56,8 +56,21 @@ export class BrowserManager {
     private headlessPage: Page | null = null;
     private headlessOverride: boolean | null = null;
 
+    private idleTimer: NodeJS.Timeout | null = null;
+    private readonly IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
     constructor() {
         this.store = new Store<Record<string, unknown>>();
+    }
+
+    private resetIdleTimer() {
+        if (this.idleTimer) {
+            clearTimeout(this.idleTimer);
+        }
+        this.idleTimer = setTimeout(() => {
+            console.log(`[BrowserManager] Closing browser after ${this.IDLE_TIMEOUT_MS / 60000} minutes of inactivity to save memory.`);
+            this.close().catch(e => console.error('[BrowserManager] Error during idle close:', e));
+        }, this.IDLE_TIMEOUT_MS);
     }
 
     /**
@@ -370,6 +383,8 @@ export class BrowserManager {
      * @returns A promise resolving to the active Page.
      */
     async getPage(args: any): Promise<Page> {
+        this.resetIdleTimer();
+
         // Handle headless mode execution request for background tools
         if (args && args._headless) {
             return this.ensureHeadlessPage();
@@ -418,6 +433,11 @@ export class BrowserManager {
      * Closes all browser contexts and resets internal tracking state.
      */
     async close() {
+        if (this.idleTimer) {
+            clearTimeout(this.idleTimer);
+            this.idleTimer = null;
+        }
+
         if (this.context) {
             await this.context.close();
             this.context = null;

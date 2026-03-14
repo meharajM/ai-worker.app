@@ -4,6 +4,23 @@ import { humanizedClick } from '../humanMouse';
 
 export class TypeTool extends PlaywrightTool {
     name = 'type';
+    aliases = ['browser_type'];
+
+    getSchema() {
+        return {
+            name: 'type',
+            description: 'INPUT: Type text character-by-character with delays (simulates human typing). Use when websites detect instant input as bots. For normal form filling, use "fill" instead (faster).',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    selector: { type: 'string', description: 'CSS selector of input field' },
+                    text: { type: 'string', description: 'Text to type' },
+                    delay: { type: 'number', description: 'Delay between keys in ms (default: 50)' }
+                },
+                required: ['selector', 'text']
+            }
+        };
+    }
 
     async execute(page: Page, args: any): Promise<ToolResult> {
         const selectorError = this.requireParam(args, 'selector');

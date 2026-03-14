@@ -104,6 +104,10 @@ export class AgentRuntime implements IAgentClient {
   private specialHandlers: SpecialToolHandlers;
   /** Tracks last emitted progress % for incremental orchestration ticks */
   private _lastProgressPct = 0;
+  /** Incremental estimate of context size in bytes — avoids JSON.stringify on every iteration */
+  private _estimatedContextBytes = 0;
+  /** Counter to trigger periodic full context resync */
+  private _contextResyncCounter = 0;
 
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
     this.options = options;
@@ -603,8 +607,15 @@ export class AgentRuntime implements IAgentClient {
   // ── Private: Helpers ───────────────────────────────────────────────────────
 
   private async _handleContextLimits() {
-    const contextText = JSON.stringify(this.messages);
-    const estimatedTokens = Math.ceil(contextText.length / 4);
+    this._contextResyncCounter++;
+
+    // Full resync every 10 iterations as a safety net
+    if (this._contextResyncCounter % 10 === 0) {
+      const contextText = JSON.stringify(this.messages);
+      this._estimatedContextBytes = contextText.length;
+    }
+
+    const estimatedTokens = Math.ceil(this._estimatedContextBytes / 4);
     const contextLimit = 100000;
     if (estimatedTokens > contextLimit * 0.8 && !this.options.isSubAgent) {
       const originalGoalMsg = this.messages.find((m) => m.role === "user");
@@ -720,6 +731,9 @@ export class AgentRuntime implements IAgentClient {
 
   private addMessage(msg: LLMMessage): string | void {
     this.messages.push(msg);
+    // Incrementally track context size (avoid full JSON.stringify)
+    const contentLen = typeof msg.content === 'string' ? msg.content.length : JSON.stringify(msg.content ?? '').length;
+    this._estimatedContextBytes += contentLen + 50; // +50 for role, metadata overhead
     return this.options.onMessage?.(msg);
   }
 

@@ -22,6 +22,8 @@
 import { executeToolCall } from "../mcp";
 import { analyzeToolOutput } from "../result-reporter";
 import { type LLMMessage } from "../types";
+import { laneManager } from "../execution-lanes";
+import { STATEFUL_BROWSER_TOOLS } from "../client-tools";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -181,10 +183,6 @@ async function _executeWithRetry(
     }
 
     try {
-        // ── Dynamic imports (lazy, to keep initial bundle small) ─────────────────
-        const { laneManager } = await import("../execution-lanes");
-        const { STATEFUL_BROWSER_TOOLS } = await import("../client-tools");
-
         // ── Tab isolation: inject tabId for browser tools ─────────────────────────
         // WHY: Parallel sub-agents each get a dedicated tab. Injecting tabId here
         // ensures all browser tool calls from this agent stay in their own tab.

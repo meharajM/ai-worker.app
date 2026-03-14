@@ -1,8 +1,18 @@
 import { Page } from 'playwright-core';
 import { PlaywrightTool, ToolResult, PlaywrightContext } from '../PlaywrightTool';
+import { REQUEST_HUMAN_INTERVENTION_SCHEMA } from '../../../../shared/browser-tool-schemas';
 
 export class GetCookiesTool extends PlaywrightTool {
     name = 'get_cookies';
+
+    getSchema() {
+        return {
+            name: 'get_cookies',
+            description: 'SESSION: Get all cookies for the current domain. Use to check login state, session tokens, or debug authentication issues.',
+            inputSchema: { type: 'object', properties: {} }
+        };
+    }
+
     async execute(_page: Page, _args: any, context?: PlaywrightContext): Promise<ToolResult> {
         if (!context?.context) throw new Error('No browser context');
         const cookies = await context.context.cookies();
@@ -12,6 +22,24 @@ export class GetCookiesTool extends PlaywrightTool {
 
 export class SetCookieTool extends PlaywrightTool {
     name = 'set_cookie';
+
+    getSchema() {
+        return {
+            name: 'set_cookie',
+            description: 'SESSION: Set a browser cookie. Use to maintain login sessions, set preferences, or bypass cookie consent (if legal).',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    name: { type: 'string', description: 'Cookie name' },
+                    value: { type: 'string', description: 'Cookie value' },
+                    domain: { type: 'string', description: 'Domain (defaults to current site)' },
+                    path: { type: 'string', description: 'Path scope (default: /)' }
+                },
+                required: ['name', 'value']
+            }
+        };
+    }
+
     async execute(page: Page, args: any, context?: PlaywrightContext): Promise<ToolResult> {
         if (!context?.context) throw new Error('No browser context');
 
@@ -36,6 +64,11 @@ export class SetCookieTool extends PlaywrightTool {
 
 export class RequestHumanInterventionTool extends PlaywrightTool {
     name = 'request_human_intervention';
+
+    getSchema() {
+        return REQUEST_HUMAN_INTERVENTION_SCHEMA;
+    }
+
     async execute(_page: Page, args: any, context?: PlaywrightContext): Promise<ToolResult> {
         const rErr = this.requireParam(args, 'reason');
         if (rErr) return { result: null, error: rErr };

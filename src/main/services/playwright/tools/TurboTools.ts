@@ -1,8 +1,13 @@
 import { Page } from 'playwright-core';
 import { PlaywrightTool, ToolResult, PlaywrightContext } from '../PlaywrightTool';
+import { BROWSER_ACTION_SEQUENCE_SCHEMA, WEB_SEARCH_SCHEMA, FILL_FORM_SCHEMA } from '../../../../shared/browser-tool-schemas';
 
 export class BrowserActionSequenceTool extends PlaywrightTool {
     name = 'browser_action_sequence';
+
+    getSchema() {
+        return BROWSER_ACTION_SEQUENCE_SCHEMA;
+    }
 
     async execute(page: Page, args: any, context?: PlaywrightContext): Promise<ToolResult> {
         if (!context) throw new Error('No playwright context');
@@ -75,6 +80,10 @@ export class BrowserActionSequenceTool extends PlaywrightTool {
 export class WebSearchTool extends PlaywrightTool {
     name = 'web_search';
 
+    getSchema() {
+        return WEB_SEARCH_SCHEMA;
+    }
+
     async execute(page: Page, args: any): Promise<ToolResult> {
         const query = args.query;
         if (!query) return { result: null, error: 'web_search: query is required' };
@@ -127,6 +136,10 @@ export class WebSearchTool extends PlaywrightTool {
 
 export class FillFormTool extends PlaywrightTool {
     name = 'fill_form';
+
+    getSchema() {
+        return FILL_FORM_SCHEMA;
+    }
 
     async execute(page: Page, args: any, context?: PlaywrightContext): Promise<ToolResult> {
         if (!context) throw new Error('No playwright context');

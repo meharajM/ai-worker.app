@@ -146,26 +146,22 @@ export class LaneManager {
 
     // Standard Lanes
     private globalBrowserLane: LaneQueue;
-    // private apiParallelLane: LaneQueue; // COMMENTED OUT - not using API parallel lane
-    private fileSystemLane: LaneQueue; // Granular locking handled inside? Or just serial?
-    // Current design: FS tools use a granular lock in the old code. 
-    // Here we can make a high-concurrency lane, but we might need KeyedMutex if we want true file-level locking.
-    // For now, let's stick to the Plan: Serial Browser, Parallel API.
+    private apiParallelLane: LaneQueue;
+    private fileSystemLane: LaneQueue;
 
     constructor() {
         // Browser: Serial (1 at a time) to prevent race conditions on the active page
         this.globalBrowserLane = new LaneQueue('BROWSER_SERIAL', 1);
 
-        // API/Thinking: Parallel (High concurrency)
-        // COMMENTED OUT: Not using API parallel lane for now - everything goes through browser serial
-        // this.apiParallelLane = new LaneQueue('API_PARALLEL', 10);
+        // API/Thinking: Parallel (High concurrency) for stateless tools
+        // like memory_retrieve, sequential-thinking, search, etc.
+        this.apiParallelLane = new LaneQueue('API_PARALLEL', 10);
 
-        // FileSystem: For now, we'll allow parallel file ops (OS handles locking mostly, or we assume different files)
-        // If we need strict file locking, we'd add it here.
+        // FileSystem: Parallel file ops (OS handles locking, tools target different files)
         this.fileSystemLane = new LaneQueue('FILESYSTEM', 5);
 
         this.lanes.set(this.globalBrowserLane.id, this.globalBrowserLane);
-        // this.lanes.set(this.apiParallelLane.id, this.apiParallelLane); // COMMENTED OUT
+        this.lanes.set(this.apiParallelLane.id, this.apiParallelLane);
         this.lanes.set(this.fileSystemLane.id, this.fileSystemLane);
     }
 
@@ -223,12 +219,9 @@ export class LaneManager {
             return this.fileSystemLane;
         }
 
-        // 3. Stateless/API Tools (Memory, Search, etc.)
-        // COMMENTED OUT: Forcing all non-browser/file tools to use browser lane for now
-        // return this.apiParallelLane;
-
-        // TEMPORARY: Route everything to browser serial to prevent race conditions
-        return this.globalBrowserLane;
+        // 3. Stateless/API Tools (Memory, Search, Sequential Thinking, etc.)
+        // These have no side effects and can safely run in parallel.
+        return this.apiParallelLane;
     }
 
     // Debugging helper
