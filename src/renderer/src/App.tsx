@@ -32,10 +32,23 @@ import { useAgent } from "./hooks/useAgent";
 import { useLLMStatus } from "./hooks/useLLMStatus";
 import { MissingDependenciesScreen } from "./components/MissingDependenciesScreen";
 import { ExperimentProvider } from "./lib/experiments/experimentProvider";
+import { useSettingsStore } from "./stores/settingsStore";
 
 function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
   const [dependenciesResolved, setDependenciesResolved] = useState(false);
+  const theme = useSettingsStore((s) => s.theme);
+
+  // Apply theme to document
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === "system") {
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      root.setAttribute("data-theme", prefersDark ? "dark" : "light");
+    } else {
+      root.setAttribute("data-theme", theme);
+    }
+  }, [theme]);
 
   useEffect(() => {
     const triggerCheck = () => setDependenciesResolved(false);
@@ -66,7 +79,7 @@ function App() {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <ExperimentProvider>
-    <div className="flex h-screen bg-[var(--color-bg-dark)] text-white font-sans overflow-hidden">
+    <div className="flex h-screen overflow-hidden" style={{ backgroundColor: 'var(--color-bg-dark)', color: 'var(--color-text-primary)' }}>
       <CommandPalette onViewChange={setCurrentView} />
       {!dependenciesResolved && <MissingDependenciesScreen onResolved={() => setDependenciesResolved(true)} />}
       
@@ -80,11 +93,11 @@ function App() {
         <main className="flex-1 flex flex-col overflow-hidden min-w-0">
           {currentView === "chat" && (
             <div className="flex-1 flex flex-col overflow-hidden min-w-0 relative">
-              <div className="flex-1 overflow-hidden flex flex-col relative w-full h-full pb-0 bg-[var(--color-bg-dark)] z-0">
+              <div className="flex-1 overflow-hidden flex flex-col relative w-full h-full pb-0 z-0" style={{ backgroundColor: 'var(--color-bg-dark)' }}>
                 <ChatView />
               </div>
 
-              <div className="pt-2 pb-6 px-6 flex justify-center w-full z-10 bg-[var(--color-bg-dark)] shrink-0 shadow-[0_-10px_20px_rgba(0,0,0,0.2)]">
+              <div className="pt-2 pb-6 px-6 flex justify-center w-full z-10 shrink-0" style={{ backgroundColor: 'var(--color-bg-dark)' }}>
                 <div className="w-full max-w-2xl">
                   <VoiceInput
                     onSubmit={handleSubmit}

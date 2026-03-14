@@ -267,13 +267,38 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
   const hasContent = textInput.trim().length > 0 || attachments.length > 0
 
   return (
-    <div className="bg-[var(--color-surface)]/90 backdrop-blur-xl border border-[var(--color-border)] rounded-[24px] p-3 shadow-2xl shadow-black/50 transition-all duration-300 relative group hover:border-[var(--color-border-hover)]">
+    <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-2xl p-3 transition-all duration-250 relative group hover:border-[var(--color-border-hover)]">
       {/* Notification Toast */}
       {notification && (
-        <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-emerald-500/90 text-white text-xs px-3 py-1.5 rounded-full shadow-lg whitespace-nowrap animate-in fade-in slide-in-from-bottom-2 duration-300 pointer-events-none border border-emerald-400/50 backdrop-blur-sm">
+        <div className="absolute -top-12 left-1/2 -translate-x-1/2 text-white text-xs px-3 py-1.5 rounded-full whitespace-nowrap animate-in fade-in slide-in-from-bottom-2 duration-300 pointer-events-none"
+            style={{ backgroundColor: 'var(--color-success)' }}>
           {notification}
         </div>
       )}
+
+      <div className="flex flex-col gap-2">
+        {/* Attachment chips */}
+        <AttachmentBar attachments={attachments} onRemove={removeAttachment} />
+
+        <div
+          className={`relative min-h-[44px] flex items-center transition-all duration-200 rounded-lg ${isDragging ? 'ring-2 ring-inset' : ''
+            }`}
+          style={isDragging ? { ringColor: 'var(--color-primary)', backgroundColor: 'var(--color-primary-muted)' } : {}}
+          {...dragHandlers}
+        >
+          {/* Drag overlay */}
+          {isDragging && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+              <div className="rounded-lg px-4 py-2 text-sm font-medium border"
+                style={{ 
+                    backgroundColor: 'var(--color-primary-muted)', 
+                    borderColor: 'var(--color-primary)',
+                    color: 'var(--color-primary)' 
+                }}>
+                Drop file to convert
+              </div>
+            </div>
+          )}
 
       <div className="flex flex-col gap-2">
         {/* Attachment chips */}
