@@ -750,12 +750,17 @@ export class AgentRuntime implements IAgentClient {
       console.warn("[AgentRuntime] Model refused tool use. Auto-correcting...");
       const userQuery = this.messages.filter((m) => m.role === "user").pop();
       const query = typeof userQuery?.content === "string" ? userQuery.content : "the request";
-      this.addMessage({
+      // WHY push directly instead of addMessage():
+      // This is an internal LLM steering injection, not a user-facing message.
+      // addMessage() calls onMessage() which would render it as a visible chat bubble.
+      const refusalCorrection: LLMMessage = {
         role: "user",
         content: `[AUTO-CORRECT] You refused to help. This is wrong — you HAVE browser tools.\n            \nFor "${query}", use: navigate({"url": "https://google.com/search?q=${encodeURIComponent(
           query
         )}"})`,
-      });
+      };
+      this.messages.push(refusalCorrection);
+      this._estimatedContextBytes += refusalCorrection.content.length + 50;
       return true;
     }
     return false;
@@ -772,10 +777,15 @@ export class AgentRuntime implements IAgentClient {
     if (this.options.isSubAgent) return;
     const CHECKPOINT_INTERVAL = 15;
     if (iterationCount % CHECKPOINT_INTERVAL === 0) {
-      this.addMessage({
+      // WHY push directly instead of addMessage():
+      // This is an internal LLM steering directive, not a user-facing message.
+      // addMessage() calls onMessage() which would render this as a visible chat bubble.
+      const checkpointMsg: LLMMessage = {
         role: "user",
         content: `[CHECKPOINT ${iterationCount}] Please call update_progress_summary now to summarize your progress so far. This will help prevent context overflow.`,
-      });
+      };
+      this.messages.push(checkpointMsg);
+      this._estimatedContextBytes += checkpointMsg.content.length + 50;
     }
   }
 
