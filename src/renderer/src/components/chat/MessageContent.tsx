@@ -32,7 +32,7 @@ export function MessageContent({ content }: MessageContentProps) {
     ) {
       cleanedContent = lastSentence
     } else {
-      return <div className="text-[var(--color-text-dim)] text-xs italic">Thinking...</div>
+      return <div className="text-white/40 text-xs italic">Thinking...</div>
     }
   }
 

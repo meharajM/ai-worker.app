@@ -176,14 +176,20 @@ export function EnhancedFeatureFlagsPanel({ isDevMode }: FeatureFlagsPanelProps)
                       </div>
                     </div>
                   </div>
-                  <input
-                    type="checkbox"
-                    className="toggle toggle-success"
-                    checked={flag.enabled}
-                    onChange={() => handleFlagToggle(flag.key, !flag.enabled)}
+                  <button
+                    onClick={() => handleFlagToggle(flag.key, !flag.enabled)}
+                    className={`w-12 h-6 rounded-full transition-colors ${
+                      flag.enabled ? 'bg-[#4fd1c5]' : 'bg-white/20'
+                    }`}
                     title={flag.enabled ? 'Disable feature' : 'Enable feature'}
                     aria-label={`${flag.enabled ? 'Disable' : 'Enable'} ${flag.label}`}
-                  />
+                  >
+                    <div
+                      className={`w-5 h-5 bg-white rounded-full transition-transform ${
+                        flag.enabled ? 'translate-x-6' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </button>
                 </div>
               ))}
             </div>

@@ -119,8 +119,8 @@ Can you help me troubleshoot this?`;
               setShowForm(!showForm);
             }
           }}
-          className="flex items-center gap-2 px-4 py-2 bg-[var(--color-brand-teal)] text-white rounded-xl
-                       hover:bg-[var(--color-brand-teal)]/90 transition-all shadow-lg shadow-[var(--color-brand-teal)]/20"
+          className="flex items-center gap-2 px-4 py-2 bg-[#4fd1c5] text-white rounded-xl
+                       hover:bg-[#5fe0d4] transition-all shadow-lg shadow-[#4fd1c5]/20"
         >
           <Plus size={18} />
           {editingServerId

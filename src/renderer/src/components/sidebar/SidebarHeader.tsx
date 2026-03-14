@@ -8,10 +8,10 @@ export function SidebarHeader() {
         <Network size={18} />
       </div>
       <div className="flex flex-col">
-        <span className="text-sm font-bold tracking-tight text-[var(--color-text-primary)]">
+        <span className="text-sm font-bold tracking-tight text-white/90">
           AI-WORKER
         </span>
-        <span className="text-[10px] uppercase font-bold text-[var(--color-text-muted)] tracking-wider">
+        <span className="text-[10px] uppercase font-bold text-white/40 tracking-wider">
           Your AI Co-Worker Hub
         </span>
       </div>

@@ -50,20 +50,20 @@ export function ProviderCard({
     const isError = testResult?.toLowerCase().startsWith('error') ?? false
 
     return (
-        <div className="bg-[var(--color-card-elevated)] border border-[var(--color-border)] rounded-xl p-4">
+        <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
             {/* Header */}
             <div className="flex items-center justify-between mb-3">
-                <h4 className="font-medium text-[var(--color-text-primary)]">{title}</h4>
+                <h4 className="font-medium">{title}</h4>
                 <div className="flex items-center gap-2">
                     {/* Availability badge */}
                     {checking ? (
-                        <Loader2 size={16} className="animate-spin text-[var(--color-text-muted)]" />
+                        <Loader2 size={16} className="animate-spin text-white/40" />
                     ) : status?.available ? (
-                        <span className="flex items-center gap-1 text-xs text-[var(--color-success)]">
+                        <span className="flex items-center gap-1 text-xs text-green-400">
                             <Check size={14} /> Configured
                         </span>
                     ) : status && !status.available ? (
-                        <span className="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
+                        <span className="flex items-center gap-1 text-xs text-white/40">
                             <AlertCircle size={14} /> {(status as any).error || 'Not configured'}
                         </span>
                     ) : null}
@@ -82,7 +82,7 @@ export function ProviderCard({
                     <button
                         onClick={onTest}
                         disabled={testing || testDisabled}
-                        className="w-full px-4 py-2 bg-[var(--color-brand-teal)]/10 hover:bg-[var(--color-brand-teal)]/20 text-[var(--color-brand-teal)] rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        className="w-full px-4 py-2 bg-[#4fd1c5]/10 hover:bg-[#4fd1c5]/20 text-[#4fd1c5] rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
                         {testing ? (
                             <>
@@ -99,8 +99,8 @@ export function ProviderCard({
                 {testResult && (
                     <div
                         className={`p-2 rounded text-xs ${isError
-                            ? 'bg-[var(--color-error)]/10 text-[var(--color-error)]'
-                            : 'bg-[var(--color-success)]/10 text-[var(--color-success)]'
+                            ? 'bg-red-500/10 text-red-400'
+                            : 'bg-green-500/10 text-green-400'
                             }`}
                     >
                         {testResult}

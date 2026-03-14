@@ -10,16 +10,16 @@ export function AccountSettings() {
 
     return (
         <div>
-            <h3 className="text-xl font-bold mb-6 text-[var(--color-text-primary)]">Account</h3>
+            <h3 className="text-xl font-bold mb-6">Account</h3>
 
             {auth.user ? (
-                <div className="bg-[var(--color-card-elevated)] border border-[var(--color-border)] rounded-xl p-4">
+                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
                     <div className="flex items-center gap-4 mb-4">
                         {auth.user.photoURL && (
                             <img
                                 src={auth.user.photoURL}
                                 alt="Profile"
-                                className="w-12 h-12 rounded-full border border-[var(--color-border)]"
+                                className="w-12 h-12 rounded-full border border-white/10"
                                 referrerPolicy="no-referrer"
                                 onError={(e) => {
                                     console.error('[Profile] Image load error:', e)
@@ -28,28 +28,28 @@ export function AccountSettings() {
                             />
                         )}
                         <div>
-                            <p className="font-medium text-[var(--color-text-primary)]">{auth.user.displayName}</p>
-                            <p className="text-sm text-[var(--color-text-secondary)]">{auth.user.email}</p>
+                            <p className="font-medium">{auth.user.displayName}</p>
+                            <p className="text-sm text-white/40">{auth.user.email}</p>
                         </div>
                     </div>
                     <button
                         onClick={() => auth.signOut()}
-                        className="flex items-center gap-2 px-4 py-2 bg-[var(--color-error)]/10 text-[var(--color-error)] 
-                                     rounded-lg hover:bg-[var(--color-error)]/20 transition-colors text-sm"
+                        className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 
+                                     rounded-lg hover:bg-red-500/20 transition-colors text-sm"
                     >
                         <LogOut size={16} />
                         Sign Out
                     </button>
                 </div>
             ) : (
-                <div className="bg-[var(--color-card-elevated)] border border-[var(--color-border)] rounded-xl p-6 text-center">
-                    <p className="text-[var(--color-text-secondary)] mb-6 font-medium">Authentication</p>
+                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-6 text-center">
+                    <p className="text-white/60 mb-6 font-medium">Authentication</p>
 
                     <div className="flex flex-col gap-3 max-w-xs mx-auto">
                         <button
                             onClick={() => setIsAuthModalOpen(true)}
-                            className="flex items-center justify-center gap-2 px-6 py-3 bg-[var(--color-brand-teal)] text-white 
-                                         rounded-xl hover:bg-[var(--color-brand-teal)]/90 transition-colors font-medium border border-transparent shadow-md"
+                            className="flex items-center justify-center gap-2 px-6 py-3 bg-[#4fd1c5] text-black 
+                                         rounded-xl hover:bg-[#4fd1c5]/90 transition-colors font-medium border border-white/10 shadow-lg"
                         >
                             <Mail size={18} />
                             Sign in with Email
@@ -58,8 +58,8 @@ export function AccountSettings() {
                         <button
                             onClick={() => auth.signInWithGoogle()}
                             disabled={auth.loading}
-                            className="flex items-center justify-center gap-2 px-6 py-3 bg-[var(--color-surface)] text-[var(--color-text-primary)] 
-                                         rounded-xl hover:bg-[var(--color-border)] transition-colors border border-[var(--color-border)] shadow-sm"
+                            className="flex items-center justify-center gap-2 px-6 py-3 bg-white text-black 
+                                         rounded-xl hover:bg-white/90 transition-colors border border-black/10 shadow-lg"
                         >
                             {auth.loading ? (
                                 <Loader2 size={18} className="animate-spin" />
@@ -79,18 +79,18 @@ export function AccountSettings() {
 
             {/* Antigravity (Gemini Access) Section */}
             <div className="mt-8">
-                <hr className="border-[var(--color-border)] mb-8" />
+                <hr className="border-white/5 mb-8" />
                 <div className="flex items-center justify-between mb-4">
                     <div>
-                        <h4 className="font-bold text-lg text-[var(--color-text-primary)]">Gemini Pro Access</h4>
-                        <p className="text-xs text-[var(--color-text-muted)]">Higher rate limits via Google IDE gateway</p>
+                        <h4 className="font-bold text-lg">Gemini Pro Access</h4>
+                        <p className="text-xs text-white/40">Higher rate limits via Google IDE gateway</p>
                     </div>
-                    <div className="px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-[var(--color-brand-teal)]/10 text-[var(--color-brand-teal)] border border-[var(--color-brand-teal)]/20">
+                    <div className="px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-[#4fd1c5]/10 text-[#4fd1c5] border border-[#4fd1c5]/20">
                         Antigravity
                     </div>
                 </div>
 
-                <div className="bg-[var(--color-card-elevated)] border border-[var(--color-border)] rounded-xl p-5">
+                <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-5">
                     <AntigravityLinkButton variant="full" />
                 </div>
             </div>

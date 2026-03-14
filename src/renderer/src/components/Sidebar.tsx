@@ -22,7 +22,8 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
   if (!sidebarOpen) return null
 
   return (
-    <div className="w-64 flex-shrink-0 bg-[var(--color-card-dark)] hidden md:flex flex-col h-full border-r border-[var(--color-border)] transition-all duration-300">
+    <div className="w-64 flex-shrink-0 hidden md:flex flex-col h-full border-r transition-all duration-300" 
+         style={{ backgroundColor: 'var(--color-bg-elevated)', borderColor: 'var(--color-border)' }}>
       {/* 1. Header with Logo */}
       <SidebarHeader />
 
@@ -31,9 +32,9 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
         {/* ActiveAgentsList removed as per user request to simplify sidebar */}
 
         {/* Divider */}
-        <div className="mx-5 my-2 border-t border-[var(--color-border)]" />
+        <div className="mx-5 my-2 border-t" style={{ borderColor: 'var(--color-border)' }} />
 
-        <RecentSessionsList onViewChange={onViewChange} />
+        <RecentSessionsList />
       </div>
 
       {/* 3. Footer with quick settings link */}

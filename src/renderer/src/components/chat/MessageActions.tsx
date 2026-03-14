@@ -42,7 +42,7 @@ export function MessageActions({ messageId, content, actions }: MessageActionsPr
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 action.type === 'continue'
                   ? 'bg-[var(--color-accent)] hover:bg-[var(--color-accent)]/80 text-white'
-                  : 'bg-[var(--color-surface-hover)] hover:bg-[var(--color-border)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'
+                  : 'bg-white/10 hover:bg-white/20 text-white/70'
               }`}
             >
               {action.label}

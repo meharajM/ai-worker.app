@@ -62,7 +62,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
   ) {
     return (
       <div className="flex justify-center my-2 animate-pulse">
-        <div className="flex items-center gap-1.5 text-[var(--color-text-dim)] text-[10px] font-medium px-2 py-1 rounded-full bg-[var(--color-surface)]">
+        <div className="flex items-center gap-1.5 text-white/20 text-[10px] font-medium px-2 py-1 rounded-full bg-white/5">
           <Save size={10} />
           <span>Saving progress checkpoint...</span>
         </div>
@@ -74,7 +74,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
   if (isSystem) {
     return (
       <div className="flex justify-center my-2">
-        <div className="bg-[var(--color-surface)] text-[var(--color-text-muted)] text-xs px-3 py-1 rounded-full">
+        <div className="bg-white/5 text-white/40 text-xs px-3 py-1 rounded-full">
           <FormattedText content={message.content} />
         </div>
       </div>
@@ -127,7 +127,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
             progressToolCall &&
             (message.content ||
               (visibleToolCalls && visibleToolCalls.length > 0)) && (
-              <div className="flex items-center gap-1.5 text-[var(--color-text-muted)] text-[10px] font-medium mt-3 px-1 border-t border-[var(--color-border)] pt-2">
+              <div className="flex items-center gap-1.5 text-white/30 text-[10px] font-medium mt-3 px-1 border-t border-white/5 pt-2">
                 <Save size={10} />
                 <span>Progress checkpoint saved</span>
               </div>
