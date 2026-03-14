@@ -16,6 +16,20 @@ import { PlaywrightTool, ToolResult, PlaywrightContext } from '../PlaywrightTool
  */
 export class NewTabTool extends PlaywrightTool {
     name = 'new_tab';
+
+    getSchema() {
+        return {
+            name: 'new_tab',
+            description: 'TABS: Open a new browser tab. Use to keep current page open while checking another URL. Optionally provide URL to navigate immediately.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    url: { type: 'string', description: 'URL to open (optional - opens blank tab if omitted)' }
+                }
+            }
+        };
+    }
+
     async execute(_page: Page, args: any, context?: PlaywrightContext): Promise<ToolResult> {
         if (!context?.context) throw new Error('No browser context');
         const newPage = await context.context.newPage();
@@ -33,6 +47,21 @@ export class NewTabTool extends PlaywrightTool {
  */
 export class SwitchTabTool extends PlaywrightTool {
     name = 'switch_tab';
+
+    getSchema() {
+        return {
+            name: 'switch_tab',
+            description: 'TABS: Switch focus to a different tab. Use get_tabs first to see available tabs and their indices.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    index: { type: 'number', description: 'Tab index from get_tabs (0 = first tab)' }
+                },
+                required: ['index']
+            }
+        };
+    }
+
     async execute(_page: Page, args: any, context?: PlaywrightContext): Promise<ToolResult> {
         if (!context) throw new Error('No playwright context');
         const targetTab = context.pagesMap.get(args.index);
@@ -50,6 +79,15 @@ export class SwitchTabTool extends PlaywrightTool {
  */
 export class CloseTabTool extends PlaywrightTool {
     name = 'close_tab';
+
+    getSchema() {
+        return {
+            name: 'close_tab',
+            description: 'TABS: Close the current tab. Automatically switches to another open tab. Cannot close the last remaining tab.',
+            inputSchema: { type: 'object', properties: {} }
+        };
+    }
+
     async execute(page: Page, _args: any, context?: PlaywrightContext): Promise<ToolResult> {
         if (!context?.context) throw new Error('No browser context');
         // If args.tabId or args.index is provided, use that, otherwise use current page
@@ -79,6 +117,15 @@ export class CloseTabTool extends PlaywrightTool {
  */
 export class GetTabsTool extends PlaywrightTool {
     name = 'get_tabs';
+
+    getSchema() {
+        return {
+            name: 'get_tabs',
+            description: 'TABS: List all open tabs with their index, title, and URL. Use before switch_tab to find the right tab.',
+            inputSchema: { type: 'object', properties: {} }
+        };
+    }
+
     async execute(_page: Page, _args: any, context?: PlaywrightContext): Promise<ToolResult> {
         if (!context) throw new Error('No playwright context');
         const tabList = await Promise.all(

@@ -105,6 +105,29 @@ function ensureRecord(args: Record<string, unknown> | null | undefined): Record<
 }
 
 // Execute a tool call with retry logic for connection errors
+
+// ── MCP Idle Disconnect Timers ──────────────────────────────────────────────────
+// Automatically disconnect backend processes (Node/Python) after 10m of inactivity
+// to ensure idle agents don't consume gigabytes of background RAM.
+const mcpIdleTimers = new Map<string, NodeJS.Timeout>();
+const MCP_IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+function resetMcpIdleTimer(serverId: string, serverName: string) {
+  const existing = mcpIdleTimers.get(serverId);
+  if (existing) clearTimeout(existing);
+
+  const timer = setTimeout(async () => {
+    logMcpRenderer("info", `Disconnecting server ${serverName} due to ${MCP_IDLE_TIMEOUT_MS / 60000}m of inactivity...`, { serverId, serverName });
+    try {
+      await disconnectServer(serverId);
+    } catch (err) {
+      logMcpRenderer("warn", `Failed to idle-disconnect server ${serverName}`, { error: String(err) });
+    }
+  }, MCP_IDLE_TIMEOUT_MS);
+
+  mcpIdleTimers.set(serverId, timer);
+}
+
 export async function executeToolCall(
   toolName: string,
   args: Record<string, unknown> | null | undefined
@@ -233,6 +256,29 @@ export async function executeToolCall(
     };
   }
 
+  // LAZY CONNECT: If the server has the tool cached but is currently disconnected,
+  // spin it up just-in-time before executing the tool.
+  if (!server.connected) {
+    logMcpRenderer("info", `Lazy connecting to server ${server.name} for tool ${toolName}...`, {
+      operation: "lazyConnect",
+      serverId: server.id,
+      toolName
+    });
+    try {
+      await connectServer(server.id);
+      // Let the connection settle briefly just in case the server needs a moment to be ready
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } catch (err) {
+      return {
+        result: null,
+        error: `Failed to lazy-connect to server ${server.name}: ${err instanceof Error ? err.message : String(err)}`
+      };
+    }
+  }
+
+  // Reset idle timer for this server since it's actively being used
+  resetMcpIdleTimer(server.id, server.name);
+
   let lastError: string | undefined;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -281,7 +327,10 @@ export async function executeToolCall(
 
       // Success!
       const duration = Date.now() - startTime;
-      const resultSize = JSON.stringify(result.result).length;
+      // Avoid JSON.stringify just for logging — use cheap length estimate
+      const resultSize = typeof result.result === 'string'
+        ? result.result.length
+        : (result.result ? '~object' : 0);
 
       logMcpRenderer("info", "Tool call completed successfully", {
         operation: "executeToolCall",

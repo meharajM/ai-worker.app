@@ -14,42 +14,28 @@ import { LLMMessage } from "./types";
  * than the most recent one).
  */
 export function pruneContext(messages: LLMMessage[]): LLMMessage[] {
-  // 1. Map tool_call_id to its definition (name + args)
   const toolCallDefinitions = new Map<string, string>();
-  
-  for (const msg of messages) {
-    if (msg.role === 'assistant' && msg.tool_calls) {
-      for (const call of msg.tool_calls) {
-        // Create a unique signature for this tool call configuration
-        // We sort keys to ensure arguments object order doesn't matter
-        const argsStr = JSON.stringify(call.function.arguments || {}, Object.keys(call.function.arguments || {}).sort());
-        const signature = `${call.function.name}:${argsStr}`;
-        toolCallDefinitions.set(call.id, signature);
-      }
-    }
-  }
-
-  // 2. Find which definitions have been executed multiple times
-  // We want to know the *last* tool_call_id for each signature
   const signatureToLastId = new Map<string, string>();
-  const allIdsForSignature = new Map<string, string[]>();
+  const allIdsForSignature = new Map<string, Set<string>>();
 
-  // Iterate in order to find the last one
-  // (We rely on toolCallDefinitions being populated in order, or we scan messages again? 
-  //  Actually, we can just use the map we built, but we need to know the order of occurrence in messages)
-  
-  // Let's re-scan messages to be safe about order
-  for (const msg of messages) {
+  // 1 & 2. Single pass: Map tool_call_id to signature, and track all IDs per signature
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
     if (msg.role === 'assistant' && msg.tool_calls) {
       for (const call of msg.tool_calls) {
-        const signature = toolCallDefinitions.get(call.id);
-        if (signature) {
-          signatureToLastId.set(signature, call.id);
-          
-          const existing = allIdsForSignature.get(signature) || [];
-          existing.push(call.id);
-          allIdsForSignature.set(signature, existing);
+        // Fast signature (we omit sorting keys for speed, LLM output is usually consistent)
+        const argsStr = JSON.stringify(call.function.arguments || {});
+        const signature = `${call.function.name}:${argsStr}`;
+        
+        toolCallDefinitions.set(call.id, signature);
+        signatureToLastId.set(signature, call.id);
+
+        let ids = allIdsForSignature.get(signature);
+        if (!ids) {
+            ids = new Set();
+            allIdsForSignature.set(signature, ids);
         }
+        ids.add(call.id);
       }
     }
   }
@@ -58,7 +44,7 @@ export function pruneContext(messages: LLMMessage[]): LLMMessage[] {
   const idsToPrune = new Set<string>();
   
   for (const [signature, ids] of allIdsForSignature.entries()) {
-    if (ids.length > 1) {
+    if (ids.size > 1) {
       // Keep the last one, prune the rest
       const lastId = signatureToLastId.get(signature);
       for (const id of ids) {
@@ -69,17 +55,27 @@ export function pruneContext(messages: LLMMessage[]): LLMMessage[] {
     }
   }
 
-  // 4. Create new messages array with pruned content
-  return messages.map((msg) => {
-    // We only modify messages with role 'tool'
-    if (msg.role === 'tool' && msg.tool_call_id) {
-      if (idsToPrune.has(msg.tool_call_id)) {
-        return {
-          ...msg,
-          content: "[Redundant Tool Output Pruned by DCP]",
-        };
+  // FAST PATH: If nothing to prune, return the original array reference!
+  // This saves massive GC churn and React re-renders since the array identity stays exactly the same.
+  if (idsToPrune.size === 0) {
+      return messages;
+  }
+
+  // 4. Create new messages array with pruned content, ONLY if we actually change something
+  let changed = false;
+  const newMessages = messages.map((msg) => {
+    if (msg.role === 'tool' && msg.tool_call_id && idsToPrune.has(msg.tool_call_id)) {
+      if (msg.content === "[Redundant Tool Output Pruned by DCP]") {
+          return msg; // Already pruned previously
       }
+      changed = true;
+      return {
+        ...msg,
+        content: "[Redundant Tool Output Pruned by DCP]",
+      };
     }
     return msg;
   });
+
+  return changed ? newMessages : messages;
 }

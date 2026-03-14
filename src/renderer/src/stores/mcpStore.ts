@@ -138,9 +138,9 @@ export const useMcpStore = create<McpState>()((set, get) => ({
 
                     return {
                         ...updated,
-                        // Reset runtime state
+                        // Reset runtime state but KEEP cached tools for lazy-connect
                         connected: false,
-                        tools: [],
+                        tools: updated.tools || [],
                         error: undefined
                     } as MCPServer;
                 });
@@ -180,8 +180,9 @@ export const useMcpStore = create<McpState>()((set, get) => ({
 
             set({ servers: initialServers, initialized: true })
 
-            // Auto-connect
-            const autoConnectServers = initialServers.filter(s => s.autoConnect)
+            // Lazy connect: Only auto-connect on startup if we don't have cached tool schemas.
+            // This prevents spawning expensive Node/Python child processes for unused servers.
+            const autoConnectServers = initialServers.filter(s => s.autoConnect && s.tools.length === 0)
             for (const server of autoConnectServers) {
                 // Connect sequentially to avoid overwhelming
                 get().connectServer(server.id).catch(console.error)
@@ -343,7 +344,8 @@ export const useMcpStore = create<McpState>()((set, get) => ({
             await electron.mcp.disconnect(id)
             set(state => ({
                 servers: state.servers.map(s =>
-                    s.id === id ? { ...s, connected: false, tools: [] } : s
+                    // Keep tools cached for lazy load later
+                    s.id === id ? { ...s, connected: false } : s
                 )
             }))
         } catch (error) {
@@ -450,26 +452,26 @@ export const useMcpStore = create<McpState>()((set, get) => ({
     getAllTools: () => {
         const toolMap: Map<string, MCPTool> = new Map();
         get().servers.forEach((server) => {
-            if (server.connected) {
-                server.tools.forEach(tool => {
-                    const existing = toolMap.get(tool.name);
+            // No longer require `server.connected` -> we serve cached tools for lazy-connect
+            server.tools.forEach(tool => {
+                const existing = toolMap.get(tool.name);
 
-                    // If we don't have this tool yet, or if the new one has a richer schema, take it
-                    const newScore = Object.keys(tool.inputSchema?.properties || {}).length;
-                    const existingScore = existing ? Object.keys(existing.inputSchema?.properties || {}).length : -1;
+                // If we don't have this tool yet, or if the new one has a richer schema, take it
+                const newScore = Object.keys(tool.inputSchema?.properties || {}).length;
+                const existingScore = existing ? Object.keys(existing.inputSchema?.properties || {}).length : -1;
 
-                    if (!existing || newScore > existingScore) {
-                        toolMap.set(tool.name, tool);
-                    }
-                });
-            }
+                if (!existing || newScore > existingScore) {
+                    toolMap.set(tool.name, tool);
+                }
+            });
         });
         return Array.from(toolMap.values());
     },
 
     findServerForTool: (toolName) => {
+        // Return server if it has the tool cached, regardless of connected state
         return get().servers.find(s =>
-            s.connected && s.tools.some(t => t.name === toolName)
+            s.tools.some(t => t.name === toolName)
         ) || null
     }
 }))
