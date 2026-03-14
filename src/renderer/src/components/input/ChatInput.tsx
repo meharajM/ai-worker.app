@@ -300,24 +300,6 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
             </div>
           )}
 
-      <div className="flex flex-col gap-2">
-        {/* Attachment chips */}
-        <AttachmentBar attachments={attachments} onRemove={removeAttachment} />
-
-        <div
-          className={`relative min-h-[44px] flex items-center transition-all duration-200 rounded-lg ${isDragging ? 'ring-2 ring-emerald-500/50 bg-emerald-500/10' : ''
-            }`}
-          {...dragHandlers}
-        >
-          {/* Drag overlay */}
-          {isDragging && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-              <div className="bg-emerald-500/20 backdrop-blur-sm border border-emerald-500/50 rounded-lg px-4 py-2 text-emerald-400 text-sm font-medium shadow-lg">
-                📄 Drop file to convert
-              </div>
-            </div>
-          )}
-
           <TextArea
             value={textInput}
             onChange={handleInputChange}
