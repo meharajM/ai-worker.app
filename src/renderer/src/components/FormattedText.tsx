@@ -55,7 +55,7 @@ const CodeBlock = ({ inline, className, children, ...props }: any) => {
       return (
           <div className="relative group/code my-1 inline-block align-middle">
                <div className={cn(
-                   "flex items-center gap-2 bg-[#1e1e1e] border border-white/10 rounded-md px-2 py-1",
+                   "flex items-center gap-2 bg-[#1e1e1e] border border-[var(--color-border)] rounded-md px-2 py-1",
                    isSuperShort ? "px-1.5 py-0.5" : ""
                )}>
                    <code className="font-mono text-xs text-[#ce9178] flex-1 break-all">
@@ -64,7 +64,7 @@ const CodeBlock = ({ inline, className, children, ...props }: any) => {
                    {!isSuperShort && (
                        <button
                             onClick={handleCopy}
-                            className="p-0.5 rounded hover:bg-white/10 text-white/40 hover:text-white transition-all opacity-0 group-hover/code:opacity-100"
+                            className="p-0.5 rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-all opacity-0 group-hover/code:opacity-100"
                             title="Copy"
                         >
                             {copied ? <Check size={10} className="text-green-400" /> : <Copy size={10} />}
@@ -77,18 +77,18 @@ const CodeBlock = ({ inline, className, children, ...props }: any) => {
 
   if (!inline) {
     return (
-      <div className="relative group/code my-4 rounded-xl bg-[#1e1e1e] border border-white/10 overflow-hidden shadow-sm">
+      <div className="relative group/code my-4 rounded-xl bg-[#1e1e1e] border border-[var(--color-border)] overflow-hidden shadow-sm">
         {/* Header / Language Badge */}
-        <div className="flex items-center justify-between px-3 py-2 bg-[#252526] border-b border-white/5">
+        <div className="flex items-center justify-between px-3 py-2 bg-[#252526] border-b border-[var(--color-border)]">
           <div className="flex items-center gap-2">
-            <Terminal size={12} className="text-white/40" />
+            <Terminal size={12} className="text-white/50" />
             <span className="text-[11px] font-medium text-white/60 font-mono tracking-wide">
               {language}
             </span>
           </div>
           <button
             onClick={handleCopy}
-            className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white transition-all flex items-center gap-1.5"
+            className="p-1 rounded hover:bg-white/10 text-white/60 hover:text-white transition-all flex items-center gap-1.5"
             title="Copy code"
           >
             {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}

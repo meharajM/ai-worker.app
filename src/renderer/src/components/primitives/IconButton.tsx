@@ -40,7 +40,7 @@ export function IconButton({
       disabled={disabled}
       className={cn(
         SIZE_CLASSES[size],
-        'text-white/40 hover:text-white hover:bg-white/10 transition-colors',
+        'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] transition-colors',
         'disabled:opacity-30 disabled:pointer-events-none',
         className
       )}

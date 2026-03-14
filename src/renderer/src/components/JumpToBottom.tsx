@@ -45,7 +45,7 @@ export function JumpToBottom({ isAtBottom, hasUnread, onScrollToBottom }: JumpTo
         >
           <button
             onClick={onScrollToBottom}
-            className="flex items-center gap-2 p-2 bg-[var(--color-card-elevated)] border border-white/10 hover:bg-[var(--color-surface)] text-white/60 hover:text-white rounded-full shadow-lg shadow-black/20 transition-all"
+            className="flex items-center gap-2 p-2 bg-[var(--color-card-elevated)] border border-[var(--color-border)] hover:bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-full shadow-lg shadow-black/20 transition-all"
           >
             <ArrowDown size={16} />
           </button>

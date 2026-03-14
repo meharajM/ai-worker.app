@@ -13,7 +13,7 @@ export function Header({ status }: HeaderProps) {
     const { user, signOut } = useAuthStore()
 
     return (
-        <header className="h-12 flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0">
+        <header className="h-12 flex items-center justify-between px-4 border-b border-[var(--color-border)] flex-shrink-0">
             <div className="flex items-center gap-4">
                 {/* User Auth Section */}
                 {FEATURE_FLAGS.AUTH_ENABLED && (
