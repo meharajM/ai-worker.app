@@ -82,6 +82,16 @@ When asked to "Perform a visual regression audit", use this logic:
 
 ---
 
+## ⚡ Automated Workflow (Slash Command)
+
+Use the `/visual-regression` workflow to trigger a full, automated audit across core flows. This workflow:
+1. Orchestrates the `browser_subagent` to test both Light and Dark modes.
+2. Performs the standard audit flows automatically.
+3. Generates the `regression-audit-summary.md` report.
+4. Identifies and proposes fixes for any detected contrast issues or token gaps.
+
+---
+
 ## 📌 Best Practices
 - **Wait for Load**: Always use `wait_for_selector` or a small timeout after navigation to ensure animations settle.
 - **Full Page Screenshots**: Use `capture_browser_screenshot` for the entire viewport to catch footer/sidebar regressions.
