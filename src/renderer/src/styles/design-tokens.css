@@ -5,19 +5,25 @@
  * via `document.documentElement.style.setProperty('--token', value)` without
  * touching any component code or Tailwind config.
  *
+ * Theme switching: Add `data-theme="light"` to <html> to activate light mode.
+ * Default (:root) = dark theme.
+ *
  * Usage in Tailwind:  `bg-[var(--color-primary)]`
  * Usage in plain CSS:  `color: var(--color-primary);`
  */
 
 :root {
   /* ── Colors ──────────────────────────────────────────────────────── */
-  /* ── Colors ──────────────────────────────────────────────────────── */
   --color-primary: #4facfe;
   --color-primary-hover: #00f2fe;
   --color-accent: #3b82f6;
+  --color-brand-teal: #00a896;    /* Secondary brand teal used for CTAs */
   --color-bg-dark: #0b0c0f;      /* Very dark, almost black background */
   --color-card-dark: #16171a;    /* Elevated cards and sidebar */
+  --color-card-elevated: #1a1d23; /* Settings cards, dropdowns */
   --color-surface: #222328;      /* Lighter hover states */
+  --color-surface-hover: #2a2b30; /* Even lighter hover states */
+  --color-input-bg: rgba(0, 0, 0, 0.2); /* Darker input background */
   --color-border: rgba(255, 255, 255, 0.05);
   --color-border-hover: rgba(255, 255, 255, 0.1);
 
@@ -30,16 +36,36 @@
   --color-text-muted: rgba(255, 255, 255, 0.4);
   --color-text-dim: rgba(255, 255, 255, 0.2);
 
-  /* Status */
+  /* Status & Agents */
   --color-success: #22c55e;
   --color-warning: #facc15;
   --color-error: #ef4444;
+  --color-agent-fs: #a855f7;
+  --color-agent-mcp: #3b82f6;
+  --color-agent-default: #6b7280;
+
+  /* ── ToolCallList tokens ───────────────────────────────────────── */
+  --color-tool-bg: #16171a;
+  --color-tool-border: rgba(255, 255, 255, 0.06);
+  --color-tool-text: rgba(255, 255, 255, 0.85);
+  --color-tool-text-muted: rgba(255, 255, 255, 0.45);
+  --color-tool-text-dim: rgba(255, 255, 255, 0.25);
+  --color-tool-finding-bg: rgba(0, 0, 0, 0.2);
+  --color-tool-finding-border: rgba(255, 255, 255, 0.05);
+  --color-tool-badge-bg: rgba(255, 255, 255, 0.05);
+  --color-tool-chip-bg: rgba(255, 255, 255, 0.04);
+
+  /* Scrollbar */
+  --color-scrollbar-thumb: rgba(255, 255, 255, 0.15);
+  --color-scrollbar-thumb-hover: rgba(255, 255, 255, 0.25);
 
   /* ── Radii ─────────────────────────────────────────────────────── */
   --radius-bubble: 1rem;
   --radius-button: 0.5rem;
   --radius-avatar: 0.5rem;
   --radius-card: 0.75rem;
+  --radius-input: 1.5rem;
+  --radius-tile: 1.25rem;
   --radius-pill: 9999px;
 
   /* ── Spacing ────────────────────────────────────────────────────── */
@@ -58,4 +84,59 @@
   --duration-normal: 300ms;
   --duration-slow: 500ms;
   --ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+  /* ── Shadows ────────────────────────────────────────────────────── */
+  --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  --shadow-top: 0 -10px 20px rgba(0, 0, 0, 0.2);
+}
+
+/* ── Light Theme ─────────────────────────────────────────────────── */
+[data-theme="light"] {
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-accent: #3b82f6;
+  --color-brand-teal: #0d9488;
+  --color-bg-dark: #f1f5f9;      /* Tailwind slate-100 backgound to reduce glare */
+  --color-card-dark: #ffffff;    /* Pure white for sidebar and elevated areas */
+  --color-card-elevated: #ffffff; /* Same for settings cards */
+  --color-surface: #ffffff;      /* Pure white for tiles and inputs */
+  --color-surface-hover: #f8fafc; /* Very subtle gray for hover states */
+  --color-input-bg: #ffffff;     /* White for inputs so they don't look disabled */
+  --color-border: #e2e8f0;       /* Solid border color */
+  --color-border-hover: #cbd5e1; /* Darker solid border on hover */
+
+  --gradient-text: linear-gradient(135deg, #0d9488 0%, #2563eb 50%, #7c3aed 100%);
+
+  /* Text - Much higher contrast */
+  --color-text-primary: #0f172a;   /* Near black for primary text */
+  --color-text-secondary: #334155; /* Dark gray for secondary text */
+  --color-text-muted: #64748b;     /* Medium gray for muted text */
+  --color-text-dim: #94a3b8;       /* Lighter gray for dim text */
+
+  /* Status & Agents */
+  --color-success: #16a34a;
+  --color-warning: #ea580c;
+  --color-error: #dc2626;
+  --color-agent-fs: #9333ea;    /* Slightly deeper purple for light mode */
+  --color-agent-mcp: #2563eb;   /* Deeper blue for light mode */
+  --color-agent-default: #64748b; /* Slate-500 for light mode */
+
+  /* ── ToolCallList tokens ─────────────────────────────────────── */
+  --color-tool-bg: #ffffff;
+  --color-tool-border: #e2e8f0;
+  --color-tool-text: #1e293b;
+  --color-tool-text-muted: #64748b;
+  --color-tool-text-dim: #94a3b8;
+  --color-tool-finding-bg: #f8fafc;
+  --color-tool-finding-border: #e2e8f0;
+  --color-tool-badge-bg: #f1f5f9;
+  --color-tool-chip-bg: #f1f5f9;
+
+  /* Scrollbar */
+  --color-scrollbar-thumb: #cbd5e1;
+  --color-scrollbar-thumb-hover: #94a3b8;
+
+  /* Shadows — Softer on light backgrounds */
+  --shadow-glass: 0 4px 12px 0 rgba(0, 0, 0, 0.05);
+  --shadow-top: 0 -10px 20px rgba(0, 0, 0, 0.03);
 }

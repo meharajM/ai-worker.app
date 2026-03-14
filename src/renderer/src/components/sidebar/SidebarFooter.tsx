@@ -13,7 +13,7 @@ export function SidebarFooter({ currentView, onViewChange }: SidebarFooterProps)
         onClick={() => onViewChange('chat')}
         title="Chat"
         className={`w-full flex items-center justify-between py-2 px-2 -mx-2 rounded-lg transition-colors group cursor-pointer
-          ${currentView === 'chat' ? 'bg-[var(--color-surface)] text-white' : 'text-white/50 hover:bg-[var(--color-surface)] hover:text-white'}
+          ${currentView === 'chat' ? 'bg-[var(--color-surface)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text-primary)]'}
         `}
       >
         <div className="flex items-center gap-3">
@@ -25,7 +25,7 @@ export function SidebarFooter({ currentView, onViewChange }: SidebarFooterProps)
         onClick={() => onViewChange('connections')}
         title="MCP Connections"
         className={`w-full flex items-center justify-between py-2 px-2 -mx-2 rounded-lg transition-colors group cursor-pointer
-          ${currentView === 'connections' ? 'bg-[var(--color-surface)] text-white' : 'text-white/50 hover:bg-[var(--color-surface)] hover:text-white'}
+          ${currentView === 'connections' ? 'bg-[var(--color-surface)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text-primary)]'}
         `}
       >
         <div className="flex items-center gap-3">
@@ -38,7 +38,7 @@ export function SidebarFooter({ currentView, onViewChange }: SidebarFooterProps)
         onClick={() => onViewChange('settings')}
         title="Settings"
         className={`w-full flex items-center justify-between py-2 px-2 -mx-2 rounded-lg transition-colors group cursor-pointer
-          ${currentView === 'settings' ? 'bg-[var(--color-surface)] text-white' : 'text-white/50 hover:bg-[var(--color-surface)] hover:text-white'}
+          ${currentView === 'settings' ? 'bg-[var(--color-surface)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text-primary)]'}
         `}
       >
         <div className="flex items-center gap-3">

@@ -31,6 +31,8 @@ export interface ToolCall {
     result?: string
     isPresentable?: boolean  // Whether the tool output was summarised/reported as a finding
     finding?: string         // The summarised finding text for this specific tool call
+    startedAt?: number       // Unix ms timestamp when execution began
+    completedAt?: number     // Unix ms timestamp when execution finished
 }
 
 export interface ChatSession {

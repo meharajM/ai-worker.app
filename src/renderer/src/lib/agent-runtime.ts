@@ -69,6 +69,8 @@ interface AccumulatedToolCall {
   result?: string;
   isPresentable?: boolean;
   finding?: string;
+  startedAt?: number;
+  completedAt?: number;
 }
 
 /**
@@ -403,7 +405,8 @@ export class AgentRuntime implements IAgentClient {
       const iterationToolCalls: AccumulatedToolCall[] = response.toolCalls.map(tc => ({
         id: tc.id,
         name: tc.name,
-        arguments: tc.arguments
+        arguments: tc.arguments,
+        startedAt: Date.now(),
       }));
 
       if (!activeAssistantMessageId) {
@@ -501,7 +504,7 @@ export class AgentRuntime implements IAgentClient {
           // Update the result on the matching tool call in the master accumulator
           const tcIndex = accumulatedToolCalls.findIndex(t => t.id === call.id);
           if (tcIndex !== -1) {
-            accumulatedToolCalls[tcIndex] = { ...accumulatedToolCalls[tcIndex], result: truncated };
+            accumulatedToolCalls[tcIndex] = { ...accumulatedToolCalls[tcIndex], result: truncated, completedAt: Date.now() };
           }
           // Also update the local assistantMsg for finding reporting below
           const currentToolCalls = (assistantMsg as any).toolCalls as AccumulatedToolCall[] || [];

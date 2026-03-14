@@ -57,7 +57,7 @@ export function CopyButton({
     <button
       onClick={handleCopy}
       className={cn(
-        'p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-1.5',
+        'p-1.5 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] transition-colors flex items-center gap-1.5',
         className
       )}
       title="Copy"

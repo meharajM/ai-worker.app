@@ -62,10 +62,10 @@ export function ChatView({ onClearChat }: ChatViewProps) {
     <div className="flex-1 flex flex-col overflow-hidden min-w-0">
       {/* Header with clear button */}
       {messages.length > 0 && (
-        <div className="flex justify-end px-4 py-2 border-b border-white/5">
+        <div className="flex justify-end px-4 py-2 border-b border-[var(--color-border)]">
           <button
             onClick={handleClear}
-            className="flex items-center gap-1.5 text-xs text-white/40 hover:text-red-400 px-2 py-1 rounded hover:bg-red-500/10 transition-all"
+            className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] hover:text-red-400 px-2 py-1 rounded hover:bg-red-500/10 transition-all"
           >
             <Trash2 size={14} />
             Clear Chat

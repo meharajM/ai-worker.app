@@ -78,14 +78,14 @@ export function OpenAISettings({
                         href={apiKeyUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="px-2 py-0.5 text-[10px] bg-[#4fd1c5]/10 text-[#4fd1c5] rounded border border-[#4fd1c5]/20 hover:bg-[#4fd1c5]/20 transition-colors"
+                        className="px-2 py-0.5 text-[10px] bg-[var(--color-brand-teal)]/10 text-[var(--color-brand-teal)] rounded border border-[var(--color-brand-teal)]/20 hover:bg-[var(--color-brand-teal)]/20 transition-colors"
                     >
                         Get API Key
                     </a>
                     {!isOpenRouter && (
                         <button
                             onClick={onRefresh}
-                            className="px-2 py-1 text-xs bg-white/5 hover:bg-white/10 rounded text-white/60 hover:text-white transition-colors"
+                            className="px-2 py-1 text-xs bg-[var(--color-surface)] hover:bg-[var(--color-border)] rounded text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
                             title="Refresh connection status"
                         >
                             ↻
@@ -101,20 +101,20 @@ export function OpenAISettings({
         >
             {/* API Key */}
             <div>
-                <label className="block text-xs text-white/40 mb-1">API Key</label>
+                <label className="block text-xs text-[var(--color-text-muted)] mb-1">API Key</label>
                 <div className="flex gap-2">
                     <input
                         type="password"
-                        value={apiKey}
+                        value={apiKey || ''}
                         onChange={(e) => setApiKey(e.target.value)}
                         placeholder={isOpenRouter ? 'Enter OpenRouter API Key...' : 'sk-...'}
-                        className="flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm placeholder-white/30 focus:border-white/20 focus:outline-none"
+                        className="flex-1 bg-[var(--color-input-bg)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--color-text-dim)] text-[var(--color-text-primary)] focus:border-[var(--color-primary)] focus:outline-none"
                     />
                     {!isOpenRouter && apiKey && (
                         <button
                             onClick={onRefresh}
                             disabled={modelsEndpointAvailable === false}
-                            className="px-3 py-2 text-xs bg-[#4fd1c5]/10 hover:bg-[#4fd1c5]/20 text-[#4fd1c5] rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="px-3 py-2 text-xs bg-[var(--color-brand-teal)]/10 hover:bg-[var(--color-brand-teal)]/20 text-[var(--color-brand-teal)] rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             title={modelsEndpointAvailable === false ? 'Models endpoint not available for this API' : 'Fetch available models'}
                         >
                             Fetch Models
@@ -126,20 +126,20 @@ export function OpenAISettings({
             {/* Base URL — only for OpenAI-compatible, not OpenRouter */}
             {!isOpenRouter && (
                 <div>
-                    <label className="block text-xs text-white/40 mb-1">Base URL</label>
+                    <label className="block text-xs text-[var(--color-text-muted)] mb-1">Base URL</label>
                     <input
                         type="text"
-                        value={settings.openaiBaseUrl}
+                        value={settings.openaiBaseUrl || ''}
                         onChange={(e) => settings.setOpenaiBaseUrl(e.target.value)}
                         placeholder="https://api.openai.com/v1"
-                        className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm placeholder-white/30 focus:border-white/20 focus:outline-none"
+                        className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--color-text-dim)] text-[var(--color-text-primary)] focus:border-[var(--color-primary)] focus:outline-none"
                     />
                 </div>
             )}
 
             {/* Model */}
             <div>
-                <label className="block text-xs text-white/40 mb-1">Model</label>
+                <label className="block text-xs text-[var(--color-text-muted)] mb-1">Model</label>
                 <ModelSelect
                     value={model}
                     onChange={(value) => setModel(value)}
@@ -148,9 +148,9 @@ export function OpenAISettings({
                     ariaLabel={`${title} Model Selection`}
                 />
                 {models && models.length > 0 ? (
-                    <p className="text-xs text-white/30 mt-1">{models.length} model(s) available</p>
+                    <p className="text-xs text-[var(--color-text-dim)] mt-1">{models.length} model(s) available</p>
                 ) : error ? (
-                    <p className="text-xs text-white/30 mt-1">Could not fetch models: {error}. Type model name manually.</p>
+                    <p className="text-xs text-[var(--color-text-dim)] mt-1">Could not fetch models: {error}. Type model name manually.</p>
                 ) : null}
             </div>
         </ProviderCard>
