@@ -88,10 +88,14 @@ export function registerMcpHandlers(): void {
 
             // In-process Playwright
             if (isPlaywrightServer(serverConfig)) {
-                await PlaywrightService.getInstance().initialize()
-                inProcessPlaywrightConnections.add(id)
-                logMcpOperation('info', 'In-process Playwright connection established', { operation: 'connect', serverId: id, inProcess: true })
-                return { success: true, serverId: id, inProcess: true }
+                try {
+                    await PlaywrightService.getInstance().initialize()
+                    inProcessPlaywrightConnections.add(id)
+                    logMcpOperation('info', 'In-process Playwright connection established', { operation: 'connect', serverId: id, inProcess: true })
+                    return { success: true, serverId: id, inProcess: true }
+                } catch (playwrightError: unknown) {
+                    logMcpOperation('warn', 'In-process Playwright failed, falling back to external MCP', { operation: 'connect', serverId: id, error: String(playwrightError) })
+                }
             }
 
             // In-process Memory
@@ -229,14 +233,17 @@ export function registerMcpHandlers(): void {
         // In-process calls (Simplified content return as per original)
         if (inProcessPlaywrightConnections.has(id)) {
             const res = await PlaywrightService.getInstance().callTool(toolName, args)
+            if (res.error) return { result: null, error: res.error }
             return { result: { content: [{ type: 'text', text: String(res.result) }] } }
         }
         if (inProcessMemoryConnections.has(id)) {
             const res = await MemoryService.getInstance().callTool(toolName, args)
+            if (res.error) return { result: null, error: res.error }
             return { result: { content: [{ type: 'text', text: String(res.result) }] } }
         }
         if (inProcessFilesystemConnections.has(id)) {
             const res = await FileSystemService.getInstance().callTool(toolName, args)
+            if (res.error) return { result: null, error: res.error }
             return { result: { content: [{ type: 'text', text: String(res.result) }] } }
         }
 
