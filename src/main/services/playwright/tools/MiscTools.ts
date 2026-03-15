@@ -11,6 +11,15 @@ import { PlaywrightTool, ToolResult } from '../PlaywrightTool';
 
 export class GoBackTool extends PlaywrightTool {
     name = 'go_back';
+
+    getSchema() {
+        return {
+            name: 'go_back',
+            description: 'NAVIGATION: Click browser back button. Use to return to previous page after viewing details or search results.',
+            inputSchema: { type: 'object', properties: {} }
+        };
+    }
+
     async execute(page: Page): Promise<ToolResult> {
         await page.goBack();
         return { result: 'Navigated back' };
@@ -19,6 +28,15 @@ export class GoBackTool extends PlaywrightTool {
 
 export class GoForwardTool extends PlaywrightTool {
     name = 'go_forward';
+
+    getSchema() {
+        return {
+            name: 'go_forward',
+            description: 'NAVIGATION: Click browser forward button. Use after go_back to return to where you were.',
+            inputSchema: { type: 'object', properties: {} }
+        };
+    }
+
     async execute(page: Page): Promise<ToolResult> {
         await page.goForward();
         return { result: 'Navigated forward' };
@@ -27,6 +45,20 @@ export class GoForwardTool extends PlaywrightTool {
 
 export class WaitForNavigationTool extends PlaywrightTool {
     name = 'wait_for_navigation';
+
+    getSchema() {
+        return {
+            name: 'wait_for_navigation',
+            description: 'TIMING: Wait for page to fully load after clicking a link. Use after actions that trigger page changes. Waits for network to be idle.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    timeout: { type: 'number', description: 'Max wait in ms (default: 30000)' }
+                }
+            }
+        };
+    }
+
     async execute(page: Page | Frame, args: any): Promise<ToolResult> {
         await page.waitForLoadState('networkidle', {
             timeout: args.timeout || 10000

@@ -15,6 +15,7 @@ import { PlaywrightTool, ToolResult } from '../PlaywrightTool';
  */
 export class NavigateTool extends PlaywrightTool {
     name = 'navigate';
+    aliases = ['browser_navigate'];
 
     async execute(page: Page, args: any): Promise<ToolResult> {
         const navError = this.requireParam(args, 'url');

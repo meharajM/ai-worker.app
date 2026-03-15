@@ -33,6 +33,7 @@ import { useAgent } from "./hooks/useAgent";
 import { useLLMStatus } from "./hooks/useLLMStatus";
 import { MissingDependenciesScreen } from "./components/MissingDependenciesScreen";
 import { ExperimentProvider } from "./lib/experiments/experimentProvider";
+import { useThemeSync } from "./hooks/useThemeSync";
 
 function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
@@ -59,6 +60,7 @@ function App() {
   // ── Side-effect hooks ─────────────────────────────────────────────────────
   useAuthPersistence();
   useSettingsSync();
+  useThemeSync();
 
   // Ensure MCP is initialized for the chat view. ConnectionsPanel also calls
   // initialize(), but we need it ready before the user opens that panel.
@@ -79,7 +81,7 @@ function App() {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <ExperimentProvider>
-    <div className="flex h-screen bg-[var(--color-bg-dark)] text-white font-sans overflow-hidden">
+    <div className="flex h-screen bg-[var(--color-bg-dark)] text-[var(--color-text-primary)] font-sans overflow-hidden">
       <CommandPalette onViewChange={setCurrentView} />
       {!dependenciesResolved && <MissingDependenciesScreen onResolved={() => setDependenciesResolved(true)} />}
       
@@ -97,7 +99,7 @@ function App() {
                 <ChatView />
               </div>
 
-              <div className="pt-2 pb-6 px-6 flex justify-center w-full z-10 bg-[var(--color-bg-dark)] shrink-0 shadow-[0_-10px_20px_rgba(0,0,0,0.2)]">
+              <div className="pt-2 pb-6 px-6 flex justify-center w-full z-10 bg-[var(--color-bg-dark)] shrink-0 shadow-[var(--shadow-top)]">
                 <div className="w-full max-w-2xl">
                   <VoiceInput
                     onSubmit={handleSubmit}

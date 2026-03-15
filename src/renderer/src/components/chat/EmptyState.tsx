@@ -15,7 +15,7 @@ export function EmptyState() {
 
       {/* Greeting */}
       <div className="text-center mb-6">
-        <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-white mb-2">
+        <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-[var(--color-text-primary)] mb-2">
           Hey!
         </h1>
         <h2 className="text-4xl md:text-5xl font-bold tracking-tight bg-clip-text text-transparent bg-[image:var(--gradient-text)]">
@@ -25,7 +25,7 @@ export function EmptyState() {
 
       {/* Subtitle */}
       <p className="text-[var(--color-text-secondary)] text-md text-center max-w-2xl mb-8">
-        Your Co-Worker is ready. Delegate tasks across connected systems right here or press <span className="font-mono bg-white/10 px-1 py-0.5 rounded text-white/90 text-sm">Cmd+K</span> to quickly search.
+        Your Co-Worker is ready. Delegate tasks across connected systems right here or press <span className="font-mono bg-[var(--color-surface)] px-1 py-0.5 rounded text-[var(--color-text-primary)] text-sm">Cmd+K</span> to quickly search.
       </p>
 
       {/* Agent Cards Grid */}

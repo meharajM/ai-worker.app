@@ -4,6 +4,21 @@ import { humanizedClick } from '../humanMouse';
 
 export class ClickTool extends PlaywrightTool {
     name = 'click';
+    aliases = ['browser_click'];
+
+    getSchema() {
+        return {
+            name: 'click',
+            description: 'INTERACTION: Click an element using CSS selector. Use when you know the exact selector (e.g., "#submit-btn", ".login-button"). If you only know the text, use click_text instead.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    selector: { type: 'string', description: 'CSS selector like #id, .class, or tag[attr="value"]' }
+                },
+                required: ['selector']
+            }
+        };
+    }
 
     async execute(page: Page, args: any): Promise<ToolResult> {
         const clickError = this.requireParam(args, 'selector');

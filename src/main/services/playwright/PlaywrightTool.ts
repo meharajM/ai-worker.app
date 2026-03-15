@@ -14,6 +14,7 @@
  */
 
 import { BrowserContext, Page } from 'playwright-core';
+import { ToolSchema } from '../../../shared/browser-tool-schemas';
 
 /**
  * The standard structure returned by all browser tools.
@@ -40,9 +41,26 @@ export interface PlaywrightContext {
 
 /**
  * Abstract base class for all Playwright-based interaction tools.
+ *
+ * Each tool is self-describing: it owns its name, schema, and optional aliases.
+ * PlaywrightService collects these at registration time — no manual duplication.
  */
 export abstract class PlaywrightTool {
     abstract name: string;
+
+    /**
+     * Optional alternate names this tool responds to.
+     * Example: NavigateTool declares `aliases = ['browser_navigate']`.
+     * PlaywrightService registers these automatically.
+     */
+    aliases: string[] = [];
+
+    /**
+     * Returns the MCP-compatible schema for this tool.
+     * This is the single source of truth for the tool's description and input shape.
+     */
+    abstract getSchema(): ToolSchema;
+
     /**
      * Executes the tool's core logic.
      *

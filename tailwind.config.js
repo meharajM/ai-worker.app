@@ -5,6 +5,18 @@ export default {
         extend: {
             fontFamily: {
                 sans: ['Inter', 'system-ui', 'sans-serif']
+            },
+            borderRadius: {
+                input: 'var(--radius-input)',
+                tile: 'var(--radius-tile)',
+            },
+            transitionDuration: {
+                fast: 'var(--duration-fast)',
+                normal: 'var(--duration-normal)',
+                slow: 'var(--duration-slow)',
+            },
+            boxShadow: {
+                glass: 'var(--shadow-glass)',
             }
         }
     },

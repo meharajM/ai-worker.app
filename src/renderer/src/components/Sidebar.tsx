@@ -31,9 +31,9 @@ export function Sidebar({ currentView, onViewChange }: SidebarProps) {
         {/* ActiveAgentsList removed as per user request to simplify sidebar */}
 
         {/* Divider */}
-        <div className="mx-5 my-2 border-t border-white/5" />
+        <div className="mx-5 my-2 border-t border-[var(--color-border)]" />
 
-        <RecentSessionsList />
+        <RecentSessionsList onViewChange={onViewChange} />
       </div>
 
       {/* 3. Footer with quick settings link */}

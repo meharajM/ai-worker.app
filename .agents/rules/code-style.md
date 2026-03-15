@@ -20,6 +20,7 @@ This project's coding standards are split into focused rule files in `.agents/ru
 | `agent-loop-safety.md` | The agent message loop, tool execution, sub-agent spawning |
 | `zustand-stores.md` | Zustand stores in `src/renderer/src/stores/` |
 | `typescript-standards.md` | Any `.ts` / `.tsx` file (types, interfaces, generics) |
+| `ui-visual-testing.md` | UI changes (`.tsx`, `.css`) to trigger proactive automated visual regression testing |
 | `mcp-tools.md` | MCP integration, `executeToolCall`, tool schemas |
 | `documentation.md` | Writing JSDoc, file-level comments, or new modules |
 

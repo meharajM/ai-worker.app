@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Command } from 'cmdk';
-import { Search, Bot, Trash2, Layout, Settings } from 'lucide-react';
+import { Search, Trash2, Layout, Settings } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { View } from './Sidebar';
@@ -118,22 +118,8 @@ export function CommandPalette({ onViewChange }: CommandPaletteProps) {
                   </Command.Item>
                 </Command.Group>
 
-                <Command.Group heading="AI Models" className="text-xs font-bold text-white/30 uppercase tracking-wider mb-2 px-2 mt-4">
-                  <Command.Item
-                    onSelect={() => setOpen(false)}
-                    className={itemClass}
-                  >
-                    <Bot size={16} />
-                    <span>Switch to GPT-4o</span>
-                  </Command.Item>
-                  <Command.Item
-                    onSelect={() => setOpen(false)}
-                    className={itemClass}
-                  >
-                    <Bot size={16} />
-                    <span>Switch to Claude 3.5 Sonnet</span>
-                  </Command.Item>
-                </Command.Group>
+
+
 
               </Command.List>
             </Command>
