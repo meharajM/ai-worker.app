@@ -372,7 +372,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                             <h3 className="text-[var(--text-xl)] font-[var(--font-weight-bold)] text-[var(--color-text-primary)]">About</h3>
 
                             <Card variant="glass" padding="lg" className="text-center">
-                                <div className="w-20 h-20 bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-accent)] rounded-[var(--radius-xl)] flex items-center justify-center mx-auto mb-[var(--space-4)] shadow-lg">
+                                <div className="w-20 h-20 bg-[var(--color-primary)] rounded-[var(--radius-xl)] flex items-center justify-center mx-auto mb-[var(--space-4)] shadow-lg">
                                     <Sparkles className="w-10 h-10 text-[var(--color-text-inverse)]" />
                                 </div>
                                 <h4 className="text-[var(--text-2xl)] font-[var(--font-weight-bold)] text-[var(--color-text-primary)]">{APP_INFO.NAME}</h4>

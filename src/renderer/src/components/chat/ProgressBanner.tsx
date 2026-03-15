@@ -54,7 +54,7 @@ export function ProgressBanner({ session }: ProgressBannerProps) {
             <motion.div
               initial={{ width: 0 }}
               animate={{ width: `${session.progress}%` }}
-              className="h-full bg-gradient-to-r from-[var(--color-accent)] to-[var(--color-primary)] relative"
+              className="h-full bg-[var(--color-brand-teal)] relative"
             >
               <div className="absolute inset-0 bg-white/20" />
             </motion.div>

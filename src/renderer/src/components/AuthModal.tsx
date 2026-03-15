@@ -89,7 +89,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                         >
                             <X size={20} />
                         </button>
-                        <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-[var(--color-text-primary)] to-[var(--color-text-muted)]">
+                        <h2 className="text-2xl font-bold text-[var(--color-text-primary)]">
                             {mode === 'signin' ? 'Welcome Back' : 'Create Account'}
                         </h2>
                         <p className="text-sm text-[var(--color-text-muted)] mt-1">
