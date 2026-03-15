@@ -211,9 +211,9 @@ export async function executeParallelSubAgents(
         try {
             const result = await subAgent.chat(instruction);
             const resultContent =
-                typeof result.content === "string"
+                typeof result?.content === "string"
                     ? result.content
-                    : (result.content as any[]).map((c: any) => (c.type === "text" ? c.text : "")).join("");
+                    : (result?.content as any[])?.map((c: any) => (c.type === "text" ? c.text : "")).join("") ?? "";
 
             // Detect sub-agent bailout (max consecutive errors)
             const isBailout = resultContent.includes("consecutive errors") ||

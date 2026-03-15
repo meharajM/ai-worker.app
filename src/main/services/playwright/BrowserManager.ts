@@ -50,6 +50,8 @@ export class BrowserManager {
     private store: Store<Record<string, unknown>>;
     /** Ensures concurrent callTool calls don't trigger multiple browser launches */
     private initializationPromise: Promise<void> | null = null;
+    /** Ensures concurrent background_scrape calls don't trigger multiple headless launches */
+    private initializationPromiseHeadless: Promise<void> | null = null;
 
     private headlessBrowser: Browser | null = null;
     private headlessContext: BrowserContext | null = null;
@@ -113,7 +115,10 @@ export class BrowserManager {
         // Serialize concurrent ensureBrowser() calls behind a single promise
         if (this.initializationPromise) {
             await this.initializationPromise;
-            return this.context!;
+            if (!this.context) {
+                throw new Error('[BrowserManager] Browser initialization finished but context is still null (likely closed during launch).');
+            }
+            return this.context;
         }
 
         this.initializationPromise = (async () => {
@@ -133,7 +138,7 @@ export class BrowserManager {
                 // Default blockAds to TRUE — matches the original PlaywrightService default
                 const blockAds = settings.blockAds !== undefined ? settings.blockAds : true;
 
-                console.log(`[BrowserManager] OS: ${process.platform}, target browser: ${browserType}`);
+                console.log(`[BrowserManager] OS: ${process.platform}, target browser: ${browserType}, headless: ${headless}`);
 
                 // Full set of stealth + stability args — restored from original PlaywrightService
                 const launchArgs = [
@@ -234,13 +239,17 @@ export class BrowserManager {
                 throw lastError || new Error('[BrowserManager] All browser launch attempts failed.');
             } catch (error) {
                 console.error('[BrowserManager] Failed to launch browser:', error);
-                this.initializationPromise = null; // Allow retry on next call
                 throw error;
+            } finally {
+                this.initializationPromise = null; // Clean up promise after completion/failure
             }
         })();
 
         await this.initializationPromise;
-        return this.context!;
+        if (!this.context) {
+            throw new Error('[BrowserManager] Browser initialization failed to produce a context.');
+        }
+        return this.context;
     }
 
     /**
@@ -316,61 +325,86 @@ export class BrowserManager {
     }
 
     private async ensureHeadlessPage(): Promise<Page> {
-        if (!this.headlessBrowser) {
-            console.log('[BrowserManager] Launching invisible headless browser with stealth...');
-            this.headlessBrowser = await stealthChromium.launch({
-                headless: true, // Use boolean for modern playwright compat
-                channel: 'chrome', // Use local chrome path
-                args: [
-                    '--headless=new', // Explicitly force the new headless mode to prevent stealth plugin from overriding it
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-infobars',
-                    '--ignore-certificate-errors',
-                    '--disable-accelerated-2d-canvas',
-                    '--disable-gpu',
-                    '--disable-dev-shm-usage',
-                    '--window-size=1920,1080',
-                    '--disable-software-rasterizer'
-                ]
-            });
+        if (this.headlessPage && !this.headlessPage.isClosed()) return this.headlessPage;
+
+        // Serialize concurrent ensureHeadlessPage() calls behind a single promise
+        if (this.initializationPromiseHeadless) {
+            await this.initializationPromiseHeadless;
+            if (!this.headlessPage || this.headlessPage.isClosed()) {
+                throw new Error('[BrowserManager] Headless initialization finished but page is null or closed.');
+            }
+            return this.headlessPage;
         }
-        if (!this.headlessContext) {
-            this.headlessContext = await this.headlessBrowser!.newContext({
-                viewport: { width: 1920, height: 1080 },
-                locale: 'en-US',
-                timezoneId: 'America/New_York',
-                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                colorScheme: 'dark',
-                deviceScaleFactor: 2,
-                hasTouch: false,
-                isMobile: false
-            });
 
-            // Inject stealth init scripts to bypass further detection
-            await this.headlessContext.addInitScript(() => {
-                // Remove webdriver property
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined,
-                });
+        this.initializationPromiseHeadless = (async () => {
+            try {
+                if (!this.headlessBrowser) {
+                    console.log('[BrowserManager] Launching invisible headless browser with stealth...');
+                    this.headlessBrowser = await stealthChromium.launch({
+                        headless: true, // Use boolean for modern playwright compat
+                        channel: 'chrome', // Use local chrome path
+                        args: [
+                            '--headless=new', // Explicitly force the new headless mode to prevent stealth plugin from overriding it
+                            '--disable-blink-features=AutomationControlled',
+                            '--no-sandbox',
+                            '--disable-setuid-sandbox',
+                            '--disable-infobars',
+                            '--ignore-certificate-errors',
+                            '--disable-accelerated-2d-canvas',
+                            '--disable-gpu',
+                            '--disable-dev-shm-usage',
+                            '--window-size=1920,1080',
+                            '--disable-software-rasterizer'
+                        ]
+                    });
+                }
+                if (!this.headlessContext) {
+                    this.headlessContext = await this.headlessBrowser!.newContext({
+                        viewport: { width: 1920, height: 1080 },
+                        locale: 'en-US',
+                        timezoneId: 'America/New_York',
+                        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        colorScheme: 'dark',
+                        deviceScaleFactor: 2,
+                        hasTouch: false,
+                        isMobile: false
+                    });
 
-                // Mock languages
-                Object.defineProperty(navigator, 'languages', {
-                    get: () => ['en-US', 'en'],
-                });
+                    // Inject stealth init scripts to bypass further detection
+                    await this.headlessContext.addInitScript(() => {
+                        // Remove webdriver property
+                        Object.defineProperty(navigator, 'webdriver', {
+                            get: () => undefined,
+                        });
 
-                // Mock hardware properties
-                Object.defineProperty(navigator, 'hardwareConcurrency', {
-                    get: () => 8,
-                });
-                Object.defineProperty(navigator, 'deviceMemory', {
-                    get: () => 8,
-                });
-            });
-        }
+                        // Mock languages
+                        Object.defineProperty(navigator, 'languages', {
+                            get: () => ['en-US', 'en'],
+                        });
+
+                        // Mock hardware properties
+                        Object.defineProperty(navigator, 'hardwareConcurrency', {
+                            get: () => 8,
+                        });
+                        Object.defineProperty(navigator, 'deviceMemory', {
+                            get: () => 8,
+                        });
+                    });
+                }
+                if (!this.headlessPage || this.headlessPage.isClosed()) {
+                    this.headlessPage = await this.headlessContext!.newPage();
+                }
+            } catch (error) {
+                console.error('[BrowserManager] Failed to launch headless browser:', error);
+                throw error;
+            } finally {
+                this.initializationPromiseHeadless = null;
+            }
+        })();
+
+        await this.initializationPromiseHeadless;
         if (!this.headlessPage || this.headlessPage.isClosed()) {
-            this.headlessPage = await this.headlessContext!.newPage();
+            throw new Error('[BrowserManager] Headless initialization failed to produce an active page.');
         }
         return this.headlessPage;
     }
@@ -401,11 +435,14 @@ export class BrowserManager {
         }
 
         if (!this.page || this.page.isClosed()) {
-            const pages = this.context!.pages().filter(p => !p.isClosed());
+            if (!this.context) {
+                throw new Error('[BrowserManager] Cannot get page: Context is null after ensureBrowser.');
+            }
+            const pages = this.context.pages().filter(p => !p.isClosed());
             if (pages.length > 0) {
                 this.page = pages[pages.length - 1];
             } else {
-                this.page = await this.context!.newPage();
+                this.page = await this.context.newPage();
                 this.registerPage(this.page);
             }
         }
@@ -438,14 +475,18 @@ export class BrowserManager {
             this.idleTimer = null;
         }
 
+        // Reset promises to ensure subsequent calls don't await stale ones
+        this.initializationPromise = null;
+        this.initializationPromiseHeadless = null;
+
         if (this.context) {
-            await this.context.close();
+            await this.context.close().catch(e => console.error('[BrowserManager] Error closing context:', e));
             this.context = null;
             this.page = null;
             this.pagesMap.clear();
         }
         if (this.headlessBrowser) {
-            await this.headlessBrowser.close();
+            await this.headlessBrowser.close().catch(e => console.error('[BrowserManager] Error closing headless browser:', e));
             this.headlessBrowser = null;
             this.headlessContext = null;
             this.headlessPage = null;
