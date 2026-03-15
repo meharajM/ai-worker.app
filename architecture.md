@@ -67,6 +67,7 @@ graph LR
         IPC[IPC Handlers<br/>Modular Handlers]
         MCP[MCP Client Manager<br/>@modelcontextprotocol/sdk]
         Playwright[Playwright Service<br/>Internal Browser Automation]
+        McpManager[McpProcessManager<br/>Process Lifecycle & tree-kill]
         Speech[Speech Services<br/>ModelManager & ModelServer]
         Env[Environment Utils<br/>fix-path, ESM shims]
     end
@@ -99,6 +100,7 @@ graph LR
 - Window management and lifecycle
 - IPC handler registration
 - MCP server connections (Stdio/SSE)
+- **MCP Process Governance**: Managed by `McpProcessManager` using `tree-kill` for guaranteed recursive cleanup of runaway child processes.
 - Antigravity OAuth flow & Gateway access
 - Speech Model Management (Download/Serving)
 - System-level operations (file system, shell)
@@ -476,6 +478,7 @@ AI-Worker comes with two pre-configured MCP servers that are automatically initi
    - Capabilities:
      - 30+ tools including navigate, click, fill, screenshot, get_state, evaluate.
      - **Advanced Headless Evasion**: Built-in stealth flags, network TLS impersonation, and rich context mocking (User-Agent, Locale, Hardware).
+     - **Headless-to-Headed State Promotion**: Active headless contexts can be "promoted" to visible windows via `surfaceBrowser()`. The `BrowserManager` dynamically re-routes persistent data directories to ensure cookies and session state are preserved during the transition.
      - **Human-Like Inputs**: Utilizes `ghost-cursor` for Bezier-curve mouse movements and variable typing delays to bypass behavioral biometrics (e.g., Turnstile).
 
 2. **Sequential Thinking Server** (`sequential-thinking`)
