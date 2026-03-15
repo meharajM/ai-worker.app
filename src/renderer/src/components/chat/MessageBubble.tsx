@@ -1,16 +1,5 @@
 /**
  * MessageBubble.tsx — Slim orchestrator for chat message rendering.
- *
- * This component is now a composition of atomic sub-components:
- *   - MessageAvatar — user/bot avatar icon
- *   - MessageAttachments — file attachment cards
- *   - ThinkingBlock — collapsible LLM reasoning
- *   - MessageContent — cleaned markdown rendering
- *   - ToolCallList — grouped tool call checklist
- *   - MessageActions — copy, regenerate, action buttons
- *   - MessageTimestamp — formatted time display
- *
- * Each sub-component can be independently styled, tracked, and experimented on.
  */
 
 import React from 'react'
@@ -38,7 +27,6 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
 
-  // Filter out internal tools from the standard checklist view
   const visibleToolCalls = message.toolCalls?.filter(
     tc =>
       tc.name !== 'create_execution_plan' &&
@@ -46,14 +34,13 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
       tc.name !== 'memory_update_entity'
   )
 
-  // Check for progress summary update (Legacy or Memory)
   const progressToolCall = message.toolCalls?.find(
     tc =>
       tc.name === 'update_progress_summary' ||
       tc.name === 'memory_update_entity'
   )
 
-  // SPECIAL CASE: If message is ONLY a progress update (no content, no other tools)
+  // Progress checkpoint only message
   if (
     !isUser &&
     !message.content &&
@@ -61,8 +48,8 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
     progressToolCall
   ) {
     return (
-      <div className="flex justify-center my-2 animate-pulse">
-        <div className="flex items-center gap-1.5 text-[var(--color-text-dim)] text-[10px] font-medium px-2 py-1 rounded-full bg-[var(--color-surface)]">
+      <div className="flex justify-center my-2">
+        <div className="flex items-center gap-1.5 text-[var(--color-text-dim)] text-[10px] font-[var(--font-weight-medium)] px-2 py-1 rounded-[var(--radius-pill)] bg-[var(--color-surface)]">
           <Save size={10} />
           <span>Saving progress checkpoint...</span>
         </div>
@@ -70,11 +57,11 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
     )
   }
 
-  // System message — minimal centered badge
+  // System message
   if (isSystem) {
     return (
       <div className="flex justify-center my-2">
-        <div className="bg-[var(--color-surface)] text-[var(--color-text-muted)] text-xs px-3 py-1 rounded-full">
+        <div className="bg-[var(--color-surface)] text-[var(--color-text-muted)] text-[var(--text-xs)] px-3 py-1 rounded-[var(--radius-pill)]">
           <FormattedText content={message.content} />
         </div>
       </div>
@@ -110,7 +97,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
         {/* 2. Main Message Bubble */}
         <div
           className={cn(
-            'rounded-[var(--radius-bubble)] px-[var(--space-bubble-px)] py-[var(--space-bubble-py)] shadow-sm',
+            'rounded-[var(--radius-bubble)] px-[var(--space-bubble-px)] py-[var(--space-bubble-py)] shadow-[var(--shadow-sm)]',
             isUser
               ? 'bg-[var(--color-primary)] text-white'
               : 'bg-[var(--color-card-dark)] border border-[var(--color-border)] text-[var(--color-text-primary)]'
@@ -127,7 +114,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
             progressToolCall &&
             (message.content ||
               (visibleToolCalls && visibleToolCalls.length > 0)) && (
-              <div className="flex items-center gap-1.5 text-[var(--color-text-muted)] text-[10px] font-medium mt-3 px-1 border-t border-[var(--color-border)] pt-2">
+              <div className="flex items-center gap-1.5 text-[var(--color-text-muted)] text-[10px] font-[var(--font-weight-medium)] mt-3 px-1 border-t border-[var(--color-border)] pt-2">
                 <Save size={10} />
                 <span>Progress checkpoint saved</span>
               </div>

@@ -19,7 +19,11 @@ import {
     Globe,
     FolderOpen,
     FileText,
-    Mic
+    Mic,
+    Sparkles,
+    Activity,
+    Clock,
+    Zap
 } from 'lucide-react'
 import { useLogStore } from '../stores/logStore'
 import { useSettingsStore, Theme, LLMProviderType } from '../stores/settingsStore'
@@ -28,6 +32,8 @@ import { FEATURE_FLAGS, APP_INFO, VOICE_CONFIG } from '../lib/constants'
 import { isDevelopmentMode } from '../lib/featureFlags'
 import { EnhancedFeatureFlagsPanel } from './EnhancedFeatureFlagsPanel'
 import { SystemDependenciesSettings } from './SystemDependenciesSettings'
+import { Card, CardContent } from './primitives/Card'
+import { StatusBadge } from './primitives/StatusDot'
 import { AccountSettings } from './settings/AccountSettings'
 import {
     chat,
@@ -363,24 +369,61 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 {
                     activeSection === 'about' && (
                         <div className="space-y-6">
-                            <h3 className="text-xl font-bold text-[var(--color-text-primary)]">About</h3>
+                            <h3 className="text-[var(--text-xl)] font-[var(--font-weight-bold)] text-[var(--color-text-primary)]">About</h3>
 
-                            <div className="bg-[var(--color-card-elevated)] border border-[var(--color-border)] rounded-xl p-6 text-center">
-                                <div className="w-16 h-16 bg-[#00a896] rounded-2xl flex items-center justify-center mx-auto mb-4">
-                                    <div className="w-8 h-8 border-2 border-white rounded-lg flex items-center justify-center">
-                                        <div className="w-4 h-[2px] bg-white rounded-full"></div>
-                                    </div>
+                            <Card variant="glass" padding="lg" className="text-center">
+                                <div className="w-20 h-20 bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-accent)] rounded-[var(--radius-xl)] flex items-center justify-center mx-auto mb-[var(--space-4)] shadow-lg">
+                                    <Sparkles className="w-10 h-10 text-white" />
                                 </div>
-                                <h4 className="text-xl font-bold text-[var(--color-text-primary)]">{APP_INFO.NAME}</h4>
-                                <p className="text-[var(--color-text-dim)] text-sm">Version {APP_INFO.VERSION}</p>
-                                <p className="text-[var(--color-text-secondary)] mt-4 text-sm">
-                                    Voice-first desktop workspace with MCP integration
+                                <h4 className="text-[var(--text-2xl)] font-[var(--font-weight-bold)] text-[var(--color-text-primary)]">{APP_INFO.NAME}</h4>
+                                <p className="text-[var(--text-sm)] text-[var(--color-text-muted)] mt-[var(--space-1)]">Version {APP_INFO.VERSION}</p>
+                                <p className="text-[var(--text-sm)] text-[var(--color-text-secondary)] mt-[var(--space-4)] max-w-sm mx-auto">
+                                    Voice-first desktop workspace with MCP integration. Built for AI-assisted productivity.
                                 </p>
-                                <div className="mt-6 pt-4 border-t border-[var(--color-border)]">
-                                    <p className="text-xs text-[var(--color-text-dim)]">
-                                        Built with Electron, React, and ❤️
+                                <div className="mt-[var(--space-6)] pt-[var(--space-4)] border-t border-[var(--color-border)]">
+                                    <p className="text-[var(--text-xs)] text-[var(--color-text-dim)]">
+                                        Built with Electron, React, and TypeScript
                                     </p>
                                 </div>
+                            </Card>
+
+                            <div className="grid grid-cols-2 gap-[var(--space-3)]">
+                                <Card variant="default" padding="md" className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-[var(--radius-md)] bg-[var(--color-success)]/15 flex items-center justify-center">
+                                        <Activity className="w-5 h-5 text-[var(--color-success)]" />
+                                    </div>
+                                    <div>
+                                        <p className="text-[var(--text-xs)] text-[var(--color-text-dim)]">Status</p>
+                                        <StatusBadge variant="success" label="Active" animated />
+                                    </div>
+                                </Card>
+                                <Card variant="default" padding="md" className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-[var(--radius-md)] bg-[var(--color-primary)]/15 flex items-center justify-center">
+                                        <Zap className="w-5 h-5 text-[var(--color-primary)]" />
+                                    </div>
+                                    <div>
+                                        <p className="text-[var(--text-xs)] text-[var(--color-text-dim)]">Platform</p>
+                                        <p className="text-[var(--text-sm)] font-[var(--font-weight-medium)] text-[var(--color-text-primary)]">Electron</p>
+                                    </div>
+                                </Card>
+                                <Card variant="default" padding="md" className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-[var(--radius-md)] bg-[var(--color-accent)]/15 flex items-center justify-center">
+                                        <Clock className="w-5 h-5 text-[var(--color-accent)]" />
+                                    </div>
+                                    <div>
+                                        <p className="text-[var(--text-xs)] text-[var(--color-text-dim)]">Launch</p>
+                                        <p className="text-[var(--text-sm)] font-[var(--font-weight-medium)] text-[var(--color-text-primary)]">Ready</p>
+                                    </div>
+                                </Card>
+                                <Card variant="default" padding="md" className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-[var(--radius-md)] bg-[var(--color-brand-teal)]/15 flex items-center justify-center">
+                                        <Cpu className="w-5 h-5 text-[var(--color-brand-teal)]" />
+                                    </div>
+                                    <div>
+                                        <p className="text-[var(--text-xs)] text-[var(--color-text-dim)]">Engine</p>
+                                        <p className="text-[var(--text-sm)] font-[var(--font-weight-medium)] text-[var(--color-text-primary)]">React</p>
+                                    </div>
+                                </Card>
                             </div>
 
                             <SystemDependenciesSettings />

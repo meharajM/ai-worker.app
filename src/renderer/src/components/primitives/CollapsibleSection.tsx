@@ -40,7 +40,7 @@ export function CollapsibleSection({
           className={cn(
             'w-1 h-3 rounded-full',
             statusColor,
-            statusPulse && 'animate-pulse'
+            statusPulse && 'shadow-[0_0_8px_var(--color-primary)]'
           )}
         />
         <span>{label}</span>

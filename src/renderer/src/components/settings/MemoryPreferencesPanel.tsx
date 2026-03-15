@@ -110,7 +110,7 @@ export function MemoryPreferencesPanel() {
             <div className="bg-[var(--color-card-elevated)] border border-[var(--color-border)] rounded-xl p-6">
                 <div className="flex items-center justify-between mb-4">
                     <h4 className="font-medium flex items-center gap-2 text-[var(--color-text-primary)]">
-                        <span className="w-2 h-2 rounded-full bg-[var(--color-success)] animate-pulse"></span>
+                        <span className="w-2 h-2 rounded-full bg-[var(--color-success)] shadow-[0_0_8px_var(--color-success)]"></span>
                         Active Memory Stats
                     </h4>
                     <button 

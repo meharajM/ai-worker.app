@@ -123,7 +123,7 @@ export function RecentSessionsList({ onViewChange }: RecentSessionsListProps) {
                   <button onClick={(e) => startEditing(e, session)} className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded">
                     <Edit2 size={12} />
                   </button>
-                  <button onClick={(e) => handleDelete(e, session.id)} className="p-1 text-[var(--color-text-muted)] hover:text-red-400 rounded">
+                  <button onClick={(e) => handleDelete(e, session.id)} className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-error)] rounded">
                     <Trash2 size={12} />
                   </button>
                 </div>
