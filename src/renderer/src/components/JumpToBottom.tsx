@@ -29,7 +29,7 @@ export function JumpToBottom({ isAtBottom, hasUnread, onScrollToBottom }: JumpTo
         >
           <button
             onClick={onScrollToBottom}
-            className="flex items-center gap-2 px-4 py-2 bg-[#00a896] hover:bg-[#00a896]/90 text-white rounded-full shadow-lg shadow-black/20 text-sm font-medium transition-all hover:scale-105"
+            className="flex items-center gap-2 px-4 py-2 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-bg-dark)] rounded-full shadow-lg text-sm font-medium transition-all hover:scale-105"
           >
             <ArrowDown size={16} />
             New messages
@@ -45,7 +45,7 @@ export function JumpToBottom({ isAtBottom, hasUnread, onScrollToBottom }: JumpTo
         >
           <button
             onClick={onScrollToBottom}
-            className="flex items-center gap-2 p-2 bg-[#1a1d23] border border-white/10 hover:bg-[#25252b] text-white/60 hover:text-white rounded-full shadow-lg shadow-black/20 transition-all"
+            className="flex items-center gap-2 p-2 bg-[var(--color-bg-elevated)] border border-[var(--color-border)] hover:bg-[var(--color-bg-surface)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] rounded-full shadow-lg text-sm transition-all"
           >
             <ArrowDown size={16} />
           </button>

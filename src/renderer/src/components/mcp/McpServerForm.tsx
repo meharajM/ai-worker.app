@@ -111,14 +111,14 @@ export function McpServerForm({
   };
 
   return (
-    <div className="bg-[#1a1d23] border border-[#4fd1c5]/30 rounded-xl p-6 mb-6 animate-in slide-in-from-top-2 border-l-4">
+    <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-accent)]/30 rounded-lg p-6 mb-6 border-l-4">
       <h3 className="text-lg font-medium mb-4 flex items-center justify-between">
         <span className="flex items-center gap-2">
-          <Server size={20} className="text-[#4fd1c5]" />
+          <Server size={20} className="text-[var(--color-accent)]" />
           {editingServer ? `Edit ${name}` : "New MCP Connection"}
         </span>
         {editingServer && (
-          <span className="text-[10px] bg-[#4fd1c5]/10 text-[#4fd1c5] px-2 py-0.5 rounded uppercase tracking-wider font-bold">
+          <span className="text-[10px] bg-[var(--color-accent-muted)] text-[var(--color-accent)] px-2 py-0.5 rounded uppercase tracking-wider font-bold">
             Editing
           </span>
         )}
@@ -127,7 +127,7 @@ export function McpServerForm({
       <div className="space-y-4">
         {/* Name */}
         <div>
-          <label className="block text-xs text-white/40 mb-1.5 uppercase tracking-wider">
+          <label className="block text-xs text-[var(--color-text-tertiary)] mb-1.5 uppercase tracking-wider">
             Name
           </label>
           <input
@@ -135,14 +135,14 @@ export function McpServerForm({
             placeholder="My Server"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm
-                             placeholder-white/30 focus:border-[#4fd1c5]/50 focus:outline-none focus:ring-1 focus:ring-[#4fd1c5]/50"
+            className="w-full bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text-primary)]
+                             placeholder:text-[var(--color-text-disabled)] focus:border-[var(--color-accent)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]/50"
           />
         </div>
 
         {/* Type Selection */}
         <div>
-          <label className="block text-xs text-white/40 mb-1.5 uppercase tracking-wider">
+          <label className="block text-xs text-[var(--color-text-tertiary)] mb-1.5 uppercase tracking-wider">
             Connection Type
           </label>
           <div className="flex gap-2">
@@ -150,8 +150,8 @@ export function McpServerForm({
               onClick={() => setServerType("stdio")}
               className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm transition-colors border ${
                 serverType === "stdio"
-                  ? "bg-[#4fd1c5]/10 border-[#4fd1c5] text-[#4fd1c5]"
-                  : "bg-black/30 border-white/10 text-white/60 hover:bg-white/5"
+                  ? "bg-[var(--color-accent-muted)] border-[var(--color-accent)] text-[var(--color-accent)]"
+                  : "bg-[var(--color-bg-dark)] border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-surface)]"
               }`}
             >
               <Terminal size={16} />
@@ -161,8 +161,8 @@ export function McpServerForm({
               onClick={() => setServerType("sse")}
               className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm transition-colors border ${
                 serverType === "sse"
-                  ? "bg-[#4fd1c5]/10 border-[#4fd1c5] text-[#4fd1c5]"
-                  : "bg-black/30 border-white/10 text-white/60 hover:bg-white/5"
+                  ? "bg-[var(--color-accent-muted)] border-[var(--color-accent)] text-[var(--color-accent)]"
+                  : "bg-[var(--color-bg-dark)] border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-surface)]"
               }`}
             >
               <Globe size={16} />
@@ -175,7 +175,7 @@ export function McpServerForm({
         {serverType === "stdio" ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-1">
-              <label className="block text-xs text-white/40 mb-1.5 uppercase tracking-wider">
+              <label className="block text-xs text-[var(--color-text-tertiary)] mb-1.5 uppercase tracking-wider">
                 Command
               </label>
               <input
@@ -183,12 +183,12 @@ export function McpServerForm({
                 placeholder="npx, python, node..."
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
-                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm
-                                     placeholder-white/30 focus:border-[#4fd1c5]/50 focus:outline-none focus:ring-1 focus:ring-[#4fd1c5]/50 font-mono"
+                className="w-full bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text-primary)]
+                                     placeholder:text-[var(--color-text-disabled)] focus:border-[var(--color-accent)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]/50 font-mono"
               />
             </div>
             <div className="md:col-span-1">
-              <label className="block text-xs text-white/40 mb-1.5 uppercase tracking-wider">
+              <label className="block text-xs text-[var(--color-text-tertiary)] mb-1.5 uppercase tracking-wider">
                 Arguments
               </label>
               <input
@@ -196,14 +196,14 @@ export function McpServerForm({
                 placeholder="--args..."
                 value={args}
                 onChange={(e) => setArgs(e.target.value)}
-                className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm
-                                     placeholder-white/30 focus:border-[#4fd1c5]/50 focus:outline-none focus:ring-1 focus:ring-[#4fd1c5]/50 font-mono"
+                className="w-full bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text-primary)]
+                                     placeholder:text-[var(--color-text-disabled)] focus:border-[var(--color-accent)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]/50 font-mono"
               />
             </div>
           </div>
         ) : (
           <div>
-            <label className="block text-xs text-white/40 mb-1.5 uppercase tracking-wider">
+            <label className="block text-xs text-[var(--color-text-tertiary)] mb-1.5 uppercase tracking-wider">
               Server URL
             </label>
             <input
@@ -211,26 +211,26 @@ export function McpServerForm({
               placeholder="http://localhost:8000/sse"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm
-                                 placeholder-white/30 focus:border-[#4fd1c5]/50 focus:outline-none focus:ring-1 focus:ring-[#4fd1c5]/50 font-mono"
+              className="w-full bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text-primary)]
+                                  placeholder:text-[var(--color-text-disabled)] focus:border-[var(--color-accent)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]/50 font-mono"
             />
           </div>
         )}
 
         {/* Environment Variables (Local Only) */}
         {serverType === "stdio" && (
-            <div className="space-y-3 pt-2 border-t border-white/5">
+            <div className="space-y-3 pt-2 border-t border-[var(--color-border)]">
                 <div className="flex items-center gap-2 mb-2">
-                    <label className="text-xs text-white/40 uppercase tracking-wider">
+                    <label className="text-xs text-[var(--color-text-tertiary)] uppercase tracking-wider">
                         Environment Variables
                     </label>
-                    <span className="px-1.5 py-0.5 rounded bg-[#4fd1c5]/10 text-[#4fd1c5] text-[10px] font-bold border border-[#4fd1c5]/20">
+                    <span className="px-1.5 py-0.5 rounded bg-[var(--color-accent-muted)] text-[var(--color-accent)] text-[10px] font-bold border border-[var(--color-accent)]/20">
                         LOCAL ONLY
                     </span>
                 </div>
                 
-                <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg mb-3">
-                    <p className="text-yellow-200/80 text-[11px] leading-relaxed flex gap-2">
+                <div className="p-3 bg-[var(--color-warning-muted)] border border-[var(--color-warning)]/20 rounded-lg mb-3">
+                    <p className="text-[var(--color-warning)] text-[11px] leading-relaxed flex gap-2">
                         <span className="shrink-0">⚠️</span>
                         Secrets like API Keys are stored locally on this device only. We do not sync them to the cloud. If you switch devices or clear data, you will need to re-enter them.
                     </p>
@@ -244,18 +244,18 @@ export function McpServerForm({
                                 placeholder="KEY" 
                                 value={pair.key}
                                 onChange={(e) => updateEnvPair(index, 'key', e.target.value)}
-                                className="flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm font-mono placeholder-white/20 focus:border-[#4fd1c5]/50 focus:outline-none"
+                                className="flex-1 bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm font-mono text-[var(--color-text-primary)] placeholder:text-[var(--color-text-disabled)] focus:border-[var(--color-accent)]/50 focus:outline-none"
                             />
                             <input 
                                 placeholder="VALUE" 
                                 value={pair.value}
                                 type="password"
                                 onChange={(e) => updateEnvPair(index, 'value', e.target.value)}
-                                className="flex-1 bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm font-mono placeholder-white/20 focus:border-[#4fd1c5]/50 focus:outline-none"
+                                className="flex-1 bg-[var(--color-bg-dark)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm font-mono text-[var(--color-text-primary)] placeholder:text-[var(--color-text-disabled)] focus:border-[var(--color-accent)]/50 focus:outline-none"
                             />
                             <button 
                                 onClick={() => removeEnvPair(index)}
-                                className="p-2 text-white/40 hover:text-red-400 hover:bg-white/5 rounded-lg transition-colors"
+                                className="p-2 text-[var(--color-text-tertiary)] hover:text-[var(--color-error)] hover:bg-[var(--color-bg-surface)] rounded-lg transition-colors"
                             >
                                 <Trash2 size={16} />
                             </button>
@@ -263,7 +263,7 @@ export function McpServerForm({
                     ))}
                     <button 
                         onClick={addEnvPair}
-                        className="text-xs text-[#4fd1c5] hover:text-[#4fd1c5]/80 flex items-center gap-1 font-medium px-1"
+                        className="text-xs text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] flex items-center gap-1 font-medium px-1"
                     >
                         <Plus size={14} /> Add Variable
                     </button>
@@ -276,15 +276,15 @@ export function McpServerForm({
           <button
             onClick={handleSubmit}
             disabled={!name || (serverType === "stdio" ? !command : !url)}
-            className="px-6 py-2 bg-[#4fd1c5] text-white rounded-lg text-sm font-medium
-                           hover:bg-[#5fe0d4] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-6 py-2 bg-[var(--color-accent)] text-[var(--color-bg-dark)] rounded-lg text-sm font-medium
+                           hover:bg-[var(--color-accent-hover)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {editingServer ? "Update Connection" : "Add Connection"}
           </button>
           <button
             onClick={onCancel}
-            className="px-6 py-2 bg-white/5 text-white/60 rounded-lg text-sm font-medium
-                           hover:bg-white/10 transition-all"
+            className="px-6 py-2 bg-[var(--color-bg-surface)] text-[var(--color-text-secondary)] rounded-lg text-sm font-medium
+                           hover:bg-[var(--color-bg-raised)] transition-all"
           >
             Cancel
           </button>

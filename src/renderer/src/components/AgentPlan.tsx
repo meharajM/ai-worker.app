@@ -17,19 +17,19 @@ export function AgentPlan({ plan, className = '' }: AgentPlanProps) {
       initial={{ opacity: 0, height: 0 }}
       animate={{ opacity: 1, height: 'auto' }}
       transition={{ duration: 0.3 }}
-      className={`rounded-xl bg-black/20 border border-white/10 overflow-hidden my-2 ${className}`}
+      className={`rounded-lg bg-[var(--color-bg-surface)] border border-[var(--color-border)] overflow-hidden my-2 ${className}`}
     >
       {/* Header */}
-      <div className="bg-white/5 px-4 py-2 border-b border-white/10 flex items-center gap-2">
-        <BrainCircuit size={16} className="text-[#4fd1c5]" />
-        <span className="text-xs font-medium text-white/80">Agent Thought Process</span>
+      <div className="bg-[var(--color-bg-elevated)] px-4 py-2 border-b border-[var(--color-border)] flex items-center gap-2">
+        <BrainCircuit size={16} className="text-[var(--color-accent)]" />
+        <span className="text-xs font-medium text-[var(--color-text-secondary)]">Agent Thought Process</span>
       </div>
 
       {/* Goal */}
       {plan.goal && (
-        <div className="px-4 py-3 border-b border-white/5">
-          <div className="text-xs text-white/50 mb-1 uppercase tracking-wider font-semibold">Goal</div>
-          <div className="text-sm text-white/90">{plan.goal}</div>
+        <div className="px-4 py-3 border-b border-[var(--color-border)]">
+          <div className="text-xs text-[var(--color-text-tertiary)] mb-1 uppercase tracking-wider font-semibold">Goal</div>
+          <div className="text-sm text-[var(--color-text-primary)]">{plan.goal}</div>
         </div>
       )}
 
@@ -43,29 +43,29 @@ export function AgentPlan({ plan, className = '' }: AgentPlanProps) {
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: idx * 0.05, duration: 0.2 }}
               className={`flex items-start gap-3 p-2 rounded-lg transition-colors ${
-                step.status === 'active' ? 'bg-white/10' : 'hover:bg-white/5'
+                step.status === 'active' ? 'bg-[var(--color-bg-raised)]' : 'hover:bg-[var(--color-bg-raised)]'
               }`}
             >
               {/* Status Icon */}
               <div className="mt-0.5 flex-shrink-0">
-                {step.status === 'completed' && <CheckCircle2 size={16} className="text-green-400" />}
-                {step.status === 'active' && <Loader2 size={16} className="text-[#4fd1c5] animate-spin" />}
-                {step.status === 'pending' && <Circle size={16} className="text-white/20" />}
+                {step.status === 'completed' && <CheckCircle2 size={16} className="text-[var(--color-success)]" />}
+                {step.status === 'active' && <Loader2 size={16} className="text-[var(--color-accent)] animate-spin" />}
+                {step.status === 'pending' && <Circle size={16} className="text-[var(--color-text-disabled)]" />}
               </div>
 
               {/* Content */}
               <div className="flex-1 min-w-0">
                 <div className={`text-sm ${
-                  step.status === 'completed' ? 'text-white/60 line-through' : 
-                  step.status === 'active' ? 'text-white font-medium' : 'text-white/60'
+                  step.status === 'completed' ? 'text-[var(--color-text-tertiary)] line-through' : 
+                  step.status === 'active' ? 'text-[var(--color-text-primary)] font-medium' : 'text-[var(--color-text-tertiary)]'
                 }`}>
                   {step.description}
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
                       step.status === 'active' 
-                        ? 'bg-[#4fd1c5]/10 border-[#4fd1c5]/30 text-[#4fd1c5]' 
-                        : 'bg-white/5 border-white/10 text-white/40'
+                        ? 'bg-[var(--color-accent-muted)] border-[var(--color-accent)]/30 text-[var(--color-accent)]' 
+                        : 'bg-[var(--color-bg-surface)] border-[var(--color-border)] text-[var(--color-text-tertiary)]'
                     }`}>
                     {step.assigned_agent || 'System'}
                   </span>

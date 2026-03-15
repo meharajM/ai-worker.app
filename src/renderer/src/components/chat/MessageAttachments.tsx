@@ -34,7 +34,7 @@ export function MessageAttachments({ attachments, isUser = false }: MessageAttac
       {attachments.map((att, idx) => (
         <div
           key={`${att.name}-${idx}`}
-          className="group/card flex items-center gap-3 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-2xl p-3 pr-5 transition-all hover:bg-[#25252b] hover:border-[var(--color-border-hover)] shadow-sm"
+          className="group/card flex items-center gap-3 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-2xl p-3 pr-5 transition-all hover:bg-[var(--color-bg-raised)] hover:border-[var(--color-border-hover)] shadow-sm"
           title={att.path}
         >
           <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center border border-white/5">

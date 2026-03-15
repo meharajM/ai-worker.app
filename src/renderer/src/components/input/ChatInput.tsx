@@ -258,7 +258,7 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
     <div className="bg-[var(--color-card-elevated)]/90 backdrop-blur-xl border border-[var(--color-border)] rounded-input p-3 shadow-glass transition-all duration-normal relative group hover:border-[var(--color-border-hover)]">
       {/* Notification Toast */}
       {notification && (
-        <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-emerald-500/90 text-white text-xs px-3 py-1.5 rounded-full shadow-lg whitespace-nowrap animate-in fade-in slide-in-from-bottom-2 duration-normal pointer-events-none border border-emerald-400/50 backdrop-blur-sm">
+        <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-[var(--color-success)] text-white text-xs px-3 py-1.5 rounded-full shadow-lg whitespace-nowrap animate-in fade-in slide-in-from-bottom-2 duration-normal pointer-events-none border border-[var(--color-success)]/50 backdrop-blur-sm">
           {notification}
         </div>
       )}

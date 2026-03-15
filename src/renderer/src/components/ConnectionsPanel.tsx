@@ -105,8 +105,8 @@ Can you help me troubleshoot this?`;
     <div className="flex-1 min-w-0 p-6 overflow-y-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-xl font-bold">MCP Connections</h2>
-          <p className="text-sm text-white/40 mt-1">
+          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">MCP Connections</h2>
+          <p className="text-sm text-[var(--color-text-tertiary)] mt-1">
             {connectedCount} connected · {servers.length} configured
           </p>
         </div>
@@ -119,8 +119,8 @@ Can you help me troubleshoot this?`;
               setShowForm(!showForm);
             }
           }}
-          className="flex items-center gap-2 px-4 py-2 bg-[#4fd1c5] text-white rounded-xl
-                       hover:bg-[#5fe0d4] transition-all shadow-lg shadow-[#4fd1c5]/20"
+          className="flex items-center gap-2 px-4 py-2 bg-[var(--color-accent)] text-[var(--color-bg-dark)] rounded-lg
+                       hover:opacity-90 transition-all shadow-lg"
         >
           <Plus size={18} />
           {editingServerId
@@ -145,9 +145,9 @@ Can you help me troubleshoot this?`;
 
       {/* Server List */}
       {servers.length === 0 ? (
-        <div className="text-center py-20 border-2 border-dashed border-white/5 rounded-xl">
-          <Database size={48} className="mx-auto text-white/20 mb-4" />
-          <p className="text-white/40 mb-2 font-medium">
+        <div className="text-center py-20 border-2 border-dashed border-[var(--color-border)] rounded-lg">
+          <Database size={48} className="mx-auto text-[var(--color-text-disabled)] mb-4" />
+          <p className="text-[var(--color-text-tertiary)] mb-2 font-medium">
             No MCP servers configured
           </p>
         </div>

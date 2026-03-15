@@ -57,49 +57,49 @@ export function MemoryPreferencesPanel() {
     return (
         <div className="space-y-6">
             <div className="flex items-center gap-3 mb-6">
-                <div className="p-3 bg-purple-500/10 rounded-xl">
-                    <HardDrive className="w-6 h-6 text-purple-400" />
+                <div className="p-3 bg-[var(--color-accent-muted)] rounded-lg">
+                    <HardDrive className="w-6 h-6 text-[var(--color-accent)]" />
                 </div>
                 <div>
-                    <h3 className="text-xl font-bold">Memory Architecture</h3>
-                    <p className="text-sm text-white/60">Configure how the AI agent stores and retrieves long-term memories.</p>
+                    <h3 className="text-xl font-bold text-[var(--color-text-primary)]">Memory Architecture</h3>
+                    <p className="text-sm text-[var(--color-text-secondary)]">Configure how the AI agent stores and retrieves long-term memories.</p>
                 </div>
             </div>
 
             {/* Backend Selection */}
-            <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-4">
-                <label className="block text-sm font-medium mb-4">Storage Backend</label>
+            <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-lg p-4">
+                <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-4">Storage Backend</label>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <button
                         onClick={() => handleBackendChange('server-memory')}
-                        className={`flex flex-col items-start p-4 rounded-xl border transition-all ${
+                        className={`flex flex-col items-start p-4 rounded-lg border transition-all ${
                             settings.memoryBackend === 'server-memory'
-                                ? 'bg-purple-500/10 border-purple-500/50'
-                                : 'bg-white/5 border-transparent hover:bg-white/10'
+                                ? 'bg-[var(--color-accent-muted)] border-[var(--color-accent)]/50'
+                                : 'bg-[var(--color-bg-surface)] border-transparent hover:bg-[var(--color-bg-raised)]'
                         }`}
                     >
                         <div className="flex items-center gap-2 mb-2">
-                            <Server className={`w-5 h-5 ${settings.memoryBackend === 'server-memory' ? 'text-purple-400' : 'text-white/60'}`} />
-                            <span className="font-bold">Server Memory</span>
+                            <Server className={`w-5 h-5 ${settings.memoryBackend === 'server-memory' ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)]'}`} />
+                            <span className="font-bold text-[var(--color-text-primary)]">Server Memory</span>
                         </div>
-                        <p className="text-xs text-left text-white/50">
+                        <p className="text-xs text-left text-[var(--color-text-tertiary)]">
                             Local JSON-based storage. Fast and simple. Best for personal use and standard workloads.
                         </p>
                     </button>
 
                     <button
                         onClick={() => handleBackendChange('memento-mcp')}
-                        className={`flex flex-col items-start p-4 rounded-xl border transition-all ${
+                        className={`flex flex-col items-start p-4 rounded-lg border transition-all ${
                             settings.memoryBackend === 'memento-mcp'
-                                ? 'bg-purple-500/10 border-purple-500/50'
-                                : 'bg-white/5 border-transparent hover:bg-white/10'
+                                ? 'bg-[var(--color-accent-muted)] border-[var(--color-accent)]/50'
+                                : 'bg-[var(--color-bg-surface)] border-transparent hover:bg-[var(--color-bg-raised)]'
                         }`}
                     >
                         <div className="flex items-center gap-2 mb-2">
-                            <HardDrive className={`w-5 h-5 ${settings.memoryBackend === 'memento-mcp' ? 'text-purple-400' : 'text-white/60'}`} />
-                            <span className="font-bold">Memento MCP (Neo4j)</span>
+                            <HardDrive className={`w-5 h-5 ${settings.memoryBackend === 'memento-mcp' ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)]'}`} />
+                            <span className="font-bold text-[var(--color-text-primary)]">Memento MCP (Neo4j)</span>
                         </div>
-                        <p className="text-xs text-left text-white/50">
+                        <p className="text-xs text-left text-[var(--color-text-tertiary)]">
                             Graph database storage. Scalable and relational. Best for massive context and complex queries.
                         </p>
                     </button>
@@ -107,42 +107,42 @@ export function MemoryPreferencesPanel() {
             </div>
 
             {/* Current Stats */}
-            <div className="bg-[#1a1d23] border border-white/10 rounded-xl p-6">
+            <div className="bg-[var(--color-bg-elevated)] border border-[var(--color-border)] rounded-lg p-6">
                 <div className="flex items-center justify-between mb-4">
-                    <h4 className="font-medium flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                    <h4 className="font-medium text-[var(--color-text-primary)] flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-[var(--color-success)] animate-pulse"></span>
                         Active Memory Stats
                     </h4>
                     <button 
                         onClick={loadStats}
                         disabled={loading}
-                        className="p-2 hover:bg-white/5 rounded-lg transition-colors"
+                        className="p-2 hover:bg-[var(--color-bg-surface)] rounded-lg transition-colors"
                     >
-                        <RefreshCw className={`w-4 h-4 text-white/40 ${loading ? 'animate-spin' : ''}`} />
+                        <RefreshCw className={`w-4 h-4 text-[var(--color-text-tertiary)] ${loading ? 'animate-spin' : ''}`} />
                     </button>
                 </div>
 
                 {stats ? (
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <div className="bg-black/20 p-3 rounded-lg">
-                            <div className="text-xs text-white/40 mb-1">Total Entities</div>
-                            <div className="text-xl font-mono text-purple-400">{stats.entityCount.toLocaleString()}</div>
+                        <div className="bg-[var(--color-bg-dark)] p-3 rounded-lg">
+                            <div className="text-xs text-[var(--color-text-tertiary)] mb-1">Total Entities</div>
+                            <div className="text-xl font-mono text-[var(--color-accent)]">{stats.entityCount.toLocaleString()}</div>
                         </div>
-                        <div className="bg-black/20 p-3 rounded-lg">
-                            <div className="text-xs text-white/40 mb-1">Relations</div>
-                            <div className="text-xl font-mono text-blue-400">{stats.relationCount.toLocaleString()}</div>
+                        <div className="bg-[var(--color-bg-dark)] p-3 rounded-lg">
+                            <div className="text-xs text-[var(--color-text-tertiary)] mb-1">Relations</div>
+                            <div className="text-xl font-mono text-[var(--color-info)]">{stats.relationCount.toLocaleString()}</div>
                         </div>
-                        <div className="bg-black/20 p-3 rounded-lg">
-                            <div className="text-xs text-white/40 mb-1">Storage Size</div>
-                            <div className="text-xl font-mono text-yellow-400">{formatBytes(stats.storageSize)}</div>
+                        <div className="bg-[var(--color-bg-dark)] p-3 rounded-lg">
+                            <div className="text-xs text-[var(--color-text-tertiary)] mb-1">Storage Size</div>
+                            <div className="text-xl font-mono text-[var(--color-warning)]">{formatBytes(stats.storageSize)}</div>
                         </div>
-                        <div className="bg-black/20 p-3 rounded-lg">
-                            <div className="text-xs text-white/40 mb-1">Search Latency</div>
-                            <div className="text-xl font-mono text-green-400">{stats.avgSearchLatency.toFixed(1)}ms</div>
+                        <div className="bg-[var(--color-bg-dark)] p-3 rounded-lg">
+                            <div className="text-xs text-[var(--color-text-tertiary)] mb-1">Search Latency</div>
+                            <div className="text-xl font-mono text-[var(--color-success)]">{stats.avgSearchLatency.toFixed(1)}ms</div>
                         </div>
                     </div>
                 ) : (
-                    <div className="text-center py-8 text-white/20">
+                    <div className="text-center py-8 text-[var(--color-text-disabled)]">
                         {loading ? 'Loading statistics...' : 'Stats unavailable'}
                     </div>
                 )}
@@ -150,28 +150,28 @@ export function MemoryPreferencesPanel() {
 
             {/* Migration Suggestion (Conditional) */}
             {(migrationStatus === 'success' || (stats && stats.entityCount > 10000 && settings.memoryBackend === 'server-memory')) && (
-                <div className={`border rounded-xl p-4 flex items-start gap-4 ${
+                <div className={`border rounded-lg p-4 flex items-start gap-4 ${
                     migrationStatus === 'success' 
-                        ? 'bg-green-500/10 border-green-500/20' 
-                        : 'bg-yellow-500/10 border-yellow-500/20'
+                        ? 'bg-[var(--color-success-muted)] border-[var(--color-success)]/20' 
+                        : 'bg-[var(--color-warning-muted)] border-[var(--color-warning)]/20'
                 }`}>
                     <div className={`p-2 rounded-lg ${
-                        migrationStatus === 'success' ? 'bg-green-500/20' : 'bg-yellow-500/20'
+                        migrationStatus === 'success' ? 'bg-[var(--color-success)]/20' : 'bg-[var(--color-warning)]/20'
                     }`}>
                         {migrationStatus === 'success' ? (
-                            <Check className="w-6 h-6 text-green-400" />
+                            <Check className="w-6 h-6 text-[var(--color-success)]" />
                         ) : (
-                            <AlertCircle className="w-6 h-6 text-yellow-400" />
+                            <AlertCircle className="w-6 h-6 text-[var(--color-warning)]" />
                         )}
                     </div>
                     <div className="flex-1">
                         <h4 className={`font-bold mb-1 ${
-                            migrationStatus === 'success' ? 'text-green-400' : 'text-yellow-400'
+                            migrationStatus === 'success' ? 'text-[var(--color-success)]' : 'text-[var(--color-warning)]'
                         }`}>
                             {migrationStatus === 'success' ? 'Migration Complete' : 'Scalability Warning'}
                         </h4>
                         <p className={`text-sm mb-3 ${
-                            migrationStatus === 'success' ? 'text-green-200/80' : 'text-yellow-200/80'
+                            migrationStatus === 'success' ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-secondary)]'
                         }`}>
                             {migrationStatus === 'success' 
                                 ? 'Your memory has been successfully migrated to Memento MCP.' 
@@ -198,7 +198,7 @@ export function MemoryPreferencesPanel() {
                                     }
                                 }}
                                 disabled={migrationStatus === 'migrating'}
-                                className="px-4 py-2 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-400 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                                className="px-4 py-2 bg-[var(--color-warning-muted)] hover:bg-[var(--color-warning)]/20 text-[var(--color-warning)] rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
                             >
                                 {migrationStatus === 'migrating' ? (
                                     <>
@@ -237,7 +237,7 @@ export function MemoryPreferencesPanel() {
                             alert('Write Exception: ' + e.message);
                         }
                     }}
-                    className="text-xs text-white/30 hover:text-white/80 underline"
+                    className="text-xs text-[var(--color-text-disabled)] hover:text-[var(--color-text-primary)] underline"
                 >
                     Test Write
                 </button>

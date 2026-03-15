@@ -72,10 +72,10 @@ export function InputToolbar({
           onClick={() => setShowContextMenu(!showContextMenu)}
           disabled={disabled}
           className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${workspacePath
-              ? 'bg-[#00a896]/20 text-[#00a896] hover:bg-[#00a896]/30'
+              ? 'bg-[var(--color-accent-muted)] text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20'
               : hasAttachments
-                ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
-                : 'bg-transparent text-white/40 hover:text-white/60 hover:bg-white/5'
+                ? 'bg-[var(--color-success-muted)] text-[var(--color-success)] hover:bg-[var(--color-success)]/20'
+                : 'bg-transparent text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-surface)]'
             } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
           title={workspacePath ? `Workspace: ${workspacePath}` : 'Select workspace or files'}
         >
@@ -84,40 +84,40 @@ export function InputToolbar({
 
         {/* Dropdown Menu */}
         {showContextMenu && (
-          <div className="absolute bottom-full mb-2 -right-4 bg-[#1e2028] border border-white/15 rounded-xl shadow-2xl overflow-hidden min-w-[200px] animate-in fade-in slide-in-from-bottom-2 duration-150 z-50">
+          <div className="absolute bottom-full mb-2 -right-4 bg-[var(--color-bg-elevated)] border border-[var(--color-border-hover)] rounded-lg shadow-lg overflow-hidden min-w-[200px] animate-in fade-in slide-in-from-bottom-2 duration-150 z-50">
             {/* Select Workspace */}
             <button
               onClick={() => {
                 onSelectFolder()
                 setShowContextMenu(false)
               }}
-              className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/80 hover:bg-white/10 hover:text-white transition-colors"
+              className="w-full flex items-center gap-3 px-4 py-3 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-surface)] hover:text-[var(--color-text-primary)] transition-colors"
             >
               <FolderOpen
                 size={16}
-                className={workspacePath ? 'text-[#00a896]' : 'text-white/50'}
+                className={workspacePath ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-tertiary)]'}
               />
               <div className="flex flex-col items-start">
                 <span className="font-medium">Select Workspace</span>
                 {workspacePath && (
-                  <span className="text-[10px] text-[#00a896]/70 max-w-[160px] truncate">
+                  <span className="text-[10px] text-[var(--color-accent)]/70 max-w-[160px] truncate">
                     {workspacePath.split(/[/\\]/).pop()}
                   </span>
                 )}
               </div>
             </button>
-            <div className="border-t border-white/10" />
+            <div className="border-t border-[var(--color-border)]" />
             {/* Select Files */}
             <button
               onClick={() => {
                 fileInputRef.current?.click()
                 setShowContextMenu(false)
               }}
-              className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/80 hover:bg-white/10 hover:text-white transition-colors"
+              className="w-full flex items-center gap-3 px-4 py-3 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-surface)] hover:text-[var(--color-text-primary)] transition-colors"
             >
               <FileIcon
                 size={16}
-                className={hasAttachments ? 'text-emerald-400' : 'text-white/50'}
+                className={hasAttachments ? 'text-[var(--color-success)]' : 'text-[var(--color-text-tertiary)]'}
               />
               <span className="font-medium">Select Files</span>
             </button>
@@ -130,8 +130,8 @@ export function InputToolbar({
         onClick={onToggleHeadless}
         disabled={disabled}
         className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center ${isHeadless
-            ? 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30'
-            : 'bg-transparent text-white/40 hover:text-white/60 hover:bg-white/5'
+            ? 'bg-[var(--color-accent-muted)] text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20'
+            : 'bg-transparent text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-surface)]'
           } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
         title={
           isHeadless

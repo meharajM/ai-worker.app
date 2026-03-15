@@ -1,118 +1,169 @@
 /**
  * Design Tokens — CSS custom properties for the ai-worker UI.
  * 
- * Apple-inspired palette: Refined, professional, warm.
- * Supports both light and dark modes.
+ * Industrial utilitarian aesthetic: Warm amber/bronze accent on deep charcoal.
+ * Distinctive, professional, not generic AI slop.
  * 
- * Usage in Tailwind:  `bg-[var(--color-primary)]`
- * Usage in plain CSS:  `color: var(--color-primary);`
+ * Usage in Tailwind:  `bg-[var(--color-accent)]`
+ * Usage in plain CSS:  `color: var(--color-accent);`
  */
 
 /* ── Dark Mode (Default) ───────────────────────────────────────────── */
 :root {
-  /* ── Primary Brand Color ──────────────────────────────────────────── */
-  /* iOS Blue - trustworthy, calm, professional */
-  --color-primary: #007AFF;
-  --color-primary-hover: #0056CC;
-  --color-primary-muted: rgba(0, 122, 255, 0.15);
+  /* ── Accent Color — Warm Amber (distinctive, NOT cyan/teal) ─────── */
+  --color-accent: #E5A855;
+  --color-accent-hover: #C99245;
+  --color-accent-muted: rgba(229, 168, 85, 0.15);
+  --color-accent-subtle: rgba(229, 168, 85, 0.08);
   
-  /* ── Backgrounds (slightly blue-tinted, not pure gray) ───────────── */
-  --color-bg-dark: #0D0F12;        /* Main background - deep charcoal */
-  --color-bg-elevated: #16181D;    /* Cards, modals */
-  --color-bg-surface: #1E2127;     /* Hover states, inputs */
-  --color-bg-raised: #252A32;      /* Elevated surfaces */
+  /* ── Primary Brand (for user messages) ───────────────────────────── */
+  --color-primary: #E5A855;
+  --color-primary-hover: #C99245;
+  --color-primary-muted: rgba(229, 168, 85, 0.15);
   
-  /* ── Legacy aliases for existing components ──────────────────────── */
+  /* ── Backgrounds — Warm-tinted charcoal ────────────────────────── */
+  --color-bg-dark: #121110;
+  --color-bg-elevated: #1A1918;
+  --color-bg-surface: #222120;
+  --color-bg-raised: #2A2826;
+  
+  /* Legacy aliases */
   --color-card-dark: var(--color-bg-elevated);
   --color-surface: var(--color-bg-surface);
-  --color-border: rgba(255, 255, 255, 0.08);
-  --color-border-hover: rgba(255, 255, 255, 0.15);
+  --color-border: rgba(255, 255, 255, 0.06);
+  --color-border-hover: rgba(255, 255, 255, 0.12);
   
-  /* ── Text (soft, not harsh) ─────────────────────────────────────── */
-  --color-text-primary: rgba(255, 255, 255, 0.92);
-  --color-text-secondary: rgba(255, 255, 255, 0.65);
-  --color-text-tertiary: rgba(255, 255, 255, 0.45);
-  --color-text-disabled: rgba(255, 255, 255, 0.28);
+  /* ── Text — Warm whites ─────────────────────────────────────────── */
+  --color-text-primary: rgba(255, 248, 240, 0.94);
+  --color-text-secondary: rgba(255, 248, 240, 0.62);
+  --color-text-tertiary: rgba(255, 248, 240, 0.42);
+  --color-text-disabled: rgba(255, 248, 240, 0.24);
   
   /* Legacy aliases */
   --color-text-muted: var(--color-text-tertiary);
   --color-text-dim: var(--color-text-disabled);
   
-  /* ── Semantic Colors ──────────────────────────────────────────────── */
-  /* Success - emerald (not neon green) */
-  --color-success: #34C759;
-  --color-success-muted: rgba(52, 199, 89, 0.15);
+  /* ── Semantic Colors ───────────────────────────────────────────── */
+  --color-success: #8B9F5A;
+  --color-success-muted: rgba(139, 159, 90, 0.15);
   
-  /* Warning - amber (not yellow) */
-  --color-warning: #FF9500;
-  --color-warning-muted: rgba(255, 149, 0, 0.15);
+  --color-warning: #D4A03A;
+  --color-warning-muted: rgba(212, 160, 58, 0.15);
   
-  /* Error - coral/rose (not bright red) */
-  --color-error: #FF453A;
-  --color-error-muted: rgba(255, 69, 58, 0.15);
+  --color-error: #C75D4D;
+  --color-error-muted: rgba(199, 93, 77, 0.15);
   
-  /* Info - iOS blue */
-  --color-info: #007AFF;
-  --color-info-muted: rgba(0, 122, 255, 0.15);
+  --color-info: #E5A855;
+  --color-info-muted: rgba(229, 168, 85, 0.12);
+
+  /* ── Theme-aware opacity utilities (maps Tailwind white/X patterns) ─ */
+  --bg-white-5: rgba(255, 255, 255, 0.05);
+  --bg-white-10: rgba(255, 255, 255, 0.10);
+  --bg-white-20: rgba(255, 255, 255, 0.20);
+  --bg-black-20: rgba(0, 0, 0, 0.20);
+  --bg-black-30: rgba(0, 0, 0, 0.30);
+  --bg-black-40: rgba(0, 0, 0, 0.40);
   
-  /* ── Legacy status aliases ───────────────────────────────────────── */
-  --color-success: #34C759;
-  --color-warning: #FF9500;
-  --color-error: #FF453A;
-
-  /* ── Typography gradient (removed AI slop gradient) ──────────────── */
-  --gradient-text: none;  /* Solid text - clean and professional */
-
-  /* ── Radii ───────────────────────────────────────────────────────── */
-  --radius-bubble: 1.125rem;   /* iOS-style rounded */
-  --radius-button: 0.625rem;
-  --radius-avatar: 0.5rem;
-  --radius-card: 0.875rem;
-  --radius-pill: 9999px;
-
-  /* ── Spacing ─────────────────────────────────────────────────────── */
-  --space-message-gap: 0.75rem;
-  --space-bubble-px: 1rem;
-  --space-bubble-py: 0.75rem;
-
+  --text-white: rgba(255, 255, 255, 0.94);
+  --text-white-90: rgba(255, 255, 255, 0.90);
+  --text-white-80: rgba(255, 255, 255, 0.80);
+  --text-white-70: rgba(255, 255, 255, 0.70);
+  --text-white-60: rgba(255, 255, 255, 0.60);
+  --text-white-50: rgba(255, 255, 255, 0.50);
+  --text-white-40: rgba(255, 255, 255, 0.40);
+  --text-white-30: rgba(255, 255, 255, 0.30);
+  --text-white-20: rgba(255, 255, 255, 0.20);
+  --text-white-10: rgba(255, 255, 255, 0.10);
+  
+  --border-white-5: rgba(255, 255, 255, 0.05);
+  --border-white-10: rgba(255, 255, 255, 0.10);
+  --border-white-20: rgba(255, 255, 255, 0.20);
+  
   /* ── Typography ─────────────────────────────────────────────────── */
-  --font-size-message: 0.9375rem;  /* 15px - readable, Apple-style */
-  --font-size-meta: 0.6875rem;    /* 11px */
-  --font-size-tool: 0.8125rem;    /* 13px */
-  --font-size-label: 0.75rem;     /* 12px */
-
+  --font-size-message: 0.9375rem;
+  --font-size-meta: 0.6875rem;
+  --font-size-tool: 0.8125rem;
+  --font-size-label: 0.75rem;
+  
+  /* ── Radii ───────────────────────────────────────────────────────── */
+  --radius-bubble: 0.75rem;
+  --radius-button: 0.375rem;
+  --radius-avatar: 0.375rem;
+  --radius-card: 0.5rem;
+  --radius-pill: 9999px;
+  
+  /* ── Spacing ─────────────────────────────────────────────────────── */
+  --space-message-gap: 0.5rem;
+  --space-bubble-px: 0.875rem;
+  --space-bubble-py: 0.625rem;
+  
   /* ── Animation ───────────────────────────────────────────────────── */
-  --duration-fast: 150ms;
-  --duration-normal: 250ms;       /* Slightly faster than before */
-  --duration-slow: 400ms;
-  --ease-out: cubic-bezier(0.25, 0.1, 0.25, 1);  /* Apple-style ease */
-  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);  /* Subtle bounce */
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  
+  /* ── Shadows ──────────────────────────────────────────────────────── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-glass: none;
 }
 
 /* ── Light Mode ──────────────────────────────────────────────────────── */
 [data-theme="light"] {
-  /* ── Backgrounds (warm whites like macOS) ───────────────────────── */
-  --color-bg-dark: #F5F5F7;       /* macOS light gray */
-  --color-bg-elevated: #FFFFFF;   /* Cards - pure white */
-  --color-bg-surface: #F0F0F3;    /* Inputs, hover */
-  --color-bg-raised: #E8E8ED;     /* Elevated surfaces */
+  /* ── Backgrounds ─────────────────────────────────────────────────── */
+  --color-bg-dark: #F5F3EE;
+  --color-bg-elevated: #FFFFFF;
+  --color-bg-surface: #EFECE6;
+  --color-bg-raised: #E5E2DB;
   
   /* ── Borders ──────────────────────────────────────────────────────── */
   --color-border: rgba(0, 0, 0, 0.08);
-  --color-border-hover: rgba(0, 0, 0, 0.15);
+  --color-border-hover: rgba(0, 0, 0, 0.16);
   
-  /* ── Text (dark, not pure black) ───────────────────────────────── */
-  --color-text-primary: rgba(0, 0, 0, 0.88);
-  --color-text-secondary: rgba(0, 0, 0, 0.58);
-  --color-text-tertiary: rgba(0, 0, 0, 0.38);
-  --color-text-disabled: rgba(0, 0, 0, 0.22);
+  /* ── Text ─────────────────────────────────────────────────────────── */
+  --color-text-primary: rgba(30, 28, 24, 0.92);
+  --color-text-secondary: rgba(30, 28, 24, 0.60);
+  --color-text-tertiary: rgba(30, 28, 24, 0.40);
+  --color-text-disabled: rgba(30, 28, 24, 0.24);
   
-  /* ── Primary stays the same (iOS blue works on light too) ─────── */
-  --color-primary-muted: rgba(0, 122, 255, 0.1);
+  /* ── Accent stays the same (amber works in light mode) ───────────── */
+  --color-accent-muted: rgba(229, 168, 85, 0.12);
+  --color-accent-subtle: rgba(229, 168, 85, 0.06);
   
-  /* ── Semantic muted (lighter for light mode) ───────────────────── */
-  --color-success-muted: rgba(52, 199, 89, 0.12);
-  --color-warning-muted: rgba(255, 149, 0, 0.12);
-  --color-error-muted: rgba(255, 69, 58, 0.12);
-  --color-info-muted: rgba(0, 122, 255, 0.1);
+  /* ── Semantic muted ───────────────────────────────────────────────── */
+  --color-success-muted: rgba(139, 159, 90, 0.12);
+  --color-warning-muted: rgba(212, 160, 58, 0.12);
+  --color-error-muted: rgba(199, 93, 77, 0.12);
+  --color-info-muted: rgba(229, 168, 85, 0.10);
+  
+  /* ── Theme-aware opacity utilities for light mode ────────────────── */
+  --bg-white-5: rgba(0, 0, 0, 0.03);
+  --bg-white-10: rgba(0, 0, 0, 0.06);
+  --bg-white-20: rgba(0, 0, 0, 0.10);
+  --bg-black-20: rgba(255, 255, 255, 0.80);
+  --bg-black-30: rgba(255, 255, 255, 0.70);
+  --bg-black-40: rgba(255, 255, 255, 0.60);
+  
+  --text-white: rgba(30, 28, 24, 0.92);
+  --text-white-90: rgba(30, 28, 24, 0.90);
+  --text-white-80: rgba(30, 28, 24, 0.80);
+  --text-white-70: rgba(30, 28, 24, 0.70);
+  --text-white-60: rgba(30, 28, 24, 0.60);
+  --text-white-50: rgba(30, 28, 24, 0.50);
+  --text-white-40: rgba(30, 28, 24, 0.40);
+  --text-white-30: rgba(30, 28, 24, 0.30);
+  --text-white-20: rgba(30, 28, 24, 0.20);
+  --text-white-10: rgba(30, 28, 24, 0.10);
+  
+  --border-white-5: rgba(0, 0, 0, 0.04);
+  --border-white-10: rgba(0, 0, 0, 0.08);
+  --border-white-20: rgba(0, 0, 0, 0.16);
+  
+  /* ── Shadows lighter in light mode ────────────────────────────────── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.10);
 }
