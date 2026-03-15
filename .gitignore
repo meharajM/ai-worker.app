@@ -30,7 +30,7 @@ node_modules/
 out/
 dist/
 build/Release
-tests/
+# tests/
 
 # Python (Vosk Bridge)
 __pycache__/
