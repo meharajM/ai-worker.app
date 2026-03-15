@@ -121,7 +121,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <SidebarHeader />
 
                 <div className="flex-1 overflow-y-auto px-5 py-4">
-                    <h3 className="text-[10px] font-bold text-white/40 tracking-wider uppercase mb-3">
+                    <h3 className="text-[10px] font-[var(--font-weight-bold)] text-[var(--color-text-dim)] tracking-wider uppercase mb-3">
                         Settings
                     </h3>
                     <nav className="flex flex-col gap-1">
@@ -304,7 +304,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                                             key={theme}
                                             onClick={() => settings.setTheme(theme)}
                                             className={`flex-1 py-2 px-4 rounded-lg text-sm capitalize transition-colors ${settings.theme === theme
-                                                ? 'bg-[var(--color-brand-teal)] text-white'
+                                                ? 'bg-[var(--color-brand-teal)] text-[var(--color-text-inverse)]'
                                                 : 'bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-border)]'
                                                 }`}
                                         >
@@ -373,7 +373,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
                             <Card variant="glass" padding="lg" className="text-center">
                                 <div className="w-20 h-20 bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-accent)] rounded-[var(--radius-xl)] flex items-center justify-center mx-auto mb-[var(--space-4)] shadow-lg">
-                                    <Sparkles className="w-10 h-10 text-white" />
+                                    <Sparkles className="w-10 h-10 text-[var(--color-text-inverse)]" />
                                 </div>
                                 <h4 className="text-[var(--text-2xl)] font-[var(--font-weight-bold)] text-[var(--color-text-primary)]">{APP_INFO.NAME}</h4>
                                 <p className="text-[var(--text-sm)] text-[var(--color-text-muted)] mt-[var(--space-1)]">Version {APP_INFO.VERSION}</p>

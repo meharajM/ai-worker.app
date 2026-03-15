@@ -258,7 +258,7 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
     <div className="card card-glass card-padding-sm border border-[var(--color-border)] p-[var(--space-3)] relative group hover:border-[var(--color-border-hover)]">
       {/* Notification Toast */}
       {notification && (
-        <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-[var(--color-success)]/90 text-white text-xs px-3 py-1.5 rounded-full shadow-lg whitespace-nowrap animate-in fade-in slide-in-from-bottom-2 duration-normal pointer-events-none border border-[var(--color-success)]/50 backdrop-blur-sm">
+        <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-[var(--color-success)]/90 text-[var(--color-text-inverse)] text-xs px-3 py-1.5 rounded-full shadow-lg whitespace-nowrap animate-in fade-in slide-in-from-bottom-2 duration-normal pointer-events-none border border-[var(--color-success)]/50 backdrop-blur-sm">
           {notification}
         </div>
       )}

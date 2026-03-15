@@ -99,7 +99,7 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
           className={cn(
             'rounded-[var(--radius-bubble)] px-[var(--space-bubble-px)] py-[var(--space-bubble-py)] shadow-[var(--shadow-sm)]',
             isUser
-              ? 'bg-[var(--color-primary)] text-white'
+              ? 'bg-[var(--color-primary)] text-[var(--color-text-inverse)]'
               : 'bg-[var(--color-card-dark)] border border-[var(--color-border)] text-[var(--color-text-primary)]'
           )}
         >

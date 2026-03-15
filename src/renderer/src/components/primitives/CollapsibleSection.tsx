@@ -35,7 +35,7 @@ export function CollapsibleSection({
 }: CollapsibleSectionProps) {
   return (
     <details className={cn('group', className)} open={defaultOpen}>
-      <summary className="text-[10px] text-white/40 cursor-pointer hover:text-white/60 transition-colors list-none flex items-center gap-1.5 font-medium select-none">
+      <summary className="text-[10px] text-[var(--color-text-dim)] cursor-pointer hover:text-[var(--color-text-muted)] transition-colors list-none flex items-center gap-1.5 font-medium select-none">
         <div
           className={cn(
             'w-1 h-3 rounded-full',
@@ -46,7 +46,7 @@ export function CollapsibleSection({
         <span>{label}</span>
         <ChevronRight
           size={10}
-          className="group-open:rotate-90 transition-transform text-white/20"
+          className="group-open:rotate-90 transition-transform text-[var(--color-text-dim)]"
         />
       </summary>
 

@@ -12,7 +12,7 @@ export function MessageTimestamp({ timestamp, isUser = false }: MessageTimestamp
   return (
     <p
       className={`text-[var(--font-size-meta)] mt-1 ${
-        isUser ? 'text-white/60' : 'text-[var(--color-text-dim)]'
+        isUser ? 'text-[var(--color-text-inverse-muted)]' : 'text-[var(--color-text-dim)]'
       }`}
     >
       {formatted}

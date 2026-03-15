@@ -47,6 +47,22 @@
   --color-agent-mcp: #0A84FF;
   --color-agent-default: #8E8E93;
 
+  /* ── Extended Status Colors ──────────────────────────────────────── */
+  /* Status backgrounds (translucent versions for cards/badges) */
+  --color-success-bg: rgba(48, 209, 88, 0.15);
+  --color-warning-bg: rgba(255, 214, 10, 0.15);
+  --color-error-bg: rgba(255, 69, 58, 0.15);
+  --color-primary-bg: rgba(0, 122, 255, 0.15);
+  --color-accent-bg: rgba(88, 86, 214, 0.15);
+  
+  /* Inverse colors (for dark backgrounds) */
+  --color-text-inverse: #FFFFFF;
+  --color-text-inverse-muted: rgba(255, 255, 255, 0.7);
+  
+  /* Subtle backgrounds */
+  --color-bg-subtle: rgba(255, 255, 255, 0.03);
+  --color-bg-subtle-hover: rgba(255, 255, 255, 0.06);
+
   /* ── Apple Glassmorphism ───────────────────────────────────────── */
   --glass-bg: rgba(28, 28, 30, 0.8);
   --glass-bg-hover: rgba(44, 44, 46, 0.9);
@@ -262,6 +278,19 @@
   --color-agent-mcp: #007AFF;
   --color-agent-default: #8E8E93;
 
+  /* Extended Status Colors */
+  --color-success-bg: rgba(52, 199, 89, 0.15);
+  --color-warning-bg: rgba(255, 159, 10, 0.15);
+  --color-error-bg: rgba(255, 59, 48, 0.15);
+  --color-primary-bg: rgba(0, 122, 255, 0.15);
+  --color-accent-bg: rgba(88, 86, 214, 0.15);
+  
+  --color-text-inverse: #FFFFFF;
+  --color-text-inverse-muted: rgba(255, 255, 255, 0.7);
+  
+  --color-bg-subtle: rgba(0, 0, 0, 0.02);
+  --color-bg-subtle-hover: rgba(0, 0, 0, 0.05);
+
   /* ── ToolCallList ───────────────────────────────────────────── */
   --color-tool-bg: #FFFFFF;
   --color-tool-border: rgba(0, 0, 0, 0.08);
@@ -446,3 +475,36 @@
 .btn-glass:active { transform: scale(0.98); }
 
 .btn-full-width { width: 100%; }
+
+/* Status background utilities */
+.bg-success { background-color: var(--color-success-bg); }
+.bg-warning { background-color: var(--color-warning-bg); }
+.bg-error { background-color: var(--color-error-bg); }
+.bg-primary { background-color: var(--color-primary-bg); }
+.bg-accent { background-color: var(--color-accent-bg); }
+
+.text-success { color: var(--color-success); }
+.text-warning { color: var(--color-warning); }
+.text-error { color: var(--color-error); }
+.text-primary { color: var(--color-primary); }
+.text-accent { color: var(--color-accent); }
+
+.border-success { border-color: var(--color-success); }
+.border-warning { border-color: var(--color-warning); }
+.border-error { border-color: var(--color-error); }
+.border-primary { border-color: var(--color-primary); }
+.border-accent { border-color: var(--color-accent); }
+
+/* Hover states */
+.hover\:bg-success:hover { background-color: var(--color-success-bg); }
+.hover\:bg-error:hover { background-color: var(--color-error-bg); }
+.hover\:text-success:hover { color: var(--color-success); }
+.hover\:text-error:hover { color: var(--color-error); }
+
+/* Text inverse (for dark backgrounds) */
+.text-inverse { color: var(--color-text-inverse); }
+.text-inverse-muted { color: var(--color-text-inverse-muted); }
+
+/* Subtle backgrounds */
+.bg-subtle { background-color: var(--color-bg-subtle); }
+.bg-subtle-hover { background-color: var(--color-bg-subtle-hover); }

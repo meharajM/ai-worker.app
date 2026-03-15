@@ -23,7 +23,7 @@ export function Header({ status }: HeaderProps) {
                         {user ? (
                             <div className="flex items-center gap-3">
                                 <div className="flex items-center gap-2 text-[var(--text-sm)] text-[var(--color-text-primary)]">
-                                    <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-[var(--color-brand-teal)] to-[var(--color-primary)] flex items-center justify-center text-[10px] font-[var(--font-weight-bold)] text-white uppercase">
+                                    <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-[var(--color-brand-teal)] to-[var(--color-primary)] flex items-center justify-center text-[10px] font-[var(--font-weight-bold)] text-[var(--color-text-inverse)] uppercase">
                                         {user.displayName ? user.displayName[0] : user.email?.[0] || 'U'}
                                     </div>
                                     <span className="hidden sm:inline">{user.displayName || user.email?.split('@')[0]}</span>
