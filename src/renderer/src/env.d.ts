@@ -111,6 +111,21 @@ interface ElectronAPI {
     clipboard: {
         readFilePaths: () => string[]
     }
+
+    whatsapp?: {
+        getState: () => Promise<{
+            status: 'disconnected' | 'connecting' | 'connected' | 'error'
+            qrCode: string | null
+            error: string | null
+            phoneNumber: string | null
+        }>
+        connect: (phoneNumber: string) => Promise<{ success: boolean; error?: string }>
+        disconnect: () => Promise<{ success: boolean; error?: string }>
+        sendMessage: (to: string, content: string) => Promise<{ success: boolean; error?: string }>
+        sendPresence: (to: string, state: string) => Promise<{ success: boolean; error?: string }>
+        onConnectionChange: (callback: (state: unknown) => void) => () => void
+        onMessage: (callback: (message: unknown) => void) => () => void
+    }
 }
 
 // Web Speech API types - placed inside declare global to be available everywhere

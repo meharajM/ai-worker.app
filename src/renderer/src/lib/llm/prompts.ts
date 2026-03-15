@@ -1,6 +1,7 @@
 import { LLMTool, ServerInfo } from "../types";
 import { getUserEnvironmentContext } from "../user-environment";
 import { EXECUTION_PLAN_SCHEMA } from "../agent-protocol";
+import { useWhatsAppStore } from "../../stores/whatsappStore";
 
 /**
  * Filter tools to most relevant subset for sub-agents (reduces token usage)
@@ -206,6 +207,20 @@ Example: "search for nike shoes on Google" requires:
 DO NOT stop after just navigating - complete the entire workflow!`;
   }
 
+  // Detect WhatsApp context
+  const whatsappState = useWhatsAppStore.getState();
+  const isWaConnected = whatsappState.connectionState.status === 'connected';
+  const isWaEnabled = whatsappState.whatsappEnabled;
+  let whatsappNote = "";
+
+  if (isWaConnected) {
+    if (isWaEnabled) {
+      whatsappNote = `\n\n**WHATSAPP MODE ACTIVE**: The user is currently communicating with you directly through WhatsApp! Your responses will be sent straight to their phone. Keep your responses concise, well-formatted for mobile, and use emojis where appropriate. Break long messages into smaller paragraphs.`;
+    } else {
+      whatsappNote = `\n\n**WHATSAPP CONNECTED**: You have an active connection to the user's WhatsApp. If you are completing a long-running task, you can use the messaging tools to send a notification to the user's phone.`;
+    }
+  }
+
   const userContext = await getUserEnvironmentContext();
 
   return `You are AI-Worker, an autonomous agent with ${toolCount} tools for browser automation, web navigation, and task execution.${jsonFormatNote}
@@ -252,7 +267,7 @@ RULES:
 
 
 # AVAILABLE TOOLS
-${toolsDescription}${serverContext}${browserCapabilityNote}
+${toolsDescription}${serverContext}${browserCapabilityNote}${whatsappNote}
 
 ${dynamicRules ? `\n# TASK-SPECIFIC PROTOCOLS\n${dynamicRules}\n` : ''}
 

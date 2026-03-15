@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { Plus, Database, AlertCircle } from "lucide-react";
+import React, { useState, useCallback } from "react";
+import { Plus, Database, MessageCircle, CheckCircle, XCircle, Loader2 } from "lucide-react";
 import { useMcpStore, MCPServer } from "../stores/mcpStore";
 import { useChatStore } from "../stores/chatStore";
+import { useWhatsAppStore } from "../stores/whatsappStore";
 import { McpServerCard } from "./mcp/McpServerCard";
 import { McpServerForm } from "./mcp/McpServerForm";
 
@@ -11,12 +12,15 @@ export function ConnectionsPanel() {
   const [editingServerId, setEditingServerId] = useState<string | null>(null);
   const [expandedServer, setExpandedServer] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
+  const { connectionState, openDialog } = useWhatsAppStore();
+  const waStatus = connectionState.status;
 
 
   // Refresh servers (handled automatically by Zustand reactivity)
   const servers = mcp.servers;
 
   // Add or Update server
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleFormSubmit = async (config: any) => {
     try {
       if (editingServerId) {
@@ -103,6 +107,65 @@ Can you help me troubleshoot this?`;
 
   return (
     <div className="flex-1 min-w-0 p-6 overflow-y-auto">
+
+      {/* ── WhatsApp Section ──────────────────────────────── */}
+      <div className="mb-8">
+        <h2 className="text-xl font-bold mb-1">WhatsApp</h2>
+        <p className="text-sm text-white/40 mb-4">Direct WhatsApp integration</p>
+
+        <div className="flex items-center justify-between p-4 rounded-xl bg-[var(--color-surface)] border border-white/5">
+          <div className="flex items-center gap-3">
+            <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
+              waStatus === 'connected' ? 'bg-[#25D366]/20' : 'bg-white/5'
+            }`}>
+              <MessageCircle
+                size={18}
+                className={waStatus === 'connected' ? 'text-[#25D366]' : 'text-white/30'}
+              />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-white">
+                {waStatus === 'connected'
+                  ? `Connected${connectionState.phoneNumber ? ` · ${connectionState.phoneNumber}` : ''}`
+                  : waStatus === 'connecting'
+                    ? 'Connecting…'
+                    : waStatus === 'error'
+                      ? 'Connection error'
+                      : 'Disconnected'}
+              </p>
+              <p className="text-xs text-white/40">
+                {waStatus === 'connected'
+                  ? 'Ready for bidirectional messaging'
+                  : 'Scan QR code to connect'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {waStatus === 'connected' ? (
+              <CheckCircle size={18} className="text-[#25D366]" />
+            ) : waStatus === 'connecting' ? (
+              <Loader2 size={18} className="text-white/40 animate-spin" />
+            ) : waStatus === 'error' ? (
+              <XCircle size={18} className="text-red-400" />
+            ) : null}
+
+            <button
+              id="connections-whatsapp-btn"
+              onClick={openDialog}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${
+                waStatus === 'connected'
+                  ? 'bg-white/5 hover:bg-white/10 text-white/70'
+                  : 'bg-[#25D366]/20 hover:bg-[#25D366]/30 text-[#25D366]'
+              }`}
+            >
+              {waStatus === 'connected' ? 'Manage' : 'Connect'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── MCP Servers Section ───────────────────────────── */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-xl font-bold">MCP Connections</h2>

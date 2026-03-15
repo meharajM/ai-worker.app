@@ -24,6 +24,7 @@ import { FileChangeReview } from "./components/FileChangeReview";
 import { CommandPalette } from "./components/CommandPalette";
 import { Sidebar, View } from "./components/Sidebar";
 import { Header } from "./components/Header";
+import { WhatsAppConnectionDialog } from "./components/WhatsAppConnectionDialog";
 
 import { useChatStore } from "./stores/chatStore";
 import { useMcpStore } from "./stores/mcpStore";
@@ -31,6 +32,7 @@ import { useAuthPersistence } from "./hooks/useAuthPersistence";
 import { useSettingsSync } from "./hooks/useSettingsSync";
 import { useAgent } from "./hooks/useAgent";
 import { useLLMStatus } from "./hooks/useLLMStatus";
+import { useWhatsAppBridge } from "./hooks/useWhatsAppBridge";
 import { MissingDependenciesScreen } from "./components/MissingDependenciesScreen";
 import { ExperimentProvider } from "./lib/experiments/experimentProvider";
 import { useThemeSync } from "./hooks/useThemeSync";
@@ -61,6 +63,7 @@ function App() {
   useAuthPersistence();
   useSettingsSync();
   useThemeSync();
+  useWhatsAppBridge(); // Sync WhatsApp IPC events → whatsappStore
 
   // Ensure MCP is initialized for the chat view. ConnectionsPanel also calls
   // initialize(), but we need it ready before the user opens that panel.
@@ -118,6 +121,7 @@ function App() {
       </div>
 
       <FileChangeReview />
+      <WhatsAppConnectionDialog />
     </div>
     </ExperimentProvider>
   );
