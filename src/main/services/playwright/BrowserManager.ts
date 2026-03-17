@@ -36,6 +36,8 @@ export interface PlaywrightSettings {
     blockAds?: boolean;
 }
 
+const MODERN_CHROME_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
 /**
  * Manages the underlying Playwright browser, its context, and tab state.
  * Implements persistent data directories to keep cookies and session state between runs.
@@ -50,13 +52,13 @@ export class BrowserManager {
     private store: Store<Record<string, unknown>>;
     /** Ensures concurrent callTool calls don't trigger multiple browser launches */
     private initializationPromise: Promise<void> | null = null;
-    /** Ensures concurrent background_scrape calls don't trigger multiple headless launches */
-    private initializationPromiseHeadless: Promise<void> | null = null;
 
     private headlessBrowser: Browser | null = null;
     private headlessContext: BrowserContext | null = null;
     private headlessPage: Page | null = null;
     private headlessOverride: boolean | null = null;
+    /** Ensures concurrent calls to ensureHeadlessPage don't trigger multiple launches */
+    private headlessInitializationPromise: Promise<void> | null = null;
 
     private idleTimer: NodeJS.Timeout | null = null;
     private readonly IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -76,19 +78,30 @@ export class BrowserManager {
     }
 
     /**
-     * Surfacres the browser from headless mode to UI mode to allow the human to intervene.
+     * Surfaces the browser from headless mode to UI mode to allow the human to intervene.
      * Retains persistent context.
      */
     async surfaceBrowser(): Promise<void> {
-        if (!this.context) return;
         console.log('[BrowserManager] Surfacing browser for human intervention...');
-        const currentUrl = this.page?.url();
+        
+        let currentUrl = this.page?.url();
+        let useHeadlessData = false;
+
+        // If we have an active headless session, we want to promote its data to the headed browser
+        if (this.headlessContext) {
+            console.log('[BrowserManager] Detected active headless session. Promoting headless data...');
+            currentUrl = this.headlessPage?.url() || currentUrl;
+            useHeadlessData = true;
+        }
 
         await this.close();
         
         // This forces ensureBrowser to use headless: false on the next launch
         this.headlessOverride = false;
         
+        // If we were promoted from headless, we should point the headed browser to the headless data dir
+        (this as any)._useHeadlessDirForHeaded = useHeadlessData;
+
         // Relaunch immediately
         await this.ensureBrowser();
 
@@ -97,26 +110,22 @@ export class BrowserManager {
         }
 
         this.headlessOverride = null;
+        (this as any)._useHeadlessDirForHeaded = false;
     }
 
     /**
      * Lazily initializes the Playwright browser context if it doesn't exist.
-     * Uses an OS-smart fallback order: tries the user's preferred browser first,
-     * then falls back to platform defaults if that launch fails.
-     *
-     * blockAds defaults to TRUE (matching original service behaviour) unless
-     * explicitly set to false in the user's MCP settings.
-     *
-     * @returns A promise resolving to the active BrowserContext.
      */
     async ensureBrowser(): Promise<BrowserContext> {
-        if (this.context) return this.context;
+        if (this.context && !(this as any)._isContextClosed) return this.context;
 
         // Serialize concurrent ensureBrowser() calls behind a single promise
         if (this.initializationPromise) {
             await this.initializationPromise;
-            if (!this.context) {
-                throw new Error('[BrowserManager] Browser initialization finished but context is still null (likely closed during launch).');
+            if (!this.context || (this as any)._isContextClosed) {
+                this.initializationPromise = null;
+                (this as any)._isContextClosed = false;
+                return this.ensureBrowser();
             }
             return this.context;
         }
@@ -124,7 +133,8 @@ export class BrowserManager {
         this.initializationPromise = (async () => {
             try {
                 console.log('[BrowserManager] Launching browser...');
-                const userDataDir = path.join(app.getPath('userData'), 'playwright_data');
+                const dataDirName = (this as any)._useHeadlessDirForHeaded ? 'playwright_data_headless' : 'playwright_data';
+                const userDataDir = path.join(app.getPath('userData'), dataDirName);
 
                 if (!fs.existsSync(userDataDir)) {
                     fs.mkdirSync(userDataDir, { recursive: true });
@@ -133,41 +143,32 @@ export class BrowserManager {
                 const settings = ((this.store as any).get('mcpPlaywright') || {}) as PlaywrightSettings;
                 const browserType = settings.browser || this.getDefaultBrowser();
                 
-                // Use override if set (for surfaceBrowser bypass), otherwise use store setting, default to false
                 const headless = this.headlessOverride !== null ? this.headlessOverride : (settings.headless ?? false);
-                // Default blockAds to TRUE — matches the original PlaywrightService default
                 const blockAds = settings.blockAds !== undefined ? settings.blockAds : true;
 
-                console.log(`[BrowserManager] OS: ${process.platform}, target browser: ${browserType}, headless: ${headless}`);
-
-                // Full set of stealth + stability args — restored from original PlaywrightService
                 const launchArgs = [
-                    '--disable-blink-features=AutomationControlled', // Remove automation flag from navigator
+                    '--disable-blink-features=AutomationControlled',
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
-                    '--disable-infobars',                            // Remove "Chrome is being controlled" bar
+                    '--disable-infobars',
                     '--window-position=0,0',
-                    '--ignore-certificate-errors',                   // Allow self-signed SSL sites
+                    '--ignore-certificate-errors',
                     '--ignore-certificate-errors-spki-list',
-                    '--disable-accelerated-2d-canvas',               // Stealth: reduce GPU fingerprinting surface
+                    '--disable-accelerated-2d-canvas',
                     '--disable-gpu',
-                    '--disable-dev-shm-usage',                       // Stability: avoid /dev/shm exhaustion in containers
+                    '--disable-dev-shm-usage',
                 ];
 
-                // OS-smart browser fallback order.
-                // If the preferred browser fails (not installed, corrupt profile, etc.),
-                // we try the next most compatible option for the current platform.
                 const getFallbackOrder = (): string[] => {
                     switch (process.platform) {
-                        case 'win32': return ['msedge', 'chrome', 'firefox'];   // Windows: Edge (pre-installed) → Chrome → Firefox
-                        case 'darwin': return ['chrome', 'webkit', 'firefox'];  // macOS: Chrome → Safari/WebKit → Firefox
-                        case 'linux': return ['chrome', 'firefox', 'chromium']; // Linux: Chrome → Firefox → bundled Chromium
+                        case 'win32': return ['msedge', 'chrome', 'firefox'];
+                        case 'darwin': return ['chrome', 'webkit', 'firefox'];
+                        case 'linux': return ['chrome', 'firefox', 'chromium'];
                         default: return ['chrome', 'msedge', 'firefox'];
                     }
                 };
 
                 const fallbackOrder = getFallbackOrder();
-                // User preference always goes first; deduplication removes it from fallbacks
                 const browserAttempts = [browserType, ...fallbackOrder.filter(b => b !== browserType)];
 
                 let lastError: Error | null = null;
@@ -178,32 +179,30 @@ export class BrowserManager {
 
                 for (const tryBrowser of browserAttempts) {
                     try {
-                        // Select the right Playwright launcher and channel for each browser type
                         let launcher: any = stealthChromium;
                         const tryOptions: Record<string, any> = {
                             headless,
                             args: [...launchArgs],
                             viewport: { width: 1280, height: 800 },
+                            userAgent: MODERN_CHROME_UA,
                         };
 
                         if (tryBrowser === 'firefox') {
                             launcher = playwrightCore.firefox;
-                            delete tryOptions.channel; // firefox doesn't support channel option
+                            delete tryOptions.channel;
                         } else if (tryBrowser === 'webkit') {
                             launcher = playwrightCore.webkit;
-                            delete tryOptions.channel; // webkit doesn't support channel option
+                            delete tryOptions.channel;
                         } else if (tryBrowser === 'chromium') {
                             launcher = stealthChromium;
-                            tryOptions.channel = 'chrome'; // Using core, 'chromium' usually implies using local Chrome anyway
+                            tryOptions.channel = 'chrome';
                         } else {
-                            // Named channel: 'chrome', 'msedge'
                             tryOptions.channel = tryBrowser;
                         }
 
                         console.log(`[BrowserManager] Trying browser: ${tryBrowser}...`);
                         this.context = await launcher.launchPersistentContext(userDataDir, tryOptions);
 
-                        // Inject stealth init script to hide webdriver property from sites
                         await this.context!.addInitScript(() => {
                             Object.defineProperty(navigator, 'webdriver', {
                                 get: () => undefined,
@@ -216,7 +215,6 @@ export class BrowserManager {
                             this.registerPage(this.page);
                         }
 
-                        // Apply ad/resource blocking to all current and future pages
                         if (blockAds) {
                             this.context!.on('page', (newPage) => {
                                 this.enableResourceBlocking(newPage);
@@ -227,7 +225,13 @@ export class BrowserManager {
                         }
 
                         console.log(`[BrowserManager] ✅ Browser launched: ${tryBrowser}`);
-                        return; // Success — exit fallback loop
+                        this.context!.on('close', () => {
+                            (this as any)._isContextClosed = true;
+                            this.context = null;
+                            this.page = null;
+                            this.initializationPromise = null;
+                        });
+                        return; 
                     } catch (err) {
                         lastError = err instanceof Error ? err : new Error(String(err));
                         console.warn(`[BrowserManager] Browser '${tryBrowser}' failed: ${lastError.message}. Trying next...`);
@@ -235,13 +239,13 @@ export class BrowserManager {
                     }
                 }
 
-                // All browsers in the fallback chain failed
                 throw lastError || new Error('[BrowserManager] All browser launch attempts failed.');
             } catch (error) {
                 console.error('[BrowserManager] Failed to launch browser:', error);
+                this.initializationPromise = null;
                 throw error;
             } finally {
-                this.initializationPromise = null; // Clean up promise after completion/failure
+                this.initializationPromise = null;
             }
         })();
 
@@ -252,12 +256,6 @@ export class BrowserManager {
         return this.context;
     }
 
-    /**
-     * Enables network interception to block images, media, and fonts.
-     * This saves bandwidth and reduces agent context token usage per page.
-     *
-     * @param page - The page to apply blocking to.
-     */
     private async enableResourceBlocking(page: Page): Promise<void> {
         await page.route('**/*', (route) => {
             const type = route.request().resourceType();
@@ -268,10 +266,6 @@ export class BrowserManager {
         });
     }
 
-    /**
-     * Returns the OS-appropriate default browser when the user hasn't configured one.
-     * Matches the original PlaywrightService getDefaultBrowser() logic.
-     */
     private getDefaultBrowser(): PlaywrightSettings['browser'] {
         const platform = process.platform;
         if (platform === 'win32') return 'msedge';
@@ -279,27 +273,13 @@ export class BrowserManager {
         return 'chromium';
     }
 
-    /**
-     * Registers a new Playwright Page into the managed tab tracking system.
-     * Sets up listeners for tab close cleanup and popup interception.
-     *
-     * Popup isolation: when a page spawns a target="_blank" popup, we redirect
-     * the ORIGINATING tab to that URL instead of letting an unmanaged popup
-     * accumulate outside the pagesMap. This prevents orphaned tabs the agent
-     * cannot track or interact with.
-     *
-     * @param page - The Playwright Page instance to track.
-     * @returns The unique integer ID assigned to this tab.
-     */
     registerPage(page: Page): number {
-        // Prevent double-registration
         for (const [id, p] of this.pagesMap.entries()) {
             if (p === page) return id;
         }
         const id = this.nextTabId++;
         this.pagesMap.set(id, page);
 
-        // Auto-cleanup when tab is closed
         page.on('close', () => {
             this.pagesMap.delete(id);
             if (this.page === page) {
@@ -308,7 +288,6 @@ export class BrowserManager {
             }
         });
 
-        // Force popup into the same tab (same-tab redirect)
         page.on('popup', async (popup) => {
             try {
                 const url = popup.url();
@@ -317,7 +296,6 @@ export class BrowserManager {
                     await page.goto(url, { waitUntil: 'domcontentloaded' }).catch(() => { });
                 }
             } catch {
-                // Silently ignore — popup may already be closed or not navigable
             }
         });
 
@@ -327,62 +305,59 @@ export class BrowserManager {
     private async ensureHeadlessPage(): Promise<Page> {
         if (this.headlessPage && !this.headlessPage.isClosed()) return this.headlessPage;
 
-        // Serialize concurrent ensureHeadlessPage() calls behind a single promise
-        if (this.initializationPromiseHeadless) {
-            await this.initializationPromiseHeadless;
-            if (!this.headlessPage || this.headlessPage.isClosed()) {
-                throw new Error('[BrowserManager] Headless initialization finished but page is null or closed.');
-            }
-            return this.headlessPage;
+        if (this.headlessInitializationPromise) {
+            await this.headlessInitializationPromise;
+            if (this.headlessPage && !this.headlessPage.isClosed()) return this.headlessPage;
+            this.headlessInitializationPromise = null;
+            return this.ensureHeadlessPage();
         }
 
-        this.initializationPromiseHeadless = (async () => {
+        this.headlessInitializationPromise = (async () => {
             try {
-                if (!this.headlessBrowser) {
-                    console.log('[BrowserManager] Launching invisible headless browser with stealth...');
-                    this.headlessBrowser = await stealthChromium.launch({
-                        headless: true, // Use boolean for modern playwright compat
-                        channel: 'chrome', // Use local chrome path
-                        args: [
-                            '--headless=new', // Explicitly force the new headless mode to prevent stealth plugin from overriding it
-                            '--disable-blink-features=AutomationControlled',
-                            '--no-sandbox',
-                            '--disable-setuid-sandbox',
-                            '--disable-infobars',
-                            '--ignore-certificate-errors',
-                            '--disable-accelerated-2d-canvas',
-                            '--disable-gpu',
-                            '--disable-dev-shm-usage',
-                            '--window-size=1920,1080',
-                            '--disable-software-rasterizer'
-                        ]
-                    });
-                }
                 if (!this.headlessContext) {
-                    this.headlessContext = await this.headlessBrowser!.newContext({
+                    console.log('[BrowserManager] Launching persistent headless context with stealth...');
+                    const userDataDirHeadless = path.join(app.getPath('userData'), 'playwright_data_headless');
+
+                    if (!fs.existsSync(userDataDirHeadless)) {
+                        fs.mkdirSync(userDataDirHeadless, { recursive: true });
+                    }
+
+                    const launchArgs = [
+                        '--disable-blink-features=AutomationControlled',
+                        '--no-sandbox',
+                        '--disable-setuid-sandbox',
+                        '--disable-infobars',
+                        '--ignore-certificate-errors',
+                        '--disable-accelerated-2d-canvas',
+                        '--disable-gpu',
+                        '--disable-dev-shm-usage',
+                        '--window-size=1920,1080',
+                        '--disable-software-rasterizer',
+                        '--headless=new'
+                    ];
+
+                    const contextOptions = {
+                        headless: true,
+                        args: launchArgs,
                         viewport: { width: 1920, height: 1080 },
                         locale: 'en-US',
                         timezoneId: 'America/New_York',
-                        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        userAgent: MODERN_CHROME_UA,
                         colorScheme: 'dark',
                         deviceScaleFactor: 2,
                         hasTouch: false,
                         isMobile: false
-                    });
+                    };
 
-                    // Inject stealth init scripts to bypass further detection
-                    await this.headlessContext.addInitScript(() => {
-                        // Remove webdriver property
+                    this.headlessContext = await stealthChromium.launchPersistentContext(userDataDirHeadless, contextOptions);
+
+                    await this.headlessContext!.addInitScript(() => {
                         Object.defineProperty(navigator, 'webdriver', {
                             get: () => undefined,
                         });
-
-                        // Mock languages
                         Object.defineProperty(navigator, 'languages', {
                             get: () => ['en-US', 'en'],
                         });
-
-                        // Mock hardware properties
                         Object.defineProperty(navigator, 'hardwareConcurrency', {
                             get: () => 8,
                         });
@@ -390,43 +365,50 @@ export class BrowserManager {
                             get: () => 8,
                         });
                     });
+
+                    const pages = this.headlessContext!.pages();
+                    if (pages.length > 0) {
+                        this.headlessPage = pages[0];
+                    }
                 }
+
                 if (!this.headlessPage || this.headlessPage.isClosed()) {
                     this.headlessPage = await this.headlessContext!.newPage();
                 }
             } catch (error) {
                 console.error('[BrowserManager] Failed to launch headless browser:', error);
+                this.headlessInitializationPromise = null;
                 throw error;
-            } finally {
-                this.initializationPromiseHeadless = null;
             }
         })();
 
-        await this.initializationPromiseHeadless;
-        if (!this.headlessPage || this.headlessPage.isClosed()) {
-            throw new Error('[BrowserManager] Headless initialization failed to produce an active page.');
+        await this.headlessInitializationPromise;
+        if (!this.headlessContext) {
+            this.headlessInitializationPromise = null;
+            return this.ensureHeadlessPage();
         }
-        return this.headlessPage;
+        return this.headlessPage!;
     }
 
-    /**
-     * Returns an active Page instance, optionally switching to a specific tab.
-     * If no page is active, it creates a new one within the current context.
-     *
-     * @param args - Arguments which may include `tabId` to target a specific tab.
-     * @returns A promise resolving to the active Page.
-     */
     async getPage(args: any): Promise<Page> {
         this.resetIdleTimer();
 
         // Handle headless mode execution request for background tools
         if (args && args._headless) {
-            return this.ensureHeadlessPage();
+            const page = await this.ensureHeadlessPage();
+            if (!page || page.isClosed()) {
+                throw new Error('[BrowserManager] Failed to obtain valid headless page');
+            }
+            return page;
         }
 
         await this.ensureBrowser();
 
-        if (args.tabId !== undefined) {
+        if (!this.context) {
+            throw new Error('[BrowserManager] Browser context is null after initialization. This is a critical state error.');
+        }
+
+        if (args && args.tabId !== undefined) {
             const target = this.pagesMap.get(args.tabId);
             if (target) {
                 this.page = target;
@@ -466,9 +448,6 @@ export class BrowserManager {
         return this.pagesMap;
     }
 
-    /**
-     * Closes all browser contexts and resets internal tracking state.
-     */
     async close() {
         if (this.idleTimer) {
             clearTimeout(this.idleTimer);
@@ -477,7 +456,7 @@ export class BrowserManager {
 
         // Reset promises to ensure subsequent calls don't await stale ones
         this.initializationPromise = null;
-        this.initializationPromiseHeadless = null;
+        this.headlessInitializationPromise = null;
 
         if (this.context) {
             await this.context.close().catch(e => console.error('[BrowserManager] Error closing context:', e));
@@ -488,6 +467,11 @@ export class BrowserManager {
         if (this.headlessBrowser) {
             await this.headlessBrowser.close().catch(e => console.error('[BrowserManager] Error closing headless browser:', e));
             this.headlessBrowser = null;
+            this.headlessContext = null;
+            this.headlessPage = null;
+        }
+        if (this.headlessContext) {
+            await this.headlessContext.close().catch(e => console.error('[BrowserManager] Error closing headless context:', e));
             this.headlessContext = null;
             this.headlessPage = null;
         }
