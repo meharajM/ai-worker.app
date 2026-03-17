@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Smartphone, Loader2, CheckCircle2 } from 'lucide-react'
-import { useMcpStore } from '../stores/mcpStore'
-import { executeToolCall, findServerForTool } from '../lib/mcp'
+import { whatsappService, WhatsAppConnectionState } from '../lib/whatsappService'
+import { useChatStore } from '../stores/chatStore'
 
 interface WhatsAppConnectionDialogProps {
     open: boolean
@@ -12,205 +12,66 @@ interface WhatsAppConnectionDialogProps {
 type ConnectionState = 'idle' | 'connecting' | 'qr' | 'connected'
 
 export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnectionDialogProps): React.JSX.Element | null {
-    const { servers, connectServer, disconnectServer, updateServer } = useMcpStore()
-    const whatsappServer = servers.find(s => s.name === 'whatsapp-mcp')
+    const { setWhatsAppEnabled } = useChatStore()
     const [targetNumber, setTargetNumber] = useState('')
     const [connectionState, setConnectionState] = useState<ConnectionState>('idle')
     const [qrCodeData, setQrCodeData] = useState<string | null>(null)
-    const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
+    const unsubscribeRef = useRef<(() => void) | null>(null)
 
-    // Reset state & clear polling on unmount/close
+    // Subscribe to connection state changes
+    useEffect(() => {
+        unsubscribeRef.current = whatsappService.onConnectionChange((state: WhatsAppConnectionState) => {
+            switch (state.status) {
+                case 'disconnected':
+                    setConnectionState('idle')
+                    setQrCodeData(null)
+                    break
+                case 'connecting':
+                    setConnectionState('connecting')
+                    break
+                case 'connected':
+                    setConnectionState('connected')
+                    setQrCodeData(null)
+                    setWhatsAppEnabled(true)
+                    setTimeout(() => {
+                        onOpenChange(false)
+                    }, 2500)
+                    break
+                case 'error':
+                    setConnectionState('idle')
+                    setQrCodeData(null)
+                    break
+            }
+            
+            if (state.qrCode) {
+                setConnectionState('qr')
+                setQrCodeData(state.qrCode)
+            }
+        })
+
+        return () => {
+            if (unsubscribeRef.current) {
+                unsubscribeRef.current()
+            }
+        }
+    }, [onOpenChange, setWhatsAppEnabled])
+
+    // Reset state on close
     useEffect(() => {
         if (!open) {
             setConnectionState('idle')
             setQrCodeData(null)
-            if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
-        } else if (whatsappServer?.env?.WHATSAPP_TARGET_NUMBER) {
-            setTargetNumber(whatsappServer.env.WHATSAPP_TARGET_NUMBER)
         }
-
-        return () => {
-            if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
-        }
-    }, [open, whatsappServer])
-
-    const startPolling = () => {
-        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
-        let attempts = 0
-        const MAX_POLLS = 120 // 6 minutes max
-
-        pollIntervalRef.current = setInterval(async () => {
-            if (!whatsappServer) return
-            attempts++
-
-            if (attempts > MAX_POLLS) {
-                if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
-                setConnectionState('idle')
-                return
-            }
-
-            try {
-                // Mute logging since this happens rapidly
-                const res = await executeToolCall('get_status', {})
-                // Example expected structure: { result: { content: [{ type: 'text', text: 'connected' }] } }
-                const resString = JSON.stringify(res).toLowerCase()
-
-                if (resString.includes('connected') && !resString.includes('not connected') && !resString.includes('disconnected')) {
-                    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
-                    setConnectionState('connected')
-                    setTimeout(() => {
-                        onOpenChange(false)
-                    }, 2500)
-                }
-            } catch (e) {
-                console.error('Polling get_status error:', e)
-            }
-        }, 3000)
-    }
-
-    const fetchQrCode = async () => {
-        console.log(`[WhatsApp] fetchQrCode: calling 'connect' tool...`);
-        try {
-            const res = await executeToolCall('connect', null) as { result: { content?: Array<{ type: string, data?: string, mimeType?: string, text?: string }> }, error?: string }
-            console.log(`[WhatsApp] fetchQrCode: raw response`, JSON.stringify(res).substring(0, 400));
-            if (res.error) throw new Error(res.error)
-
-            // The connect tool returns a text response, not an image.
-            // We need to parse the text to find the QR code data.
-            if (res.result?.content && Array.isArray(res.result.content)) {
-                for (const c of res.result.content) {
-                    // Case 1: Already connected — text says "connected"
-                    if (c.type === 'text' && c.text) {
-                        const txt = c.text.toLowerCase()
-                        if (txt.includes('connected successfully')) {
-                            setConnectionState('connected')
-                            setTimeout(() => onOpenChange(false), 2500)
-                            return
-                        }
-                        if (txt.includes('connection is being restored')) {
-                            // Session restoring — poll for completion
-                            setConnectionState('qr')
-                            startPolling()
-                            return
-                        }
-                    }
-                    // Case 2: Direct base64 image (future-proof if the tool upgrades)
-                    if (c.type === 'image' && c.data) {
-                        const mime = c.mimeType || 'image/png'
-                        setConnectionState('qr')
-                        setQrCodeData(`data:${mime};base64,${c.data}`)
-                        startPolling()
-                        return
-                    }
-                }
-
-                // Case 3: Text response with qr.html path — the current format
-                const textContent = res.result.content.find(c => c.type === 'text' && c.text)
-                if (textContent?.text) {
-                    // Extract the file path from the text: e.g. file:///Users/xxx/.whatsapp-mcp/qr.html
-                    const fileMatch = textContent.text.match(/file:\/\/([^\s]+?\.html)/)
-                    const rawMatch = textContent.text.match(/(\/[^\s]+?\.html)/)
-                    const htmlFilePath = fileMatch ? fileMatch[1] : rawMatch ? rawMatch[1] : null
-
-                    if (htmlFilePath) {
-                        // Fetch the HTML file directly — Electron renderer allows file:// fetches
-                        try {
-                            const fileUrl = htmlFilePath.startsWith('/') ? `file://${htmlFilePath}` : htmlFilePath
-                            const resp = await fetch(fileUrl)
-                            const htmlContent = await resp.text()
-                            // Extract the base64 src from the <img> tag
-                            const srcMatch = htmlContent.match(/src="(data:image\/[^"]+)"/)
-                            if (srcMatch && srcMatch[1]) {
-                                setConnectionState('qr')
-                                setQrCodeData(srcMatch[1])
-                                startPolling()
-                                return
-                            }
-                        } catch (fsErr) {
-                            console.warn('Could not read QR HTML file, falling back to no-image qr state:', fsErr)
-                        }
-                    }
-
-                    // Fallback: if we got a qr text response but couldn't read the file, 
-                    // still enter qr state and just show that we're waiting for scan
-                    if (textContent.text.toLowerCase().includes('authentication required') ||
-                        textContent.text.toLowerCase().includes('qr') ||
-                        textContent.text.toLowerCase().includes('scan')) {
-                        setConnectionState('qr')
-                        startPolling()
-                        return
-                    }
-                }
-            }
-
-            // If we reach here with no actionable result, stay in connecting state and poll
-            setConnectionState('qr')
-            startPolling()
-
-        } catch (e) {
-            console.error('Connection tool error:', e)
-            setConnectionState('idle')
-        }
-    }
-
-    const proceedWithConnection = async (envToSave?: Record<string, string>) => {
-        if (!whatsappServer) return
-
-        console.log(`[WhatsApp] proceedWithConnection start — server id=${whatsappServer.id} connected=${whatsappServer.connected} tools=${whatsappServer.tools.length}`);
-        setConnectionState('connecting')
-
-        try {
-            // Always start with a clean disconnected state
-            console.log(`[WhatsApp] Step 1: disconnecting...`);
-            await disconnectServer(whatsappServer.id).catch((e) => console.warn('[WhatsApp] disconnect ignored:', e))
-
-            if (envToSave) {
-                // Save env WITHOUT autoConnect — we will trigger the connect ourselves.
-                console.log(`[WhatsApp] Step 2: updateServer with env (autoConnect=false)...`);
-                await updateServer(whatsappServer.id, { env: envToSave, autoConnect: false })
-
-                // Small pause to let the store persist to disk
-                await new Promise(res => setTimeout(res, 300))
-            }
-
-            // Explicitly connect and await it — this is the single source of truth for connection
-            console.log(`[WhatsApp] Step 3: connectServer id=${whatsappServer.id}...`);
-            await connectServer(whatsappServer.id)
-            console.log(`[WhatsApp] Step 3 done: connectServer returned`);
-
-            // Wait defensively until the tools array actually settles in the store before calling the tool.
-            // Zustand updates might take a tick or two to propagate through the getter used by executeToolCall.
-            let retries = 0;
-            while (!findServerForTool('connect') && retries < 20) {
-                console.log(`[WhatsApp] Step 4: waiting for 'connect' tool in store (attempt ${retries + 1}/20)...`);
-                await new Promise(res => setTimeout(res, 250));
-                retries++;
-            }
-
-            if (!findServerForTool('connect')) {
-                throw new Error("Timeout waiting for WhatsApp tools to register in the client.");
-            }
-            console.log(`[WhatsApp] Step 4 done: 'connect' tool found in store after ${retries * 250}ms`);
-
-            await fetchQrCode()
-        } catch (e) {
-            console.error('[WhatsApp] proceedWithConnection failed:', e)
-            setConnectionState('idle')
-        }
-    }
+    }, [open])
 
     const submitPhoneNumber = () => {
-        // Prevent double-clicks / races
-        if (connectionState !== 'idle') return;
+        if (connectionState !== 'idle') return
 
-        if (targetNumber && targetNumber.trim().length > 0 && whatsappServer) {
-            const formattedNumber = targetNumber.replace(/[^0-9+]/g, '');
-            const targetEnv = { ...(whatsappServer.env || {}), WHATSAPP_TARGET_NUMBER: formattedNumber };
-            proceedWithConnection(targetEnv);
+        if (targetNumber && targetNumber.trim().length > 0) {
+            const formattedNumber = targetNumber.replace(/[^0-9+]/g, '')
+            whatsappService.connect(formattedNumber)
         }
     }
-
-    if (!whatsappServer) return null
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -267,7 +128,7 @@ export function WhatsAppConnectionDialog({ open, onOpenChange }: WhatsAppConnect
                     {connectionState === 'connecting' && (
                         <div className="flex flex-col items-center justify-center py-8 animate-in fade-in duration-300">
                             <Loader2 size={32} className="text-[#4fd1c5] animate-spin mb-4" />
-                            <p className="text-white/70 font-medium">Starting server &amp; generating QR code...</p>
+                            <p className="text-white/70 font-medium">Starting WhatsApp connection...</p>
                             <p className="text-white/40 text-xs mt-2 text-center max-w-xs">Opening a secure WebSocket connection to WhatsApp. This usually takes 3–10 seconds.</p>
                         </div>
                     )}

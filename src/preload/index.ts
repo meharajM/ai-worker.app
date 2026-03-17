@@ -163,7 +163,24 @@ const electronAPI = {
             // Fallback to internal path property if webUtils isn't available
             return (file as any).path || ''
         }
-    }
+    },
+    // WhatsApp operations
+    whatsapp: {
+        connect: (targetNumber: string) => ipcRenderer.invoke('whatsapp:connect', targetNumber),
+        disconnect: () => ipcRenderer.invoke('whatsapp:disconnect'),
+        sendMessage: (to: string, content: string) => ipcRenderer.invoke('whatsapp:sendMessage', to, content),
+        getConnectionState: () => ipcRenderer.invoke('whatsapp:getConnectionState'),
+        onConnectionState: (callback: (state: any) => void) => {
+            const listener = (_event: any, state: any) => callback(state)
+            ipcRenderer.on('whatsapp:connection-state', listener)
+            return () => ipcRenderer.removeListener('whatsapp:connection-state', listener)
+        },
+        onMessage: (callback: (message: any) => void) => {
+            const listener = (_event: any, message: any) => callback(message)
+            ipcRenderer.on('whatsapp:message', listener)
+            return () => ipcRenderer.removeListener('whatsapp:message', listener)
+        },
+    },
 }
 
 // Expose APIs to renderer

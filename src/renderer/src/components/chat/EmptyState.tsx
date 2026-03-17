@@ -1,7 +1,7 @@
 import React from 'react'
 import { WorkflowTiles } from '../WorkflowTiles'
 import { MessageCircle, Smartphone, ExternalLink, Zap, ShieldCheck } from 'lucide-react'
-import { useMcpStore } from '../../stores/mcpStore'
+import { useChatStore } from '../../stores/chatStore'
 import { useState } from 'react';
 import { WhatsAppConnectionDialog } from '../WhatsAppConnectionDialog';
 
@@ -9,17 +9,14 @@ import { WhatsAppConnectionDialog } from '../WhatsAppConnectionDialog';
  * Co-Worker Hub Welcome Screen
  */
 export function EmptyState() {
-  const { servers } = useMcpStore()
-  const whatsappServer = servers.find(s => s.name === 'whatsapp-mcp')
-  const isWhatsAppConnected = whatsappServer?.connected || false
+  const { whatsappEnabled } = useChatStore()
+  const isWhatsAppConnected = whatsappEnabled
 
 
   const [showPhoneDialog, setShowPhoneDialog] = useState(false);
 
   const handleConnectWhatsApp = async () => {
-    if (whatsappServer) {
-      setShowPhoneDialog(true);
-    }
+    setShowPhoneDialog(true);
   }
 
   return (

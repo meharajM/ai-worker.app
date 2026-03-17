@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Wifi, WifiOff, User as UserIcon, LogOut, Smartphone } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
-import { useMcpStore } from '../stores/mcpStore'
+import { useChatStore } from '../stores/chatStore'
 import { AuthModal } from './AuthModal'
 import { FEATURE_FLAGS } from '../lib/constants'
 
@@ -12,9 +12,8 @@ interface HeaderProps {
 export function Header({ status }: HeaderProps) {
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
     const { user, signOut } = useAuthStore()
-    const { servers } = useMcpStore()
-    const whatsappServer = servers.find(s => s.name === 'whatsapp-mcp')
-    const isWhatsAppConnected = whatsappServer?.connected || false
+    const { whatsappEnabled } = useChatStore()
+    const isWhatsAppConnected = whatsappEnabled
 
     return (
         <header className="h-12 flex items-center justify-between px-4 border-b border-white/5 flex-shrink-0">
@@ -61,14 +60,12 @@ export function Header({ status }: HeaderProps) {
                 </div>
 
                 {/* WhatsApp Status */}
-                {whatsappServer && (
-                    <div className={`flex items-center gap-1.5 text-[10px] ${isWhatsAppConnected ? 'text-[#4fd1c5]' : 'text-white/40'}`}>
-                        <Smartphone size={12} />
-                        <span className="uppercase tracking-wide hidden sm:inline font-medium">
-                            {isWhatsAppConnected ? 'WhatsApp Active' : 'WhatsApp Ready'}
-                        </span>
-                    </div>
-                )}
+                <div className={`flex items-center gap-1.5 text-[10px] ${isWhatsAppConnected ? 'text-[#4fd1c5]' : 'text-white/40'}`}>
+                    <Smartphone size={12} />
+                    <span className="uppercase tracking-wide hidden sm:inline font-medium">
+                        {isWhatsAppConnected ? 'WhatsApp Active' : 'WhatsApp Ready'}
+                    </span>
+                </div>
 
                 {/* LLM Status */}
                 <div className={`flex items-center gap-1.5 text-[10px] ${status.available ? 'text-green-400' : 'text-yellow-400'}`}>

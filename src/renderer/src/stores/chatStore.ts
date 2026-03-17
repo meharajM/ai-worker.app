@@ -56,6 +56,7 @@ interface SessionProcessingEntry {
 interface ChatState {
     sessions: ChatSession[]
     activeSessionId: string | null
+    whatsappEnabled: boolean
 
     /**
      * Per-session processing state.
@@ -100,6 +101,7 @@ interface ChatState {
     updateSessionWorkspace: (id: string, workspacePath: string) => void
     updateSessionProgress: (id: string, progress?: number, eta?: number, plan?: ExecutionPlan) => void
     setOfflineSpeech: (enabled: boolean) => void
+    setWhatsAppEnabled: (enabled: boolean) => void
 
     // Message Actions (primarily target a specific session by ID)
     addMessage: (message: Omit<Message, 'id' | 'timestamp'>) => Message
@@ -122,6 +124,8 @@ export const useChatStore = create<ChatState>()(
         (set, get) => ({
             sessions: [],
             activeSessionId: null,
+            whatsappEnabled: false,
+            offlineSpeech: false,
             _processingSessions: new Map<string, SessionProcessingEntry>(),
 
             // ── Legacy derived scalars ─────────────────────────────────────────
@@ -283,6 +287,9 @@ export const useChatStore = create<ChatState>()(
                 }))
             },
 
+            setOfflineSpeech: (enabled: boolean) => set({ offlineSpeech: enabled }),
+            setWhatsAppEnabled: (enabled: boolean) => set({ whatsappEnabled: enabled }),
+
             // ── Message actions ────────────────────────────────────────────────
 
             addMessage: (message) => {
@@ -436,9 +443,6 @@ export const useChatStore = create<ChatState>()(
                     }
                 })
             },
-
-            offlineSpeech: false,
-            setOfflineSpeech: (enabled: boolean) => set({ offlineSpeech: enabled }),
 
             sidebarOpen: true,
             toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),

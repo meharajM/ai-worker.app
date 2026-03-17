@@ -1,6 +1,7 @@
 import { LLMTool, ServerInfo } from "../types";
 import { getUserEnvironmentContext } from "../user-environment";
 import { EXECUTION_PLAN_SCHEMA } from "../agent-protocol";
+import { useChatStore } from "../../stores/chatStore";
 
 /**
  * Filter tools to most relevant subset for sub-agents (reduces token usage)
@@ -206,11 +207,12 @@ Example: "search for nike shoes on Google" requires:
 DO NOT stop after just navigating - complete the entire workflow!`;
   }
 
-  // Detect WhatsApp server by server name (more reliable than checking tool names)
-  const hasWhatsApp = servers?.some(s => s.name === 'whatsapp-mcp') || toolNamesLower.includes("ask_question");
+  // Detect WhatsApp via chatStore.whatsappEnabled (new Baileys-based integration)
+  const { whatsappEnabled } = useChatStore.getState()
+  const hasWhatsApp = whatsappEnabled || toolNamesLower.includes("ask_question");
   let whatsappNote = "";
   if (hasWhatsApp) {
-    whatsappNote = `\n\n**HUMAN-IN-THE-LOOP (WHATSAPP)**: You are connected to the user via the \`whatsapp-mcp\` server. Use its tools (\`connect\`, \`get_status\`, \`send_message\`, \`ask_question\`) for all WhatsApp operations. **NEVER navigate the browser to web.whatsapp.com.** For any significant or destructive action, use \`ask_question\` to get the user's approval on WhatsApp before proceeding.`;
+    whatsappNote = `\n\n**HUMAN-IN-THE-LOOP (WHATSAPP)**: You are connected to the user via WhatsApp. Messages from the connected phone number will be received as chat inputs. For any significant or destructive action, ask the user for confirmation before proceeding.`;
   }
 
   const userContext = await getUserEnvironmentContext();

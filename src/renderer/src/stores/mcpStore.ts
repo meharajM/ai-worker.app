@@ -93,16 +93,6 @@ const DEFAULT_MCP_SERVERS = [
         command: 'uvx',
         args: ['markitdown-mcp'],
         autoConnect: true // Enable auto-connect (requires uv/python)
-    },
-    {
-        name: 'whatsapp-mcp',
-        description: 'WhatsApp MCP Server - Human-in-the-Loop for AI Agents via WhatsApp',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@mhrj/whatsapp-mcp'],
-        // Do NOT auto-connect: user must configure a target phone number first
-        // via the Command Palette or the EmptyState CTA.
-        autoConnect: false
     }
 ]
 
@@ -199,14 +189,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                     console.log(`[mcpStore] Dedup removed ${beforeLen - initialServers.length} duplicate(s)`);
                 }
 
-                // ENFORCE: whatsapp-mcp must NEVER autoConnect — requires explicit user action
-                initialServers = initialServers.map(s => {
-                    if (s.name === 'whatsapp-mcp') {
-                        if (s.autoConnect) console.log(`[mcpStore] Enforcing autoConnect=false for whatsapp-mcp (was true)`);
-                        return { ...s, autoConnect: false };
-                    }
-                    return s;
-                });
+
 
                 // Always persist clean state back to disk
                 await electron.store.set(storageKey, initialServers);

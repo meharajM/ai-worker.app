@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Command } from 'cmdk';
 import { Search, Bot, Trash2, Layout, Settings, Zap, WifiOff } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
-import { useMcpStore } from '../stores/mcpStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { View } from './Sidebar';
 import { WhatsAppConnectionDialog } from './WhatsAppConnectionDialog';
+import { whatsappService } from '../lib/whatsappService';
 
 interface CommandPaletteProps {
   onViewChange?: (view: View) => void;
@@ -15,30 +15,21 @@ export function CommandPalette({ onViewChange }: CommandPaletteProps) {
   const [open, setOpen] = useState(false);
   const [showPhoneDialog, setShowPhoneDialog] = useState(false);
 
-  const { clearMessages, toggleSidebar } = useChatStore();
-  const { servers, disconnectServer, updateServer } = useMcpStore();
-  const whatsappServer = servers.find(s => s.name === 'whatsapp-mcp');
-  const isWhatsAppConnected = whatsappServer?.connected || false;
+  const { clearMessages, toggleSidebar, whatsappEnabled, setWhatsAppEnabled } = useChatStore();
+  const isWhatsAppConnected = whatsappEnabled;
 
   const handleConnectWhatsApp = async () => {
-    if (whatsappServer) {
-        setShowPhoneDialog(true);
-    }
+    setShowPhoneDialog(true);
   };
 
-  const handleDisconnectWhatsApp = () => {
-    if (whatsappServer) {
-      disconnectServer(whatsappServer.id).catch(console.error);
-    }
+  const handleDisconnectWhatsApp = async () => {
+    await whatsappService.disconnect();
+    setWhatsAppEnabled(false);
   };
 
   const handleClearWhatsApp = async () => {
-    if (whatsappServer) {
-      // Await disconnect before updating — updateServer triggers auto-reconnect
-      // when autoConnect is true, so we explicitly disable it during a clear.
-      await disconnectServer(whatsappServer.id).catch(console.error);
-      await updateServer(whatsappServer.id, { env: {}, autoConnect: false });
-    }
+    await whatsappService.disconnect();
+    setWhatsAppEnabled(false);
   };
 
   useEffect(() => {
@@ -111,8 +102,7 @@ export function CommandPalette({ onViewChange }: CommandPaletteProps) {
                     </Command.Item>
                   </Command.Group>
 
-                  {whatsappServer && (
-                    <Command.Group heading="WhatsApp (Human-in-the-Loop)" className="text-xs font-bold text-white/30 uppercase tracking-wider mb-2 px-2 mt-4">
+                  <Command.Group heading="WhatsApp (Human-in-the-Loop)" className="text-xs font-bold text-white/30 uppercase tracking-wider mb-2 px-2 mt-4">
                       {!isWhatsAppConnected && (
                         <Command.Item
                           onSelect={() => {
@@ -160,7 +150,6 @@ export function CommandPalette({ onViewChange }: CommandPaletteProps) {
                         <span>Clear WhatsApp Data & Configuration</span>
                       </Command.Item>
                     </Command.Group>
-                  )}
 
                   <Command.Group heading="Navigation" className="text-xs font-bold text-white/30 uppercase tracking-wider mb-2 px-2 mt-4">
                     <Command.Item

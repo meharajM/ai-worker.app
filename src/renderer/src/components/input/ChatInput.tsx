@@ -18,12 +18,14 @@ import { useFileDragDrop } from '../../hooks/useFileDragDrop'
 import { useLogStore } from '../../stores/logStore'
 import { useChatStore } from '../../stores/chatStore'
 import electron from '../../lib/electron'
+import { whatsappService } from '../../lib/whatsappService'
 
 import { VoiceButton } from './VoiceButton'
 import { TextArea } from './TextArea'
 import { AttachmentBar } from './AttachmentBar'
 import { InputToolbar } from './InputToolbar'
 import { SendButton } from './SendButton'
+import { MessageCircle } from 'lucide-react'
 
 interface ChatInputProps {
   onSubmit: (message: string, attachments?: File[], isHeadless?: boolean) => void

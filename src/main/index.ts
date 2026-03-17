@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initEnv, __dirname } from './utils/env'
 import { setupIpcHandlers } from './ipc'
+import { setupWhatsAppIPC, whatsAppService } from './services/whatsapp/WhatsAppService'
 
 
 // Enable experimental on-device AI features (Gemini Nano / Chrome Prompt API)
@@ -107,6 +108,9 @@ function createWindow(): void {
     } else {
         mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
     }
+
+    // Initialize WhatsApp service with main window reference
+    whatsAppService.setMainWindow(mainWindow)
 }
 
 app.whenReady().then(async () => {
@@ -114,6 +118,7 @@ app.whenReady().then(async () => {
 
     // Verify environment and paths
     setupIpcHandlers()
+    setupWhatsAppIPC()
 
     // Workers cannot fetch file:// URLs easily. We serve the model over HTTP locally.
     // Check for production env explicitly to ensure it runs during e2e tests
