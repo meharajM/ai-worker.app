@@ -330,11 +330,6 @@ export class AgentRuntime implements IAgentClient {
   private async _runLoop(finalPrompt: string): Promise<LLMMessage> {
     let iterationCount = 0;
     let consecutiveErrors = 0;
-    // WHY: Tracks whether the agent explicitly called mark_task_complete.
-    // The loop can ONLY exit cleanly when this is true or an abort/hard-limit fires.
-    let taskComplete = false;
-    let taskSuccess = true;
-    let taskSummary = "";
     const recentToolCalls: string[] = [];
     // Tracks the single live UI bubble created for ALL tool-calling iterations.
     // Only one bubble is ever created per agent run; all tool calls accumulate into it.
@@ -343,8 +338,6 @@ export class AgentRuntime implements IAgentClient {
     const accumulatedToolCalls: AccumulatedToolCall[] = [];
 
     while (iterationCount < this.maxIterations) {
-      // Exit cleanly if mark_task_complete was called in previous iteration
-      if (taskComplete) break;
       this.totalIterations++;
       if (this.options.signal?.aborted) throw new Error("Aborted by user");
 
@@ -374,32 +367,8 @@ export class AgentRuntime implements IAgentClient {
       }
 
       if (!response.toolCalls || response.toolCalls.length === 0) {
-        // ── Check: did the agent explicitly signal completion last iteration? ──
-        // If mark_task_complete was processed in a previous iteration, taskComplete
-        // would have broken the while-loop already. If we reach here WITHOUT that flag,
-        // the agent stopped calling tools without finishing — inject a corrective prompt.
         const refusal = this._handleModelRefusal(response);
         if (refusal) continue;
-
-        // Guard: only inject corrective if we haven't hit the absolute cap
-        if (!taskComplete && this.totalIterations < this.ABSOLUTE_MAX_ITERATIONS) {
-          console.warn(`[AgentRuntime] Agent returned no tool calls without calling mark_task_complete. Injecting corrective prompt.`);
-          // WHY push directly instead of addMessage():
-          // This is an internal LLM-steering injection — it must go into the LLM context
-          // for the next API call but must NEVER appear as a visible bubble in the chat UI.
-          // addMessage() calls onMessage(), which would display this message to the user.
-          const correctiveMsg = {
-            role: "user" as const,
-            content: `[AUTO-CORRECT] You stopped working without calling mark_task_complete. This is not allowed.\n\n` +
-              `If the task is DONE: call mark_task_complete({ summary: "...", success: true }).\n` +
-              `If you are BLOCKED: call mark_task_complete({ summary: "blocked: <reason>", success: false }).\n` +
-              `If you need to keep working: call the next tool immediately.\n\n` +
-              `Do NOT respond in prose. Call a tool.`,
-          };
-          this.messages.push(correctiveMsg);
-          this._estimatedContextBytes += correctiveMsg.content.length + 50;
-          continue;
-        }
 
         const assistantMsg: LLMMessage = { role: "assistant", content: response.content };
         this._appendCheckpointReport(assistantMsg);
@@ -408,7 +377,7 @@ export class AgentRuntime implements IAgentClient {
           // ── Final response: update the live bubble in-place (no new bubble created) ──
           // Push to internal history without firing onMessage (which would add a new bubble).
           this.messages.push(assistantMsg);
-          const finalUpdates: Record<string, unknown> = { content: assistantMsg.content };
+          const finalUpdates: any = { content: assistantMsg.content };
           if (accumulatedToolCalls.length > 0) {
             finalUpdates.toolCalls = accumulatedToolCalls;
           }
@@ -485,16 +454,7 @@ export class AgentRuntime implements IAgentClient {
         console.log(`[AgentRuntime] Executing tool: ${call.name}`);
         let resultStr = "";
 
-        if (call.name === "mark_task_complete") {
-          // ── Explicit task completion signal ──────────────────────────────────
-          // This is the ONLY valid exit for the agent loop (besides abort + hard cap).
-          // Set the flag here; the while-loop checks it at the top of the next iteration.
-          const completion = this.specialHandlers.handleMarkTaskComplete(call.arguments);
-          resultStr = completion.result;
-          taskComplete = completion.isComplete;
-          taskSuccess = completion.success;
-          taskSummary = (call.arguments.summary as string) || "";
-        } else if (call.name === "create_execution_plan") {
+        if (call.name === "create_execution_plan") {
           const { result, plan } = this.specialHandlers.handleCreateExecutionPlan(call.arguments);
           this.executionPlan = plan;
           resultStr = result;
@@ -527,19 +487,12 @@ export class AgentRuntime implements IAgentClient {
           }
 
           if (consecutiveErrors >= this.maxConsecutiveErrors) {
-            // ── Adaptive recovery: inject corrective message, DON'T hard-stop ──
-            // WHY: Bailing out immediately means the agent gives up on the whole task.
-            // Instead, reset the counter and let the LLM pivot to a new approach.
-            // The ABSOLUTE_MAX_ITERATIONS cap is the true hard ceiling.
-            console.warn(`[AgentRuntime] ${consecutiveErrors} consecutive errors. Injecting recovery prompt instead of bailing.`);
-            consecutiveErrors = 0;
-            resultStr += `\n\n[RECOVERY] The last ${this.maxConsecutiveErrors} tool calls all failed consecutively.\n` +
-              `STOP using those tools. You MUST try a completely different approach:\n` +
-              `- If browser tools fail → try filesystem tools, API calls, or convert_to_markdown\n` +
-              `- If a selector fails → use get_interactive_elements() or screenshot() to rediscover\n` +
-              `- If an API call fails → check for an alternative endpoint or library\n` +
-              `- If you are genuinely blocked → call mark_task_complete({ summary: "blocked: <reason>", success: false })\n` +
-              `Do NOT retry the same tools with the same arguments.`;
+            const bailoutMsg: LLMMessage = {
+              role: "assistant",
+              content: `Bailing out after ${consecutiveErrors} consecutive errors. Last error: ${resultStr}`,
+            };
+            this.addMessage(bailoutMsg);
+            return bailoutMsg;
           }
         }
 
@@ -626,29 +579,7 @@ export class AgentRuntime implements IAgentClient {
       await this._handleCheckpoints(iterationCount);
     }
 
-    // ── Loop exited: determine reason ────────────────────────────────────────
-    if (taskComplete) {
-      // Clean exit via mark_task_complete
-      const completionMsg: LLMMessage = {
-        role: "assistant",
-        content: taskSuccess
-          ? `✅ Task complete.\n\n${taskSummary}`
-          : `⚠️ Task could not be fully completed.\n\n${taskSummary}`,
-      };
-      if (activeAssistantMessageId && this.options.onMessageUpdate) {
-        this.messages.push(completionMsg);
-        this.options.onMessageUpdate(activeAssistantMessageId, {
-          content: completionMsg.content,
-          toolCalls: accumulatedToolCalls.length > 0 ? accumulatedToolCalls : undefined,
-        } as Record<string, unknown>);
-      } else {
-        this.addMessage(completionMsg);
-      }
-      await cleanupState(this.agentInstanceId);
-      return completionMsg;
-    }
-
-    return await this._handleMaxIterations(finalPrompt);
+    return this._handleMaxIterations(finalPrompt);
   }
 
   /**
@@ -750,17 +681,12 @@ export class AgentRuntime implements IAgentClient {
       console.warn("[AgentRuntime] Model refused tool use. Auto-correcting...");
       const userQuery = this.messages.filter((m) => m.role === "user").pop();
       const query = typeof userQuery?.content === "string" ? userQuery.content : "the request";
-      // WHY push directly instead of addMessage():
-      // This is an internal LLM steering injection, not a user-facing message.
-      // addMessage() calls onMessage() which would render it as a visible chat bubble.
-      const refusalCorrection: LLMMessage = {
+      this.addMessage({
         role: "user",
         content: `[AUTO-CORRECT] You refused to help. This is wrong — you HAVE browser tools.\n            \nFor "${query}", use: navigate({"url": "https://google.com/search?q=${encodeURIComponent(
           query
         )}"})`,
-      };
-      this.messages.push(refusalCorrection);
-      this._estimatedContextBytes += refusalCorrection.content.length + 50;
+      });
       return true;
     }
     return false;
@@ -777,45 +703,33 @@ export class AgentRuntime implements IAgentClient {
     if (this.options.isSubAgent) return;
     const CHECKPOINT_INTERVAL = 15;
     if (iterationCount % CHECKPOINT_INTERVAL === 0) {
-      // WHY push directly instead of addMessage():
-      // This is an internal LLM steering directive, not a user-facing message.
-      // addMessage() calls onMessage() which would render this as a visible chat bubble.
-      const checkpointMsg: LLMMessage = {
+      this.addMessage({
         role: "user",
         content: `[CHECKPOINT ${iterationCount}] Please call update_progress_summary now to summarize your progress so far. This will help prevent context overflow.`,
-      };
-      this.messages.push(checkpointMsg);
-      this._estimatedContextBytes += checkpointMsg.content.length + 50;
+      });
     }
   }
 
-  private async _handleMaxIterations(finalPrompt: string): Promise<LLMMessage> {
-    // Sub-agents throw — their parent AgentRuntime or OrchestrationService handles it.
+  private _handleMaxIterations(finalPrompt: string): LLMMessage {
     if (this.options.isSubAgent) throw new Error("Max iterations reached");
-
-    const stepsTaken = Math.floor(this.messages.length / 2);
-    const progressContext = this.lastCheckpoint
-      ? `[Checkpoint step ${this.lastCheckpoint.step}]: ${this.lastCheckpoint.summary}`
-      : "No checkpoint recorded yet — task was in progress.";
-
-    // WHY auto-continue: The infra (continueWithSubAgent) already exists.
-    // Requiring a user button-click to continue was the gap — the task intent
-    // has not changed, so we continue automatically with a fresh context window.
-    console.log(`[AgentRuntime] Max iterations (${this.maxIterations}) reached. Auto-continuing via sub-agent.`);
-    this.addMessage({
+    const handoffMsg: LLMMessage = {
       role: "assistant",
-      content: `I've used ${this.maxIterations} steps. Saving progress and continuing automatically with a fresh context...`,
-    });
-
-    return continueWithSubAgent(
-      finalPrompt,
-      stepsTaken,
-      progressContext,
-      this.options,
-      this.agentInstanceId,
-      (msg) => this.addMessage(msg),
-      this._makeSubAgentFactory()
-    );
+      content: `I've reached the maximum number of steps (${this.maxIterations}) for this context. To ensure accuracy and prevent context issues, I've saved a checkpoint of my progress. Should I continue with a fresh context or stop here?`,
+      actions: [
+        {
+          type: "continue",
+          label: "▶️ Continue Task",
+          payload: { goal: finalPrompt },
+        },
+        {
+          type: "cancel",
+          label: "⏹️ Stop Here",
+          payload: {},
+        },
+      ],
+    };
+    this.addMessage(handoffMsg);
+    return handoffMsg;
   }
 
   private addMessage(msg: LLMMessage): string | void {

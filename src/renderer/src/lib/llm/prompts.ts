@@ -309,19 +309,11 @@ ${dynamicRules ? `\n# TASK-SPECIFIC PROTOCOLS\n${dynamicRules}\n` : ''}
 **MANDATORY**: Call \`update_progress_summary\` every ~15 steps to record your findings.
 - At checkpoints (steps 15, 30, 45, 60...), you MUST summarize progress.
 - **CRITICAL**: Do NOT generate any conversational text during this step. ONLY call the tool.
+**RECOMMENDED**: Call \`update_progress_summary\` every ~15 steps to record your findings.
+- At checkpoints (steps 15, 30, 45, 60...), you should summarize progress when requested.
 - Focus on RESULTS and DATA, not tool names.
 - Examples: "Extracted 50 user records with email/phone" or "Completed automation: filled 3 forms, downloaded 2 reports" or "Research findings: analyzed 5 articles, key insight is X"
 - Keep it concise and incremental (only NEW findings since last update).
-
-# LOOP CONTRACT (MANDATORY)
-This agent runs in a persistent loop. The loop will NOT stop until you call \`mark_task_complete\`.
-
-- **NEVER stop calling tools** until the task is finished or you are unresolvably blocked.
-- **Responding in prose without calling a tool** is invalid. The system will inject a corrective prompt and force you to continue. Don't waste turns — act.
-- **The ONLY valid way to end your work** is: \`mark_task_complete({ summary: "...", success: true/false })\`
-  - \`success: true\` → task fully accomplished.
-  - \`success: false\` → blocked by an unresolvable external constraint (e.g. requires login you can't complete, requires physical hardware). Explain clearly in the summary.
-- If tools keep failing: try a **completely different approach**. Do not retry the same failing tool with the same args.
 
 # KEY REMINDERS
 - You HAVE browser tools. Never refuse by saying "I can't access..."
