@@ -244,11 +244,16 @@ export class BrowserManager {
                 console.error('[BrowserManager] Failed to launch browser:', error);
                 this.initializationPromise = null;
                 throw error;
+            } finally {
+                this.initializationPromise = null;
             }
         })();
 
         await this.initializationPromise;
-        return this.context!;
+        if (!this.context) {
+            throw new Error('[BrowserManager] Browser initialization failed to produce a context.');
+        }
+        return this.context;
     }
 
     private async enableResourceBlocking(page: Page): Promise<void> {
@@ -412,11 +417,14 @@ export class BrowserManager {
         }
 
         if (!this.page || this.page.isClosed()) {
-            const pages = this.context!.pages().filter(p => !p.isClosed());
+            if (!this.context) {
+                throw new Error('[BrowserManager] Cannot get page: Context is null after ensureBrowser.');
+            }
+            const pages = this.context.pages().filter(p => !p.isClosed());
             if (pages.length > 0) {
                 this.page = pages[pages.length - 1];
             } else {
-                this.page = await this.context!.newPage();
+                this.page = await this.context.newPage();
                 this.registerPage(this.page);
             }
         }
@@ -446,25 +454,26 @@ export class BrowserManager {
             this.idleTimer = null;
         }
 
+        // Reset promises to ensure subsequent calls don't await stale ones
+        this.initializationPromise = null;
+        this.headlessInitializationPromise = null;
+
         if (this.context) {
-            await this.context.close();
+            await this.context.close().catch(e => console.error('[BrowserManager] Error closing context:', e));
             this.context = null;
             this.page = null;
             this.pagesMap.clear();
-            this.initializationPromise = null;
         }
         if (this.headlessBrowser) {
-            await this.headlessBrowser.close();
+            await this.headlessBrowser.close().catch(e => console.error('[BrowserManager] Error closing headless browser:', e));
             this.headlessBrowser = null;
             this.headlessContext = null;
             this.headlessPage = null;
-            this.headlessInitializationPromise = null;
         }
         if (this.headlessContext) {
-            await this.headlessContext.close();
+            await this.headlessContext.close().catch(e => console.error('[BrowserManager] Error closing headless context:', e));
             this.headlessContext = null;
             this.headlessPage = null;
-            this.headlessInitializationPromise = null;
         }
     }
 }

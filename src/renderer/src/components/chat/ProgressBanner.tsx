@@ -50,13 +50,13 @@ export function ProgressBanner({ session }: ProgressBannerProps) {
             </span>
             <span>{session.progress}%</span>
           </div>
-          <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
+          <div className="h-1.5 w-full bg-[var(--color-surface)] rounded-[var(--radius-pill)] overflow-hidden border border-[var(--color-border)]">
             <motion.div
               initial={{ width: 0 }}
               animate={{ width: `${session.progress}%` }}
-              className="h-full bg-gradient-to-r from-[var(--color-accent)] to-[var(--color-primary)] relative"
+              className="h-full bg-[var(--color-brand-teal)] relative"
             >
-              <div className="absolute inset-0 bg-white/20 animate-pulse" />
+              <div className="absolute inset-0 bg-white/20" />
             </motion.div>
           </div>
         </div>

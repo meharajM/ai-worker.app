@@ -69,8 +69,8 @@ export function MissingDependenciesScreen({ onResolved }: { onResolved: () => vo
 
     if (loading && missing.length === 0) {
         return (
-            <div className="flex items-center justify-center p-8 bg-[#0f1115] text-white w-full h-full">
-                <div className="animate-pulse">Checking system dependencies...</div>
+            <div className="flex items-center justify-center p-8 bg-[var(--color-bg-dark)] text-[var(--color-text-primary)] w-full h-full">
+                <div className="text-[var(--color-text-muted)]">Checking system dependencies...</div>
             </div>
         );
     }
@@ -80,8 +80,8 @@ export function MissingDependenciesScreen({ onResolved }: { onResolved: () => vo
     }
 
     return (
-        <div className="fixed inset-0 z-50 bg-[#0f1115] flex items-center justify-center text-white p-8 overflow-y-auto">
-            <div className="max-w-md w-full p-8 rounded-xl border border-white/10 bg-[#16181d] shadow-2xl space-y-6">
+        <div className="fixed inset-0 z-50 bg-[var(--color-bg-dark)] flex items-center justify-center text-[var(--color-text-primary)] p-8 overflow-y-auto">
+            <div className="max-w-md w-full p-8 rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-card-dark)] shadow-[var(--shadow-xl)] space-y-6">
                 <div className="space-y-2">
                     <h2 className="text-2xl font-bold">Missing Dependencies</h2>
                     <p className="text-sm text-gray-400">
