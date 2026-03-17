@@ -57,13 +57,25 @@ export class WhatsAppService extends EventEmitter {
         try {
             const credsFile = path.join(this.authDir, 'creds.json')
             const phoneFile = path.join(this.authDir, 'phone.txt')
+            
+            // Just log that we found credentials - don't auto-connect
+            // Let user explicitly connect to handle any credential issues
             if (fs.existsSync(credsFile)) {
                 let savedPhone = ''
                 if (fs.existsSync(phoneFile)) {
                     savedPhone = fs.readFileSync(phoneFile, 'utf8').trim()
                 }
-                console.log('[WhatsAppService] Found existing auth, auto-connecting...')
-                this.connect(savedPhone).catch((e) => console.error('[WhatsAppService] Auto-connect failed:', e))
+                console.log('[WhatsAppService] Found existing auth credentials. User can connect when ready.')
+                
+                // Set the saved phone number in state but don't connect
+                if (savedPhone) {
+                    this._setState({
+                        status: 'disconnected',
+                        qrCode: null,
+                        error: null,
+                        phoneNumber: savedPhone,
+                    })
+                }
             }
         } catch (error) {
             console.error('[WhatsAppService] Init error:', error)
@@ -85,6 +97,9 @@ export class WhatsAppService extends EventEmitter {
             phoneNumber: targetPhoneNumber,
         })
 
+        // Don't clear auth here - it breaks the QR scan flow!
+        // Auth is only cleared on explicit disconnect or Stream Error
+        
         try {
             // Dynamically import Baileys to avoid bundling issues
             const {
@@ -117,11 +132,16 @@ export class WhatsAppService extends EventEmitter {
                 child: () => silentLogger,
             }
 
+            // Use default Baileys WebSocket with proper configuration
             const sock = makeWASocket({
                 version,
                 auth: state,
                 logger: silentLogger,
                 printQRInTerminal: false,
+                // Browser identification - helps with WhatsApp server stability
+                browser: ['AI-Worker', 'Chrome', '120.0.0'],
+                // Connection options for better stability
+                connectTimeoutMs: 60000,
             })
 
             this.socket = sock
@@ -133,15 +153,18 @@ export class WhatsAppService extends EventEmitter {
             sock.ev.on('connection.update', (update: any) => {
                 const { connection, lastDisconnect, qr } = update as {
                     connection?: string
-                    lastDisconnect?: { error?: { output?: { statusCode?: number } } }
+                    lastDisconnect?: { error?: { output?: { statusCode?: number }; message?: string }; reason?: string }
                     qr?: string
                 }
+
+                console.log('[WhatsAppService] Connection update:', { connection, qr: !!qr, lastDisconnect })
 
                 if (qr) {
                     this._setState({ ...this.connectionState, status: 'connecting', qrCode: qr })
                 }
 
                 if (connection === 'open') {
+                    console.log('[WhatsAppService] Connection opened successfully!')
                     this._setState({
                         status: 'connected',
                         qrCode: null,
@@ -152,15 +175,74 @@ export class WhatsAppService extends EventEmitter {
 
                 if (connection === 'close') {
                     const statusCode = lastDisconnect?.error?.output?.statusCode
+                    const errorMessage = lastDisconnect?.error?.message || lastDisconnect?.reason || 'Unknown reason'
                     const loggedOutCode = DisconnectReason.loggedOut
+                    
+                    console.log('[WhatsAppService] Connection closed:', { statusCode, errorMessage, loggedOutCode })
+                    
+                    // Check for Stream Error - need to clear auth and retry
+                    const isStreamError = errorMessage?.toLowerCase().includes('stream errored') || 
+                        errorMessage?.toLowerCase().includes('restart required')
+                    
+                    // Check if this is a network-related disconnection (not user-initiated)
+                    const isNetworkError = statusCode === undefined || 
+                        statusCode === 428 || // Server unreachable
+                        statusCode === 503 || // Service unavailable  
+                        statusCode === 504  // Gateway timeout
 
                     if (statusCode !== loggedOutCode) {
-                        this._setState({
-                            status: 'error',
-                            qrCode: null,
-                            error: 'Connection closed unexpectedly. Please reconnect.',
-                            phoneNumber: targetPhoneNumber,
-                        })
+                        // Handle Stream Error - don't clear auth, just show QR again
+                        if (isStreamError) {
+                            console.log('[WhatsAppService] Stream error detected, showing QR for re-auth...')
+                            this._setState({
+                                status: 'disconnected',
+                                qrCode: null,
+                                error: null,
+                                phoneNumber: targetPhoneNumber,
+                            })
+                            // Don't clear auth - just let user scan QR again with same credentials
+                            return
+                        }
+                        
+                        if (isNetworkError && targetPhoneNumber) {
+                            // Network issue - try to auto-reconnect after a delay
+                            this._setState({
+                                status: 'connecting',
+                                qrCode: null,
+                                error: null,
+                                phoneNumber: targetPhoneNumber,
+                            })
+                            console.log('[WhatsAppService] Network disconnected, attempting auto-reconnect in 5s...')
+                            setTimeout(() => {
+                                if (this.connectionState.status === 'connecting') {
+                                    this.connect(targetPhoneNumber).catch(e => {
+                                        console.error('[WhatsAppService] Auto-reconnect failed:', e)
+                                        this._setState({
+                                            status: 'error',
+                                            qrCode: null,
+                                            error: 'Failed to reconnect. Please try again.',
+                                            phoneNumber: targetPhoneNumber,
+                                        })
+                                    })
+                                }
+                            }, 5000)
+                        } else {
+                            // Provide more specific error message
+                            let specificError = 'Connection closed unexpectedly. Please reconnect.'
+                            if (errorMessage) {
+                                specificError = `Connection failed: ${errorMessage}`
+                            } else if (statusCode) {
+                                specificError = `Connection failed with status code: ${statusCode}`
+                            }
+                            
+                            console.error('[WhatsAppService] Connection error:', specificError)
+                            this._setState({
+                                status: 'error',
+                                qrCode: null,
+                                error: specificError,
+                                phoneNumber: targetPhoneNumber,
+                            })
+                        }
                     } else {
                         // Logged out — clear auth so next connect shows a fresh QR
                         this._clearAuth()
@@ -209,21 +291,30 @@ export class WhatsAppService extends EventEmitter {
     }
 
     async disconnect(): Promise<void> {
+        console.log('[WhatsAppService] Disconnecting and clearing auth...')
+        
         if (this.socket) {
             try {
                 await this.socket.logout()
-            } catch {
-                // ignore logout errors
+                console.log('[WhatsAppService] Logged out from WhatsApp')
+            } catch (err) {
+                console.warn('[WhatsAppService] Logout warning:', err)
             }
             this.socket = null
         }
+        
+        // Clear all auth data - this ensures a fresh QR scan on next connect
         this._clearAuth()
+        
+        // Reset internal state completely
         this._setState({
             status: 'disconnected',
             qrCode: null,
             error: null,
             phoneNumber: null,
         })
+        
+        console.log('[WhatsAppService] Disconnect complete - auth cleared')
     }
 
     async sendMessage(to: string, content: string): Promise<{ success: boolean; error?: string }> {
@@ -263,10 +354,21 @@ export class WhatsAppService extends EventEmitter {
     private _clearAuth(): void {
         try {
             if (fs.existsSync(this.authDir)) {
+                console.log('[WhatsAppService] Clearing auth directory:', this.authDir)
                 fs.rmSync(this.authDir, { recursive: true, force: true })
+                console.log('[WhatsAppService] Auth directory cleared')
+            } else {
+                console.log('[WhatsAppService] No auth directory to clear')
             }
+        } catch (err) {
+            console.error('[WhatsAppService] Error clearing auth:', err)
+        }
+        
+        // Also ensure the parent directory exists for next connect
+        try {
+            fs.mkdirSync(this.authDir, { recursive: true })
         } catch {
-            // non-fatal
+            // ignore - will be created on next connect
         }
     }
 

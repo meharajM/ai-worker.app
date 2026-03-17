@@ -298,8 +298,22 @@ export function useAgent(): UseAgentReturn {
 
                 // Extract WhatsApp target sender JID if this was an incoming remote message
                 const extractWaJid = (text: string) => {
-                    const match = text.match(/📱 \*\*WhatsApp\*\* \(([^)]+)\):/);
-                    return match ? match[1] : null;
+                    if (!text || typeof text !== 'string') return null;
+                    
+                    // Try multiple patterns for robustness
+                    const patterns = [
+                        /📱 \*\*WhatsApp\*\* \(([^)]+)\):/,  // Primary pattern
+                        /📱 WhatsApp \(([^)]+)\):/,          // Without bold
+                        /WhatsApp.*?\((\+?\d+)\):/,           // Flexible pattern
+                    ];
+                    
+                    for (const pattern of patterns) {
+                        const match = text.match(pattern);
+                        if (match && match[1]) {
+                            return match[1];
+                        }
+                    }
+                    return null;
                 };
                 const targetJid = extractWaJid(content);
                 const waState = useWhatsAppStore.getState();

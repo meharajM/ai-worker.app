@@ -20,10 +20,67 @@ import electron from '../lib/electron'
 type DialogStep = 'idle' | 'connecting' | 'qr' | 'connected' | 'manage' | 'error'
 
 export function WhatsAppConnectionDialog(): React.JSX.Element | null {
-    const { isDialogOpen, closeDialog, connectionState, setConnectionState } = useWhatsAppStore()
+    const { isDialogOpen, closeDialog, connectionState, setConnectionState, setTargetPhoneNumber, setWhatsAppEnabled, targetPhoneNumber } = useWhatsAppStore()
     const [phoneInput, setPhoneInput] = useState('')
     const [step, setStep] = useState<DialogStep>('idle')
     const [errorMessage, setErrorMessage] = useState('')
+
+    // Pre-fill phone number from stored target when dialog opens
+    useEffect(() => {
+        if (isDialogOpen && targetPhoneNumber && !phoneInput) {
+            setPhoneInput(targetPhoneNumber)
+        }
+    }, [isDialogOpen, targetPhoneNumber])
+
+    // Phone number validation function
+    const validatePhoneNumber = useCallback((phone: string): string | null => {
+        // Remove all non-digit characters
+        const digits = phone.replace(/\D/g, '')
+        
+        // Check if we have at least 7 digits (minimum for a phone number)
+        if (digits.length < 7) {
+            return null
+        }
+        
+        // If it doesn't start with country code, assume +1 (US) if 10 digits
+        let normalized = phone.trim()
+        if (!normalized.startsWith('+') && digits.length === 10) {
+            normalized = '+1' + digits
+        } else if (!normalized.startsWith('+')) {
+            normalized = '+' + digits
+        }
+        
+        return normalized
+    }, [])
+
+    // Save target phone number when connecting
+    const handleConnect = useCallback(async () => {
+        const phone = phoneInput.trim()
+        if (!phone) return
+
+        const normalizedPhone = validatePhoneNumber(phone)
+        if (!normalizedPhone) {
+            setErrorMessage('Please enter a valid phone number')
+            return
+        }
+
+        // Save target phone for future sessions
+        setTargetPhoneNumber(normalizedPhone)
+        
+        setStep('connecting')
+        setErrorMessage('')
+
+        try {
+            const result = await electron.whatsapp.connect(normalizedPhone)
+            if (!result.success && 'error' in result) {
+                setErrorMessage((result as { success: false; error: string }).error)
+                setStep('error')
+            }
+        } catch (err) {
+            setErrorMessage(err instanceof Error ? err.message : 'Failed to connect')
+            setStep('error')
+        }
+    }, [phoneInput, validatePhoneNumber, setTargetPhoneNumber])
 
     // Sync dialog step with connection state from main process
     useEffect(() => {
@@ -59,6 +116,20 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
         }
     }, [connectionState, isDialogOpen, closeDialog, step])
 
+    // QR code timeout - show error if QR not scanned within 2 minutes
+    useEffect(() => {
+        if (step === 'qr') {
+            const timeout = setTimeout(() => {
+                setErrorMessage('QR code expired. Please try again.')
+                setStep('idle')
+                // Notify main process to restart connection flow
+                electron.whatsapp.disconnect().catch(() => {})
+            }, 120000) // 2 minutes
+            
+            return () => clearTimeout(timeout)
+        }
+    }, [step])
+
     // Reset when dialog opens
     useEffect(() => {
         if (isDialogOpen) {
@@ -71,38 +142,23 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
         }
     }, [isDialogOpen, connectionState.status])
 
-    const handleConnect = useCallback(async () => {
-        const phone = phoneInput.trim()
-        if (!phone) return
-
-        setStep('connecting')
-        setErrorMessage('')
-
-        try {
-            const result = await electron.whatsapp.connect(phone)
-            if (!result.success && 'error' in result) {
-                setErrorMessage((result as { success: false; error: string }).error)
-                setStep('error')
-            }
-            // On success, the connectionChange event will update the store
-            // and the useEffect above will transition to 'qr' or 'connected'
-        } catch (err) {
-            setErrorMessage(err instanceof Error ? err.message : 'Failed to connect')
-            setStep('error')
-        }
-    }, [phoneInput])
-
     const handleDisconnect = useCallback(async () => {
+        if (!window.confirm('Are you sure you want to disconnect WhatsApp? You will need to scan the QR code again to reconnect.')) {
+            return
+        }
+        
         await electron.whatsapp.disconnect()
         setStep('idle')
         setPhoneInput('')
+        setTargetPhoneNumber(null)
+        setWhatsAppEnabled(false)
         setConnectionState({
             status: 'disconnected',
             qrCode: null,
             error: null,
             phoneNumber: null,
         })
-    }, [setConnectionState])
+    }, [setConnectionState, setTargetPhoneNumber, setWhatsAppEnabled])
 
     const handleClose = useCallback(() => {
         // Only allow closing if we're not mid-connection
