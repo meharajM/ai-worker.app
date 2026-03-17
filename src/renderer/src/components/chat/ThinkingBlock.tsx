@@ -25,13 +25,13 @@ export function ThinkingBlock({ content }: ThinkingBlockProps) {
         <summary className="text-[10px] text-[var(--color-accent)] cursor-pointer hover:text-[var(--color-primary)] transition-colors list-none flex items-center gap-1.5 font-medium select-none">
           <div
             className={`w-1 h-3 rounded-full ${
-              isComplete ? 'bg-[var(--color-accent)]' : 'bg-yellow-400 animate-pulse'
+              isComplete ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-warning)] shadow-[0_0_8px_var(--color-warning)]'
             }`}
           />
           <span>{isComplete ? 'Thinking Process' : 'Thinking...'}</span>
           <ChevronRight
             size={10}
-            className="group-open:rotate-90 transition-transform text-white/20"
+            className="group-open:rotate-90 transition-transform text-[var(--color-text-dim)]"
           />
         </summary>
         <motion.div
@@ -41,7 +41,7 @@ export function ThinkingBlock({ content }: ThinkingBlockProps) {
           transition={{ duration: 0.3, ease: 'easeOut' }}
           className="overflow-hidden"
         >
-          <div className="mt-2 text-[11px] leading-relaxed text-white/60 bg-black/20 rounded-md p-3 border border-white/5 font-mono shadow-inner whitespace-pre-wrap">
+          <div className="mt-2 text-[11px] leading-[var(--leading-relaxed)] text-[var(--color-text-secondary)] bg-[var(--color-surface)] rounded-[var(--radius-md)] p-3 border border-[var(--color-border)] font-[var(--font-family-mono)] shadow-inner whitespace-pre-wrap">
             {thinking}
           </div>
         </motion.div>

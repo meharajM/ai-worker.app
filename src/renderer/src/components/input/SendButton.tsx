@@ -1,44 +1,34 @@
 import React from 'react'
 import { Send, Square } from 'lucide-react'
+import { Button } from '../primitives/Button'
 
 interface SendButtonProps {
-  /** Whether the input is disabled (processing) */
   disabled?: boolean
-  /** Abort handler — if provided while disabled, shows a stop button */
   onAbort?: () => void
-  /** Submit handler */
   onSubmit: () => void
-  /** Whether there's content to send */
   hasContent: boolean
 }
 
-/**
- * Submit / Stop generation button.
- *
- * Two states:
- *   1. Processing + onAbort available → red stop button
- *   2. Otherwise → send button (enabled only when hasContent)
- */
 export function SendButton({
   disabled = false,
   onAbort,
   onSubmit,
   hasContent,
 }: SendButtonProps) {
-  // Stop button during generation
   if (disabled && onAbort) {
     return (
-      <button
+      <Button
+        variant="ghost"
+        size="md"
         onClick={onAbort}
-        className="p-2 mb-[1px] rounded-lg transition-all bg-red-500/20 hover:bg-red-500/30 text-red-400 h-[44px] w-[36px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+        className="w-[36px] h-[44px] p-2 mb-[1px] text-[var(--color-error)] hover:bg-[var(--color-error)]/20"
         title="Stop Generation"
       >
         <Square size={18} className="fill-current" />
-      </button>
+      </Button>
     )
   }
 
-  // Send button
   return (
     <button
       type="button"
@@ -52,7 +42,7 @@ export function SendButton({
       aria-disabled={disabled || !hasContent}
       aria-label="Send message"
       data-testid="send-button"
-      className={`p-2 mb-[1px] rounded-lg transition-all h-[44px] w-[36px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${hasContent && !disabled
+      className={`p-2 mb-[1px] rounded-[var(--radius-lg)] transition-all h-[44px] w-[36px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${hasContent && !disabled
           ? 'bg-[var(--color-text-primary)] text-[var(--color-bg-dark)] hover:opacity-80'
           : 'bg-transparent text-[var(--color-text-dim)] cursor-not-allowed'
         }`}

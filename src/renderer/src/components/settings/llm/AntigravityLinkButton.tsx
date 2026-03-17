@@ -49,7 +49,7 @@ export function AntigravityLinkButton({ variant = 'compact' }: AntigravityLinkBu
                 <div>
                     <p className="text-sm font-medium text-[var(--color-text-primary)]">{antigravityEmail}</p>
                     <p className="text-[10px] text-[var(--color-success)] flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] animate-pulse inline-block" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] shadow-[0_0_8px_var(--color-success)] inline-block" />
                         Linked and Active
                     </p>
                 </div>

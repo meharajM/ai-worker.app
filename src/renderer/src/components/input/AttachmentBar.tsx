@@ -2,16 +2,10 @@ import React from 'react'
 import { File as FileIcon, XCircle } from 'lucide-react'
 
 interface AttachmentBarProps {
-  /** Currently attached files */
   attachments: File[]
-  /** Remove an attachment by index */
   onRemove: (index: number) => void
 }
 
-/**
- * Horizontal pill list showing attached files with remove buttons.
- * Extracted from VoiceInput for independent rendering and tracking.
- */
 export function AttachmentBar({ attachments, onRemove }: AttachmentBarProps) {
   if (attachments.length === 0) return null
 
@@ -20,9 +14,9 @@ export function AttachmentBar({ attachments, onRemove }: AttachmentBarProps) {
       {attachments.map((file, index) => (
         <div
           key={`${file.name}-${index}`}
-          className="flex items-center gap-2 bg-white/10 rounded-full px-3 py-1 text-xs text-white/90 border border-white/10 animate-in fade-in zoom-in-95 duration-200"
+          className="flex items-center gap-2 bg-[var(--color-surface)] rounded-[var(--radius-pill)] px-3 py-1 text-[var(--text-xs)] text-[var(--color-text-primary)] border border-[var(--color-border)] animate-in fade-in zoom-in-95 duration-[var(--duration-fast)]"
         >
-          <FileIcon size={12} className="text-emerald-400" />
+          <FileIcon size={12} className="text-[var(--color-success)]" />
           <span
             className="max-w-[200px] truncate"
             title={(file as unknown as { path: string }).path || file.name}
@@ -31,7 +25,7 @@ export function AttachmentBar({ attachments, onRemove }: AttachmentBarProps) {
           </span>
           <button
             onClick={() => onRemove(index)}
-            className="hover:text-red-400 transition-colors"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-error)] transition-colors"
           >
             <XCircle size={14} />
           </button>
