@@ -203,31 +203,11 @@ export const BROWSER_ACTION_SEQUENCE_TOOL: MCPTool = BROWSER_ACTION_SEQUENCE_SCH
 export const WEB_SEARCH_TOOL: MCPTool = WEB_SEARCH_SCHEMA as MCPTool;
 export const FILL_FORM_TOOL: MCPTool = FILL_FORM_SCHEMA as MCPTool;
 
-export const MARK_TASK_COMPLETE_TOOL: MCPTool = {
-  name: "mark_task_complete",
-  description: "REQUIRED: Call this tool ONLY when the task is fully done. This is the ONLY valid way to end your work. Do not stop calling tools for any other reason.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      summary: {
-        type: "string",
-        description: "Brief summary of what was accomplished."
-      },
-      success: {
-        type: "boolean",
-        description: "True if the task was completed successfully, false if it had to be abandoned due to an unresolvable blocker."
-      }
-    },
-    required: ["summary", "success"]
-  }
-};
-
 export const CLIENT_TOOLS = [
   PLANNING_TOOL,
   SUB_AGENT_TOOL,
   SCAN_PAGE_TOOL,
   PROGRESS_SUMMARY_TOOL,
-  MARK_TASK_COMPLETE_TOOL,
   MEMORY_CREATE_ENTITY_TOOL,
   MEMORY_CREATE_RELATION_TOOL,
   MEMORY_SEARCH_TOOL,

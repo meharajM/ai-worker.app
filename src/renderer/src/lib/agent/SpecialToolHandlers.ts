@@ -159,32 +159,6 @@ export class SpecialToolHandlers {
     }
 
     /**
-     * Handles the mark_task_complete signal from the agent.
-     * This is the ONLY valid way for the agent to declare a task finished.
-     *
-     * @param args - Object containing `summary` (string) and `success` (boolean).
-     * @returns Acknowledged result plus structured flags for the loop.
-     */
-    handleMarkTaskComplete(args: Record<string, unknown>): { result: string; isComplete: true; success: boolean } {
-        const summary = (args.summary as string) || "Task complete.";
-        const success = typeof args.success === "boolean" ? args.success : true;
-
-        console.log(`[SpecialToolHandlers] mark_task_complete called. success=${success}. Summary: ${summary.substring(0, 80)}`);
-
-        return {
-            result: JSON.stringify({
-                acknowledged: true,
-                message: success
-                    ? "Task marked as complete. Loop will exit cleanly."
-                    : "Task marked as abandoned. Loop will exit and surface reason to user.",
-                summary,
-            }),
-            isComplete: true,
-            success,
-        };
-    }
-
-    /**
      * Spawns a sub-agent to perform a specific instruction with context.
      * Closes the sub-agent's temporary tab and updates the execution plan on completion.
      *
