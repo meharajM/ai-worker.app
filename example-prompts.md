@@ -855,3 +855,201 @@ The agent's browser tools feature built-in protective layers to prevent hallucin
 | 21F: Sub-agent isolation | N/A | ✅ | ✅ | ✅ |
 | 21G: Instant reply (no tools) | N/A | ❌ (correct) | ❌ (correct) | N/A |
 
+---
+
+## 22. Agent Loop Robustness (New — Loop Contract Changes)
+
+> These prompts verify the **three core loop improvements** shipped in the latest release:
+>
+> 1. **`mark_task_complete` — Explicit finish signal.** The LLM must call this tool to end a task. Going silent no longer counts as "done".
+> 2. **Adaptive error recovery.** After a series of consecutive tool errors the agent injects a corrective prompt and tries a different strategy instead of hard-stopping.
+> 3. **Auto-continuation after max iterations.** When the iteration cap is hit the agent automatically spawns a continuation sub-agent — no "Continue / Stop" buttons needed.
+
+---
+
+### 22A. Explicit Task Completion via `mark_task_complete`
+**What it tests:** The agent calls `mark_task_complete` at the end of every task instead of just going silent.
+
+**Prompt:**
+> "What is today's date and what day of the week is it?"
+
+**Expected Behavior:**
+- Agent answers the question in text
+- Calls `mark_task_complete` with a short summary before the loop exits
+- Loop exits cleanly — no lingering spinner
+
+**What you should NOT see:**
+- ❌ Loop spinning forever after the answer is delivered
+- ❌ "Agent returned no tool calls without calling mark_task_complete. Injecting corrective prompt." in logs (for a simple query this should resolve quickly)
+
+**Console Logs to Check:**
+```
+[AgentRuntime] Executing tool: mark_task_complete
+[SpecialToolHandlers] mark_task_complete called. success=true. Summary: ...
+[AgentRuntime] Task marked complete by agent.
+```
+
+---
+
+### 22B. mark_task_complete on a Multi-Step Task
+**What it tests:** `mark_task_complete` fires once all steps are done, not prematurely.
+
+**Prompt:**
+> "Open wikipedia.org, search for 'Eiffel Tower', read the first paragraph, and tell me when it was built."
+
+**Expected Behavior:**
+- Agent navigates → searches → reads
+- Only calls `mark_task_complete` after returning the build year
+- Single clean completion — no mid-task bailout
+
+**Console Logs to Check:**
+```
+[AgentRuntime] Executing tool: browser_navigate
+[AgentRuntime] Executing tool: browser_search_text
+[AgentRuntime] Executing tool: browser_get_text
+[AgentRuntime] Executing tool: mark_task_complete
+[SpecialToolHandlers] mark_task_complete called. success=true.
+```
+
+---
+
+### 22C. Adaptive Error Recovery — Tool Keeps Failing
+**What it tests:** When a tool fails multiple times in a row the agent injects a corrective prompt and tries an alternative approach instead of crashing.
+
+**Prompt:**
+> "Navigate to https://this-domain-absolutely-does-not-exist-xyz.com and get the page title."
+
+**Expected Behavior:**
+- `browser_navigate` fails (DNS error)
+- Agent **does not stop** — it injects: `[AUTO-CORRECT] Previous tools encountered errors…`
+- Agent tries an alternative (e.g., tries a different URL, or reports the error gracefully)
+- Eventually calls `mark_task_complete` with `success: false` explaining what happened
+
+**What you should NOT see:**
+- ❌ Uncaught error in UI
+- ❌ Agent permanently stuck in an error loop consuming all iterations silently
+
+**Console Logs to Check:**
+```
+[AgentRuntime] Consecutive tool errors: 1
+[AgentRuntime] Consecutive tool errors: 2
+[AgentRuntime] Consecutive tool errors: 3 — injecting adaptive recovery prompt
+[AgentRuntime] Executing tool: mark_task_complete   ← agent recovers gracefully
+[SpecialToolHandlers] mark_task_complete called. success=false. Summary: Could not reach domain…
+```
+
+---
+
+### 22D. Adaptive Recovery — Bad Selector, Self-Corrects
+**What it tests:** Error recovery kicks in specifically for bad CSS selectors, and the agent switches strategy rather than retrying the same broken selector.
+
+**Prompt:**
+> "Go to google.com. Click the element with selector '#i-do-not-exist-button' and then tell me what happened."
+
+**Expected Behavior:**
+- Click fails (element not found)
+- Recovery prompt: the agent is instructed to try a different approach
+- Agent switches to `get_interactive_elements` to find a real element
+- Reports back what it found — does NOT keep blindly retrying the same selector
+
+**Console Logs to Check:**
+```
+[AgentRuntime] Consecutive tool errors: 1
+[AgentRuntime] Consecutive tool errors: 2
+[AgentRuntime] Consecutive tool errors: 3 — injecting adaptive recovery prompt
+[AgentRuntime] Executing tool: get_interactive_elements   ← new strategy
+[AgentRuntime] Executing tool: mark_task_complete
+```
+
+---
+
+### 22E. Auto-Continuation After Max Iterations
+**What it tests:** When the iteration cap is hit the agent auto-spawns a continuation sub-agent without any "Continue / Stop" buttons.
+
+**Prompt (force a long task):**
+> "Deeply compare the top 5 electric vehicles available in India — Tesla Model 3, Tata Nexon EV, Hyundai Ioniq 5, MG ZS EV, and Kia EV6. For each car visit its official India webpage, extract the starting price, range, charging time, and top speed. Then compile a detailed comparison table."
+
+**Expected Behavior:**
+- Agent works through the cars one by one
+- Hits max iterations (20) while still mid-task
+- **No user prompt appears** — the agent automatically creates a continuation sub-agent
+- The continuation sub-agent picks up where the parent left off
+- Final comparison table is delivered
+
+**What you should NOT see:**
+- ❌ "Continue Task / Stop Here" buttons appearing
+- ❌ Task just stopping silently at the iteration cap
+
+**Console Logs to Check:**
+```
+[AgentRuntime] Max iterations (20) reached — auto-continuing via sub-agent
+[OrchestrationService] Spawning continuation sub-agent...
+[AgentRuntime] Sub-agent created with FRESH context (parent summary passed)
+[AgentRuntime] Executing tool: mark_task_complete   ← sub-agent finishes
+```
+
+---
+
+### 22F. Loop Contract — No Premature Silence
+**What it tests:** If the LLM returns a plain text answer with no tool calls and no `mark_task_complete`, the loop injects a corrective prompt rather than treating it as done.
+
+**Prompt:**
+> "List all the files in my Downloads folder, count them, and tell me the total."
+
+**Expected Behavior:**
+- Agent calls `fs_list_directory` to get the real list
+- If for any reason the LLM only produces text (no tool call), the corrective prompt fires
+- Agent recovers and performs the actual directory listing
+- Eventually calls `mark_task_complete` with the real count
+
+**What you should NOT see:**
+- ❌ Agent replying "I can help with that!" without actually listing files
+- ❌ Loop exiting after a text-only response that contains no real data
+
+**Console Logs to Check:**
+```
+[AgentRuntime] Agent returned no tool calls without calling mark_task_complete. Injecting corrective prompt.
+[AgentRuntime] Executing tool: fs_list_directory
+[AgentRuntime] Executing tool: mark_task_complete
+[SpecialToolHandlers] mark_task_complete called. success=true. Summary: Found X files in Downloads.
+```
+
+---
+
+### Quick Loop Robustness Checklist
+
+| Scenario | `mark_task_complete` called? | Recovery on errors? | Auto-continues at max? |
+|---|---|---|---|
+| 22A: Simple answer | ✅ | N/A | N/A |
+| 22B: Multi-step task | ✅ (after all steps) | N/A | N/A |
+| 22C: Tool keeps failing | ✅ (`success: false`) | ✅ corrective prompt | N/A |
+| 22D: Bad selector recovery | ✅ | ✅ switches strategy | N/A |
+| 22E: Long task (max iter) | ✅ (sub-agent) | N/A | ✅ auto-continues |
+| 22F: LLM goes silent | ✅ (after correction) | ✅ corrective prompt | N/A |
+
+**Terminal Log Patterns to Watch for (all should appear regularly):**
+
+```
+# Good — task completed properly
+[SpecialToolHandlers] mark_task_complete called. success=true.
+
+# Good — agent self-corrected after silence
+[AgentRuntime] Agent returned no tool calls without calling mark_task_complete. Injecting corrective prompt.
+
+# Good — error triggered adaptive recovery
+[AgentRuntime] Consecutive tool errors: 3 — injecting adaptive recovery prompt
+
+# Good — seamless auto-continuation
+[AgentRuntime] Max iterations (20) reached — auto-continuing via sub-agent
+```
+
+**Signs of Regression (should never appear):**
+
+```
+# BAD — loop exited without explicit completion
+[AgentRuntime] No tool calls — assuming task complete  ← removed
+
+# BAD — hard stop after errors
+[AgentRuntime] Max consecutive errors (3) reached. Stopping.  ← removed
+```
+

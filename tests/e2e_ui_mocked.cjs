@@ -112,7 +112,10 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                         choices: [{
                             message: {
                                 role: "assistant",
-                                content: "✅ Found 3 products:\n\n1. **Sony WH-1000XM5** - ₹24,990 ⭐4.8\n2. **Bose QuietComfort** - ₹29,500 ⭐4.6\n3. **Sennheiser HD** - ₹12,999 ⭐4.4\n\n<think>Filtered noise from DOM.</think>"
+                                content: "✅ Found 3 products:\n\n1. **Sony WH-1000XM5** - ₹24,990 ⭐4.8\n2. **Bose QuietComfort** - ₹29,500 ⭐4.6\n3. **Sennheiser HD** - ₹12,999 ⭐4.4\n\n<think>Filtered noise from DOM.</think>",
+                                tool_calls: [
+                                    { id: "call_done1", type: "function", function: { name: "mark_task_complete", arguments: JSON.stringify({ summary: "Found 3 products.", success: true }) } }
+                                ]
                             }
                         }]
                     }
@@ -152,7 +155,9 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                             message: {
                                 role: "assistant",
                                 content: "I have added the item to cart, but I cannot proceed to checkout due to safety rules.",
-                                tool_calls: []
+                                tool_calls: [
+                                    { id: "call_done2", type: "function", function: { name: "mark_task_complete", arguments: JSON.stringify({ summary: "Safety refusal.", success: false }) } }
+                                ]
                             }
                         }]
                     }
@@ -163,7 +168,10 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                         choices: [{
                             message: {
                                 role: "assistant",
-                                content: "<think>Deeply analyzing the request...</think>Here is the answer."
+                                content: "<think>Deeply analyzing the request...</think>Here is the answer.",
+                                tool_calls: [
+                                    { id: "call_done3", type: "function", function: { name: "mark_task_complete", arguments: JSON.stringify({ summary: "Think complete.", success: true }) } }
+                                ]
                             }
                         }]
                     }
@@ -345,7 +353,13 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                         let responseData = {
                             model: "mock-model",
                             choices: [{
-                                message: { role: "assistant", content: "I am a generic mock response." }
+                                message: { 
+                                    role: "assistant", 
+                                    content: "I am a generic mock response.",
+                                    tool_calls: [
+                                        { id: "call_generic_done", type: "function", function: { name: "mark_task_complete", arguments: JSON.stringify({ summary: "Generic completion.", success: true }) } }
+                                    ]
+                                }
                             }],
                             usage: { total_tokens: 10 }
                         };
