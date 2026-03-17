@@ -1,41 +1,58 @@
 import React from 'react'
 import { cn } from '../../lib/utils'
 
+type StatusVariant = 'success' | 'warning' | 'error' | 'idle' | 'active'
+type StatusSize = 'sm' | 'md' | 'lg'
+
 interface StatusDotProps {
-  /** Color class (e.g. 'bg-green-400', 'bg-[var(--color-primary)]') */
-  color?: string
-  /** Whether the dot should animate with a pulse */
-  pulse?: boolean
-  /** Size variant */
-  size?: 'sm' | 'md'
-  /** Additional class names */
+  variant?: StatusVariant
+  size?: StatusSize
+  animated?: boolean
   className?: string
 }
 
-const SIZE_CLASSES = {
-  sm: 'w-1 h-1',
-  md: 'w-1.5 h-1.5',
-} as const
-
-/**
- * Tiny animated status indicator dot.
- * Used throughout the UI, such as in tool call progress, connection status, and session indicators.
- */
 export function StatusDot({
-  color = 'bg-green-400',
-  pulse = false,
+  variant = 'idle',
   size = 'md',
+  animated = false,
   className,
 }: StatusDotProps) {
   return (
     <span
       className={cn(
-        'rounded-full inline-block',
-        SIZE_CLASSES[size],
-        color,
-        pulse && 'animate-pulse',
+        'status-dot',
+        `status-dot-${variant}`,
+        `status-dot-${size}`,
+        animated && 'status-dot-animated',
         className
       )}
     />
+  )
+}
+
+interface StatusBadgeProps {
+  variant?: StatusVariant
+  label: string
+  showDot?: boolean
+  animated?: boolean
+  className?: string
+}
+
+export function StatusBadge({
+  variant = 'idle',
+  label,
+  showDot = true,
+  animated = false,
+  className,
+}: StatusBadgeProps) {
+  const dotVariant = variant === 'idle' ? 'idle' : variant
+
+  return (
+    <span className={cn('status-badge', `status-badge-${variant}`, className)}>
+      {showDot && (
+        <StatusDot variant={dotVariant} size="sm" animated={animated && variant !== 'idle'} />
+      )}
+      {label}
+    </span>
   )
 }

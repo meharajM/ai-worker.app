@@ -115,7 +115,7 @@ function ToolRow({ tool }: { tool: ToolCall }) {
           ) : isDone ? (
             <CheckCircle2 size={14} className="text-[var(--color-success)]" />
           ) : (
-            <Activity size={14} className="text-[var(--color-primary)] animate-pulse" />
+            <Activity size={14} className="text-[var(--color-primary)]" />
           )}
         </div>
         <div className="flex-1 min-w-0">
@@ -254,7 +254,7 @@ export function ToolCallList({ toolCalls }: ToolCallListProps) {
           >
             {/* Left status strip — pulses when in-progress */}
             <div
-              className={cn('absolute left-0 top-0 bottom-0 w-1', !isDone && !hasError && 'animate-pulse')}
+              className={cn('absolute left-0 top-0 bottom-0 w-1', !isDone && !hasError && 'shadow-[0_0_8px_var(--color-primary)]')}
               style={{ backgroundColor: statusColor }}
             />
 
@@ -267,7 +267,7 @@ export function ToolCallList({ toolCalls }: ToolCallListProps) {
                   ) : isDone ? (
                     <CheckCircle2 size={16} className="text-[var(--color-success)]" />
                   ) : (
-                    <Activity size={16} className="text-[var(--color-primary)] animate-pulse" />
+                    <Activity size={16} className="text-[var(--color-primary)]" />
                   )}
                   <span className="font-semibold text-[var(--color-tool-text)] text-sm tracking-wide">
                     {agentLabel}

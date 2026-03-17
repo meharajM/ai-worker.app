@@ -1,31 +1,17 @@
 import React from 'react'
 import { Mic, Square } from 'lucide-react'
+import { Button } from '../primitives/Button'
 
 interface VoiceButtonProps {
-  /** Whether speech is actively listening */
   isListening: boolean
-  /** Whether the speech engine is initializing */
   isInitializing: boolean
-  /** Whether this is the first-time setup (downloading model) */
   isFirstSetup: boolean
-  /** Download progress percentage (0-100) */
   setupProgress?: number
-  /** Whether speech-to-text is supported */
   sttSupported: boolean
-  /** Whether the entire input is disabled */
   disabled?: boolean
-  /** Click handler for mic toggle */
   onClick: () => void
 }
 
-/**
- * Microphone toggle button with download progress indicator.
- *
- * Three states:
- *   1. First setup — circular progress ring showing model download
- *   2. Listening/initializing — red pulsing stop button
- *   3. Idle — standard mic icon
- */
 export function VoiceButton({
   isListening,
   isInitializing,
@@ -35,7 +21,6 @@ export function VoiceButton({
   disabled = false,
   onClick,
 }: VoiceButtonProps) {
-  // State 1: Downloading speech model
   if (isFirstSetup) {
     return (
       <div
@@ -60,13 +45,13 @@ export function VoiceButton({
               stroke="currentColor"
               strokeWidth="3"
               fill="transparent"
-              className="text-emerald-500 transition-all duration-normal ease-out"
+              className="text-[var(--color-success)] transition-all duration-[var(--duration-normal)] ease-[var(--ease-out)]"
               strokeDasharray={88}
               strokeDashoffset={88 - (88 * setupProgress) / 100}
               strokeLinecap="round"
             />
           </svg>
-          <div className="absolute inset-0 flex items-center justify-center text-[8px] font-bold text-emerald-400">
+          <div className="absolute inset-0 flex items-center justify-center text-[8px] font-[var(--font-weight-bold)] text-[var(--color-success)]">
             {Math.round(setupProgress)}%
           </div>
         </div>
@@ -74,12 +59,11 @@ export function VoiceButton({
     )
   }
 
-  // State 2: Recording / initializing
   if (isListening || isInitializing) {
     return (
       <button
         onClick={onClick}
-        className="p-3 mb-[1px] rounded-xl flex items-center justify-center transition-all active:scale-95 bg-red-500/20 hover:bg-red-500/30 text-red-400 animate-pulse ring-1 ring-red-500/50 h-[44px] w-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+        className="p-3 mb-[1px] rounded-[var(--radius-xl)] flex items-center justify-center transition-all active:scale-[0.95] bg-[var(--color-error)]/20 hover:bg-[var(--color-error)]/30 text-[var(--color-error)] ring-1 ring-[var(--color-error)]/50 h-[44px] w-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
         title="Stop Recording"
       >
         <Square size={16} className="fill-current" />
@@ -87,17 +71,16 @@ export function VoiceButton({
     )
   }
 
-  // State 3: Idle
   return (
-    <button
+    <Button
+      variant="secondary"
+      size="md"
       onClick={onClick}
       disabled={disabled || !sttSupported}
-      className={`p-3 mb-[1px] rounded-xl flex items-center justify-center transition-all active:scale-95 shadow-lg group bg-[var(--color-surface)] hover:bg-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] h-[44px] w-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${
-        disabled || !sttSupported ? 'opacity-50 cursor-not-allowed' : ''
-      }`}
+      className="w-[44px] h-[44px] p-3 mb-[1px]"
       title="Start Voice Mode"
     >
       <Mic size={20} />
-    </button>
+    </Button>
   )
 }

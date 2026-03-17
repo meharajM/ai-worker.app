@@ -265,10 +265,10 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
   const hasContent = textInput.trim().length > 0 || attachments.length > 0
 
   return (
-    <div className="bg-[var(--color-card-elevated)]/90 backdrop-blur-xl border border-[var(--color-border)] rounded-input p-3 shadow-glass transition-all duration-normal relative group hover:border-[var(--color-border-hover)]">
+    <div className="card card-glass card-padding-sm border border-[var(--color-border)] p-[var(--space-3)] relative group hover:border-[var(--color-border-hover)]">
       {/* Notification Toast */}
       {notification && (
-        <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-emerald-500/90 text-white text-xs px-3 py-1.5 rounded-full shadow-lg whitespace-nowrap animate-in fade-in slide-in-from-bottom-2 duration-normal pointer-events-none border border-emerald-400/50 backdrop-blur-sm">
+        <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-[var(--color-success)]/90 text-[var(--color-text-inverse)] text-xs px-3 py-1.5 rounded-full shadow-lg whitespace-nowrap animate-in fade-in slide-in-from-bottom-2 duration-normal pointer-events-none border border-[var(--color-success)]/50 backdrop-blur-sm">
           {notification}
         </div>
       )}
@@ -278,14 +278,14 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
         <AttachmentBar attachments={attachments} onRemove={removeAttachment} />
 
         <div
-          className={`relative min-h-[44px] flex items-center transition-all duration-normal rounded-lg ${isDragging ? 'ring-2 ring-emerald-500/50 bg-emerald-500/10' : ''
+          className={`relative min-h-[44px] flex items-center transition-all duration-[var(--duration-normal)] rounded-[var(--radius-md)] ${isDragging ? 'ring-2 ring-[var(--color-success)]/50 bg-[var(--color-success)]/10' : ''
             }`}
           {...dragHandlers}
         >
           {/* Drag overlay */}
           {isDragging && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-              <div className="bg-emerald-500/20 backdrop-blur-sm border border-emerald-500/50 rounded-lg px-4 py-2 text-emerald-400 text-sm font-medium shadow-lg">
+              <div className="bg-[var(--color-success)]/20 backdrop-blur-sm border border-[var(--color-success)]/50 rounded-[var(--radius-md)] px-4 py-2 text-[var(--color-success)] text-sm font-[var(--font-weight-medium)] shadow-lg">
                 📄 Drop file to convert
               </div>
             </div>

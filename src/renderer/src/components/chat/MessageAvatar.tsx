@@ -16,9 +16,9 @@ export function MessageAvatar({ isUser }: MessageAvatarProps) {
     <Avatar
       icon={
         isUser ? (
-          <User size={18} className="text-white" />
+          <User size={18} className="text-[var(--color-text-inverse)]" />
         ) : (
-          <Bot size={18} className="text-white" />
+          <Bot size={18} className="text-[var(--color-text-inverse)]" />
         )
       }
       colorClass={

@@ -30,7 +30,7 @@
 }
 
 @layer components {
-  /* Custom toggle styles (replacing missing DaisyUI) */
+  /* Custom toggle styles - Dark theme optimized */
   .toggle {
     appearance: none;
     -webkit-appearance: none;
@@ -38,7 +38,7 @@
     width: 3rem; /* 48px */
     height: 1.5rem; /* 24px */
     border-radius: 9999px;
-    background-color: var(--color-surface-hover);
+    background-color: var(--color-surface);
     border: 1px solid var(--color-border);
     cursor: pointer;
     transition: background-color 0.2s ease, border-color 0.2s ease;
@@ -51,26 +51,28 @@
     top: 50%;
     left: 2px;
     transform: translateY(-50%);
-    width: 1.25rem; /* 20px */
-    height: 1.25rem; /* 20px */
+    width: 1.125rem; /* 18px */
+    height: 1.125rem; /* 18px */
     border-radius: 9999px;
-    background-color: var(--color-text-muted);
+    background-color: var(--color-text-dim);
     transition: transform 0.2s ease, background-color 0.2s ease;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
   }
   
   .toggle:checked, .toggle-success:checked {
     background-color: var(--color-success);
     border-color: var(--color-success);
+    box-shadow: 0 0 8px rgba(48, 209, 88, 0.3);
   }
   
   .toggle:checked::before, .toggle-success:checked::before {
-    transform: translate(1.375rem, -50%); /* 22px to right for standard sizing based on real rendering */
-    background-color: #ffffff;
+    transform: translate(1.375rem, -50%);
+    background-color: white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
   }
   
   .toggle:focus-visible {
-    outline: 2px solid var(--color-brand-teal);
+    outline: 2px solid var(--color-primary);
     outline-offset: 2px;
   }
 
