@@ -298,9 +298,9 @@ export const electron = {
             console.warn('[Browser] WhatsApp not supported in browser mode')
             return { success: false, error: 'Not supported in browser mode' }
         },
-        disconnect: async () => {
+        disconnect: async (clearAuth?: boolean) => {
             if (isElectron() && window.electron?.whatsapp) {
-                return window.electron.whatsapp.disconnect()
+                return window.electron.whatsapp.disconnect(clearAuth)
             }
             return { success: true }
         },

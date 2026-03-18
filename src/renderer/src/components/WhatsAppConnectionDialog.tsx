@@ -142,22 +142,32 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
         }
     }, [isDialogOpen, connectionState.status])
 
-    const handleDisconnect = useCallback(async () => {
-        if (!window.confirm('Are you sure you want to disconnect WhatsApp? You will need to scan the QR code again to reconnect.')) {
+    const handleDisconnect = useCallback(async (clearAuth = true) => {
+        if (clearAuth && !window.confirm('Are you sure you want to logout from WhatsApp? You will need to scan the QR code again to reconnect.')) {
             return
         }
         
-        await electron.whatsapp.disconnect()
-        setStep('idle')
-        setPhoneInput('')
-        setTargetPhoneNumber(null)
-        setWhatsAppEnabled(false)
-        setConnectionState({
-            status: 'disconnected',
-            qrCode: null,
-            error: null,
-            phoneNumber: null,
-        })
+        try {
+            await electron.whatsapp.disconnect(clearAuth)
+            
+            if (clearAuth) {
+                setStep('idle')
+                setPhoneInput('')
+                setTargetPhoneNumber(null)
+                setWhatsAppEnabled(false)
+                setConnectionState({
+                    status: 'disconnected',
+                    qrCode: null,
+                    error: null,
+                    phoneNumber: null,
+                })
+            } else {
+                setStep('idle')
+            }
+        } catch (err) {
+            setErrorMessage(err instanceof Error ? err.message : 'Failed to disconnect')
+            setStep('error')
+        }
     }, [setConnectionState, setTargetPhoneNumber, setWhatsAppEnabled])
 
     const handleClose = useCallback(() => {
@@ -312,7 +322,7 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
 
                                     <button
                                         id="whatsapp-disconnect-qr-btn"
-                                        onClick={handleDisconnect}
+                                        onClick={() => handleDisconnect(true)}
                                         className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] underline transition-colors"
                                     >
                                         Cancel
@@ -368,13 +378,20 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
                                         </div>
                                     </div>
                                     
-                                    <div className="w-full pt-4 border-t border-white/10">
+                                    <div className="w-full pt-4 border-t border-white/10 space-y-2">
+                                        <button
+                                            id="whatsapp-manage-stop-btn"
+                                            onClick={() => handleDisconnect(false)}
+                                            className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-[var(--color-text-secondary)] text-sm font-medium rounded-xl transition-colors border border-white/10"
+                                        >
+                                            Stop Connection (Keep Login)
+                                        </button>
                                         <button
                                             id="whatsapp-manage-disconnect-btn"
-                                            onClick={handleDisconnect}
+                                            onClick={() => handleDisconnect(true)}
                                             className="w-full py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-sm font-medium rounded-xl transition-colors border border-red-500/20"
                                         >
-                                            Disconnect WhatsApp
+                                            Logout from WhatsApp
                                         </button>
                                     </div>
                                 </motion.div>
@@ -416,7 +433,7 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
                         <div className="px-6 pb-4 border-t border-white/5 pt-4">
                             <button
                                 id="whatsapp-disconnect-btn"
-                                onClick={handleDisconnect}
+                                onClick={() => handleDisconnect(true)}
                                 className="w-full py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl transition-colors"
                             >
                                 Cancel Connection

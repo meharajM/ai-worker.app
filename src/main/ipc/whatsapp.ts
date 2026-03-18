@@ -49,9 +49,9 @@ export function registerWhatsAppHandlers(): void {
         }
     })
 
-    ipcMain.handle('whatsapp:disconnect', async () => {
+    ipcMain.handle('whatsapp:disconnect', async (_event, clearAuth: unknown) => {
         try {
-            await whatsappService.disconnect()
+            await whatsappService.disconnect(clearAuth !== false)
             return { success: true }
         } catch (error) {
             return { success: false, error: error instanceof Error ? error.message : String(error) }

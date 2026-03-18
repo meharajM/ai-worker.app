@@ -324,18 +324,37 @@ export function useAgent(): UseAgentReturn {
                 }
 
                 // ── Step 6: Run the agent ──────────────────────────────────────────
-                await runtime.chat(content, attachmentData);
+                const llmResponse = await runtime.chat(content, attachmentData);
 
                 // ── Step 7: Handle Outbound WhatsApp Messages ──────────────────────
                 // If WhatsApp mode is enabled, we need to send the final assistant response
                 // back to the remote user via IPC.
                 if (targetJid && waState.whatsappEnabled && waState.connectionState.status === "connected") {
-                    const finalMessages = useChatStore.getState().sessions.find(s => s.id === originSessionId)?.messages ?? [];
-                    const lastAssistantMessage = finalMessages.slice().reverse().find(m => m.role === "assistant" && !m.toolCalls?.length);
+                    // Extract text content from the response - can be string or array
+                    let responseText = '';
+                    if (typeof llmResponse.content === 'string') {
+                        responseText = llmResponse.content;
+                    } else if (Array.isArray(llmResponse.content)) {
+                        // Extract text from content parts
+                        responseText = llmResponse.content
+                            .filter(part => part.type === 'text')
+                            .map(part => part.text)
+                            .join('\n');
+                    }
                     
-                    if (lastAssistantMessage && lastAssistantMessage.content) {
-                        electron.whatsapp.sendMessage(targetJid, lastAssistantMessage.content)
+                    if (responseText) {
+                        console.log('[useAgent] Sending WhatsApp response to:', targetJid, 'Length:', responseText.length);
+                        electron.whatsapp.sendMessage(targetJid, responseText)
                             .catch(err => console.error("[useAgent] Failed to send WhatsApp response:", err));
+                    } else {
+                        // Fallback: try to get from store
+                        const finalMessages = useChatStore.getState().sessions.find(s => s.id === originSessionId)?.messages ?? [];
+                        const lastAssistantMessage = finalMessages.slice().reverse().find(m => m.role === "assistant" && !m.toolCalls?.length);
+                        
+                        if (lastAssistantMessage && lastAssistantMessage.content) {
+                            electron.whatsapp.sendMessage(targetJid, lastAssistantMessage.content)
+                                .catch(err => console.error("[useAgent] Failed to send WhatsApp response:", err));
+                        }
                     }
                 }
 
@@ -406,11 +425,21 @@ export function useAgent(): UseAgentReturn {
 
         const handleAppSubmit = (e: Event) => {
             const customEvent = e as CustomEvent<{ content: string }>;
-            const { activeSessionId, isSessionProcessing } = useChatStore.getState();
-            // Automatically switch text input workflows to active UI processing
-            if (activeSessionId && !isSessionProcessing(activeSessionId)) {
-                handleSubmit(customEvent.detail.content);
+            const { activeSessionId, isSessionProcessing, sessions, createSession } = useChatStore.getState();
+            const content = customEvent.detail?.content;
+            
+            if (!content) return;
+            
+            // If no active session, create one
+            let sessionId = activeSessionId;
+            if (!sessionId) {
+                sessionId = createSession();
+                console.log('[useAgent] Created new session for WhatsApp message:', sessionId);
             }
+            
+            // If session is processing, we still want to queue the message
+            // by calling handleSubmit - it will add the message and process
+            handleSubmit(content);
         };
 
         window.addEventListener("agent-action", handleAgentAction as EventListener);

@@ -151,7 +151,7 @@ const electronAPI = {
     whatsapp: {
         getState: () => ipcRenderer.invoke('whatsapp:get-state'),
         connect: (phoneNumber: string) => ipcRenderer.invoke('whatsapp:connect', phoneNumber),
-        disconnect: () => ipcRenderer.invoke('whatsapp:disconnect'),
+        disconnect: (clearAuth?: boolean) => ipcRenderer.invoke('whatsapp:disconnect', clearAuth),
         sendMessage: (to: string, content: string) =>
             ipcRenderer.invoke('whatsapp:send-message', to, content),
         sendPresence: (to: string, state: string) =>

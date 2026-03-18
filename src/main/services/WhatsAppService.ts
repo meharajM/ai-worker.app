@@ -13,6 +13,8 @@ import { EventEmitter } from 'events'
 import path from 'path'
 import fs from 'fs'
 import { app } from 'electron'
+import type { WASocket } from '@whiskeysockets/baileys'
+import { formatWhatsAppJid } from '../utils/whatsapp'
 
 // Types we expose over IPC — mirrored in the renderer's whatsappStore.ts
 export interface WhatsAppConnectionState {
@@ -42,9 +44,10 @@ export class WhatsAppService extends EventEmitter {
         phoneNumber: null,
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    private socket: any = null
+    private socket: WASocket | null = null
     private authDir: string
+    private lastMessageTime = 0
+    private readonly MESSAGE_RATE_LIMIT_MS = 1000 // 1 message per second
 
     constructor() {
         super()
@@ -290,40 +293,65 @@ export class WhatsAppService extends EventEmitter {
         }
     }
 
-    async disconnect(): Promise<void> {
-        console.log('[WhatsAppService] Disconnecting and clearing auth...')
+    async disconnect(clearAuth = true): Promise<void> {
+        console.log(`[WhatsAppService] Disconnecting (clearAuth=${clearAuth})...`)
         
         if (this.socket) {
             try {
-                await this.socket.logout()
-                console.log('[WhatsAppService] Logged out from WhatsApp')
+                if (clearAuth) {
+                    await this.socket.logout()
+                    console.log('[WhatsAppService] Logged out from WhatsApp')
+                } else {
+                    await (this.socket as any).end(undefined) // Baileys end session
+                    console.log('[WhatsAppService] Session ended (not logged out)')
+                }
             } catch (err) {
-                console.warn('[WhatsAppService] Logout warning:', err)
+                console.warn('[WhatsAppService] Disconnect warning:', err)
             }
             this.socket = null
         }
         
-        // Clear all auth data - this ensures a fresh QR scan on next connect
-        this._clearAuth()
-        
-        // Reset internal state completely
-        this._setState({
-            status: 'disconnected',
-            qrCode: null,
-            error: null,
-            phoneNumber: null,
-        })
-        
-        console.log('[WhatsAppService] Disconnect complete - auth cleared')
+        if (clearAuth) {
+            // Clear all auth data - this ensures a fresh QR scan on next connect
+            this._clearAuth()
+            
+            // Reset internal state completely
+            this._setState({
+                status: 'disconnected',
+                qrCode: null,
+                error: null,
+                phoneNumber: null,
+            })
+            console.log('[WhatsAppService] Disconnect complete - auth cleared')
+        } else {
+            this._setState({
+                ...this.connectionState,
+                status: 'disconnected',
+                qrCode: null,
+            })
+            console.log('[WhatsAppService] Disconnect complete - auth preserved')
+        }
     }
 
     async sendMessage(to: string, content: string): Promise<{ success: boolean; error?: string }> {
         if (!this.socket || this.connectionState.status !== 'connected') {
             return { success: false, error: 'WhatsApp not connected' }
         }
+
+        // Rate limiting
+        const now = Date.now()
+        if (now - this.lastMessageTime < this.MESSAGE_RATE_LIMIT_MS) {
+            return { success: false, error: 'Rate limit exceeded. Please wait a moment.' }
+        }
+        this.lastMessageTime = now
+
         try {
-            // Format JID
-            const jid = to.includes('@') ? to : `${to.replace(/[^0-9]/g, '')}@s.whatsapp.net`
+            // Validate and format JID
+            const jid = formatWhatsAppJid(to)
+            if (!jid) {
+                return { success: false, error: 'Invalid phone number format' }
+            }
+            
             await this.socket.sendMessage(jid, { text: content })
             return { success: true }
         } catch (error) {
@@ -336,7 +364,10 @@ export class WhatsAppService extends EventEmitter {
              return { success: false, error: 'WhatsApp not connected' }
         }
         try {
-            const jid = to.includes('@') ? to : `${to.replace(/[^0-9]/g, '')}@s.whatsapp.net`
+            const jid = formatWhatsAppJid(to)
+            if (!jid) {
+                return { success: false, error: 'Invalid phone number format' }
+            }
             await this.socket.sendPresenceUpdate(state, jid)
             return { success: true }
         } catch (error) {

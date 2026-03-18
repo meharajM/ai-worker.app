@@ -75,10 +75,10 @@ graph LR
     subgraph "IPC Modules"
         AppHandlers[app.ts<br/>App Info & Shell]
         MCPHandlers[mcp.ts<br/>MCP Operations]
-        LLMHandlers[llm.ts<br/>LLM Placeholder]
-        StoreHandlers[store.ts<br/>Storage Operations]
+        SSEHandlers[sse.ts<br/>SSE Operations]
         SpeechHandlers[speech.ts<br/>Speech Operations]
         AntigravityHandlers[antigravity.ts<br/>OAuth & Gateway]
+        WhatsAppHandlers[whatsapp.ts<br/>WhatsApp Operations]
     end
 
     App --> IPC
@@ -88,10 +88,12 @@ graph LR
     IPC --> StoreHandlers
     IPC --> SpeechHandlers
     IPC --> AntigravityHandlers
+    IPC --> WhatsAppHandlers
     MCPHandlers --> MCP
     MCPHandlers --> Playwright
     SpeechHandlers --> Speech
     AntigravityHandlers --> AntigravityAuthService[AntigravityAuthService]
+    WhatsAppHandlers --> WhatsAppService[WhatsAppService]
     App --> Env
 ```
 
@@ -102,6 +104,7 @@ graph LR
 - MCP server connections (Stdio/SSE)
 - **MCP Process Governance**: Managed by `McpProcessManager` using `tree-kill` for guaranteed recursive cleanup of runaway child processes.
 - Antigravity OAuth flow & Gateway access
+- WhatsApp connection management & message handling
 - Speech Model Management (Download/Serving)
 - System-level operations (file system, shell)
 - Environment setup (PATH fixing, ESM compatibility)
@@ -124,6 +127,7 @@ graph TB
         ShellAPI[Shell Operations]
         AppAPI[App Info]
         SpeechAPI[Speech Operations]
+        WhatsAppAPI[WhatsApp Operations]
     end
 
     ContextBridge --> MCPAPI
@@ -132,6 +136,7 @@ graph TB
     ContextBridge --> ShellAPI
     ContextBridge --> AppAPI
     ContextBridge --> SpeechAPI
+    ContextBridge --> WhatsAppAPI
     IPCInvoke --> ContextBridge
 ```
 
@@ -162,12 +167,14 @@ graph TB
         SettingsPanel[SettingsPanel]
         Header[Header]
         Sidebar[Sidebar]
+        WhatsAppDialog[WhatsAppConnectionDialog]
     end
 
     subgraph "Stores"
         ChatStore[chatStore]
         SettingsStore[settingsStore]
         AuthStore[authStore]
+        WhatsAppStore[whatsappStore]
     end
 
     subgraph "Libraries"
@@ -184,6 +191,7 @@ graph TB
          UseSpeech[useSpeechRecognition]
          UseVisualizer[useAudioVisualizer]
          UseDragDrop[useFileDragDrop]
+         UseWhatsAppBridge[useWhatsAppBridge]
     end
 
     ReactApp --> Components
@@ -193,6 +201,7 @@ graph TB
     Hooks --> VoskLib
     Hooks --> UseVisualizer
     Hooks --> UseDragDrop
+    Hooks --> UseWhatsAppBridge
     Stores --> Lib
     Lib --> ElectronLib
     
@@ -461,6 +470,61 @@ graph TB
 | `electron.speech.checkSupport()`| `speech:check-support`| `speech.ts`    | Check/Verify Model     |
 | `electron.speech.downloadModel()`| `speech:download-model`| `speech.ts`  | Download logic         |
 | `electron.speech.getModelPath()`| `speech:get-model-path`| `speech.ts`   | Get model server URL   |
+| `electron.whatsapp.connect()`   | `whatsapp:connect`    | `whatsapp.ts`  | Connect to WhatsApp    |
+| `electron.whatsapp.disconnect()`| `whatsapp:disconnect` | `whatsapp.ts`  | Disconnect & clear auth|
+| `electron.whatsapp.getState()`  | `whatsapp:get-state`  | `whatsapp.ts`  | Get current status     |
+| `electron.whatsapp.sendMessage()`| `whatsapp:send-message`| `whatsapp.ts`  | Send a WhatsApp message|
+| `electron.whatsapp.sendPresence()`| `whatsapp:send-presence`| `whatsapp.ts` | Send typing status    |
+
+---
+
+## WhatsApp Integration
+
+AI-Worker includes a first-class WhatsApp integration that allows the agent to communicate with users directly on their mobile devices.
+
+### Architecture Overview
+
+The integration uses a **Bridge Pattern** between the Main and Renderer processes:
+
+1.  **WhatsAppService (Main)**: A singleton service running in Node.js that manages the connection using the Baileys library. It handles authentication, QR code generation, socket management, and message parsing.
+2.  **whatsappStore (Renderer)**: A Zustand store that mirrors the connection state and manages user preferences (e.g., whether "WhatsApp Mode" is enabled).
+3.  **useWhatsAppBridge (Hook)**: A bridge that subscribes to IPC events from the main process (`whatsapp:connection-change`, `whatsapp:message`) and updates the renderer's store and chat UI in real-time.
+
+### Connection Lifecycle
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as WhatsAppConnectionDialog
+    participant Main as WhatsAppService
+    participant WA as WhatsApp Servers
+
+    User->>UI: Enter Phone Number
+    UI->>Main: whatsapp:connect(phone)
+    Main->>WA: Initialize Socket
+    WA-->>Main: QR Code
+    Main-->>UI: QR Code Data
+    User->>WA: Scan QR with Phone
+    WA-->>Main: Auth Success
+    Main-->>UI: Connected
+    Note over Main: Auth saved to userData/whatsapp-auth
+```
+
+### Communication Flows
+
+#### 1. WhatsApp Mode (Direct Chat)
+When WhatsApp Mode is enabled, the agent responds directly to the user's WhatsApp messages.
+- **Input**: `useWhatsAppBridge` detects an incoming message → dispatches `app:submit-message` event → `useAgent` triggers the agent loop.
+- **Output**: `useAgent` detects the message originated from WhatsApp → calls `electron.whatsapp.sendMessage` after the LLM generates a response.
+
+#### 2. Autonomous Notifications
+The agent can use WhatsApp to send status updates or ask questions during long-running tasks.
+- **Messaging**: The agent can call the `whatsapp_send_message` tool to notify the user (e.g., "Task complete, check your dashboard").
+- **Interaction**: The agent can call the `whatsapp_ask_question` tool to wait for user input from their phone.
+
+### Persistence & Security
+- **Authentication**: WhatsApp session credentials (creds.json) are stored in the application's `userData` directory. Disconnecting explicitly clears this data.
+- **Privacy**: The application only communicates with the phone number provided during setup. All communication is end-to-end encrypted by WhatsApp.
 
 ---
 
@@ -1908,10 +1972,17 @@ ai-worker-app/
 
 ---
 
-**Last Updated:** 2026-03-06  
-**Version:** 0.1.0  
-**Architecture Version:** 1.2
+**Last Updated:** 2026-03-18  
+**Version:** 0.2.0  
+**Architecture Version:** 1.3
 
+- **WhatsApp Integration**: Implemented a comprehensive bridge for WhatsApp communication.
+  - `WhatsAppService.ts`: Main-process service using Baileys for socket management and auth.
+  - `whatsapp.ts`: IPC handlers for connection, state sync, and messaging.
+  - `whatsappStore.ts`: Renderer-process state management for WhatsApp.
+  - `WhatsAppConnectionDialog.tsx` & `WhatsAppToggle.tsx`: UI components for managing the connection.
+  - `useWhatsAppBridge.ts`: Real-time event syncing between Main and Renderer.
+  - Integrated WhatsApp response logic into `useAgent.ts` for automated mobile interaction.
 - **File Attachment UX Fix**: Resolved the AI asking users to select a workspace when analyzing attached files.
   - `VoiceInput.tsx`: Added `maybeSetWorkspaceFromFiles()` — auto-derives workspace from the parent directory of the first attached file (applied to button-select and drag-and-drop).
   - `agent-runtime.ts`: Strengthened the `attachmentContext` block injected into the user prompt; now provides ready-to-use `file://` URIs and an explicit directive to call `convert_to_markdown` immediately.
