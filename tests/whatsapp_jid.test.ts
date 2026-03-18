@@ -3,7 +3,7 @@
  * Run with: node --test tests/whatsapp_jid.test.ts
  */
 
-import { formatWhatsAppJid } from '../src/main/utils/whatsapp';
+import { formatWhatsAppJid } from '../src/main/utils/whatsapp.js';
 
 // Simple test runner
 function test(name: string, fn: () => void) {

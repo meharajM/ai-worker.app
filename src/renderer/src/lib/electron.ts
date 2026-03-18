@@ -289,11 +289,11 @@ export const electron = {
             if (isElectron() && window.electron?.whatsapp) {
                 return window.electron.whatsapp.getState()
             }
-            return { status: 'disconnected' as const, qrCode: null, error: null, phoneNumber: null }
+            return { status: 'disconnected' as const, qrCode: null, error: null, phoneNumber: null, isVerified: false, connectedPhoneNumber: null }
         },
-        connect: async (phoneNumber: string) => {
+        connect: async (phoneNumber: string | null) => {
             if (isElectron() && window.electron?.whatsapp) {
-                return window.electron.whatsapp.connect(phoneNumber)
+                return window.electron.whatsapp.connect(phoneNumber ?? '')
             }
             console.warn('[Browser] WhatsApp not supported in browser mode')
             return { success: false, error: 'Not supported in browser mode' }
@@ -301,6 +301,12 @@ export const electron = {
         disconnect: async (clearAuth?: boolean) => {
             if (isElectron() && window.electron?.whatsapp) {
                 return window.electron.whatsapp.disconnect(clearAuth)
+            }
+            return { success: true }
+        },
+        setTargetNumber: async (phoneNumber: string) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.setTargetNumber(phoneNumber)
             }
             return { success: true }
         },

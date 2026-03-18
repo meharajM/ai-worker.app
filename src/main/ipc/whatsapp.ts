@@ -38,11 +38,23 @@ export function registerWhatsAppHandlers(): void {
     })
 
     ipcMain.handle('whatsapp:connect', async (_event, phoneNumber: unknown) => {
+        // Allow null phone number - QR code will be shown first
+        const normalizedPhone = phoneNumber === null || phoneNumber === undefined ? null : (typeof phoneNumber === 'string' ? phoneNumber.trim() : null)
+        
+        try {
+            await whatsappService.connect(normalizedPhone)
+            return { success: true }
+        } catch (error) {
+            return { success: false, error: error instanceof Error ? error.message : String(error) }
+        }
+    })
+
+    ipcMain.handle('whatsapp:set-target-number', async (_event, phoneNumber: unknown) => {
         if (typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
             throw new Error('Invalid phone number argument')
         }
         try {
-            await whatsappService.connect(phoneNumber.trim())
+            whatsappService.setTargetNumber(phoneNumber.trim())
             return { success: true }
         } catch (error) {
             return { success: false, error: error instanceof Error ? error.message : String(error) }

@@ -17,6 +17,10 @@ export interface WhatsAppConnectionState {
     qrCode: string | null
     error: string | null
     phoneNumber: string | null
+    /** Whether we've verified the source phone number after QR scan */
+    isVerified: boolean
+    /** Phone number from the device that scanned the QR (for verification) */
+    connectedPhoneNumber: string | null
 }
 
 interface WhatsAppState {
@@ -51,6 +55,8 @@ export const useWhatsAppStore = create<WhatsAppState>()(
                 qrCode: null,
                 error: null,
                 phoneNumber: null,
+                isVerified: false,
+                connectedPhoneNumber: null,
             },
             whatsappEnabled: false,
             targetPhoneNumber: null,

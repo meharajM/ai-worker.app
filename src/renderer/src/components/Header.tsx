@@ -62,7 +62,7 @@ export function Header({ status }: HeaderProps) {
                 local-session: active
 
                 {/* WhatsApp status indicator */}
-                {isWhatsAppConnected && (
+                {isWhatsAppConnected ? (
                     <button
                         id="header-whatsapp-status"
                         onClick={openDialog}
@@ -74,6 +74,18 @@ export function Header({ status }: HeaderProps) {
                             {whatsappEnabled ? 'WHATSAPP ON' : 'WHATSAPP'}
                         </span>
                         <span className="w-1 h-1 rounded-full bg-[#25D366] animate-pulse" />
+                    </button>
+                ) : (
+                    <button
+                        id="header-whatsapp-connect"
+                        onClick={openDialog}
+                        className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+                        title="Connect WhatsApp"
+                    >
+                        <MessageCircle size={10} className="text-[var(--color-text-muted)]" />
+                        <span className="text-[var(--color-text-muted)] text-[9px] font-bold tracking-widest">
+                            CONNECT
+                        </span>
                     </button>
                 )}
             </div>

@@ -1,11 +1,12 @@
 /**
  * WhatsAppConnectionDialog.tsx — Connection setup dialog for WhatsApp.
  *
- * Handles the full connection flow:
- *   idle → entering phone number
- *   connecting → QR code displayed
- *   connected → success + dialog close
- *   error → error message + retry
+ * Flow:
+ *   Step 1: Intro → Explain connection process
+ *   Step 2: QR Code → User scans to link device
+ *   Step 3: Enter Phone → User enters their WhatsApp number
+ *   Step 4: Verify → App sends confirmation message to that number
+ *   Step 5: Connected → All set
  *
  * Per react-components.md: no direct IPC calls — everything goes through
  * the whatsappStore and the electron wrapper.
@@ -13,16 +14,33 @@
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Phone, CheckCircle, AlertCircle, Loader2, MessageCircle } from 'lucide-react'
+import { X, Phone, CheckCircle, AlertCircle, Loader2, MessageCircle, Smartphone, ArrowRight, Send } from 'lucide-react'
 import { useWhatsAppStore } from '../stores/whatsappStore'
 import electron from '../lib/electron'
 
-type DialogStep = 'idle' | 'connecting' | 'qr' | 'connected' | 'manage' | 'error'
+type DialogStep = 
+    | 'intro'         // Step 1: Welcome + explain the flow
+    | 'qr'            // Step 2: Show QR code to scan
+    | 'connecting'    // While waiting for QR scan
+    | 'verify'        // Step 3: Enter phone number to verify
+    | 'sending'       // Step 4: Sending confirmation message
+    | 'connected'     // Step 5: Success
+    | 'manage'        // Already connected - show options
+    | 'error'         // Error state
 
 export function WhatsAppConnectionDialog(): React.JSX.Element | null {
-    const { isDialogOpen, closeDialog, connectionState, setConnectionState, setTargetPhoneNumber, setWhatsAppEnabled, targetPhoneNumber } = useWhatsAppStore()
+    const { 
+        isDialogOpen, 
+        closeDialog, 
+        connectionState, 
+        setConnectionState, 
+        setTargetPhoneNumber, 
+        setWhatsAppEnabled, 
+        targetPhoneNumber 
+    } = useWhatsAppStore()
+    
     const [phoneInput, setPhoneInput] = useState('')
-    const [step, setStep] = useState<DialogStep>('idle')
+    const [step, setStep] = useState<DialogStep>('intro')
     const [errorMessage, setErrorMessage] = useState('')
 
     // Pre-fill phone number from stored target when dialog opens
@@ -34,15 +52,12 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
 
     // Phone number validation function
     const validatePhoneNumber = useCallback((phone: string): string | null => {
-        // Remove all non-digit characters
         const digits = phone.replace(/\D/g, '')
         
-        // Check if we have at least 7 digits (minimum for a phone number)
         if (digits.length < 7) {
             return null
         }
         
-        // If it doesn't start with country code, assume +1 (US) if 10 digits
         let normalized = phone.trim()
         if (!normalized.startsWith('+') && digits.length === 10) {
             normalized = '+1' + digits
@@ -53,8 +68,26 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
         return normalized
     }, [])
 
-    // Save target phone number when connecting
-    const handleConnect = useCallback(async () => {
+    // Start connection - show QR code first
+    const handleStartConnection = useCallback(async () => {
+        setStep('connecting')
+        setErrorMessage('')
+
+        try {
+            // Start connection without phone number first - just show QR
+            const result = await electron.whatsapp.connect(null)
+            if (!result.success && 'error' in result) {
+                setErrorMessage((result as { success: false; error: string }).error)
+                setStep('error')
+            }
+        } catch (err) {
+            setErrorMessage(err instanceof Error ? err.message : 'Failed to start connection')
+            setStep('error')
+        }
+    }, [])
+
+    // Verify phone number and send confirmation message
+    const handleVerifyPhone = useCallback(async () => {
         const phone = phoneInput.trim()
         if (!phone) return
 
@@ -64,41 +97,82 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
             return
         }
 
-        // Save target phone for future sessions
-        setTargetPhoneNumber(normalizedPhone)
+        // Check if the connected phone from QR scan is the same as entered number
+        const connectedNum = connectionState.connectedPhoneNumber
+        const userEnteredDigits = normalizedPhone.replace(/\D/g, '')
         
-        setStep('connecting')
+        // Block if same number (cannot use same number for Worker and Personal)
+        if (connectedNum) {
+            const connectedDigits = connectedNum.replace(/\D/g, '')
+            const userSuffix = userEnteredDigits.slice(-10)
+            const connectedSuffix = connectedDigits.slice(-10)
+            
+            console.log('[WhatsAppDialog] Verification check:', {
+                entered: normalizedPhone,
+                enteredDigits: userEnteredDigits,
+                connected: connectedNum,
+                connectedDigits: connectedDigits,
+                userSuffix,
+                connectedSuffix
+            })
+
+            if (userSuffix === connectedSuffix && userSuffix.length >= 7) {
+                setErrorMessage('Cannot use the same number for both Worker and Personal. Please enter a different personal phone number.')
+                return
+            }
+        }
+        
+        setTargetPhoneNumber(normalizedPhone)
+        setStep('sending')
         setErrorMessage('')
 
         try {
-            const result = await electron.whatsapp.connect(normalizedPhone)
-            if (!result.success && 'error' in result) {
-                setErrorMessage((result as { success: false; error: string }).error)
-                setStep('error')
+            // First save the target number
+            await electron.whatsapp.setTargetNumber(normalizedPhone)
+            
+            // Send a clearer confirmation message with usage instructions
+            const workerPhone = connectionState.connectedPhoneNumber ? `+${connectionState.connectedPhoneNumber}` : 'this device'
+
+            const confirmationMessage = 
+                `✅ WhatsApp Connected to AI Worker!\n\n` +
+                `Your number ${normalizedPhone} has been verified.\n\n` +
+                `📱 How to use:\n` +
+                `• Send a message from this number to control AI Worker\n` +
+                `• The AI will respond to your messages\n` +
+                `• Your chats will appear in the AI Worker app\n\n` +
+                `Note: Your AI Worker is running on ${workerPhone}\n\n` +
+                `💡 Reply to this message to start chatting!`
+            
+            // Then send a confirmation message to verify the connection
+            const result = await electron.whatsapp.sendMessage(normalizedPhone, confirmationMessage)
+            
+            if (result.success) {
+                setStep('connected')
+            } else {
+                setErrorMessage(result.error || 'Failed to send confirmation message')
+                setStep('verify')
             }
         } catch (err) {
-            setErrorMessage(err instanceof Error ? err.message : 'Failed to connect')
-            setStep('error')
+            setErrorMessage(err instanceof Error ? err.message : 'Failed to verify phone number')
+            setStep('verify')
         }
-    }, [phoneInput, validatePhoneNumber, setTargetPhoneNumber])
+    }, [phoneInput, validatePhoneNumber, setTargetPhoneNumber, connectionState.connectedPhoneNumber])
 
     // Sync dialog step with connection state from main process
     useEffect(() => {
         if (!isDialogOpen) return
 
         if (connectionState.status === 'connected') {
-            // If we just got connected (were in a previous step), show success and auto-close
+            // If we just got connected (were in qr or connecting step), go to verify step
             if (step === 'connecting' || step === 'qr') {
-                setStep('connected')
-                const timer = setTimeout(() => {
-                    closeDialog()
-                    // Reset to manage state for next opening
+                setStep('verify')
+            } else if (step === 'intro' || step === 'verify' || step === 'sending') {
+                // If opened while already connected, show manage state
+                if (connectionState.isVerified) {
                     setStep('manage')
-                }, 2000)
-                return () => clearTimeout(timer)
-            } else if (step === 'idle') {
-                // If opened while already connected, show manage state immediately
-                setStep('manage')
+                } else {
+                    setStep('verify')
+                }
             }
         }
 
@@ -106,7 +180,7 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
             setStep('qr')
         }
 
-        if (connectionState.status === 'connecting' && !connectionState.qrCode) {
+        if (connectionState.status === 'connecting' && !connectionState.qrCode && step !== 'qr') {
             setStep('connecting')
         }
 
@@ -114,17 +188,16 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
             setErrorMessage(connectionState.error ?? 'Connection failed')
             setStep('error')
         }
-    }, [connectionState, isDialogOpen, closeDialog, step])
+    }, [connectionState, isDialogOpen, step])
 
     // QR code timeout - show error if QR not scanned within 2 minutes
     useEffect(() => {
         if (step === 'qr') {
             const timeout = setTimeout(() => {
                 setErrorMessage('QR code expired. Please try again.')
-                setStep('idle')
-                // Notify main process to restart connection flow
-                electron.whatsapp.disconnect().catch(() => {})
-            }, 120000) // 2 minutes
+                setStep('intro')
+                electron.whatsapp.disconnect(false).catch(() => {})
+            }, 120000)
             
             return () => clearTimeout(timeout)
         }
@@ -134,13 +207,17 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
     useEffect(() => {
         if (isDialogOpen) {
             if (connectionState.status === 'disconnected') {
-                setStep('idle')
+                setStep('intro')
                 setErrorMessage('')
             } else if (connectionState.status === 'connected') {
-                setStep('manage')
+                if (connectionState.isVerified) {
+                    setStep('manage')
+                } else {
+                    setStep('verify')
+                }
             }
         }
-    }, [isDialogOpen, connectionState.status])
+    }, [isDialogOpen, connectionState.status, connectionState.isVerified])
 
     const handleDisconnect = useCallback(async (clearAuth = true) => {
         if (clearAuth && !window.confirm('Are you sure you want to logout from WhatsApp? You will need to scan the QR code again to reconnect.')) {
@@ -151,7 +228,7 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
             await electron.whatsapp.disconnect(clearAuth)
             
             if (clearAuth) {
-                setStep('idle')
+                setStep('intro')
                 setPhoneInput('')
                 setTargetPhoneNumber(null)
                 setWhatsAppEnabled(false)
@@ -160,9 +237,11 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
                     qrCode: null,
                     error: null,
                     phoneNumber: null,
+                    isVerified: false,
+                    connectedPhoneNumber: null,
                 })
             } else {
-                setStep('idle')
+                setStep('intro')
             }
         } catch (err) {
             setErrorMessage(err instanceof Error ? err.message : 'Failed to disconnect')
@@ -171,14 +250,13 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
     }, [setConnectionState, setTargetPhoneNumber, setWhatsAppEnabled])
 
     const handleClose = useCallback(() => {
-        // Only allow closing if we're not mid-connection
-        if (step !== 'connecting') {
+        if (step !== 'connecting' && step !== 'qr') {
             closeDialog()
         }
     }, [step, closeDialog])
 
     const handleRetry = useCallback(() => {
-        setStep('idle')
+        setStep('intro')
         setErrorMessage('')
     }, [])
 
@@ -220,7 +298,7 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
                             </div>
                         </div>
 
-                        {step !== 'connecting' && (
+                        {step !== 'connecting' && step !== 'qr' && step !== 'sending' && (
                             <button
                                 id="whatsapp-dialog-close"
                                 onClick={handleClose}
@@ -235,19 +313,123 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
                     <div className="px-6 pb-6">
                         <AnimatePresence mode="wait">
 
-                            {/* ─── Idle: Phone Input ─────────────────────────────── */}
-                            {step === 'idle' && (
+                            {/* ─── Step 1: Intro ────────────────────────────────────── */}
+                            {step === 'intro' && (
                                 <motion.div
-                                    key="idle"
+                                    key="intro"
                                     initial={{ opacity: 0, y: 8 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     exit={{ opacity: 0, y: -8 }}
                                     className="space-y-4"
                                 >
-                                    <p className="text-sm text-[var(--color-text-secondary)]">
-                                        Enter the phone number you want the AI to chat with <b>(the contact you will message from).</b><br /><br />
-                                        You will need a <b>second phone</b> with WhatsApp installed to scan the QR code to log the AI worker in.
-                                    </p>
+                                    <div className="text-center space-y-3 py-2">
+                                        <div className="w-16 h-16 mx-auto rounded-full bg-[#25D366]/10 flex items-center justify-center">
+                                            <Smartphone size={28} className="text-[#25D366]" />
+                                        </div>
+                                        <h3 className="text-base font-semibold text-[var(--color-text-primary)]">
+                                            Connect Your WhatsApp
+                                        </h3>
+                                    </div>
+
+                                    <div className="space-y-3 text-sm text-[var(--color-text-secondary)]">
+                                        <div className="flex gap-3 items-start">
+                                            <div className="w-5 h-5 rounded-full bg-[#25D366]/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                                <span className="text-[10px] font-bold text-[#25D366]">1</span>
+                                            </div>
+                                            <p><b>Scan QR Code</b> — Link your WhatsApp account by scanning the QR code with your phone.</p>
+                                        </div>
+                                        <div className="flex gap-3 items-start">
+                                            <div className="w-5 h-5 rounded-full bg-[#25D366]/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                                                <span className="text-[10px] font-bold text-[#25D366]">2</span>
+                                            </div>
+                                            <p><b>Enter Your Number</b> — Enter your WhatsApp number. We'll send a confirmation message to verify.</p>
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        id="whatsapp-start-btn"
+                                        onClick={handleStartConnection}
+                                        className="w-full py-3 bg-[#25D366] hover:bg-[#22c55e] text-white text-sm font-medium rounded-xl transition-all flex items-center justify-center gap-2"
+                                    >
+                                        Connect WhatsApp
+                                        <ArrowRight size={16} />
+                                    </button>
+                                </motion.div>
+                            )}
+
+                            {/* ─── Step 2: QR Code ───────────────────────────────────── */}
+                            {(step === 'connecting' || step === 'qr') && connectionState.qrCode && (
+                                <motion.div
+                                    key="qr"
+                                    initial={{ opacity: 0, scale: 0.95 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="flex flex-col items-center gap-4"
+                                >
+                                    <div className="text-center space-y-1">
+                                        <p className="text-sm text-[var(--color-text-secondary)]">
+                                            Scan this QR code with your <b>WhatsApp phone app</b>
+                                        </p>
+                                        <p className="text-xs text-[var(--color-text-muted)]">
+                                            Open WhatsApp → Settings → Linked Devices → Link a Device
+                                        </p>
+                                    </div>
+
+                                    <div className="p-3 bg-white rounded-xl shadow-inner">
+                                        <QRCodeDisplay qrString={connectionState.qrCode} />
+                                    </div>
+
+                                    {step === 'connecting' && (
+                                        <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+                                            <Loader2 size={16} className="animate-spin" />
+                                            Waiting for scan...
+                                        </div>
+                                    )}
+
+                                    <button
+                                        id="whatsapp-cancel-qr-btn"
+                                        onClick={() => { electron.whatsapp.disconnect(false); setStep('intro') }}
+                                        className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] underline transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                </motion.div>
+                            )}
+
+                            {/* ─── Step 3: Enter Phone Number ────────────────────────── */}
+                            {step === 'verify' && (
+                                <motion.div
+                                    key="verify"
+                                    initial={{ opacity: 0, y: 8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -8 }}
+                                    className="space-y-4"
+                                >
+                                    <div className="text-center space-y-2">
+                                        <div className="w-12 h-12 mx-auto rounded-full bg-[#25D366]/20 flex items-center justify-center">
+                                            <CheckCircle size={24} className="text-[#25D366]" />
+                                        </div>
+                                        <p className="text-sm text-[var(--color-text-secondary)]">
+                                            <b>Device Linked!</b>
+                                        </p>
+                                        {connectionState.connectedPhoneNumber && (
+                                            <p className="text-xs text-[var(--color-text-muted)]">
+                                                Worker: +{connectionState.connectedPhoneNumber}
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    <div className="text-left p-3 bg-white/5 rounded-xl border border-white/5 space-y-2">
+                                        <p className="text-xs text-[var(--color-text-secondary)] font-medium">
+                                            Final Step: Enter Your Personal Number
+                                        </p>
+                                        <p className="text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+                                            Enter your <b>personal WhatsApp number</b>. Only messages from this number will control the AI Worker (running on the Worker number above).
+                                        </p>
+                                        <p className="text-[10px] text-amber-400">
+                                            Note: Cannot be the same as the Worker number.
+                                        </p>
+                                    </div>
 
                                     <div className="relative">
                                         <Phone
@@ -259,78 +441,57 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
                                             type="tel"
                                             value={phoneInput}
                                             onChange={(e) => setPhoneInput(e.target.value)}
-                                            onKeyDown={(e) => { if (e.key === 'Enter') handleConnect() }}
+                                            onKeyDown={(e) => { if (e.key === 'Enter') handleVerifyPhone() }}
                                             placeholder="+1234567890"
                                             className="w-full pl-9 pr-4 py-2.5 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl text-sm text-[var(--color-text-primary)] placeholder-[var(--color-text-dim)] outline-none focus:border-[#25D366]/50 transition-colors"
                                         />
                                     </div>
 
+                                    {errorMessage && (
+                                        <p className="text-xs text-red-400 text-center">{errorMessage}</p>
+                                    )}
+
                                     <button
-                                        id="whatsapp-connect-btn"
-                                        onClick={handleConnect}
+                                        id="whatsapp-verify-btn"
+                                        onClick={handleVerifyPhone}
                                         disabled={!phoneInput.trim()}
-                                        className="w-full py-2.5 bg-[#25D366] hover:bg-[#22c55e] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-xl transition-all"
+                                        className="w-full py-2.5 bg-[#25D366] hover:bg-[#22c55e] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-xl transition-all flex items-center justify-center gap-2"
                                     >
-                                        Connect WhatsApp
+                                        <Send size={16} />
+                                        Verify & Send Confirmation
+                                    </button>
+
+                                    <button
+                                        id="whatsapp-back-to-qr-btn"
+                                        onClick={() => { setStep('intro'); electron.whatsapp.disconnect(false) }}
+                                        className="w-full py-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
+                                    >
+                                        ← Start Over
                                     </button>
                                 </motion.div>
                             )}
 
-                            {/* ─── Connecting: Spinner ───────────────────────────── */}
-                            {step === 'connecting' && (
+                            {/* ─── Step 4: Sending Confirmation ──────────────────────── */}
+                            {step === 'sending' && (
                                 <motion.div
-                                    key="connecting"
-                                    initial={{ opacity: 0, y: 8 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, y: -8 }}
-                                    className="flex flex-col items-center gap-4 py-4"
-                                >
-                                    <Loader2
-                                        size={36}
-                                        className="text-[#25D366] animate-spin"
-                                    />
-                                    <p className="text-sm text-[var(--color-text-secondary)] text-center">
-                                        Connecting to WhatsApp…<br />
-                                        <span className="text-xs text-[var(--color-text-muted)]">
-                                            Generating QR code
-                                        </span>
-                                    </p>
-                                </motion.div>
-                            )}
-
-                            {/* ─── QR Code ──────────────────────────────────────── */}
-                            {step === 'qr' && connectionState.qrCode && (
-                                <motion.div
-                                    key="qr"
+                                    key="sending"
                                     initial={{ opacity: 0, scale: 0.95 }}
                                     animate={{ opacity: 1, scale: 1 }}
-                                    exit={{ opacity: 0 }}
-                                    className="flex flex-col items-center gap-4"
+                                    className="flex flex-col items-center gap-4 py-4"
                                 >
-                                    <p className="text-sm text-[var(--color-text-secondary)] text-center">
-                                        Scan this QR code with your WhatsApp phone app
-                                    </p>
-
-                                    {/* QR Code Display using native img with data URI */}
-                                    <div className="p-3 bg-white rounded-xl shadow-inner">
-                                        <QRCodeDisplay qrString={connectionState.qrCode} />
+                                    <Loader2 size={36} className="text-[#25D366] animate-spin" />
+                                    <div className="text-center">
+                                        <p className="text-base font-semibold text-[var(--color-text-primary)]">
+                                            Sending Confirmation
+                                        </p>
+                                        <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                                            Sending a confirmation message to {phoneInput}...
+                                        </p>
                                     </div>
-
-                                    <p className="text-xs text-[var(--color-text-muted)] text-center">
-                                        Open WhatsApp → Settings → Linked Devices → Link a Device
-                                    </p>
-
-                                    <button
-                                        id="whatsapp-disconnect-qr-btn"
-                                        onClick={() => handleDisconnect(true)}
-                                        className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] underline transition-colors"
-                                    >
-                                        Cancel
-                                    </button>
                                 </motion.div>
                             )}
 
-                            {/* ─── Connected ────────────────────────────────────── */}
+                            {/* ─── Step 5: Connected ─────────────────────────────────── */}
                             {step === 'connected' && (
                                 <motion.div
                                     key="connected"
@@ -346,15 +507,24 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
                                         <CheckCircle size={48} className="text-[#25D366]" />
                                     </motion.div>
                                     <p className="text-base font-semibold text-[var(--color-text-primary)]">
-                                        Connected!
+                                        All Set! 🎉
                                     </p>
                                     <p className="text-xs text-[var(--color-text-muted)] text-center">
-                                        WhatsApp is ready. Closing in a moment…
+                                        WhatsApp is connected and verified.<br/>
+                                        {targetPhoneNumber && <span className="text-[#25D366]">Receiving messages from: {targetPhoneNumber}</span>}
                                     </p>
+                                    
+                                    <button
+                                        id="whatsapp-done-btn"
+                                        onClick={closeDialog}
+                                        className="mt-2 px-8 py-2 bg-[#25D366] hover:bg-[#22c55e] text-white text-sm font-medium rounded-xl transition-all"
+                                    >
+                                        Done
+                                    </button>
                                 </motion.div>
                             )}
 
-                            {/* ─── Manage (Already Connected) ───────────────────── */}
+                            {/* ─── Manage (Already Connected) ──────────────────────── */}
                             {step === 'manage' && (
                                 <motion.div
                                     key="manage"
@@ -371,9 +541,9 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
                                                 WhatsApp is Active
                                             </p>
                                             <p className="text-sm text-[var(--color-text-secondary)] mt-1">
-                                                {connectionState.phoneNumber 
-                                                    ? `Connected as ${connectionState.phoneNumber}`
-                                                    : 'Connected via Baileys Web'}
+                                                {targetPhoneNumber 
+                                                    ? `Receiving from: ${targetPhoneNumber}`
+                                                    : 'No verified number set'}
                                             </p>
                                         </div>
                                     </div>
@@ -397,7 +567,7 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
                                 </motion.div>
                             )}
 
-                            {/* ─── Error ────────────────────────────────────────── */}
+                            {/* ─── Error ──────────────────────────────────────────── */}
                             {step === 'error' && (
                                 <motion.div
                                     key="error"
@@ -429,11 +599,11 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
                     </div>
 
                     {/* Footer — only shown when QR testing/connecting */}
-                    {connectionState.status === 'connecting' && step !== 'manage' && (
+                    {connectionState.status === 'connecting' && step !== 'manage' && step !== 'sending' && (
                         <div className="px-6 pb-4 border-t border-white/5 pt-4">
                             <button
                                 id="whatsapp-disconnect-btn"
-                                onClick={() => handleDisconnect(true)}
+                                onClick={() => { electron.whatsapp.disconnect(false); setStep('intro') }}
                                 className="w-full py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-xl transition-colors"
                             >
                                 Cancel Connection
@@ -447,8 +617,6 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
 }
 
 // ── Inline QR Code Renderer ──────────────────────────────────────────────────
-// Renders the QR string as a canvas-based pixel grid — no extra dependencies.
-
 interface QRCodeDisplayProps {
     qrString: string
 }
@@ -460,7 +628,6 @@ function QRCodeDisplay({ qrString }: QRCodeDisplayProps): React.JSX.Element {
         const canvas = canvasRef.current
         if (!canvas || !qrString) return
 
-        // Dynamically import qrcode for rendering
         import('qrcode').then((QRCode) => {
             QRCode.toCanvas(canvas, qrString, {
                 width: 200,
@@ -468,7 +635,6 @@ function QRCodeDisplay({ qrString }: QRCodeDisplayProps): React.JSX.Element {
                 color: { dark: '#000000', light: '#ffffff' },
             }).catch(console.error)
         }).catch(() => {
-            // Fallback: show the raw string if qrcode module is not available
             const ctx = canvas.getContext('2d')
             if (ctx) {
                 ctx.fillStyle = '#fff'
