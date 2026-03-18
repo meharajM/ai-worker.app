@@ -17,6 +17,7 @@ import { useSpeechRecognition } from '../../hooks/useSpeechRecognition'
 import { useFileDragDrop } from '../../hooks/useFileDragDrop'
 import { useLogStore } from '../../stores/logStore'
 import { useChatStore } from '../../stores/chatStore'
+import { useWhatsAppStore } from '../../stores/whatsappStore'
 import electron from '../../lib/electron'
 
 import { VoiceButton } from './VoiceButton'
@@ -24,6 +25,7 @@ import { TextArea } from './TextArea'
 import { AttachmentBar } from './AttachmentBar'
 import { InputToolbar } from './InputToolbar'
 import { SendButton } from './SendButton'
+import { WhatsAppToggle } from './WhatsAppToggle'
 
 interface ChatInputProps {
   onSubmit: (message: string, attachments?: File[], isHeadless?: boolean) => void
@@ -39,6 +41,7 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const { addLog } = useLogStore()
   const { activeSessionId, getActiveSession } = useChatStore()
+  const { whatsappEnabled, connectionState } = useWhatsAppStore()
 
   // Load workspace from active session and reset per-session state
   useEffect(() => {
@@ -206,12 +209,19 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
     const message = textInput.trim()
     const hasAttachments = attachments.length > 0
     if ((message || hasAttachments) && !disabled) {
+      // If WhatsApp mode is active and connected, also send via WhatsApp
+      if (whatsappEnabled && connectionState.status === 'connected' && message) {
+        const targetNumber = useWhatsAppStore.getState().targetPhoneNumber
+        if (targetNumber) {
+          electron.whatsapp.sendMessage(targetNumber, message).catch(console.error)
+        }
+      }
       onSubmit(message, attachments, isHeadless)
       setTextInput('')
       setAttachments([])
       resetTranscript()
     }
-  }, [textInput, attachments, disabled, onSubmit, resetTranscript, isHeadless])
+  }, [textInput, attachments, disabled, onSubmit, resetTranscript, isHeadless, whatsappEnabled, connectionState.status])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -305,6 +315,9 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
               disabled={disabled}
               onClick={handleMicClick}
             />
+
+            {/* WhatsApp toggle */}
+            <WhatsAppToggle disabled={disabled} />
           </div>
 
           <div className="flex items-center gap-2">

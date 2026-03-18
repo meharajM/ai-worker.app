@@ -145,8 +145,10 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                     } as MCPServer;
                 });
 
-                // Also ensure all current defaults exist if they are missing
-                let hasNewDefaults = false;
+                // Migration: Remove old WhatsApp MCP since we now have direct integration
+                const beforeCount = initialServers.length;
+                initialServers = initialServers.filter(s => !s.name.toLowerCase().includes('whatsapp'));
+                let hasNewDefaults = beforeCount !== initialServers.length;
                 DEFAULT_MCP_SERVERS.forEach(def => {
                     if (!initialServers.some(s => s.name === def.name)) {
                         initialServers.push({

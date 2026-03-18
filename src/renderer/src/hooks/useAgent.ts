@@ -35,7 +35,9 @@
 import { useCallback, useEffect } from "react";
 import { useChatStore } from "../stores/chatStore";
 import { useSettingsStore } from "../stores/settingsStore";
+import { useWhatsAppStore } from "../stores/whatsappStore";
 import { type LLMMessage } from "../lib/llm";
+import electron from "../lib/electron";
 
 /**
  * State returned by `useAgent`.
@@ -271,7 +273,8 @@ export function useAgent(): UseAgentReturn {
                          */
                         onProgressUpdate: (progress?: number, eta?: number, plan?: unknown) => {
                             useChatStore.getState().updateSessionProgress(
-                                originSessionId, progress, eta, plan
+                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                originSessionId, progress, eta, plan as any
                             );
                         },
                     },
@@ -293,8 +296,67 @@ export function useAgent(): UseAgentReturn {
                     MemoryReflector.getInstance().analyze(historyForReflector, settingsForLLM);
                 });
 
+                // Extract WhatsApp target sender JID if this was an incoming remote message
+                const extractWaJid = (text: string) => {
+                    if (!text || typeof text !== 'string') return null;
+                    
+                    // Try multiple patterns for robustness
+                    const patterns = [
+                        /📱 \*\*WhatsApp\*\* \(([^)]+)\):/,  // Primary pattern
+                        /📱 WhatsApp \(([^)]+)\):/,          // Without bold
+                        /WhatsApp.*?\((\+?\d+)\):/,           // Flexible pattern
+                    ];
+                    
+                    for (const pattern of patterns) {
+                        const match = text.match(pattern);
+                        if (match && match[1]) {
+                            return match[1];
+                        }
+                    }
+                    return null;
+                };
+                const targetJid = extractWaJid(content);
+                const waState = useWhatsAppStore.getState();
+
+                if (targetJid && waState.whatsappEnabled && waState.connectionState.status === "connected") {
+                    electron.whatsapp.sendPresence(targetJid, "composing")
+                        .catch(err => console.error("[useAgent] Failed to send typing presence:", err));
+                }
+
                 // ── Step 6: Run the agent ──────────────────────────────────────────
-                await runtime.chat(content, attachmentData);
+                const llmResponse = await runtime.chat(content, attachmentData);
+
+                // ── Step 7: Handle Outbound WhatsApp Messages ──────────────────────
+                // If WhatsApp mode is enabled, we need to send the final assistant response
+                // back to the remote user via IPC.
+                if (targetJid && waState.whatsappEnabled && waState.connectionState.status === "connected") {
+                    // Extract text content from the response - can be string or array
+                    let responseText = '';
+                    if (typeof llmResponse.content === 'string') {
+                        responseText = llmResponse.content;
+                    } else if (Array.isArray(llmResponse.content)) {
+                        // Extract text from content parts
+                        responseText = llmResponse.content
+                            .filter(part => part.type === 'text')
+                            .map(part => part.text)
+                            .join('\n');
+                    }
+                    
+                    if (responseText) {
+                        console.log('[useAgent] Sending WhatsApp response to:', targetJid, 'Length:', responseText.length);
+                        electron.whatsapp.sendMessage(targetJid, responseText)
+                            .catch(err => console.error("[useAgent] Failed to send WhatsApp response:", err));
+                    } else {
+                        // Fallback: try to get from store
+                        const finalMessages = useChatStore.getState().sessions.find(s => s.id === originSessionId)?.messages ?? [];
+                        const lastAssistantMessage = finalMessages.slice().reverse().find(m => m.role === "assistant" && !m.toolCalls?.length);
+                        
+                        if (lastAssistantMessage && lastAssistantMessage.content) {
+                            electron.whatsapp.sendMessage(targetJid, lastAssistantMessage.content)
+                                .catch(err => console.error("[useAgent] Failed to send WhatsApp response:", err));
+                        }
+                    }
+                }
 
             } catch (error) {
                 console.error("[useAgent] Handler error:", error);
@@ -305,6 +367,14 @@ export function useAgent(): UseAgentReturn {
                     content: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
                 });
             } finally {
+                // Clear the composing state if this was a WhatsApp message
+                const targetJid = content.match(/📱 \*\*WhatsApp\*\* \(([^)]+)\):/)?.[1];
+                const waState = useWhatsAppStore.getState();
+                if (targetJid && waState.whatsappEnabled && waState.connectionState.status === "connected") {
+                    electron.whatsapp.sendPresence(targetJid, "paused")
+                        .catch(err => console.error("[useAgent] Failed to send paused presence:", err));
+                }
+
                 // Always clear the processing state for originSessionId.
                 // This does NOT affect any other session that might be running.
                 const store = useChatStore.getState();
@@ -353,8 +423,32 @@ export function useAgent(): UseAgentReturn {
             }
         };
 
+        const handleAppSubmit = (e: Event) => {
+            const customEvent = e as CustomEvent<{ content: string }>;
+            const { activeSessionId, isSessionProcessing, sessions, createSession } = useChatStore.getState();
+            const content = customEvent.detail?.content;
+            
+            if (!content) return;
+            
+            // If no active session, create one
+            let sessionId = activeSessionId;
+            if (!sessionId) {
+                sessionId = createSession();
+                console.log('[useAgent] Created new session for WhatsApp message:', sessionId);
+            }
+            
+            // If session is processing, we still want to queue the message
+            // by calling handleSubmit - it will add the message and process
+            handleSubmit(content);
+        };
+
         window.addEventListener("agent-action", handleAgentAction as EventListener);
-        return () => window.removeEventListener("agent-action", handleAgentAction as EventListener);
+        window.addEventListener("app:submit-message", handleAppSubmit);
+        
+        return () => {
+            window.removeEventListener("agent-action", handleAgentAction as EventListener);
+            window.removeEventListener("app:submit-message", handleAppSubmit);
+        };
     }, [handleSubmit]);
 
     return { handleSubmit };

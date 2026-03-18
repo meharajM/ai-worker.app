@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Command } from 'cmdk';
-import { Search, Trash2, Layout, Settings } from 'lucide-react';
+import { Search, Trash2, Layout, Settings, MessageCircle, WifiOff } from 'lucide-react';
 import { useChatStore } from '../stores/chatStore';
+import { useWhatsAppStore } from '../stores/whatsappStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { View } from './Sidebar';
 
@@ -12,6 +13,8 @@ interface CommandPaletteProps {
 export function CommandPalette({ onViewChange }: CommandPaletteProps) {
   const [open, setOpen] = useState(false);
   const { clearMessages, toggleSidebar } = useChatStore();
+  const { connectionState, openDialog, setWhatsAppEnabled } = useWhatsAppStore();
+  const isWhatsAppConnected = connectionState.status === 'connected';
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -116,6 +119,43 @@ export function CommandPalette({ onViewChange }: CommandPaletteProps) {
                     <span>Settings</span>
                     <span className="ml-auto text-xs opacity-50 font-mono">Cmd+,</span>
                   </Command.Item>
+                </Command.Group>
+
+                <Command.Group heading="WhatsApp" className="text-xs font-bold text-white/30 uppercase tracking-wider mb-2 px-2 mt-4">
+                  <Command.Item
+                    onSelect={() => {
+                      openDialog();
+                      setOpen(false);
+                    }}
+                    className={itemClass}
+                  >
+                    <MessageCircle size={16} className="text-[#25D366]" />
+                    <span>Connect WhatsApp</span>
+                  </Command.Item>
+                  {isWhatsAppConnected && (
+                    <>
+                      <Command.Item
+                        onSelect={() => {
+                          setWhatsAppEnabled(true);
+                          setOpen(false);
+                        }}
+                        className={itemClass}
+                      >
+                        <MessageCircle size={16} className="text-[#25D366]" />
+                        <span>Enable WhatsApp Mode</span>
+                      </Command.Item>
+                      <Command.Item
+                        onSelect={() => {
+                          setWhatsAppEnabled(false);
+                          setOpen(false);
+                        }}
+                        className={itemClass}
+                      >
+                        <WifiOff size={16} />
+                        <span>Disable WhatsApp Mode</span>
+                      </Command.Item>
+                    </>
+                  )}
                 </Command.Group>
 
 

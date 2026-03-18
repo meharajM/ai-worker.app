@@ -281,7 +281,58 @@ export const electron = {
             }
             return []
         }
-    }
+    },
+
+    // WhatsApp operations
+    whatsapp: {
+        getState: async () => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.getState()
+            }
+            return { status: 'disconnected' as const, qrCode: null, error: null, phoneNumber: null }
+        },
+        connect: async (phoneNumber: string) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.connect(phoneNumber)
+            }
+            console.warn('[Browser] WhatsApp not supported in browser mode')
+            return { success: false, error: 'Not supported in browser mode' }
+        },
+        disconnect: async (clearAuth?: boolean) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.disconnect(clearAuth)
+            }
+            return { success: true }
+        },
+        sendMessage: async (to: string, content: string) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.sendMessage(to, content)
+            }
+            console.warn('[Browser] WhatsApp sendMessage not supported')
+            return { success: false, error: 'Not supported in browser mode' }
+        },
+        sendPresence: async (to: string, state: string) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.sendPresence(to, state)
+            }
+            console.warn('[Browser] WhatsApp sendPresence not supported')
+            return { success: false, error: 'Not supported in browser mode' }
+        },
+        onConnectionChange: (callback: (state: import('../stores/whatsappStore').WhatsAppConnectionState) => void): (() => void) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return window.electron.whatsapp.onConnectionChange(callback as any)
+            }
+            return () => {}
+        },
+        onMessage: (callback: (message: import('../stores/whatsappStore').WhatsAppConnectionState) => void): (() => void) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return window.electron.whatsapp.onMessage(callback as any)
+            }
+            return () => {}
+        },
+    },
 }
 
 export default electron

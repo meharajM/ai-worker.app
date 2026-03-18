@@ -147,6 +147,26 @@ const electronAPI = {
             return paths
         }
     },
+    // WhatsApp operations
+    whatsapp: {
+        getState: () => ipcRenderer.invoke('whatsapp:get-state'),
+        connect: (phoneNumber: string) => ipcRenderer.invoke('whatsapp:connect', phoneNumber),
+        disconnect: (clearAuth?: boolean) => ipcRenderer.invoke('whatsapp:disconnect', clearAuth),
+        sendMessage: (to: string, content: string) =>
+            ipcRenderer.invoke('whatsapp:send-message', to, content),
+        sendPresence: (to: string, state: string) =>
+            ipcRenderer.invoke('whatsapp:send-presence', to, state),
+        onConnectionChange: (callback: (state: unknown) => void) => {
+            const listener = (_event: any, state: unknown) => callback(state)
+            ipcRenderer.on('whatsapp:connection-change', listener)
+            return () => ipcRenderer.removeListener('whatsapp:connection-change', listener)
+        },
+        onMessage: (callback: (message: unknown) => void) => {
+            const listener = (_event: any, message: unknown) => callback(message)
+            ipcRenderer.on('whatsapp:message', listener)
+            return () => ipcRenderer.removeListener('whatsapp:message', listener)
+        },
+    },
     // General utils
     utils: {
         getPathForFile: (file: File): string => {

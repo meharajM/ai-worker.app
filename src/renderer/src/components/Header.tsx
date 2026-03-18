@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
-import { Wifi, WifiOff, User as UserIcon, LogOut } from 'lucide-react'
+import { Wifi, WifiOff, User as UserIcon, LogOut, MessageCircle } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { AuthModal } from './AuthModal'
 import { FEATURE_FLAGS } from '../lib/constants'
+import { useWhatsAppStore } from '../stores/whatsappStore'
 import { Button } from './primitives/Button'
 import { StatusDot } from './primitives/StatusDot'
 
@@ -13,6 +14,8 @@ interface HeaderProps {
 export function Header({ status }: HeaderProps) {
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
     const { user, signOut } = useAuthStore()
+    const { connectionState, whatsappEnabled, openDialog } = useWhatsAppStore()
+    const isWhatsAppConnected = connectionState.status === 'connected'
 
     return (
         <header className="h-[var(--space-12)] flex items-center justify-between px-[var(--space-4)] border-b border-[var(--color-border)] flex-shrink-0">
@@ -57,6 +60,22 @@ export function Header({ status }: HeaderProps) {
             <div className="text-[10px] uppercase tracking-widest text-[var(--color-text-dim)] hidden sm:flex items-center gap-2">
                 <StatusDot variant="success" size="sm" animated />
                 local-session: active
+
+                {/* WhatsApp status indicator */}
+                {isWhatsAppConnected && (
+                    <button
+                        id="header-whatsapp-status"
+                        onClick={openDialog}
+                        className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#25D366]/15 hover:bg-[#25D366]/25 transition-colors cursor-pointer"
+                        title="WhatsApp connected — click to manage"
+                    >
+                        <MessageCircle size={10} className="text-[#25D366]" />
+                        <span className="text-[#25D366] text-[9px] font-bold tracking-widest">
+                            {whatsappEnabled ? 'WHATSAPP ON' : 'WHATSAPP'}
+                        </span>
+                        <span className="w-1 h-1 rounded-full bg-[#25D366] animate-pulse" />
+                    </button>
+                )}
             </div>
 
             {/* LLM Status */}

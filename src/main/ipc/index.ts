@@ -8,6 +8,7 @@ import { registerSecureHandlers } from './secure'
 import { registerFsHandlers } from './fs'
 import { registerMemoryHandlers } from './memory'
 import { registerAntigravityHandlers } from './antigravity'
+import { registerWhatsAppHandlers } from './whatsapp'
 
 export function setupIpcHandlers(): void {
     registerAppHandlers()
@@ -20,4 +21,5 @@ export function setupIpcHandlers(): void {
     registerSecureHandlers()
     registerFsHandlers()
     registerAntigravityHandlers()
+    registerWhatsAppHandlers()
 }
