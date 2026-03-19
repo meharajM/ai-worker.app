@@ -855,3 +855,268 @@ The agent's browser tools feature built-in protective layers to prevent hallucin
 | 21F: Sub-agent isolation | N/A | ✅ | ✅ | ✅ |
 | 21G: Instant reply (no tools) | N/A | ❌ (correct) | ❌ (correct) | N/A |
 
+---
+
+## 22. WhatsApp Integration — Use Cases & Verification Prompts
+
+> These prompts verify the full WhatsApp bidirectional integration added in the `whatsapp-implementation-v2` branch.
+>
+> **Prerequisites before running any test:**
+> - Built the app: `npm run build && npm start` (or `npm run dev`)
+> - WhatsApp connected: Header shows green dot + phone number
+> - Target phone number verified (not the same as the Worker phone)
+> - WhatsApp Mode toggle (💬 icon in chat toolbar) is **ON** (green pulse dot visible)
+
+---
+
+### 22A. Setup — First-Time Connection Flow
+
+**What to verify:** The connection dialog guides user through QR scan and phone number verification correctly.
+
+**Steps:**
+1. Click the **CONNECT** button in the app header (or the WhatsApp CTA in the empty state)
+2. The dialog opens — click **"Start Connection"**
+3. A QR code appears — scan it from the Worker phone (WhatsApp → Linked Devices → Link a Device)
+4. After scanning, enter your **Personal phone number** (different from Worker)
+5. Click **Verify** — the dialog closes, header shows `● Connected`
+
+**What to watch in the UI:**
+- [ ] Dialog has a clear 3-step flow: Intro → QR Code → Phone Verification
+- [ ] QR refreshes automatically if it expires
+- [ ] Entering the **same** number as the Worker phone shows error: *"Cannot use the same number for both Worker and Personal"*
+- [ ] Header status button updates from `CONNECT` to `● Connected`
+
+**Console Logs to Check:**
+```
+[WhatsAppService] Restored target JID filter: +91XXXXXXXXXX@s.whatsapp.net
+[Main] Wake lock acquired (WhatsApp connected). ID: 0
+[WhatsAppService] Target JID set for message filtering: +91XXXXXXXXXX@s.whatsapp.net
+```
+
+---
+
+### 22B. Auto-Reconnect on App Restart
+
+**What to verify:** After a full quit-and-relaunch, the app reconnects automatically — no QR scan needed.
+
+**Steps:**
+1. Fully quit the app (`Cmd+Q` on macOS)
+2. Relaunch the app
+3. Watch the header — within 5–10 seconds it should show `● Connected`
+
+**What to watch in the UI:**
+- [ ] Header briefly shows `Connecting...` then `● Connected` — **no manual click required**
+- [ ] Target phone number is pre-filled and message filter is already active
+- [ ] WhatsApp Mode toggle is restored from the previous session (persisted in Zustand)
+
+**What you should NOT see:**
+- The "CONNECT" button requiring user interaction
+- A dialog asking the user to re-scan the QR code
+
+**Console Logs to Check:**
+```
+[WhatsAppService] Found existing auth credentials. Auto-reconnecting...
+[WhatsAppService] Restored target JID filter: +91XXXXXXXXXX@s.whatsapp.net
+[WhatsAppService] Connection update: { connection: 'open' }
+[Main] Wake lock acquired (WhatsApp connected). ID: 0
+```
+
+---
+
+### 22C. Desktop → WhatsApp Mirror (UI → Phone)
+
+**What to verify:** When WhatsApp Mode is ON and you type in the desktop chat, the LLM response is mirrored to your personal phone.
+
+**Prompt (type in desktop chat with Mode ON):**
+> "What is the capital of France?"
+
+**What to watch:**
+- [ ] Message appears in desktop chat as normal
+- [ ] Your personal phone shows **"Typing..."** from the Worker number while AI processes
+- [ ] The AI's final answer appears on **both** desktop chat AND personal phone as a single WhatsApp message
+- [ ] No multiple partial fragments — only one clean complete message on phone
+
+**What you should NOT see:**
+- Multiple partial WhatsApp messages sent during streaming
+- No message on the phone at all (the original bug before this fix)
+
+**Console Logs to Check:**
+```
+[useAgent] WhatsApp flow detected/enabled. JID: +91XXXXXXXXXX@s.whatsapp.net
+[useAgent] Final WhatsApp delivery check...
+[WhatsAppService] Message sent successfully to: +91XXXXXXXXXX@s.whatsapp.net
+```
+
+---
+
+### 22D. Phone → Desktop Remote Operation (WhatsApp → AI → Phone)
+
+**What to verify:** A message from the personal phone triggers the AI agent on desktop and replies back.
+
+**Steps:**
+1. Ensure WhatsApp is connected and Mode toggle is **ON**
+2. **From your personal phone**, text the Worker number: `"Write me a haiku about coding"`
+3. Watch the desktop app
+
+**What to watch:**
+- [ ] The incoming message appears in the desktop chat prefixed with `📱 **WhatsApp** (from: +91XXXXXXXXXX):`
+- [ ] The AI begins processing (spinner / progress bar visible on desktop)
+- [ ] Worker phone shows **"Typing..."** back to your personal phone
+- [ ] The AI's haiku appears in the desktop chat AND is received on your personal phone
+
+**What you should NOT see:**
+- No response on the phone (the original core bug)
+- Messages from random contacts triggering the agent
+
+**Console Logs to Check:**
+```
+[useAgent] WhatsApp flow detected/enabled. JID: +91XXXXXXXXXX@s.whatsapp.net
+[useAgent] Final WhatsApp delivery check...
+[WhatsAppService] Message sent successfully to: +91XXXXXXXXXX@s.whatsapp.net
+```
+
+---
+
+### 22E. Security Filter — Only Verified Number Triggers Agent
+
+**What to verify:** Messages from other contacts or group chats do NOT trigger the AI.
+
+**Steps:**
+1. Ensure WhatsApp is connected
+2. From a **different phone** (not the personal/admin number), send a message to the Worker phone
+3. Watch the desktop app — nothing should happen
+
+**Console Logs to Check:**
+```
+[WhatsAppService] Dropping message from non-target sender: 9199XXXXXXXX
+```
+
+**Also test:** Send from a **group chat** that includes the Worker phone — same drop behavior expected.
+
+---
+
+### 22F. Long-Running Task — Remote Notification
+
+**What to verify:** You can start a task from the desktop and receive the result on your phone while away.
+
+**Prompt (type in desktop chat with Mode ON):**
+> "Analyze the Hacker News homepage and give me a summary of the top 5 stories."
+
+**Steps:**
+1. Send the prompt from desktop
+2. Lock your phone screen and put it face-down
+3. Wait 30–60 seconds for the agent to complete
+
+**What to watch:**
+- [ ] Personal phone receives the HN summary as a WhatsApp notification
+- [ ] Desktop chat also shows the full result
+
+---
+
+### 22G. System Awake — Wake Lock Verification
+
+**What to verify:** The OS does not suspend the app while WhatsApp is connected.
+
+**Steps:**
+1. Connect WhatsApp and leave the app running
+2. Set Mac to sleep after 1 min (System Prefs → Battery → Sleep: 1 min) — keep lid **open**
+3. Leave idle for 2 minutes
+4. From personal phone, send: `"Are you there?"`
+
+**What to watch:**
+- [ ] App responds normally despite idle time — no dropped messages, no reconnection delay
+
+**Console Logs to Check (on startup):**
+```
+[Main] Wake lock acquired (WhatsApp connected). ID: 0
+```
+
+**On app quit:**
+```
+[Main] Wake lock released (WhatsApp disconnected).
+```
+
+---
+
+### 22H. Rate Limiting — No WhatsApp Spam
+
+**What to verify:** Only one complete message is sent to WhatsApp, not fragmented streaming chunks.
+
+**Prompt:**
+> "List all 50 US states and their capitals."
+
+**What to watch:**
+- [ ] **Only one** WhatsApp message arrives on personal phone with the full answer
+- [ ] No duplicate or partial messages received on phone
+
+---
+
+### 22I. Disconnect — Stop vs. Logout
+
+**Test A — Stop Connection (preserve auth):**
+1. Click Connected status button in header → click **"Stop Connection"**
+2. Fully close and relaunch the app
+3. Expected: App **auto-reconnects** without QR scan
+
+**Console Logs to Check:**
+```
+[Main] Wake lock released (WhatsApp disconnected).
+[WhatsAppService] Found existing auth credentials. Auto-reconnecting...
+```
+
+**Test B — Logout (wipe auth):**
+1. Click Connected status button → click **"Logout"**
+2. Fully close and relaunch the app
+3. Expected: App shows **"CONNECT"** button — user must scan QR again
+
+**Console Logs to Check:**
+```
+[WhatsAppService] Auth cleared.
+```
+
+---
+
+### 22J. Multi-Turn Context over WhatsApp
+
+**What to verify:** Conversation context is maintained across multiple WhatsApp messages in the same session.
+
+**Steps (from personal phone):**
+1. Send: `"My name is Alex"`
+2. Wait for reply about Alex
+3. Send: `"What is my name?"`
+4. Expected reply: mentions Alex
+
+**What to watch:**
+- [ ] AI correctly recalls context from earlier in the WhatsApp conversation
+- [ ] All messages appear in the same desktop chat thread (not a new session per message)
+
+---
+
+### Quick Verification Checklist for Section 22
+
+| Scenario | Desktop Chat? | Phone Mirror? | Key Console Log |
+|---|---|---|---|
+| 22A: First-time setup | Dialog works | Connected status shows | `Wake lock acquired` |
+| 22B: Auto-reconnect on restart | Status restores | No QR needed | `Auto-reconnecting...` |
+| 22C: Desktop → Phone mirror | Normal chat | Single WA message | `Final WhatsApp delivery` |
+| 22D: Phone → AI → Phone | Shows prefixed msg | AI replies to phone | `Message sent successfully` |
+| 22E: Security filter | No unknown msgs | No AI triggered | `Dropping message from non-target` |
+| 22F: Background task notification | Result in chat | Phone notified | `Message sent successfully` |
+| 22G: Wake lock | App stays responsive | Message received | `Wake lock acquired` |
+| 22H: Rate limiting | One response | One WA message | `Rate limit` (if triggered) |
+| 22I: Stop vs Logout | Auth preserved/wiped | Reconnects or asks QR | `Auto-reconnecting` / `Auth cleared` |
+| 22J: Multi-turn context | Same session thread | Context remembered | — |
+
+---
+
+### What Changed in App Behavior After Today's Fixes
+
+The following behaviors are **new** — they did not work before these changes:
+
+| # | Old Behavior (broken) | New Behavior (fixed) | Fix Location |
+|---|---|---|---|
+| 1 | Desktop→Phone: LLM reply **never sent** to phone when typing from UI | LLM reply **always sent** when WA Mode is ON | `useAgent.ts` — `shouldMirrorToWhatsApp` |
+| 2 | App restart → user **must manually click Connect** again | App **auto-reconnects** silently on startup | `WhatsAppService.init()` — calls `connect()` |
+| 3 | macOS could **suspend the app**, dropping incoming messages | OS **prevented from sleeping** while WA connected | `index.ts` — `powerSaveBlocker` wake lock |
+| 4 | **All WhatsApp contacts** (groups, unknown) could trigger the AI | **Only the verified personal number** triggers the AI | `WhatsAppService.messages.upsert` — JID filter |
+| 5 | Agent sent partial streamed chunks to WhatsApp (rate-limited, garbled) | Agent sends **single complete final response** | Removed `onMessage` real-time delivery |

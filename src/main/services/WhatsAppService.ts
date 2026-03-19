@@ -12,16 +12,54 @@
 import { EventEmitter } from 'events'
 import path from 'path'
 import fs from 'fs'
-import { app } from 'electron'
+import { app, powerSaveBlocker } from 'electron'
 import type { WASocket } from '@whiskeysockets/baileys'
 import { formatWhatsAppJid } from '../utils/whatsapp'
+
+const loggerForRetry = {
+    level: 'silent' as const,
+    trace: () => {},
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    fatal: () => {},
+    child: () => loggerForRetry,
+};
+
+// A simple map cache to store sent messages for retries
+class SimpleMessageCache {
+    private store = new Map<string, any>()
+    private readonly maxSize = 100
+
+    get(key: string) { return this.store.get(key) }
+    set(key: string, value: any) {
+        if (this.store.size >= this.maxSize) {
+            const firstKey = this.store.keys().next().value
+            if (firstKey) this.store.delete(firstKey)
+        }
+        this.store.set(key, value)
+    }
+}
+
+class SimpleRetryCache {
+    private store = new Map<string, number>()
+    get<T>(key: string): T | undefined { return this.store.get(key) as unknown as T }
+    set<T>(key: string, value: T): void { this.store.set(key, value as unknown as number) }
+    del(key: string): void { this.store.delete(key) }
+    flushAll(): void { this.store.clear() }
+}
+
+const sentMessagesCache = new SimpleMessageCache()
+const msgRetryCounterCache = new SimpleRetryCache()
 
 // Types we expose over IPC — mirrored in the renderer's whatsappStore.ts
 export interface WhatsAppConnectionState {
     status: 'disconnected' | 'connecting' | 'connected' | 'error'
     qrCode: string | null
     error: string | null
-    phoneNumber: string | null
+    phoneNumber: string | null // Target number
+    workerNumber: string | null // Self number (scanned)
 }
 
 export interface WhatsAppMessage {
@@ -42,12 +80,21 @@ export class WhatsAppService extends EventEmitter {
         qrCode: null,
         error: null,
         phoneNumber: null,
+        workerNumber: null,
     }
 
     private socket: WASocket | null = null
     private authDir: string
     private lastMessageTime = 0
     private readonly MESSAGE_RATE_LIMIT_MS = 1000 // 1 message per second
+    private wakeLockId: number | null = null
+    
+    // Handshake state
+    private pendingHandshake: {
+        phoneNumber: string
+        code: string
+        expires: number
+    } | null = null
 
     constructor() {
         super()
@@ -68,7 +115,7 @@ export class WhatsAppService extends EventEmitter {
                 if (fs.existsSync(phoneFile)) {
                     savedPhone = fs.readFileSync(phoneFile, 'utf8').trim()
                 }
-                console.log('[WhatsAppService] Found existing auth credentials. User can connect when ready.')
+                console.log('[WhatsAppService] Found existing auth credentials. Auto-connecting in background.')
                 
                 // Set the saved phone number in state but don't connect
                 if (savedPhone) {
@@ -77,7 +124,14 @@ export class WhatsAppService extends EventEmitter {
                         qrCode: null,
                         error: null,
                         phoneNumber: savedPhone,
+                        workerNumber: null,
                     })
+                    
+                    console.log('[WhatsAppService] Found existing auth credentials. Auto-reconnecting...')
+                    console.log(`[WhatsAppService] Restored target JID filter: ${formatWhatsAppJid(savedPhone)}`)
+                    
+                    // Auto-connect on launch
+                    this.connect(savedPhone).catch(e => console.error('[WhatsAppService] Auto-connect error:', e))
                 }
             }
         } catch (error) {
@@ -89,15 +143,19 @@ export class WhatsAppService extends EventEmitter {
         return { ...this.connectionState }
     }
 
-    async connect(targetPhoneNumber: string): Promise<void> {
+    async connect(targetPhoneNumber?: string): Promise<void> {
         if (this.connectionState.status === 'connected') return
         if (this.connectionState.status === 'connecting') return
+        
+        // If we have a saved phone number, use it.
+        const effectivePhone: string | null = (targetPhoneNumber ?? this.connectionState.phoneNumber) ?? null
 
         this._setState({
             status: 'connecting',
             qrCode: null,
             error: null,
-            phoneNumber: targetPhoneNumber,
+            phoneNumber: effectivePhone ?? null,
+            workerNumber: this.connectionState.workerNumber
         })
 
         // Don't clear auth here - it breaks the QR scan flow!
@@ -115,8 +173,8 @@ export class WhatsAppService extends EventEmitter {
             // Ensure auth directory exists
             fs.mkdirSync(this.authDir, { recursive: true })
             
-            if (targetPhoneNumber) {
-                fs.writeFileSync(path.join(this.authDir, 'phone.txt'), targetPhoneNumber)
+            if (effectivePhone) {
+                fs.writeFileSync(path.join(this.authDir, 'phone.txt'), effectivePhone)
             }
 
             // eslint-disable-next-line react-hooks/rules-of-hooks
@@ -145,9 +203,21 @@ export class WhatsAppService extends EventEmitter {
                 browser: ['AI-Worker', 'Chrome', '120.0.0'],
                 // Connection options for better stability
                 connectTimeoutMs: 60000,
+                // Critical for message delivery retries
+                msgRetryCounterCache,
+                getMessage: async (key) => {
+                    const id = key.id;
+                    if (id) {
+                        const msg = sentMessagesCache.get(id);
+                        if (msg) return msg;
+                    }
+                    return { conversation: 'Hello, this is fallback text.' };
+                },
+                markOnlineOnConnect: true,
             })
 
             this.socket = sock
+
 
             // QR code and connection state events
             // Use 'any' because Baileys exposes a complex union type that doesn't
@@ -168,15 +238,34 @@ export class WhatsAppService extends EventEmitter {
 
                 if (connection === 'open') {
                     console.log('[WhatsAppService] Connection opened successfully!')
+                    
+                    const workerJid = sock.user?.id || ''
+                    const workerPhone = workerJid.split(':')[0].split('@')[0]
+                    
+                    if (this.connectionState.phoneNumber) {
+                        console.log(`[WhatsAppService] Target JID set for message filtering: ${formatWhatsAppJid(this.connectionState.phoneNumber)}`)
+                    }
+                    
                     this._setState({
                         status: 'connected',
                         qrCode: null,
                         error: null,
-                        phoneNumber: targetPhoneNumber,
+                        phoneNumber: this.connectionState.phoneNumber,
+                        workerNumber: workerPhone || null
                     })
+                    
+                    if (this.wakeLockId === null) {
+                        this.wakeLockId = powerSaveBlocker.start('prevent-app-suspension')
+                        console.log(`[Main] Wake lock acquired (WhatsApp connected). ID: ${this.wakeLockId}`)
+                    }
                 }
 
                 if (connection === 'close') {
+                    if (this.wakeLockId !== null) {
+                        powerSaveBlocker.stop(this.wakeLockId)
+                        console.log('[Main] Wake lock released (WhatsApp disconnected).')
+                        this.wakeLockId = null
+                    }
                     const statusCode = lastDisconnect?.error?.output?.statusCode
                     const errorMessage = lastDisconnect?.error?.message || lastDisconnect?.reason || 'Unknown reason'
                     const loggedOutCode = DisconnectReason.loggedOut
@@ -201,30 +290,33 @@ export class WhatsAppService extends EventEmitter {
                                 status: 'disconnected',
                                 qrCode: null,
                                 error: null,
-                                phoneNumber: targetPhoneNumber,
+                                phoneNumber: (effectivePhone as string | null) ?? null,
+                                workerNumber: this.connectionState.workerNumber
                             })
                             // Don't clear auth - just let user scan QR again with same credentials
                             return
                         }
                         
-                        if (isNetworkError && targetPhoneNumber) {
+                        if (isNetworkError && effectivePhone) {
                             // Network issue - try to auto-reconnect after a delay
                             this._setState({
                                 status: 'connecting',
                                 qrCode: null,
                                 error: null,
-                                phoneNumber: targetPhoneNumber,
+                                phoneNumber: effectivePhone ?? null,
+                                workerNumber: this.connectionState.workerNumber
                             })
                             console.log('[WhatsAppService] Network disconnected, attempting auto-reconnect in 5s...')
                             setTimeout(() => {
                                 if (this.connectionState.status === 'connecting') {
-                                    this.connect(targetPhoneNumber).catch(e => {
+                                    this.connect(effectivePhone).catch(e => {
                                         console.error('[WhatsAppService] Auto-reconnect failed:', e)
                                         this._setState({
                                             status: 'error',
                                             qrCode: null,
                                             error: 'Failed to reconnect. Please try again.',
-                                            phoneNumber: targetPhoneNumber,
+                                            phoneNumber: effectivePhone ?? null,
+                                            workerNumber: this.connectionState.workerNumber
                                         })
                                     })
                                 }
@@ -243,10 +335,10 @@ export class WhatsAppService extends EventEmitter {
                                 status: 'error',
                                 qrCode: null,
                                 error: specificError,
-                                phoneNumber: targetPhoneNumber,
+                                phoneNumber: effectivePhone ?? null,
+                                workerNumber: this.connectionState.workerNumber
                             })
                         }
-                    } else {
                         // Logged out — clear auth so next connect shows a fresh QR
                         this._clearAuth()
                         this._setState({
@@ -254,6 +346,7 @@ export class WhatsAppService extends EventEmitter {
                             qrCode: null,
                             error: null,
                             phoneNumber: null,
+                            workerNumber: null
                         })
                     }
                     this.socket = null
@@ -265,11 +358,61 @@ export class WhatsAppService extends EventEmitter {
 
             // Incoming messages
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            sock.ev.on('messages.upsert', ({ messages, type }: { messages: any[]; type: string }) => {
+            sock.ev.on('messages.upsert', (upsert: { messages: any[]; type: string }) => {
+                const { messages, type } = upsert
                 if (type !== 'notify') return
+                
                 for (const raw of messages) {
                     const msg = this._parseMessage(raw)
                     if (msg) {
+                        const fromClean = msg.from.split('@')[0].split(':')[0]
+                        console.log(`[WhatsAppService] Incoming: from=${msg.from} (clean=${fromClean}) isFromMe=${msg.isFromMe} content="${msg.content.substring(0, 50)}"`)
+
+                        // Handshake Verification Check
+                        if (this.pendingHandshake && !msg.isFromMe) {
+                            const handshakeClean = this.pendingHandshake.phoneNumber.replace(/\D/g, '')
+                            console.log(`[WhatsAppService] Handshake Check: Expected=${handshakeClean}, Received=${fromClean}, CodeMatch=${msg.content.includes(this.pendingHandshake.code)}`)
+                            
+                            if (fromClean === handshakeClean && msg.content.includes(this.pendingHandshake.code)) {
+                                console.log(`[WhatsAppService] Handshake SUCCESS for ${msg.from}!`)
+                                const verifiedPhone = fromClean
+                                this.pendingHandshake = null
+                                
+                                // Finalize link
+                                this.connectionState.phoneNumber = verifiedPhone
+                                fs.mkdirSync(this.authDir, { recursive: true })
+                                fs.writeFileSync(path.join(this.authDir, 'phone.txt'), verifiedPhone)
+                                
+                                this._setState({
+                                    ...this.connectionState,
+                                    phoneNumber: verifiedPhone
+                                })
+                                // Message successfully consumed for handshake, stop processing
+                                continue
+                            }
+                            
+                            // If time expired, clear it
+                            if (Date.now() > this.pendingHandshake.expires) {
+                                console.log('[WhatsAppService] Handshake expired.')
+                                this.pendingHandshake = null
+                            }
+                        }
+
+                        // Strict Target Number Verification
+                        if (!msg.isFromMe) {
+                            if (!this.connectionState.phoneNumber) {
+                                console.log('[WhatsAppService] Dropping message: No target/personal phone number verified yet.')
+                                continue
+                            }
+                            
+                            const targetClean = this.connectionState.phoneNumber.replace(/\D/g, '')
+                            
+                            if (fromClean !== targetClean) {
+                                console.log(`[WhatsAppService] Dropping message from unknown JID: ${msg.from} (clean=${fromClean}, Expected=${targetClean})`)
+                                continue
+                            }
+                        }
+
                         // Auto-mark as read if it's from someone else
                         if (!msg.isFromMe && raw.key) {
                             try {
@@ -279,6 +422,11 @@ export class WhatsAppService extends EventEmitter {
                             }
                         }
                         this.emit('message', msg)
+                    } else {
+                        // Log raw message if parsing failed, but only if it's not a protocol message
+                        if (raw.message) {
+                             console.log(`[WhatsAppService] Failed to parse message from JID: ${raw.key?.remoteJid}`)
+                        }
                     }
                 }
             })
@@ -287,26 +435,80 @@ export class WhatsAppService extends EventEmitter {
                 status: 'error',
                 qrCode: null,
                 error: error instanceof Error ? error.message : String(error),
-                phoneNumber: targetPhoneNumber,
+                phoneNumber: targetPhoneNumber ?? null,
+                workerNumber: this.connectionState.workerNumber
             })
             throw error
+        }
+    }
+
+    async setTargetPhoneNumber(phoneNumber: string): Promise<{ success: boolean; error?: string; handshakeCode?: string }> {
+        if (!phoneNumber) return { success: false, error: 'Phone number required' }
+        
+        const normalized = phoneNumber.trim()
+        
+        // Check if matching worker (self)
+        if (this.connectionState.workerNumber) {
+            const workerNormalized = this.connectionState.workerNumber.replace(/\D/g, '')
+            const targetNormalized = normalized.replace(/\D/g, '')
+            if (workerNormalized === targetNormalized) {
+                return { success: false, error: 'Cannot use the same number for both Worker and Personal' }
+            }
+        }
+
+        try {
+            // Generate a 6-digit handshake code
+            const code = Math.floor(100000 + Math.random() * 900000).toString()
+            this.pendingHandshake = {
+                phoneNumber: normalized,
+                code,
+                expires: Date.now() + (5 * 60 * 1000) // 5 minutes
+            }
+            
+            // Send the handshake message
+            // We do NOT send the code in the message. The code is shown on the computer screen.
+            // This proves the person at the computer has control over the phone.
+            const intro = `🤖 *AI-Worker Verification*\n\nPlease reply to this message with the *6-digit verification code* shown on your computer screen to link this as your personal device.`
+            
+            const jid = formatWhatsAppJid(normalized)
+            console.log(`[WhatsAppService] Attempting handshake to JID: ${jid} (Input: ${normalized})`)
+            
+            const result = await this.sendMessage(normalized, intro)
+            
+            if (!result.success) {
+                console.error(`[WhatsAppService] Handshake message failed to ${jid}: ${result.error}`)
+                return { success: false, error: `Could not send verification message. ${result.error}` }
+            }
+            
+            console.log(`[WhatsAppService] Handshake started successfully for ${normalized}. (Wait for user to reply with code shown in UI)`)
+            
+            return { success: true, handshakeCode: code }
+        } catch (error) {
+            console.error('[WhatsAppService] Handshake error:', error)
+            return { success: false, error: error instanceof Error ? error.message : String(error) }
         }
     }
 
     async disconnect(clearAuth = true): Promise<void> {
         console.log(`[WhatsAppService] Disconnecting (clearAuth=${clearAuth})...`)
         
+        if (this.wakeLockId !== null) {
+            powerSaveBlocker.stop(this.wakeLockId)
+            console.log('[Main] Wake lock released (WhatsApp disconnected).')
+            this.wakeLockId = null
+        }
+        
         if (this.socket) {
             try {
                 if (clearAuth) {
-                    await this.socket.logout()
+                    await (this.socket as { logout: () => Promise<void> }).logout()
                     console.log('[WhatsAppService] Logged out from WhatsApp')
                 } else {
-                    await (this.socket as any).end(undefined) // Baileys end session
+                    (this.socket as { end: (err: any) => void }).end(undefined) // Baileys end session
                     console.log('[WhatsAppService] Session ended (not logged out)')
                 }
-            } catch (err) {
-                console.warn('[WhatsAppService] Disconnect warning:', err)
+            } catch (err: unknown) {
+                console.warn('[WhatsAppService] Disconnect warning:', err instanceof Error ? err.message : String(err))
             }
             this.socket = null
         }
@@ -321,8 +523,9 @@ export class WhatsAppService extends EventEmitter {
                 qrCode: null,
                 error: null,
                 phoneNumber: null,
+                workerNumber: null
             })
-            console.log('[WhatsAppService] Disconnect complete - auth cleared')
+            console.log('[WhatsAppService] Auth cleared.')
         } else {
             this._setState({
                 ...this.connectionState,
@@ -352,7 +555,11 @@ export class WhatsAppService extends EventEmitter {
                 return { success: false, error: 'Invalid phone number format' }
             }
             
-            await this.socket.sendMessage(jid, { text: content })
+            const result = await this.socket.sendMessage(jid, { text: content })
+            if (result && result.key && result.key.id && result.message) {
+                 sentMessagesCache.set(result.key.id, result.message)
+            }
+            console.log(`[WhatsAppService] Message sent successfully to: ${jid}. Content: "${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`)
             return { success: true }
         } catch (error) {
             return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -391,10 +598,9 @@ export class WhatsAppService extends EventEmitter {
             } else {
                 console.log('[WhatsAppService] No auth directory to clear')
             }
-        } catch (err) {
-            console.error('[WhatsAppService] Error clearing auth:', err)
-        }
-        
+        } catch (err: unknown) {
+            console.error('[WhatsAppService] Error in logout:', err instanceof Error ? err.message : String(err))
+        }  
         // Also ensure the parent directory exists for next connect
         try {
             fs.mkdirSync(this.authDir, { recursive: true })
@@ -403,20 +609,34 @@ export class WhatsAppService extends EventEmitter {
         }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private _parseMessage(raw: any): WhatsAppMessage | null {
         try {
             if (!raw?.key || !raw?.message) return null
 
-            // Extract text content from various message types
             const msg = raw.message
-            const textContent: string | null =
-                msg.conversation ||
-                msg.extendedTextMessage?.text ||
-                msg.imageMessage?.caption ||
-                msg.videoMessage?.caption ||
-                msg.documentMessage?.caption ||
-                null
+            
+            // Comprehensive text extraction
+            let textContent: string | null = null
+            
+            if (msg.conversation) {
+                textContent = msg.conversation
+            } else if (msg.extendedTextMessage?.text) {
+                textContent = msg.extendedTextMessage.text
+            } else if (msg.imageMessage?.caption) {
+                textContent = msg.imageMessage.caption
+            } else if (msg.videoMessage?.caption) {
+                textContent = msg.videoMessage.caption
+            } else if (msg.documentMessage?.caption) {
+                textContent = msg.documentMessage.caption
+            } else if (msg.viewOnceMessage?.message?.extendedTextMessage?.text) {
+                textContent = msg.viewOnceMessage.message.extendedTextMessage.text
+            } else if (msg.viewOnceMessage?.message?.conversation) {
+                textContent = msg.viewOnceMessage.message.conversation
+            } else if (msg.ephemeralMessage?.message?.extendedTextMessage?.text) {
+                textContent = msg.ephemeralMessage.message.extendedTextMessage.text
+            } else if (msg.ephemeralMessage?.message?.conversation) {
+                textContent = msg.ephemeralMessage.message.conversation
+            }
 
             if (!textContent) return null
 
@@ -430,10 +650,14 @@ export class WhatsAppService extends EventEmitter {
                             ? 'audio'
                             : 'text'
 
+            // Handle LID vs PN (WhatsApp is moving towards LIDs for some users)
+            // senderPn usually contains the actual phone number JID
+            const fromJid = raw.key.senderPn || raw.key.remoteJid || ''
+
             return {
                 id: raw.key.id ?? `wa_${Date.now()}`,
-                from: raw.key.remoteJid ?? '',
-                to: raw.key.fromMe ? raw.key.remoteJid ?? '' : 'me',
+                from: fromJid,
+                to: raw.key.fromMe ? (raw.key.senderPn || raw.key.remoteJid || '') : 'me',
                 content: textContent,
                 timestamp: (raw.messageTimestamp as number) * 1000 || Date.now(),
                 type,

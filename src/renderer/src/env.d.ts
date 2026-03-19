@@ -118,8 +118,10 @@ interface ElectronAPI {
             qrCode: string | null
             error: string | null
             phoneNumber: string | null
+            workerNumber: string | null
         }>
-        connect: (phoneNumber: string) => Promise<{ success: boolean; error?: string }>
+        connect: (phoneNumber?: string) => Promise<{ success: boolean; error?: string }>
+        setTargetNumber: (phoneNumber: string) => Promise<{ success: boolean; error?: string }>
         disconnect: (clearAuth?: boolean) => Promise<{ success: boolean; error?: string }>
         sendMessage: (to: string, content: string) => Promise<{ success: boolean; error?: string }>
         sendPresence: (to: string, state: string) => Promise<{ success: boolean; error?: string }>

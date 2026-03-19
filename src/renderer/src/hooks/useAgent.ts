@@ -35,9 +35,8 @@
 import { useCallback, useEffect } from "react";
 import { useChatStore } from "../stores/chatStore";
 import { useSettingsStore } from "../stores/settingsStore";
-import { useWhatsAppStore } from "../stores/whatsappStore";
 import { type LLMMessage } from "../lib/llm";
-import electron from "../lib/electron";
+import { resolveWhatsAppTarget, setWhatsAppTyping, setWhatsAppPaused, getWhatsAppSystemPrompt, sendWhatsAppResponse } from "../lib/whatsapp-integration";
 
 /**
  * State returned by `useAgent`.
@@ -193,6 +192,13 @@ export function useAgent(): UseAgentReturn {
                 // ── Step 3: Dynamically import AgentRuntime ────────────────────────
                 const { AgentRuntime } = await import("../lib/agent-runtime");
 
+                const targetJid = resolveWhatsAppTarget(content);
+                if (targetJid) {
+                    console.log(`[useAgent] WhatsApp flow detected/enabled. JID: ${targetJid}`);
+                    setWhatsAppTyping(targetJid);
+                    reconstructedHistory.push(getWhatsAppSystemPrompt());
+                }
+
                 // ── Step 4: Instantiate the agent ──────────────────────────────────
                 const runtime = new AgentRuntime(
                     {
@@ -296,66 +302,17 @@ export function useAgent(): UseAgentReturn {
                     MemoryReflector.getInstance().analyze(historyForReflector, settingsForLLM);
                 });
 
-                // Extract WhatsApp target sender JID if this was an incoming remote message
-                const extractWaJid = (text: string) => {
-                    if (!text || typeof text !== 'string') return null;
-                    
-                    // Try multiple patterns for robustness
-                    const patterns = [
-                        /📱 \*\*WhatsApp\*\* \(([^)]+)\):/,  // Primary pattern
-                        /📱 WhatsApp \(([^)]+)\):/,          // Without bold
-                        /WhatsApp.*?\((\+?\d+)\):/,           // Flexible pattern
-                    ];
-                    
-                    for (const pattern of patterns) {
-                        const match = text.match(pattern);
-                        if (match && match[1]) {
-                            return match[1];
-                        }
-                    }
-                    return null;
-                };
-                const targetJid = extractWaJid(content);
-                const waState = useWhatsAppStore.getState();
-
-                if (targetJid && waState.whatsappEnabled && waState.connectionState.status === "connected") {
-                    electron.whatsapp.sendPresence(targetJid, "composing")
-                        .catch(err => console.error("[useAgent] Failed to send typing presence:", err));
-                }
-
                 // ── Step 6: Run the agent ──────────────────────────────────────────
                 const llmResponse = await runtime.chat(content, attachmentData);
 
                 // ── Step 7: Handle Outbound WhatsApp Messages ──────────────────────
                 // If WhatsApp mode is enabled, we need to send the final assistant response
                 // back to the remote user via IPC.
-                if (targetJid && waState.whatsappEnabled && waState.connectionState.status === "connected") {
-                    // Extract text content from the response - can be string or array
-                    let responseText = '';
-                    if (typeof llmResponse.content === 'string') {
-                        responseText = llmResponse.content;
-                    } else if (Array.isArray(llmResponse.content)) {
-                        // Extract text from content parts
-                        responseText = llmResponse.content
-                            .filter(part => part.type === 'text')
-                            .map(part => part.text)
-                            .join('\n');
-                    }
-                    
-                    if (responseText) {
-                        console.log('[useAgent] Sending WhatsApp response to:', targetJid, 'Length:', responseText.length);
-                        electron.whatsapp.sendMessage(targetJid, responseText)
-                            .catch(err => console.error("[useAgent] Failed to send WhatsApp response:", err));
-                    } else {
-                        // Fallback: try to get from store
-                        const finalMessages = useChatStore.getState().sessions.find(s => s.id === originSessionId)?.messages ?? [];
-                        const lastAssistantMessage = finalMessages.slice().reverse().find(m => m.role === "assistant" && !m.toolCalls?.length);
-                        
-                        if (lastAssistantMessage && lastAssistantMessage.content) {
-                            electron.whatsapp.sendMessage(targetJid, lastAssistantMessage.content)
-                                .catch(err => console.error("[useAgent] Failed to send WhatsApp response:", err));
-                        }
-                    }
+                if (targetJid) {
+                    console.log(`[useAgent] Triggering WhatsApp delivery for JID: ${targetJid}`);
+                    sendWhatsAppResponse(targetJid, llmResponse, originSessionId);
+                } else {
+                    console.log(`[useAgent] No targetJid resolved for this prompt. Skipping WhatsApp delivery.`);
                 }
 
             } catch (error) {
@@ -368,11 +325,10 @@ export function useAgent(): UseAgentReturn {
                 });
             } finally {
                 // Clear the composing state if this was a WhatsApp message
-                const targetJid = content.match(/📱 \*\*WhatsApp\*\* \(([^)]+)\):/)?.[1];
-                const waState = useWhatsAppStore.getState();
-                if (targetJid && waState.whatsappEnabled && waState.connectionState.status === "connected") {
-                    electron.whatsapp.sendPresence(targetJid, "paused")
-                        .catch(err => console.error("[useAgent] Failed to send paused presence:", err));
+                const targetJid = resolveWhatsAppTarget(content);
+
+                if (targetJid) {
+                    setWhatsAppPaused(targetJid);
                 }
 
                 // Always clear the processing state for originSessionId.

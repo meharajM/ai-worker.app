@@ -17,6 +17,7 @@ export interface WhatsAppConnectionState {
     qrCode: string | null
     error: string | null
     phoneNumber: string | null
+    workerNumber: string | null
 }
 
 interface WhatsAppState {
@@ -51,6 +52,7 @@ export const useWhatsAppStore = create<WhatsAppState>()(
                 qrCode: null,
                 error: null,
                 phoneNumber: null,
+                workerNumber: null,
             },
             whatsappEnabled: false,
             targetPhoneNumber: null,
