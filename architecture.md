@@ -635,6 +635,8 @@ graph LR
     subgraph "Default Servers"
         Playwright[Playwright<br/>Browser Automation]
         SequentialThinking[Sequential Thinking<br/>Step-by-step Reasoning]
+        MarkItDown[MarkItDown<br/>Document to Markdown]
+        Excel[Excel<br/>Excel Data Manipulation]
     end
 
     Stdio --> Command
@@ -643,6 +645,8 @@ graph LR
     Name --> Type
     Playwright --> Stdio
     SequentialThinking --> Stdio
+    MarkItDown --> Stdio
+    Excel --> Stdio
 ```
 
 **Default MCP Servers:**
@@ -665,6 +669,13 @@ graph LR
   - Command: `uvx`
   - Args: `markitdown-mcp`
   - Description: Convert documents (PDF, Word, Excel, Images) to Markdown
+  - **Auto-Connect**: Enabled by default
+
+- **Excel** (`excel`)
+  - Type: `stdio`
+  - Command: `uvx`
+  - Args: `excel-mcp-server`
+  - Description: Native creation, reading, modifying and formatting of Excel workbooks
   - **Auto-Connect**: Enabled by default
 
 **Initialization Logic:**

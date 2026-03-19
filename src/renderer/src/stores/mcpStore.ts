@@ -93,6 +93,14 @@ const DEFAULT_MCP_SERVERS = [
         command: 'uvx',
         args: ['markitdown-mcp'],
         autoConnect: true // Enable auto-connect (requires uv/python)
+    },
+    {
+        name: 'excel',
+        description: 'Excel MCP Server - Create, read, and modify Excel workbooks (charts, pivot tables, formatting)',
+        type: 'stdio',
+        command: 'uvx',
+        args: ['excel-mcp-server', 'stdio'],
+        autoConnect: true
     }
 ]
 

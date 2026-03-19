@@ -26,6 +26,8 @@ function filterRelevantTools(tools?: LLMTool[], taskHint?: string): LLMTool[] {
     /message|send|email|slack|notification|chat|discord/i,
     // Data extraction/manipulation
     /search|find|get|extract|parse|convert|transform/i,
+    // Excel/Spreadsheet operations
+    /excel|spreadsheet|sheet|workbook|cell|row|column|formula|chart|pivot/i,
     // State/Context
     /state|status|info|current|context/i,
   ];
