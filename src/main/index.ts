@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initEnv, __dirname } from './utils/env'
 import { setupIpcHandlers } from './ipc'
+import { McpProcessManager } from './services/McpProcessManager'
 
 
 // Enable experimental on-device AI features (Gemini Nano / Chrome Prompt API)
@@ -128,6 +129,19 @@ app.whenReady().then(async () => {
     app.on('activate', function () {
         if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
+})
+
+let isQuitting = false
+app.on('before-quit', async (event) => {
+    if (isQuitting) return
+    
+    // Prevent default quit, cleanup, then quit
+    event.preventDefault()
+    isQuitting = true
+    
+    await McpProcessManager.getInstance().teardownAll()
+    
+    app.quit()
 })
 
 app.on('window-all-closed', () => {

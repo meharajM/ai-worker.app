@@ -259,27 +259,16 @@ function formatMessagesForOpenAI(messages: LLMMessage[]): Record<string, unknown
 
     // Add tool_calls if present (and strictly stringify arguments)
     if (m.tool_calls && m.tool_calls.length > 0) {
-      // At runtime, tool_calls can be in OpenAI wire format { function: { name, arguments } }
-      // (set by agent-runtime via `as any`) or our internal LLMMessage format { name, arguments }.
-      // We handle both gracefully.
-      type RuntimeToolCall = {
-        id: string;
-        name?: string;
-        arguments?: Record<string, unknown>;
-        function?: { name: string; arguments: string | Record<string, unknown> };
-      };
-      formatted.tool_calls = (m.tool_calls as unknown as RuntimeToolCall[]).map((tc) => {
-        const name = tc.name ?? tc.function?.name ?? '';
-        const rawArgs = tc.arguments ?? tc.function?.arguments ?? {};
-        return {
-          id: tc.id,
-          type: 'function',
-          function: {
-            name,
-            arguments: typeof rawArgs === 'string' ? rawArgs : JSON.stringify(rawArgs)
-          }
-        };
-      });
+      formatted.tool_calls = m.tool_calls.map((tc) => ({
+        id: tc.id,
+        type: 'function',
+        function: {
+          name: tc.function.name,
+          arguments: typeof tc.function.arguments === 'string'
+            ? tc.function.arguments
+            : JSON.stringify(tc.function.arguments)
+        }
+      }));
     }
 
     // Add tool_call_id if it's a tool response
@@ -459,19 +448,22 @@ export // Call OpenAI-compatible API
     }
   );
 
-  // If no native tool calls, try to parse from content (Self-Healing)
+  // If no native tool calls, try to self-heal by parsing JSON or XML from content.
+  // WHY always (not just useJsonFallback): some models (and test mocks) return an empty
+  // tool_calls array but embed the tool call as a JSON blob in the content field.
+  // Attempting JSON recovery here is safe — it only fires when toolCalls is empty.
   if (!toolCalls || toolCalls.length === 0) {
-    if (useJsonFallback && content) {
+    if (content) {
       console.log('[LLM] No native tool calls found. Attempting to parse JSON from content...');
-      toolCalls = parseToolCallsFromJson(content);
-      if (toolCalls && toolCalls.length > 0) {
+      const recovered = parseToolCallsFromJson(content);
+      if (recovered && recovered.length > 0) {
+        toolCalls = recovered;
         console.log(`[LLM] Successfully recovered ${toolCalls.length} tool calls from content body.`);
       }
     }
 
-    // Check for XML Plan (Legacy/Model Hallucination Fallback)
-    else if (content.includes('<agent_plan>')) {
-      // ... existing XML logic ...
+    // Check for XML Plan (Legacy/Model Hallucination Fallback) — only if JSON didn't match
+    if ((!toolCalls || toolCalls.length === 0) && content && content.includes('<agent_plan>')) {
       console.log('[LLM] Detected XML plan in content, converting to tool call');
       toolCalls = [{
         id: `auto_plan_${Date.now()}`,

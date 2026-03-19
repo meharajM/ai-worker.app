@@ -13,6 +13,9 @@ import {
   Zap,
 } from "lucide-react";
 import { MCPServer } from "../../lib/mcp";
+import { Card, CardContent } from "../primitives/Card";
+import { StatusBadge } from "../primitives/StatusDot";
+import { Button } from "../primitives/Button";
 
 interface McpServerCardProps {
   server: MCPServer;
@@ -44,26 +47,25 @@ export function McpServerCard({
   onToggleAutoConnect,
 }: McpServerCardProps) {
   return (
-    <div
-      data-testid={`mcp-server-card-${server.name.toLowerCase().replace(/\s+/g, '-')}`}
-      className={`bg-[#1a1d23] border rounded-xl overflow-hidden shadow-sm hover:border-white/20 transition-colors ${isEditing
-          ? "border-[#4fd1c5]/50 ring-1 ring-[#4fd1c5]/20"
-          : "border-white/10"
-        }`}
+    <Card 
+      variant="elevated" 
+      padding="none"
+      hoverable={!isEditing}
+      className={`overflow-hidden ${isEditing ? 'border-[var(--color-brand-teal)]/50 ring-1 ring-[var(--color-brand-teal)]/20' : ''}`}
     >
       {/* Server Header */}
       <div className="flex items-center gap-4 p-4">
         <button
           onClick={onToggleExpand}
-          className="p-1 text-white/40 hover:text-white transition-colors"
+          className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
         >
           {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
         </button>
 
         <div
-          className={`p-2.5 rounded-lg ${server.connected
-              ? "bg-[#4fd1c5]/10 text-[#4fd1c5]"
-              : "bg-white/5 text-white/40"
+          className={`p-2.5 rounded-[var(--radius-md)] ${server.connected
+              ? "bg-[var(--color-brand-teal)]/10 text-[var(--color-brand-teal)]"
+              : "bg-[var(--color-surface-hover)] text-[var(--color-text-muted)]"
             }`}
         >
           {getServerIcon(server.type)}
@@ -71,23 +73,18 @@ export function McpServerCard({
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3">
-            <h3 className="font-medium text-white/90 truncate">
+            <h3 className="font-[var(--font-weight-medium)] text-[var(--color-text-primary)] truncate">
               {server.name}
             </h3>
             {server.connected ? (
-              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 text-[10px] font-medium uppercase tracking-wide border border-green-500/20">
-                <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                Active
-              </span>
+              <StatusBadge variant="success" label="Active" animated />
             ) : server.error ? (
-              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 text-[10px] font-medium uppercase tracking-wide border border-red-500/20">
-                Error
-              </span>
+              <StatusBadge variant="error" label="Error" />
             ) : (
-              <span className="text-xs text-white/30">Offline</span>
+              <span className="text-[var(--text-xs)] text-[var(--color-text-dim)]">Offline</span>
             )}
           </div>
-          <p className="text-xs text-white/40 mt-0.5 truncate font-mono">
+          <p className="text-[var(--text-xs)] text-[var(--color-text-muted)] mt-0.5 truncate font-[var(--font-family-mono)]">
             {server.type === "stdio"
               ? `${server.command} ${(server.args || []).join(" ")}`
               : server.url}
@@ -95,24 +92,24 @@ export function McpServerCard({
         </div>
 
         <div className="flex items-center gap-2">
-          <button
+          <Button
+            variant={isEditing ? 'primary' : 'ghost'}
+            size="sm"
             onClick={onEdit}
-            className={`p-2 rounded-lg transition-all ${isEditing
-                ? "bg-[#4fd1c5] text-white"
-                : "bg-white/5 text-white/40 hover:bg-white/10 hover:text-white"
-              }`}
             title="Edit configuration"
           >
             <Edit2 size={18} />
-          </button>
+          </Button>
 
-          <button
+          <Button
+            variant={server.connected ? 'ghost' : 'ghost'}
+            size="sm"
             onClick={onToggleConnection}
             disabled={isConnecting}
-            className={`p-2 rounded-lg transition-all ${server.connected
-                ? "bg-red-500/10 text-red-400 hover:bg-red-500/20"
-                : "bg-green-500/10 text-green-400 hover:bg-green-500/20"
-              } disabled:opacity-50`}
+            className={server.connected 
+              ? 'text-[var(--color-error)] hover:bg-[var(--color-error)]/10' 
+              : 'text-[var(--color-success)] hover:bg-[var(--color-success)]/10'
+            }
             title={server.connected ? "Disconnect" : "Connect"}
           >
             {isConnecting ? (
@@ -120,36 +117,37 @@ export function McpServerCard({
             ) : (
               <Power size={18} />
             )}
-          </button>
+          </Button>
 
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={onRemove}
-            className="p-2 rounded-lg bg-white/5 text-white/40 
-                           hover:bg-red-500/10 hover:text-red-400 transition-all border border-transparent hover:border-red-500/20"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-error)] hover:bg-[var(--color-error)]/10"
             title="Remove server"
           >
             <Trash2 size={18} />
-          </button>
+          </Button>
         </div>
       </div>
 
       {/* Details & Error Message */}
       {(isExpanded || server.error) && (
-        <div className="border-t border-white/5 bg-black/20">
+        <div className="border-t border-[var(--color-border)] bg-[var(--color-input-bg)]">
           {server.error && (
-            <div className="p-4 bg-red-500/5 border-b border-red-500/10">
+            <div className="p-4 bg-[var(--color-error)]/5 border-b border-[var(--color-error)]/10">
               <div className="flex items-start gap-3">
                 <AlertCircle
                   size={16}
-                  className="text-red-400 shrink-0 mt-0.5"
+                  className="text-[var(--color-error)] shrink-0 mt-0.5"
                 />
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs text-red-200 leading-relaxed font-sans whitespace-pre-wrap">
+                  <div className="text-[var(--text-xs)] text-[var(--color-error)] leading-[var(--leading-relaxed)] whitespace-pre-wrap">
                     {server.error.split("`").map((part, i) =>
                       i % 2 === 1 ? (
                         <code
                           key={i}
-                          className="bg-red-500/20 px-1.5 py-0.5 rounded text-red-300 font-mono text-[11px] mx-0.5 border border-red-500/20 select-all cursor-pointer hover:bg-red-500/30 transition-colors"
+                          className="bg-[var(--color-error)]/20 px-1.5 py-0.5 rounded text-[var(--color-error)] font-[var(--font-family-mono)] text-[11px] mx-0.5 border border-[var(--color-error)]/20 select-all cursor-pointer hover:bg-[var(--color-error)]/30 transition-colors"
                           title="Click to select"
                         >
                           {part}
@@ -160,13 +158,15 @@ export function McpServerCard({
                     )}
                   </div>
 
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={onTroubleshoot}
-                    className="mt-4 flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-[11px] text-[#4fd1c5] hover:bg-[#4fd1c5]/10 hover:border-[#4fd1c5]/30 transition-all font-medium"
+                    className="mt-4 text-[var(--color-brand-teal)] hover:bg-[var(--color-brand-teal)]/10"
                   >
                     <MessageSquare size={14} />
                     Troubleshoot with AI
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -175,54 +175,48 @@ export function McpServerCard({
           {isExpanded && (
             <div className="p-4 space-y-4">
               {/* Auto-Connect Toggle */}
-              <div className="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/5">
+              <div className="flex items-center justify-between p-3 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-border)]">
                 <div className="flex items-center gap-3">
                   <Zap
                     size={16}
-                    className={`${server.autoConnect ? "text-[#4fd1c5]" : "text-white/40"
-                      }`}
+                    className={server.autoConnect ? "text-[var(--color-brand-teal)]" : "text-[var(--color-text-muted)]"}
                   />
                   <div>
-                    <p className="text-white/90 text-sm font-medium">
+                    <p className="text-[var(--color-text-primary)] text-[var(--text-sm)] font-[var(--font-weight-medium)]">
                       Auto-connect on startup
                     </p>
-                    <p className="text-white/40 text-xs">
+                    <p className="text-[var(--color-text-muted)] text-[var(--text-xs)]">
                       {server.autoConnect
                         ? "This server will automatically connect when the app starts"
                         : "This server requires manual connection"}
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={() => onToggleAutoConnect(!server.autoConnect)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${server.autoConnect ? "bg-[#4fd1c5]" : "bg-white/20"
-                    }`}
-                  role="switch"
-                  aria-checked={server.autoConnect}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${server.autoConnect ? "translate-x-6" : "translate-x-1"
-                      }`}
-                  />
-                </button>
+                <input
+                  type="checkbox"
+                  className="toggle"
+                  checked={server.autoConnect}
+                  onChange={() => onToggleAutoConnect(!server.autoConnect)}
+                  title="Toggle auto-connect"
+                />
               </div>
 
               {/* Tools List */}
               {server.connected && server.tools.length > 0 ? (
                 <div>
-                  <p className="text-white/40 text-xs mb-3 uppercase tracking-wider font-medium">
+                  <p className="text-[var(--color-text-muted)] text-[var(--text-xs)] mb-3 uppercase tracking-wider font-[var(--font-weight-medium)]">
                     Available Tools ({server.tools.length})
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {server.tools.map((tool) => (
                       <div
                         key={tool.name}
-                        className="p-2 rounded bg-white/5 border border-white/5 flex flex-col gap-1"
+                        className="p-2 rounded-[var(--radius-md)] bg-[var(--color-surface)] border border-[var(--color-border)] flex flex-col gap-1"
                       >
-                        <span className="text-[#4fd1c5] text-xs font-mono font-medium">
+                        <span className="text-[var(--color-brand-teal)] text-[var(--text-xs)] font-[var(--font-family-mono)] font-[var(--font-weight-medium)]">
                           {tool.name}
                         </span>
-                        <span className="text-white/40 text-[10px] truncate">
+                        <span className="text-[var(--color-text-muted)] text-[10px] truncate">
                           {tool.description}
                         </span>
                       </div>
@@ -231,17 +225,17 @@ export function McpServerCard({
                 </div>
               ) : server.connected ? (
                 <div className="space-y-2">
-                  <p className="text-white/30 text-sm italic">
+                  <p className="text-[var(--color-text-dim)] text-[var(--text-sm)] italic">
                     No tools exposed by this server.
                   </p>
                   {(server.name.includes("sequential-thinking") ||
                     server.name.includes("sequential") ||
                     server.description.toLowerCase().includes("reasoning")) && (
-                      <div className="p-3 rounded-lg bg-[#4fd1c5]/10 border border-[#4fd1c5]/20">
-                        <p className="text-[#4fd1c5] text-xs font-medium mb-1">
+                      <div className="p-3 rounded-[var(--radius-md)] bg-[var(--color-brand-teal)]/10 border border-[var(--color-brand-teal)]/20">
+                        <p className="text-[var(--color-brand-teal)] text-[var(--text-xs)] font-[var(--font-weight-medium)] mb-1">
                           ℹ️ Reasoning Server
                         </p>
-                        <p className="text-white/60 text-[11px] leading-relaxed">
+                        <p className="text-[var(--color-text-secondary)] text-[11px] leading-[var(--leading-relaxed)]">
                           This server works differently - it provides reasoning
                           capabilities rather than traditional tools. It will be
                           used automatically by the AI for complex multi-step
@@ -251,7 +245,7 @@ export function McpServerCard({
                     )}
                 </div>
               ) : (
-                <p className="text-white/30 text-sm italic">
+                <p className="text-[var(--color-text-dim)] text-[var(--text-sm)] italic">
                   Connect to inspect available tools.
                 </p>
               )}
@@ -259,6 +253,6 @@ export function McpServerCard({
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }

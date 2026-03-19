@@ -4,6 +4,20 @@ import { PlaywrightTool, ToolResult } from '../PlaywrightTool';
 export class GetInteractiveElementsTool extends PlaywrightTool {
     name = 'get_interactive_elements';
 
+    getSchema() {
+        return {
+            name: 'get_interactive_elements',
+            description: 'PERCEPTION: Get a compact list of clickable elements (buttons, links, inputs) with their text and selectors. FASTEST way to understand page structure. Use this to find what to click.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    limit: { type: 'number', description: 'Max elements to return (default: 50, use lower for speed)' },
+                    viewport_only: { type: 'boolean', description: 'Only visible elements (default: true)' }
+                }
+            }
+        };
+    }
+
     async execute(page: Page, args: any): Promise<ToolResult> {
         const limit = args.limit || 50;
         const viewportOnly = args.viewport_only !== false;

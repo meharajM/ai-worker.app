@@ -78,7 +78,8 @@ ${userContext}
 
 ${workspacePath ? `ACTIVE WORKSPACE: ${workspacePath}
 All filesystem operations (fs_*) MUST be performed within this directory.` : `WORKSPACE NOT SELECTED: 
-If the user's request involves filesystem operations (fs_*), explain that no workspace is selected and they should use the folder icon in the UI to select one.`}
+No workspace folder is set. For operations that CREATE or WRITE files (fs_write, fs_mkdir, etc.), ask the user to select a workspace folder using the folder icon in the UI.
+IMPORTANT: If the user has attached a file to this message, READ it immediately using convert_to_markdown — attached files do NOT require a workspace.`}
 
 AVAILABLE TOOLS (${toolCount}):
 ${toolList}
@@ -98,14 +99,14 @@ ${dynamicRules ? `\n# TASK-SPECIFIC\n${dynamicRules}` : ''}`;
 }
 
 export // Build robust but token-efficient system prompt
-async function buildSystemPrompt(
-  tools?: LLMTool[],
-  servers?: ServerInfo[],
-  useJsonFallback = false,
-  dynamicRules?: string,
-  isSubAgent = false, // NEW: Flag for lightweight prompt
-  workspacePath?: string // Injected workspace path for filesystem scoping
-): Promise<string> {
+  async function buildSystemPrompt(
+    tools?: LLMTool[],
+    servers?: ServerInfo[],
+    useJsonFallback = false,
+    dynamicRules?: string,
+    isSubAgent = false, // NEW: Flag for lightweight prompt
+    workspacePath?: string // Injected workspace path for filesystem scoping
+  ): Promise<string> {
   // Use compact prompt for sub-agents
   if (isSubAgent) {
     return buildSubAgentSystemPrompt(tools, dynamicRules, workspacePath);
@@ -215,7 +216,8 @@ ${workspacePath ? `ACTIVE WORKSPACE: ${workspacePath}
 All filesystem operations (fs_*) MUST be performed within this directory.
 You can use relative paths (e.g. "src/file.ts") which will be automatically resolved.
 Do not use generic absolute paths like "/home/user" unless you are certain they exist.` : `WORKSPACE NOT SELECTED: 
-If the user's request involves filesystem operations (fs_*), explain that no workspace is selected and they should use the folder icon in the UI to select one.`}
+No workspace folder is set. For operations that CREATE or WRITE files (fs_write, fs_mkdir, etc.), ask the user to select a workspace folder via the folder icon in the UI.
+IMPORTANT: If the user has attached a file, READ it immediately using convert_to_markdown(uri="file://...") — attached files do NOT require a workspace to be read.`}
 
 # RESPONSE FORMAT (CRITICAL)
 Your responses have TWO parts:

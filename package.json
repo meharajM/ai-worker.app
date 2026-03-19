@@ -72,6 +72,7 @@
         "react-syntax-highlighter": "^16.1.0",
         "remark-gfm": "^4.0.1",
         "tailwind-merge": "^3.4.0",
+        "tree-kill": "^1.2.2",
         "vosk-browser": "^0.0.8",
         "yup": "^1.7.1",
         "zustand": "^5.0.9"

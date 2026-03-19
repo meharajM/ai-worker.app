@@ -127,6 +127,9 @@ export async function executeParallelSubAgents(
     const statusMessageId = addMessage(statusMessage) as string | undefined;
 
     // Spawn all sub-agents concurrently
+    // Determine if sub-agents should run headless (inherit from parent)
+    const useHeadless = parentOptions.isHeadless === true;
+
     const subAgentPromises = contexts.map(async (context, index) => {
         const instruction = generateSubAgentInstruction(originalRequest, context, contexts);
         const subAgentId = globalThis.crypto.randomUUID();
@@ -144,29 +147,36 @@ export async function executeParallelSubAgents(
             { context }
         );
 
+        // Skip visible-browser tab provisioning in headless mode — the headless
+        // browser is used directly via the _headless flag on tool args.
         let subAgentTabId: number | undefined;
-        try {
-            const { browserLock } = await import("../resource-lock");
-            const tabResult = await browserLock.runExclusive(async () =>
-                executeToolCall("new_tab", { url: "about:blank" })
-            );
+        if (!useHeadless) {
+            try {
+                const { browserLock } = await import("../resource-lock");
+                const tabResult = await browserLock.runExclusive(async () =>
+                    executeToolCall("new_tab", { url: "about:blank" })
+                );
 
-            // Extract tabId from the MCP content envelope (or raw fallback)
-            const parsedTabId = parseTabIdFromResult(tabResult);
-            if (parsedTabId !== undefined) {
-                subAgentTabId = parsedTabId;
-                console.log(`[OrchestrationService] Provisioned tab ${subAgentTabId} for sub-agent`);
-            } else {
-                console.warn("[OrchestrationService] new_tab result did not contain a tabId:", tabResult.result);
+                // Extract tabId from the MCP content envelope (or raw fallback)
+                const parsedTabId = parseTabIdFromResult(tabResult);
+                if (parsedTabId !== undefined) {
+                    subAgentTabId = parsedTabId;
+                    console.log(`[OrchestrationService] Provisioned tab ${subAgentTabId} for sub-agent`);
+                } else {
+                    console.warn("[OrchestrationService] new_tab result did not contain a tabId:", tabResult.result);
+                }
+            } catch (e) {
+                console.warn("[OrchestrationService] Failed to provision tab for sub-agent", e);
             }
-        } catch (e) {
-            console.warn("[OrchestrationService] Failed to provision tab for sub-agent", e);
+        } else {
+            console.log(`[OrchestrationService] Headless mode — skipping visible tab for sub-agent ${context}`);
         }
 
         const subAgent = spawnSubAgent({
             agentInstanceId: subAgentId,
             parentAgentId,
             isSubAgent: true,
+            isHeadless: useHeadless,
             tabId: subAgentTabId,
             taskCategory: parentOptions.taskCategory,
             onMessage: (msg: LLMMessage) => {
@@ -201,9 +211,9 @@ export async function executeParallelSubAgents(
         try {
             const result = await subAgent.chat(instruction);
             const resultContent =
-                typeof result.content === "string"
+                typeof result?.content === "string"
                     ? result.content
-                    : (result.content as any[]).map((c: any) => (c.type === "text" ? c.text : "")).join("");
+                    : (result?.content as any[])?.map((c: any) => (c.type === "text" ? c.text : "")).join("") ?? "";
 
             // Detect sub-agent bailout (max consecutive errors)
             const isBailout = resultContent.includes("consecutive errors") ||
@@ -516,6 +526,7 @@ End with "✓ Done" and a brief result.`;
                 agentInstanceId: subAgentId,
                 parentAgentId,
                 isSubAgent: true,
+                isHeadless: parentOptions.isHeadless,
                 taskCategory: parentOptions.taskCategory,
                 onMessage: (msg) => {
                     const contentStr =
@@ -638,6 +649,7 @@ Use tools immediately. End with "✓ Done".`;
         agentInstanceId: globalThis.crypto.randomUUID(),
         parentAgentId,
         isSubAgent: true,
+        isHeadless: parentOptions.isHeadless,
         taskCategory: parentOptions.taskCategory,
         onMessage: (msg) => {
             if (msg.role === "assistant" && msg.content) {

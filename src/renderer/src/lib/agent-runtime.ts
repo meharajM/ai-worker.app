@@ -69,6 +69,8 @@ interface AccumulatedToolCall {
   result?: string;
   isPresentable?: boolean;
   finding?: string;
+  startedAt?: number;
+  completedAt?: number;
 }
 
 /**
@@ -104,6 +106,10 @@ export class AgentRuntime implements IAgentClient {
   private specialHandlers: SpecialToolHandlers;
   /** Tracks last emitted progress % for incremental orchestration ticks */
   private _lastProgressPct = 0;
+  /** Incremental estimate of context size in bytes — avoids JSON.stringify on every iteration */
+  private _estimatedContextBytes = 0;
+  /** Counter to trigger periodic full context resync */
+  private _contextResyncCounter = 0;
 
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
     this.options = options;
@@ -139,13 +145,29 @@ export class AgentRuntime implements IAgentClient {
     userContent: string,
     attachments?: { name: string; path: string; type: string }[]
   ): Promise<LLMMessage> {
-    const finalPrompt = userContent;
+    let finalPrompt = userContent;
 
-    let attachmentContext = "";
     if (attachments && attachments.length > 0) {
-      const resourceList = attachments.map((a) => `- ${a.name} (Path: ${a.path})`).join("\n");
-      const toolHint = `\n\n[To analyze these files, use the 'convert_to_markdown' tool with file:// URIs. Example: convert_to_markdown(uri="file:///absolute/path")]`;
-      attachmentContext = `\n\n[System Note: User attached the following files. Use absolute paths to access them.]\n${resourceList}${toolHint}`;
+      // Filter out files that have no native path (non-Electron environments or
+      // files that were selected in a way that didn't expose .path).
+      const validAttachments = attachments.filter(a => a.path && a.path.trim() !== "");
+
+      if (validAttachments.length > 0) {
+        // Build one explicit tool-call line per file so the model cannot
+        // accidentally reconstruct a URI from just the filename.
+        const callLines = validAttachments.map((a, i) => {
+          // Ensure triple-slash absolute URI — a.path always starts with '/' on macOS/Linux
+          const uri = a.path.startsWith("file://") ? a.path : `file://${a.path}`;
+          return `${i + 1}. ${a.name}\n   → convert_to_markdown(uri="${uri}")`;
+        }).join("\n");
+
+        finalPrompt +=
+          `\n\n[ATTACHED FILES — act on these immediately and read each one NOW using the exact call shown]\n` +
+          `${callLines}\n\n` +
+          `CRITICAL: Copy the uri argument CHARACTER-FOR-CHARACTER from above. ` +
+          `Do NOT use just the filename. Do NOT construct a URI yourself. ` +
+          `Reading attached files does NOT require a workspace to be selected.`;
+      }
     }
 
     const { restoredCheckpoint } = await initializeSessionState(
@@ -198,7 +220,7 @@ export class AgentRuntime implements IAgentClient {
       /^(yes|continue|proceed|go ahead|sure)$/i.test(userContent.trim());
 
     if (isConfirmingHandoff) {
-      this.addMessage({ role: "user", content: userContent });
+      this.addMessage({ role: "user", content: finalPrompt });
       const originalGoal =
         this.messages.find((m) => m.role === "user")?.content?.toString() || "Complete the task";
       const stepsTaken = Math.floor(this.messages.length / 2);
@@ -289,9 +311,9 @@ export class AgentRuntime implements IAgentClient {
     const alreadyHasMessage = lastMessage?.role === "user" && lastMessage?.content === finalPrompt;
 
     if (alreadyHasMessage && lastMessage) {
-      lastMessage.content = finalPrompt + attachmentContext;
+      lastMessage.content = finalPrompt;
     } else {
-      this.addMessage({ role: "user", content: finalPrompt + attachmentContext });
+      this.addMessage({ role: "user", content: finalPrompt });
     }
 
     return this._runLoop(finalPrompt);
@@ -376,14 +398,15 @@ export class AgentRuntime implements IAgentClient {
           id: tc.id,
           type: "function",
           function: { name: tc.name, arguments: tc.arguments },
-        })) as any,
+        })),
       };
 
       // Build tool call entries for this iteration (no result yet — pending)
       const iterationToolCalls: AccumulatedToolCall[] = response.toolCalls.map(tc => ({
         id: tc.id,
         name: tc.name,
-        arguments: tc.arguments
+        arguments: tc.arguments,
+        startedAt: Date.now(),
       }));
 
       if (!activeAssistantMessageId) {
@@ -481,7 +504,7 @@ export class AgentRuntime implements IAgentClient {
           // Update the result on the matching tool call in the master accumulator
           const tcIndex = accumulatedToolCalls.findIndex(t => t.id === call.id);
           if (tcIndex !== -1) {
-            accumulatedToolCalls[tcIndex] = { ...accumulatedToolCalls[tcIndex], result: truncated };
+            accumulatedToolCalls[tcIndex] = { ...accumulatedToolCalls[tcIndex], result: truncated, completedAt: Date.now() };
           }
           // Also update the local assistantMsg for finding reporting below
           const currentToolCalls = (assistantMsg as any).toolCalls as AccumulatedToolCall[] || [];
@@ -587,8 +610,15 @@ export class AgentRuntime implements IAgentClient {
   // ── Private: Helpers ───────────────────────────────────────────────────────
 
   private async _handleContextLimits() {
-    const contextText = JSON.stringify(this.messages);
-    const estimatedTokens = Math.ceil(contextText.length / 4);
+    this._contextResyncCounter++;
+
+    // Full resync every 10 iterations as a safety net
+    if (this._contextResyncCounter % 10 === 0) {
+      const contextText = JSON.stringify(this.messages);
+      this._estimatedContextBytes = contextText.length;
+    }
+
+    const estimatedTokens = Math.ceil(this._estimatedContextBytes / 4);
     const contextLimit = 100000;
     if (estimatedTokens > contextLimit * 0.8 && !this.options.isSubAgent) {
       const originalGoalMsg = this.messages.find((m) => m.role === "user");
@@ -684,7 +714,7 @@ export class AgentRuntime implements IAgentClient {
     if (this.options.isSubAgent) throw new Error("Max iterations reached");
     const handoffMsg: LLMMessage = {
       role: "assistant",
-      content: `I've worked for ${this.maxIterations} steps on this task. To ensure accuracy and prevent context issues, I've saved a checkpoint of my progress. Should I continue with a fresh context or stop here?`,
+      content: `I've reached the maximum number of steps (${this.maxIterations}) for this context. To ensure accuracy and prevent context issues, I've saved a checkpoint of my progress. Should I continue with a fresh context or stop here?`,
       actions: [
         {
           type: "continue",
@@ -704,6 +734,9 @@ export class AgentRuntime implements IAgentClient {
 
   private addMessage(msg: LLMMessage): string | void {
     this.messages.push(msg);
+    // Incrementally track context size (avoid full JSON.stringify)
+    const contentLen = typeof msg.content === 'string' ? msg.content.length : JSON.stringify(msg.content ?? '').length;
+    this._estimatedContextBytes += contentLen + 50; // +50 for role, metadata overhead
     return this.options.onMessage?.(msg);
   }
 

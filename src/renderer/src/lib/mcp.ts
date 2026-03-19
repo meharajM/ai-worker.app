@@ -105,6 +105,29 @@ function ensureRecord(args: Record<string, unknown> | null | undefined): Record<
 }
 
 // Execute a tool call with retry logic for connection errors
+
+// ── MCP Idle Disconnect Timers ──────────────────────────────────────────────────
+// Automatically disconnect backend processes (Node/Python) after 10m of inactivity
+// to ensure idle agents don't consume gigabytes of background RAM.
+const mcpIdleTimers = new Map<string, NodeJS.Timeout>();
+const MCP_IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+function resetMcpIdleTimer(serverId: string, serverName: string) {
+  const existing = mcpIdleTimers.get(serverId);
+  if (existing) clearTimeout(existing);
+
+  const timer = setTimeout(async () => {
+    logMcpRenderer("info", `Disconnecting server ${serverName} due to ${MCP_IDLE_TIMEOUT_MS / 60000}m of inactivity...`, { serverId, serverName });
+    try {
+      await disconnectServer(serverId);
+    } catch (err) {
+      logMcpRenderer("warn", `Failed to idle-disconnect server ${serverName}`, { error: String(err) });
+    }
+  }, MCP_IDLE_TIMEOUT_MS);
+
+  mcpIdleTimers.set(serverId, timer);
+}
+
 export async function executeToolCall(
   toolName: string,
   args: Record<string, unknown> | null | undefined
@@ -123,47 +146,75 @@ export async function executeToolCall(
 
   console.log(`[MCP Renderer] Invoking Tool: ${toolName}`, sanitizedArgs);
 
-  // SECURITY: Require workspace for ALL filesystem operations
+  // VALIDATION: convert_to_markdown requires an absolute URI or path.
+  // Accepts: file:///absolute/path, /absolute/path, C:\absolute\path
+  // Rejects: file://relative, bare-filename.ext (no leading slash or drive letter)
   if (toolName === 'convert_to_markdown') {
-    const uri = (args?.uri || args?.path) as string;
-    if (uri && typeof uri === 'string') {
-      const isAbsolute = uri.startsWith('/') || uri.match(/^[a-zA-Z]:[\\/]/) || uri.startsWith('file:///');
-      // Check for "file:filename" relative pattern which is problematic
-      const isRelativeFileUri = uri.startsWith('file:') && !uri.startsWith('file:///');
+    const uri = (args?.uri || args?.path) as string | undefined;
+
+    // Guard against completely empty URI (file.path was "" on the attachment)
+    if (!uri || uri.trim() === '' || uri === 'file://' || uri === 'file:') {
+      return {
+        result: null,
+        error: `PATH ERROR: URI is empty. The attached file did not expose a native filesystem path. ` +
+          `Check the [ATTACHED FILES] block in this conversation for the exact uri= argument to use.`
+      };
+    }
+
+    if (typeof uri === 'string') {
+      // Accept: file:///absolute, file:// immediately followed by '/' (Unix), bare /absolute, C:\...
+      // uri[7] must be '/' — catches file://filename (relative, no leading slash after //)
+      // and file:// (empty path, caught above but doubled here for safety).
+      const isAbsolute =
+        uri.startsWith('file:///') ||
+        uri.startsWith('file:////') ||
+        (uri.startsWith('file://') && uri[7] === '/') ||
+        uri.startsWith('/') ||
+        !!uri.match(/^[a-zA-Z]:[\\/]/);
+
+      const isRelativeFileUri =
+        uri.startsWith('file:') &&
+        !uri.startsWith('file:///') &&
+        !uri.startsWith('file:////') &&
+        !(uri.startsWith('file://') && uri[7] === '/');
 
       if (!isAbsolute || isRelativeFileUri) {
         return {
           result: null,
-          error: `CRITICAL ERROR: Relative path detected: '${uri}'. You provided a file name without its full location.
-1. The file is NOT in the current working directory.
-2. You MUST search for it in common user folders like 'Documents', 'Downloads', or 'Desktop'.
-3. Use 'search_files' with path: '/Users/suhail/Documents' (or similar) first.
-4. Once found, call this tool again with the ABSOLUTE path.`
+          error:
+            `PATH ERROR: '${uri}' is not an absolute file URI. ` +
+            `You must copy the uri= value CHARACTER-FOR-CHARACTER from the ` +
+            `[ATTACHED FILES] block — do NOT reconstruct it from the filename alone. ` +
+            `The correct format is: file:///Users/username/path/to/file.ext`
         };
       }
     }
   }
 
+
   if (toolName.startsWith('fs_')) {
-    // CRITICAL: Block filesystem access entirely if no workspace is selected
-    if (!args || !args.workspacePath) {
+    // Block filesystem access when BOTH conditions are true:
+    //   (a) no workspace path has been set for this session, AND
+    //   (b) the target path itself is not already absolute.
+    // This allows: auto-set workspaces (from file attachment), absolute paths.
+    // This blocks:  relative paths with no workspace context.
+    const wsPath = args?.workspacePath as string | undefined;
+    const targetPath = args?.path as string | undefined;
+    const targetIsAbsolute =
+      !!targetPath &&
+      (targetPath.startsWith('/') || !!targetPath.match(/^[a-zA-Z]:[\\/]/));
+
+    if (!wsPath && !targetIsAbsolute) {
       return {
         result: null,
         error: 'WORKSPACE REQUIRED: Please select a workspace folder using the folder icon in the UI before performing filesystem operations.'
       };
     }
 
-    const wsPath = args.workspacePath as string;
-    const targetPath = args.path as string;
-
-    if (targetPath) {
-      // Normalize and resolve paths
-      // Note: In renderer we might use path-browserify or string manipulation
-      // Ideally this check should happen in main process but validating here adds layer 1
+    // Path traversal guard — only runs when a workspace boundary is defined.
+    if (wsPath && targetPath) {
       const normalizedWs = wsPath.replace(/\\/g, '/').replace(/\/$/, '');
       const normalizedTarget = targetPath.replace(/\\/g, '/');
-
-      // Check if target is inside workspace
       if (!normalizedTarget.startsWith(normalizedWs)) {
         return {
           result: null,
@@ -171,9 +222,13 @@ export async function executeToolCall(
         };
       }
     }
-    // Remove workspacePath from args before sending to tool (it doesn't expect it)
-    delete (args as Record<string, unknown>).workspacePath;
+
+    // Remove workspacePath from args before forwarding — tools don't expect it.
+    if (args && 'workspacePath' in args) {
+      delete (args as Record<string, unknown>).workspacePath;
+    }
   }
+
 
   const server = findServerForTool(toolName);
   if (!server) {
@@ -200,6 +255,29 @@ export async function executeToolCall(
       error: `Tool ${toolName} not found in any connected server`,
     };
   }
+
+  // LAZY CONNECT: If the server has the tool cached but is currently disconnected,
+  // spin it up just-in-time before executing the tool.
+  if (!server.connected) {
+    logMcpRenderer("info", `Lazy connecting to server ${server.name} for tool ${toolName}...`, {
+      operation: "lazyConnect",
+      serverId: server.id,
+      toolName
+    });
+    try {
+      await connectServer(server.id);
+      // Let the connection settle briefly just in case the server needs a moment to be ready
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } catch (err) {
+      return {
+        result: null,
+        error: `Failed to lazy-connect to server ${server.name}: ${err instanceof Error ? err.message : String(err)}`
+      };
+    }
+  }
+
+  // Reset idle timer for this server since it's actively being used
+  resetMcpIdleTimer(server.id, server.name);
 
   let lastError: string | undefined;
 
@@ -249,7 +327,10 @@ export async function executeToolCall(
 
       // Success!
       const duration = Date.now() - startTime;
-      const resultSize = JSON.stringify(result.result).length;
+      // Avoid JSON.stringify just for logging — use cheap length estimate
+      const resultSize = typeof result.result === 'string'
+        ? result.result.length
+        : (result.result ? '~object' : 0);
 
       logMcpRenderer("info", "Tool call completed successfully", {
         operation: "executeToolCall",

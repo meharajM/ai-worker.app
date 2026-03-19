@@ -31,6 +31,8 @@ export interface ToolCall {
     result?: string
     isPresentable?: boolean  // Whether the tool output was summarised/reported as a finding
     finding?: string         // The summarised finding text for this specific tool call
+    startedAt?: number       // Unix ms timestamp when execution began
+    completedAt?: number     // Unix ms timestamp when execution finished
 }
 
 export interface ChatSession {
@@ -449,7 +451,34 @@ export const useChatStore = create<ChatState>()(
             // are now derived from _processingSessions (a Map). Old persisted state with the
             // flat fields is incompatible and would hydrate incorrectly.
             name: 'ai-worker-chat-v3',
-            storage: createJSONStorage(() => localStorage),
+            // ── Debounced storage adapter ──────────────────────────────────────
+            // WHY: During agent tool loops, addMessage/updateMessage fire rapidly
+            // (every tool call). Each triggers JSON.stringify + localStorage.setItem
+            // of ALL sessions, blocking the main thread. This adapter coalesces
+            // writes to at most once per second.
+            storage: (() => {
+                const base = createJSONStorage(() => localStorage)
+                let pendingTimer: ReturnType<typeof setTimeout> | null = null
+                let pendingValue: any = null
+                const DEBOUNCE_MS = 1000
+
+                return {
+                    getItem: (name: string) => base!.getItem(name),
+                    removeItem: (name: string) => base!.removeItem(name),
+                    setItem: (name: string, value: any) => {
+                        pendingValue = value
+                        if (pendingTimer === null) {
+                            pendingTimer = setTimeout(() => {
+                                if (pendingValue !== null) {
+                                    base!.setItem(name, pendingValue)
+                                    pendingValue = null
+                                }
+                                pendingTimer = null
+                            }, DEBOUNCE_MS)
+                        }
+                    },
+                }
+            })(),
             partialize: (state) => ({
                 sessions: state.sessions,
                 activeSessionId: state.activeSessionId,

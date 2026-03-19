@@ -56,6 +56,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
     try {
         const window = await electronApp.firstWindow();
+        await window.setViewportSize({ width: 1280, height: 800 });
 
         window.on('console', msg => console.log(`[Renderer]: ${msg.text()}`));
         window.on('pageerror', err => console.error(`[Renderer Error]: ${err}`));

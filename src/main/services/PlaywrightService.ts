@@ -19,7 +19,7 @@
  * Consumed by: AgentRuntime, AppMain (IPC handlers)
  */
 
-import { ToolSchema, BROWSER_TURBO_SCHEMAS } from '../../shared/browser-tool-schemas';
+import { ToolSchema } from '../../shared/browser-tool-schemas';
 import { Page } from 'playwright-core';
 import { BrowserManager } from './playwright/BrowserManager';
 import { PlaywrightTool, ToolResult, PlaywrightContext } from './playwright/PlaywrightTool';
@@ -62,6 +62,10 @@ export class PlaywrightService {
         const toolList = getPlaywrightTools();
         for (const tool of toolList) {
             this.tools.set(tool.name, tool);
+            // Register tool-declared aliases (e.g., browser_navigate → navigate)
+            for (const alias of tool.aliases) {
+                this.tools.set(alias, tool);
+            }
         }
     }
 
@@ -83,6 +87,11 @@ export class PlaywrightService {
                 return { result: null, error: `Tool ${name} not found` };
             }
 
+            // Ensure background_scrape always uses our managed headless context
+            if (name === 'background_scrape') {
+                args = { ...args, _headless: true };
+            }
+
             const page = await this.browserManager.getPage(args);
             const context: PlaywrightContext = {
                 context: this.browserManager.getContext(),
@@ -91,7 +100,8 @@ export class PlaywrightService {
                 registerPage: (p) => this.browserManager.registerPage(p),
                 setPage: (p) => this.browserManager.setPage(p),
                 callTool: (n, a) => this.callTool(n, a),
-                validateAndCorrectSelector: (s, t, p) => this.validateAndCorrectSelector(s, t, p || page)
+                validateAndCorrectSelector: (s, t, p) => this.validateAndCorrectSelector(s, t, p || page),
+                surfaceBrowser: () => this.browserManager.surfaceBrowser()
             };
 
             return await tool.execute(page, args, context);
@@ -121,360 +131,24 @@ export class PlaywrightService {
      * @returns An object containing an array of tool schemas.
      */
     listTools(): { tools: ToolSchema[] } {
-        return {
-            tools: [
-                {
-                    name: 'navigate',
-                    description: 'NAVIGATION: Go to a URL. Use this FIRST to open any website. Example: navigate to "https://google.com" before searching.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            url: { type: 'string', description: 'Full URL including https://' }
-                        },
-                        required: ['url']
-                    }
-                },
-                {
-                    name: 'screenshot',
-                    description: 'VISION: Capture the current page as an image. Use when you need to see the page visually or save visual evidence. For perceiving page state, prefer get_state instead.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            fullPage: { type: 'boolean', description: 'true=capture entire scrollable page, false=visible viewport only' }
-                        }
-                    }
-                },
-                {
-                    name: 'click',
-                    description: 'INTERACTION: Click an element using CSS selector. Use when you know the exact selector (e.g., "#submit-btn", ".login-button"). If you only know the text, use click_text instead.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            selector: { type: 'string', description: 'CSS selector like #id, .class, or tag[attr="value"]' }
-                        },
-                        required: ['selector']
-                    }
-                },
-                {
-                    name: 'fill',
-                    description: 'INPUT: Instantly fill a text input, textarea, or contenteditable field. Use for forms, search boxes, login fields. Replaces existing content. For character-by-character typing, use "type" instead.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            selector: { type: 'string', description: 'CSS selector of the input field' },
-                            value: { type: 'string', description: 'Text to enter' }
-                        },
-                        required: ['selector', 'value']
-                    }
-                },
-                {
-                    name: 'hover',
-                    description: 'INTERACTION: Move mouse over an element without clicking. Use to reveal dropdown menus, tooltips, or trigger hover states before clicking sub-items.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            selector: { type: 'string', description: 'CSS selector of element to hover' }
-                        },
-                        required: ['selector']
-                    }
-                },
-                {
-                    name: 'press',
-                    description: 'KEYBOARD: Press a single key. Use for Enter (submit forms), Escape (close dialogs), Tab (navigate fields), ArrowDown/Up (navigate lists). Common keys: Enter, Escape, Tab, Space, Backspace, ArrowUp/Down/Left/Right.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            key: { type: 'string', description: 'Key name: Enter, Escape, Tab, Space, ArrowDown, etc.' }
-                        },
-                        required: ['key']
-                    }
-                },
-                {
-                    name: 'scroll',
-                    description: 'NAVIGATION: Scroll the page to see more content. Use "down" to load more items, "top" to return to beginning, "bottom" to reach footer/end of page.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            direction: { type: 'string', enum: ['up', 'down', 'top', 'bottom'], description: 'up/down=scroll by amount, top/bottom=jump to edge' },
-                            amount: { type: 'number', description: 'Pixels to scroll (default: 500). Only used for up/down.' }
-                        },
-                        required: ['direction']
-                    }
-                },
-                {
-                    name: 'evaluate',
-                    description: 'ADVANCED: Execute raw JavaScript code on the page. Use as a last resort when no other tool can accomplish the task. Can access DOM, modify page, or extract complex data. NOTE: document.querySelectorAll returns a NodeList, not Array. Use Array.from() before .map(), .filter(), or .slice(). if any issues occurs while executing the script, try to google the error and fix it.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            script: { type: 'string', description: 'JavaScript code to execute. Return value will be included in result.' }
-                        },
-                        required: ['script']
-                    }
-                },
-                {
-                    name: 'get_state',
-                    description: 'PERCEPTION: Understand what is on the current page. Use this AFTER navigation to see page elements. Modes: "fast"=quick text list (recommended), "full"=detailed DOM tree, "vision"=screenshot with labeled elements.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            mode: { type: 'string', enum: ['fast', 'full', 'vision'], description: 'fast=elements only (fastest, lowest tokens), full=elements+DOM tree, vision=screenshot+numbered elements' },
-                            screenshot: { type: 'boolean', description: 'Force include screenshot (auto in vision mode)' },
-                            tree: { type: 'boolean', description: 'Force include DOM tree (auto in full mode)' },
-                            highlight: { type: 'boolean', description: 'Draw numbered boxes on interactive elements in screenshot' }
-                        }
-                    }
-                },
-                {
-                    name: 'get_interactive_elements',
-                    description: 'PERCEPTION: Get a compact list of clickable elements (buttons, links, inputs) with their text and selectors. FASTEST way to understand page structure. Use this to find what to click.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            limit: { type: 'number', description: 'Max elements to return (default: 50, use lower for speed)' },
-                            viewport_only: { type: 'boolean', description: 'Only visible elements (default: true)' }
-                        }
-                    }
-                },
-                {
-                    name: 'get_page_content',
-                    description: 'EXTRACTION: Get all readable text from the page. Use to read articles, extract information, or understand page content. Returns title + body text.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {}
-                    }
-                },
-                {
-                    name: 'wait_for_element',
-                    description: 'TIMING: Wait for an element to appear. Use after clicking if the next page/section loads dynamically. Essential for SPAs and AJAX-loaded content.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            selector: { type: 'string', description: 'CSS selector to wait for' },
-                            timeout: { type: 'number', description: 'Max wait time in ms (default: 5000)' }
-                        },
-                        required: ['selector']
-                    }
-                },
-                {
-                    name: 'type',
-                    description: 'INPUT: Type text character-by-character with delays (simulates human typing). Use when websites detect instant input as bots. For normal form filling, use "fill" instead (faster).',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            selector: { type: 'string', description: 'CSS selector of input field' },
-                            text: { type: 'string', description: 'Text to type' },
-                            delay: { type: 'number', description: 'Delay between keys in ms (default: 50)' }
-                        },
-                        required: ['selector', 'text']
-                    }
-                },
-                {
-                    name: 'select_option',
-                    description: 'INPUT: Choose an option from a <select> dropdown menu. REQUIRED: You MUST provide "selector" AND "value". Value should be the option value attribute or visible text.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            selector: { type: 'string', description: 'CSS selector of <select> element' },
-                            value: { type: 'string', description: 'Option value attribute OR visible text label' }
-                        },
-                        required: ['selector', 'value']
-                    }
-                },
-                {
-                    name: 'go_back',
-                    description: 'NAVIGATION: Click browser back button. Use to return to previous page after viewing details or search results.',
-                    inputSchema: { type: 'object', properties: {} }
-                },
-                {
-                    name: 'go_forward',
-                    description: 'NAVIGATION: Click browser forward button. Use after go_back to return to where you were.',
-                    inputSchema: { type: 'object', properties: {} }
-                },
-                {
-                    name: 'new_tab',
-                    description: 'TABS: Open a new browser tab. Use to keep current page open while checking another URL. Optionally provide URL to navigate immediately.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            url: { type: 'string', description: 'URL to open (optional - opens blank tab if omitted)' }
-                        }
-                    }
-                },
-                {
-                    name: 'switch_tab',
-                    description: 'TABS: Switch focus to a different tab. Use get_tabs first to see available tabs and their indices.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            index: { type: 'number', description: 'Tab index from get_tabs (0 = first tab)' }
-                        },
-                        required: ['index']
-                    }
-                },
-                {
-                    name: 'close_tab',
-                    description: 'TABS: Close the current tab. Automatically switches to another open tab. Cannot close the last remaining tab.',
-                    inputSchema: { type: 'object', properties: {} }
-                },
-                {
-                    name: 'get_tabs',
-                    description: 'TABS: List all open tabs with their index, title, and URL. Use before switch_tab to find the right tab.',
-                    inputSchema: { type: 'object', properties: {} }
-                },
-                {
-                    name: 'click_text',
-                    description: 'INTERACTION: Click by visible text - PREFERRED over "click" when you see text like "Login", "Submit", "Next". More reliable than CSS selectors. Use exact=true for buttons with common words.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            text: { type: 'string', description: 'Visible text on the element (e.g., "Sign In", "Add to Cart")' },
-                            exact: { type: 'boolean', description: 'true=exact match, false=partial match (default)' },
-                            tag: { type: 'string', description: 'Limit to tag type: button, a, div, span, etc.' }
-                        },
-                        required: ['text']
-                    }
-                },
-                {
-                    name: 'extract_data',
-                    description: 'EXTRACTION: Pull structured data from page. REQUIRED: "type" is mandatory. If type="custom", "fields" is also required.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            type: { type: 'string', enum: ['table', 'list', 'custom'], description: 'table=HTML table, list=ul/ol items, custom=define your own fields' },
-                            selector: { type: 'string', description: 'CSS selector of container (optional for table/list)' },
-                            fields: { type: 'object', description: 'For custom type: {"fieldName": "CSS selector", ...}' }
-                        },
-                        required: ['type']
-                    }
-                },
-                {
-                    name: 'upload_file',
-                    description: 'INPUT: Upload a file to a file input (<input type="file">). Use for document uploads, image uploads, CSV imports.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            selector: { type: 'string', description: 'CSS selector of file input element' },
-                            filePath: { type: 'string', description: 'Absolute path to file on disk' }
-                        },
-                        required: ['selector', 'filePath']
-                    }
-                },
-                {
-                    name: 'get_cookies',
-                    description: 'SESSION: Get all cookies for the current domain. Use to check login state, session tokens, or debug authentication issues.',
-                    inputSchema: { type: 'object', properties: {} }
-                },
-                {
-                    name: 'set_cookie',
-                    description: 'SESSION: Set a browser cookie. Use to maintain login sessions, set preferences, or bypass cookie consent (if legal).',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            name: { type: 'string', description: 'Cookie name' },
-                            value: { type: 'string', description: 'Cookie value' },
-                            domain: { type: 'string', description: 'Domain (defaults to current site)' },
-                            path: { type: 'string', description: 'Path scope (default: /)' }
-                        },
-                        required: ['name', 'value']
-                    }
-                },
-                {
-                    name: 'handle_dialog',
-                    description: 'DIALOGS: Handle JavaScript alert(), confirm(), or prompt() popups. Call BEFORE the action that triggers the dialog. Use accept for OK, dismiss for Cancel.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            action: { type: 'string', enum: ['accept', 'dismiss'], description: 'accept=click OK, dismiss=click Cancel' },
-                            promptText: { type: 'string', description: 'Text to enter if dialog is a prompt()' }
-                        },
-                        required: ['action']
-                    }
-                },
-                {
-                    name: 'switch_frame',
-                    description: 'ADVANCED: Switch context to an iframe (embedded page). Required for interacting with elements inside iframes. Omit selector to return to main page.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            selector: { type: 'string', description: 'CSS selector of iframe (omit to return to main frame)' }
-                        }
-                    }
-                },
-                {
-                    name: 'find_by_xpath',
-                    description: 'ADVANCED: Find elements using XPath expressions. Use when CSS cannot express the query (e.g., selecting by text content, parent-child relationships). Example: //button[contains(text(),"Submit")]',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            xpath: { type: 'string', description: 'XPath expression starting with //' },
-                            action: { type: 'string', enum: ['info', 'click', 'text'], description: 'info=element details, click=click first, text=get text content' }
-                        },
-                        required: ['xpath']
-                    }
-                },
-                {
-                    name: 'drag_drop',
-                    description: 'INTERACTION: Drag one element onto another. Use for sortable lists, kanban boards, file drop zones, slider handles.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            sourceSelector: { type: 'string', description: 'CSS selector of element to drag' },
-                            targetSelector: { type: 'string', description: 'CSS selector of drop destination' }
-                        },
-                        required: ['sourceSelector', 'targetSelector']
-                    }
-                },
-                {
-                    name: 'check_element',
-                    description: 'INSPECTION: Check element state without interacting. Use to verify if login succeeded (check welcome message), if item is in cart, if checkbox is checked, etc.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            selector: { type: 'string', description: 'CSS selector of element' },
-                            property: { type: 'string', description: 'exists, visible, text, value, href, src, checked, disabled, or any attribute name' }
-                        },
-                        required: ['selector']
-                    }
-                },
-                {
-                    name: 'set_viewport',
-                    description: 'CONFIG: Change browser window size. Use to test mobile layouts (375x667), tablets (768x1024), or desktop (1920x1080).',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            width: { type: 'number', description: 'Width in pixels' },
-                            height: { type: 'number', description: 'Height in pixels' }
-                        },
-                        required: ['width', 'height']
-                    }
-                },
-                {
-                    name: 'wait_for_navigation',
-                    description: 'TIMING: Wait for page to fully load after clicking a link. Use after actions that trigger page changes. Waits for network to be idle.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            timeout: { type: 'number', description: 'Max wait in ms (default: 30000)' }
-                        }
-                    }
-                },
-                {
-                    name: 'background_scrape',
-                    description: 'EXTRACTION: Silently opens a URL in a temporary headless browser, extracts data, and closes the browser immediately. Useful for quick fetch operations without disturbing the user\'s visible browser.',
-                    inputSchema: {
-                        type: 'object',
-                        properties: {
-                            url: { type: 'string', description: 'URL to scrape' },
-                            extractType: { type: 'string', enum: ['table', 'list', 'text'], description: 'What to extract: table, list, or text' },
-                            selector: { type: 'string', description: 'Optional CSS selector to target specific area' }
-                        },
-                        required: ['url', 'extractType']
-                    }
-                },
-                ...BROWSER_TURBO_SCHEMAS
-            ] as ToolSchema[]
-        };
+        // Auto-collect schemas from self-describing tools.
+        // Each tool owns its schema via getSchema(); aliases get copies with the aliased name.
+        const seen = new Set<string>();
+        const schemas: ToolSchema[] = [];
+
+        for (const tool of this.tools.values()) {
+            if (seen.has(tool.name)) continue;
+            seen.add(tool.name);
+
+            schemas.push(tool.getSchema());
+
+            // Publish alias schemas so the LLM can discover them
+            for (const alias of tool.aliases) {
+                schemas.push({ ...tool.getSchema(), name: alias });
+            }
+        }
+
+        return { tools: schemas };
     }
 
     /**

@@ -4,6 +4,21 @@ import { PlaywrightTool, ToolResult } from '../PlaywrightTool';
 export class WaitForElementTool extends PlaywrightTool {
     name = 'wait_for_element';
 
+    getSchema() {
+        return {
+            name: 'wait_for_element',
+            description: 'TIMING: Wait for an element to appear. Use after clicking if the next page/section loads dynamically. Essential for SPAs and AJAX-loaded content.',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    selector: { type: 'string', description: 'CSS selector to wait for' },
+                    timeout: { type: 'number', description: 'Max wait time in ms (default: 5000)' }
+                },
+                required: ['selector']
+            }
+        };
+    }
+
     async execute(page: Page, args: any): Promise<ToolResult> {
         const originalSelector = args.selector;
         const timeout = args.timeout || 5000;
