@@ -63,7 +63,7 @@
         "formik": "^2.4.9",
         "framer-motion": "^12.26.2",
         "lucide-react": "^0.468.0",
-        "playwright": "^1.57.0",
+        "playwright": "^1.58.2",
         "playwright-core": "^1.58.2",
         "playwright-extra": "^4.3.6",
         "puppeteer-extra-plugin-stealth": "^2.11.2",
