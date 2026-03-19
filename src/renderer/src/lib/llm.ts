@@ -105,7 +105,9 @@ export async function chat(
   abortSignal?: AbortSignal,
   dynamicRules?: string,
   isSubAgent = false,
-  workspacePath?: string
+  workspacePath?: string,
+  /** WhatsApp context injected by the caller — keeps prompts.ts store-free */
+  whatsappContext?: { isConnected: boolean; isEnabled: boolean }
 ): Promise<LLMResponse> {
   // Apply Dynamic Context Pruning (DCP)
   const prunedMessages = pruneContext(messages);
@@ -169,7 +171,7 @@ export async function chat(
   }
   const allTools = Array.from(toolMap.values());
 
-  const systemPrompt = await buildSystemPrompt(allTools, servers, useJsonFallback, dynamicRules, isSubAgent, workspacePath);
+  const systemPrompt = await buildSystemPrompt(allTools, servers, useJsonFallback, dynamicRules, isSubAgent, workspacePath, whatsappContext);
 
   if (isSubAgent) {
     console.log(`[LLM] Using lightweight sub-agent prompt (${systemPrompt.length} chars vs ~4000+ main)`);

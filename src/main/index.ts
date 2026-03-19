@@ -4,6 +4,8 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initEnv, __dirname } from './utils/env'
 import { setupIpcHandlers } from './ipc'
 import { McpProcessManager } from './services/McpProcessManager'
+import { whatsappService } from './services/WhatsAppService'
+import { wakeLockService } from './services/WakeLockService'
 
 
 // Enable experimental on-device AI features (Gemini Nano / Chrome Prompt API)
@@ -113,12 +115,17 @@ function createWindow(): void {
 app.whenReady().then(async () => {
     electronApp.setAppUserModelId('com.aiworker.app')
 
-    // Verify environment and paths
+    // Setup all IPC handlers (this also calls whatsappService.init())
     setupIpcHandlers()
 
-    // Workers cannot fetch file:// URLs easily. We serve the model over HTTP locally.
-    // Check for production env explicitly to ensure it runs during e2e tests
-    // (Server code removed due to hang - reverting to file access attempt)
+    // ── WhatsApp: manage wake lock based on connection state ─────────────
+    whatsappService.on('connectionChange', (state) => {
+        if (state.status === 'connected') {
+            wakeLockService.acquire()
+        } else if (state.status === 'disconnected' || state.status === 'error') {
+            wakeLockService.release()
+        }
+    })
 
     app.on('browser-window-created', (_, window) => {
         optimizer.watchWindowShortcuts(window)
@@ -138,6 +145,9 @@ app.on('before-quit', async (event) => {
     // Prevent default quit, cleanup, then quit
     event.preventDefault()
     isQuitting = true
+
+    // Release wake lock before quitting
+    wakeLockService.release()
     
     await McpProcessManager.getInstance().teardownAll()
     

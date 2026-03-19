@@ -71,16 +71,20 @@ export function registerWhatsAppHandlers(): void {
     })
 
     ipcMain.handle('whatsapp:send-message', async (_event, to: unknown, content: unknown) => {
+        console.log('[IPC] whatsapp:send-message', { to, contentLength: typeof content === 'string' ? content.length : 0 })
         if (typeof to !== 'string' || to.trim() === '') {
             throw new Error('Invalid "to" argument')
         }
         if (typeof content !== 'string' || content.trim() === '') {
             throw new Error('Invalid "content" argument')
         }
-        return whatsappService.sendMessage(to.trim(), content.trim())
+        const result = await whatsappService.sendMessage(to.trim(), content.trim())
+        console.log('[IPC] whatsapp:send-message result:', result.success)
+        return result
     })
 
     ipcMain.handle('whatsapp:send-presence', async (_event, to: unknown, state: unknown) => {
+        console.log('[IPC] whatsapp:send-presence', { to, state })
         if (typeof to !== 'string' || to.trim() === '') {
             throw new Error('Invalid "to" argument')
         }

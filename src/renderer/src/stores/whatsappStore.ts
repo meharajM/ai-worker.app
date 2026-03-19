@@ -36,8 +36,12 @@ interface WhatsAppState {
     /** Whether the connection dialog is open */
     isDialogOpen: boolean
 
+    /** Whether to automatically mirror local messages to the target phone */
+    autoMirrorToWhatsApp: boolean
+
     // ── Persisted actions ──────────────────────────────────────────────────
     setWhatsAppEnabled: (enabled: boolean) => void
+    setAutoMirrorToWhatsApp: (enabled: boolean) => void
     setTargetPhoneNumber: (number: string | null) => void
     openDialog: () => void
     closeDialog: () => void
@@ -61,8 +65,10 @@ export const useWhatsAppStore = create<WhatsAppState>()(
             whatsappEnabled: false,
             targetPhoneNumber: null,
             isDialogOpen: false,
+            autoMirrorToWhatsApp: false,
 
             setWhatsAppEnabled: (enabled) => set({ whatsappEnabled: enabled }),
+            setAutoMirrorToWhatsApp: (enabled) => set({ autoMirrorToWhatsApp: enabled }),
             setTargetPhoneNumber: (number) => set({ targetPhoneNumber: number }),
             openDialog: () => set({ isDialogOpen: true }),
             closeDialog: () => set({ isDialogOpen: false }),
@@ -74,6 +80,7 @@ export const useWhatsAppStore = create<WhatsAppState>()(
             partialize: (state) => ({
                 whatsappEnabled: state.whatsappEnabled,
                 targetPhoneNumber: state.targetPhoneNumber,
+                autoMirrorToWhatsApp: state.autoMirrorToWhatsApp,
                 // connectionState is NOT persisted — always fresh from main on startup
                 // isDialogOpen is NOT persisted — always start closed
             }),

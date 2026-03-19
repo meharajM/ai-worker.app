@@ -30,8 +30,9 @@ export function useWhatsAppBridge(): void {
         const unsub = electron.whatsapp.onConnectionChange((state: WhatsAppConnectionState) => {
             setConnectionState(state)
 
-            // Auto-disable WhatsApp mode when disconnected/error
-            if (state.status === 'disconnected' || state.status === 'error') {
+            // Auto-disable WhatsApp mode ONLY when permanently unauthenticated (logged out).
+            // Do not disable on transient network errors, as Baileys auto-reconnects.
+            if (!state.isVerified) {
                 useWhatsAppStore.getState().setWhatsAppEnabled(false)
             }
         })
@@ -52,7 +53,14 @@ export function useWhatsAppBridge(): void {
         // Read state at execution time, not render time (prevents stale closures)
         // Trigger the AI agent execution pipeline via generic window event
         window.dispatchEvent(new CustomEvent('app:submit-message', {
-            detail: { content: `📱 **WhatsApp** (${message.from}): ${message.content}` }
+            detail: { 
+                content: `📱 **WhatsApp** (${message.from}): ${message.content}`,
+                whatsappMetadata: {
+                    from: message.from,
+                    id: message.id,
+                    timestamp: message.timestamp
+                }
+            }
         }))
     }, [])
 

@@ -22,6 +22,7 @@ export interface Message {
     eta?: number             // Estimated time remaining in seconds
     plan?: ExecutionPlan     // Current ExecutionPlan state for the UI
     findings?: string[]      // Summarised findings to show in the UI bubble
+    whatsappMetadata?: { from: string, id: string, timestamp: number }
 }
 
 export interface ToolCall {

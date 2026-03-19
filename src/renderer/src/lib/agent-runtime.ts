@@ -359,7 +359,8 @@ export class AgentRuntime implements IAgentClient {
           this.options.signal,
           dynamicRules,
           this.options.isSubAgent,
-          this.options.workspacePath
+          this.options.workspacePath,
+          this.options.whatsappContext
         );
       } catch (error) {
         console.error("[AgentRuntime] LLM Error:", error);

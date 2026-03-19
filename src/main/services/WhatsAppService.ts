@@ -53,6 +53,9 @@ export class WhatsAppService extends EventEmitter {
     private authDir: string
     private lastMessageTime = 0
     private readonly MESSAGE_RATE_LIMIT_MS = 1000 // 1 message per second
+    private isConnecting = false
+    /** The verified personal number JID — only messages from this JID trigger the agent */
+    private targetPhoneJid: string | null = null
 
     constructor() {
         super()
@@ -64,46 +67,62 @@ export class WhatsAppService extends EventEmitter {
     async init(): Promise<void> {
         try {
             const credsFile = path.join(this.authDir, 'creds.json')
-                const phoneFile = path.join(this.authDir, 'phone.txt')
-                const workerPhoneFile = path.join(this.authDir, 'worker_phone.txt')
-                
-                // Just log that we found credentials - don't auto-connect
-                // Let user explicitly connect to handle any credential issues
-                if (fs.existsSync(credsFile)) {
-                    let savedPhone = ''
-                    if (fs.existsSync(phoneFile)) {
-                        savedPhone = fs.readFileSync(phoneFile, 'utf8').trim()
-                    }
-                    let savedWorkerPhone: string | null = null
-                    if (fs.existsSync(workerPhoneFile)) {
-                        savedWorkerPhone = fs.readFileSync(workerPhoneFile, 'utf8').trim()
-                    }
-                    
-                    console.log('[WhatsAppService] Found existing auth credentials. User can connect when ready.')
-                    
-                    // Set the saved phone number in state but don't connect
-                    if (savedPhone) {
-                        // Safety check: if saved phone is same as worker phone, mark as unverified
-                        let isVerified = true
-                        if (savedWorkerPhone) {
-                            const savedDigits = savedPhone.replace(/\D/g, '')
-                            const workerDigits = savedWorkerPhone.replace(/\D/g, '')
-                            if (savedDigits.slice(-10) === workerDigits.slice(-10)) {
-                                console.warn('[WhatsAppService] Same number for worker and user detected in stored config. Requiring re-verification.')
-                                isVerified = false
-                            }
-                        }
-
-                        this._setState({
-                            status: 'disconnected',
-                            qrCode: null,
-                            error: null,
-                            phoneNumber: savedPhone,
-                            isVerified: isVerified,
-                            connectedPhoneNumber: savedWorkerPhone,
-                        })
-                    }
+            const phoneFile = path.join(this.authDir, 'phone.txt')
+            const workerPhoneFile = path.join(this.authDir, 'worker_phone.txt')
+            
+            if (fs.existsSync(credsFile)) {
+                let savedPhone = ''
+                if (fs.existsSync(phoneFile)) {
+                    savedPhone = fs.readFileSync(phoneFile, 'utf8').trim()
                 }
+                let savedWorkerPhone: string | null = null
+                if (fs.existsSync(workerPhoneFile)) {
+                    savedWorkerPhone = fs.readFileSync(workerPhoneFile, 'utf8').trim()
+                }
+                
+                console.log('[WhatsAppService] Found existing auth credentials. Auto-reconnecting...')
+                
+                if (savedPhone) {
+                    let isVerified = true
+                    if (savedWorkerPhone) {
+                        const savedDigits = savedPhone.replace(/\D/g, '')
+                        const workerDigits = savedWorkerPhone.replace(/\D/g, '')
+                        if (savedDigits.slice(-10) === workerDigits.slice(-10)) {
+                            console.warn('[WhatsAppService] Same number for worker and user detected. Requiring re-verification.')
+                            isVerified = false
+                        }
+                    }
+
+                    // Restore the message filter JID from saved phone
+                    if (isVerified) {
+                        this.targetPhoneJid = formatWhatsAppJid(savedPhone)
+                        console.log('[WhatsAppService] Restored target JID filter:', this.targetPhoneJid)
+                    }
+
+                    // Set initial state so UI can show 'connecting' immediately
+                    this._setState({
+                        status: 'connecting',
+                        qrCode: null,
+                        error: null,
+                        phoneNumber: savedPhone,
+                        isVerified: isVerified,
+                        connectedPhoneNumber: savedWorkerPhone,
+                    })
+                }
+
+                // Auto-reconnect using saved credentials — non-blocking
+                this.connect(savedPhone || null).catch((err) => {
+                    console.error('[WhatsAppService] Auto-reconnect failed:', err)
+                    this._setState({
+                        status: 'disconnected',
+                        qrCode: null,
+                        error: 'Auto-reconnect failed. Click Connect to retry.',
+                        phoneNumber: this.connectionState.phoneNumber,
+                        isVerified: false,
+                        connectedPhoneNumber: null,
+                    })
+                })
+            }
         } catch (error) {
             console.error('[WhatsAppService] Init error:', error)
         }
@@ -115,22 +134,19 @@ export class WhatsAppService extends EventEmitter {
 
     async connect(targetPhoneNumber: string | null): Promise<void> {
         if (this.connectionState.status === 'connected') return
-        if (this.connectionState.status === 'connecting') return
-
+        if (this.isConnecting) return
+        
+        this.isConnecting = true
         this._setState({
             status: 'connecting',
             qrCode: null,
             error: null,
-            phoneNumber: targetPhoneNumber,
+            phoneNumber: targetPhoneNumber || this.connectionState.phoneNumber,
             isVerified: false,
             connectedPhoneNumber: null,
         })
-
-        // Don't clear auth here - it breaks the QR scan flow!
-        // Auth is only cleared on explicit disconnect or Stream Error
         
         try {
-            // Dynamically import Baileys to avoid bundling issues
             const {
                 default: makeWASocket,
                 useMultiFileAuthState,
@@ -138,16 +154,12 @@ export class WhatsAppService extends EventEmitter {
                 fetchLatestBaileysVersion,
             } = await import('@whiskeysockets/baileys')
 
-            // Ensure auth directory exists
             fs.mkdirSync(this.authDir, { recursive: true })
-            
             if (targetPhoneNumber) {
                 fs.writeFileSync(path.join(this.authDir, 'phone.txt'), targetPhoneNumber)
             }
 
-            // eslint-disable-next-line react-hooks/rules-of-hooks
             const { state, saveCreds } = await useMultiFileAuthState(this.authDir)
-
             const { version } = await fetchLatestBaileysVersion()
 
             const silentLogger = {
@@ -161,49 +173,30 @@ export class WhatsAppService extends EventEmitter {
                 child: () => silentLogger,
             }
 
-            // Use default Baileys WebSocket with proper configuration
             const sock = makeWASocket({
                 version,
                 auth: state,
                 logger: silentLogger,
                 printQRInTerminal: false,
-                // Browser identification - helps with WhatsApp server stability
                 browser: ['AI-Worker', 'Chrome', '120.0.0'],
-                // Connection options for better stability
                 connectTimeoutMs: 60000,
             })
 
             this.socket = sock
 
-            // Track the phone number from the QR scan (the device that connected)
-            let connectedPhoneNumber: string | null = null
-
-            // QR code and connection state events
-            // Use 'any' because Baileys exposes a complex union type that doesn't
-            // match our simplified typed update object cleanly.
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            sock.ev.on('connection.update', (update: any) => {
-                const { connection, lastDisconnect, qr } = update as {
-                    connection?: string
-                    lastDisconnect?: { error?: { output?: { statusCode?: number }; message?: string }; reason?: string }
-                    qr?: string
-                }
-
-                console.log('[WhatsAppService] Connection update:', { connection, qr: !!qr, lastDisconnect })
+            sock.ev.on('connection.update', (update) => {
+                const { connection, lastDisconnect, qr } = update
+                console.log('[WhatsAppService] Connection update:', { connection, qr: !!qr })
 
                 if (qr) {
                     this._setState({ ...this.connectionState, status: 'connecting', qrCode: qr })
                 }
 
                 if (connection === 'open') {
-                    // Get the connected phone number from Baileys user info
                     const userId = sock.user?.id
+                    let connectedPhoneNumber: string | null = null
                     if (userId) {
-                        // Baileys user ID format: "phone@c.us" - extract the phone number
                         connectedPhoneNumber = userId.split('@')[0]
-                        console.log('[WhatsAppService] Connected device phone:', connectedPhoneNumber)
-                        
-                        // Save to disk to remember worker ID after restart
                         try {
                             fs.writeFileSync(path.join(this.authDir, 'worker_phone.txt'), connectedPhoneNumber)
                         } catch (err) {
@@ -211,97 +204,49 @@ export class WhatsAppService extends EventEmitter {
                         }
                     }
                     
-                    console.log('[WhatsAppService] Connection opened successfully!')
                     this._setState({
                         status: 'connected',
                         qrCode: null,
                         error: null,
-                        phoneNumber: targetPhoneNumber,
-                        isVerified: false,
+                        phoneNumber: this.connectionState.phoneNumber,
+                        isVerified: this.connectionState.isVerified,
                         connectedPhoneNumber: connectedPhoneNumber,
                     })
                 }
 
                 if (connection === 'close') {
-                    const statusCode = lastDisconnect?.error?.output?.statusCode
-                    const errorMessage = lastDisconnect?.error?.message || lastDisconnect?.reason || 'Unknown reason'
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const statusCode = (lastDisconnect?.error as any)?.output?.statusCode
+                    const errorMessage = lastDisconnect?.error?.message || 'Unknown reason'
                     const loggedOutCode = DisconnectReason.loggedOut
                     
-                    console.log('[WhatsAppService] Connection closed:', { statusCode, errorMessage, loggedOutCode })
-                    
-                    // Check for Stream Error - need to clear auth and retry
-                    const isStreamError = errorMessage?.toLowerCase().includes('stream errored') || 
-                        errorMessage?.toLowerCase().includes('restart required')
-                    
-                    // Check if this is a network-related disconnection (not user-initiated)
-                    const isNetworkError = statusCode === undefined || 
-                        statusCode === 428 || // Server unreachable
-                        statusCode === 503 || // Service unavailable  
-                        statusCode === 504  // Gateway timeout
+                    console.log('[WhatsAppService] Connection closed:', { statusCode, errorMessage })
+                    this.socket = null
 
                     if (statusCode !== loggedOutCode) {
-                        // Handle Stream Error - don't clear auth, just show QR again
-                        if (isStreamError) {
-                            console.log('[WhatsAppService] Stream error detected, showing QR for re-auth...')
-                    this._setState({
-                        status: 'disconnected',
-                        qrCode: null,
-                        error: null,
-                        phoneNumber: targetPhoneNumber,
-                        isVerified: this.connectionState.isVerified,
-                        connectedPhoneNumber: this.connectionState.connectedPhoneNumber,
-                    })
-                            // Don't clear auth - just let user scan QR again with same credentials
-                            return
-                        }
+                        const isStreamError = errorMessage?.toLowerCase().includes('stream errored') || 
+                                            errorMessage?.toLowerCase().includes('restart required')
                         
-                        if (isNetworkError && targetPhoneNumber) {
-                            // Network issue - try to auto-reconnect after a delay
+                        if (isStreamError) {
                             this._setState({
-                                status: 'connecting',
+                                status: 'disconnected',
                                 qrCode: null,
-                                error: null,
-                                phoneNumber: targetPhoneNumber,
+                                error: 'Stream error. Please reconnect.',
+                                phoneNumber: this.connectionState.phoneNumber,
                                 isVerified: this.connectionState.isVerified,
                                 connectedPhoneNumber: this.connectionState.connectedPhoneNumber,
                             })
-                            console.log('[WhatsAppService] Network disconnected, attempting auto-reconnect in 5s...')
-                            setTimeout(() => {
-                                if (this.connectionState.status === 'connecting') {
-                                    this.connect(targetPhoneNumber).catch(e => {
-                                        console.error('[WhatsAppService] Auto-reconnect failed:', e)
-                                        this._setState({
-                                            status: 'error',
-                                            qrCode: null,
-                                            error: 'Failed to reconnect. Please try again.',
-                                            phoneNumber: targetPhoneNumber,
-                                            isVerified: this.connectionState.isVerified,
-                                            connectedPhoneNumber: this.connectionState.connectedPhoneNumber,
-                                        })
-                                    })
-                                }
-                            }, 5000)
                         } else {
-                            // Provide more specific error message
-                            let specificError = 'Connection closed unexpectedly. Please reconnect.'
-                            if (errorMessage) {
-                                specificError = `Connection failed: ${errorMessage}`
-                            } else if (statusCode) {
-                                specificError = `Connection failed with status code: ${statusCode}`
-                            }
-                            
-                            console.error('[WhatsAppService] Connection error:', specificError)
                             this._setState({
                                 status: 'error',
                                 qrCode: null,
-                                error: specificError,
-                                phoneNumber: targetPhoneNumber,
+                                error: `Connection failed: ${errorMessage}`,
+                                phoneNumber: this.connectionState.phoneNumber,
                                 isVerified: this.connectionState.isVerified,
                                 connectedPhoneNumber: this.connectionState.connectedPhoneNumber,
                             })
                         }
                     } else {
-                        // Logged out — clear auth so next connect shows a fresh QR
                         this._clearAuth()
                         this._setState({
                             status: 'disconnected',
@@ -312,57 +257,58 @@ export class WhatsAppService extends EventEmitter {
                             connectedPhoneNumber: null,
                         })
                     }
-                    this.socket = null
                 }
             })
 
-            // Persist credentials on update
             sock.ev.on('creds.update', saveCreds)
 
-            // Incoming messages
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            sock.ev.on('messages.upsert', ({ messages, type }: { messages: any[]; type: string }) => {
+            sock.ev.on('messages.upsert', ({ messages, type }) => {
                 if (type !== 'notify') return
                 for (const raw of messages) {
                     const msg = this._parseMessage(raw)
                     if (msg) {
-                        // Auto-mark as read if it's from someone else
                         if (!msg.isFromMe && raw.key) {
-                            try {
-                                sock.readMessages([raw.key]).catch(e => console.error('[Baileys] auto-read error:', e))
-                            } catch {
-                                // ignore
+                            sock.readMessages([raw.key]).catch(() => {})
+                        }
+                        
+                        // ── Security: only forward messages from the verified personal number ──
+                        // If targetPhoneJid is set, silently drop messages from other numbers
+                        // (group chats, other contacts, spam, etc.)
+                        if (!msg.isFromMe && this.targetPhoneJid) {
+                            // Strip resource/device suffix for comparison (JID format: number@s.whatsapp.net)
+                            const fromBase = msg.from.split('@')[0]
+                            const targetBase = this.targetPhoneJid.split('@')[0]
+                            if (fromBase !== targetBase) {
+                                console.log('[WhatsAppService] Dropping message from non-target sender:', fromBase)
+                                continue
                             }
                         }
+                        
                         this.emit('message', msg)
                     }
                 }
             })
         } catch (error) {
+            this.socket = null
             this._setState({
                 status: 'error',
                 qrCode: null,
                 error: error instanceof Error ? error.message : String(error),
-                phoneNumber: targetPhoneNumber,
+                phoneNumber: this.connectionState.phoneNumber,
                 isVerified: this.connectionState.isVerified,
                 connectedPhoneNumber: this.connectionState.connectedPhoneNumber,
             })
             throw error
+        } finally {
+            this.isConnecting = false
         }
     }
 
     async disconnect(clearAuth = true): Promise<void> {
-        console.log(`[WhatsAppService] Disconnecting (clearAuth=${clearAuth})...`)
-        
         if (this.socket) {
             try {
-                if (clearAuth) {
-                    await this.socket.logout()
-                    console.log('[WhatsAppService] Logged out from WhatsApp')
-                } else {
-                    await (this.socket as any).end(undefined) // Baileys end session
-                    console.log('[WhatsAppService] Session ended (not logged out)')
-                }
+                if (clearAuth) await this.socket.logout()
+                else await (this.socket as any).end(undefined)
             } catch (err) {
                 console.warn('[WhatsAppService] Disconnect warning:', err)
             }
@@ -370,10 +316,7 @@ export class WhatsAppService extends EventEmitter {
         }
         
         if (clearAuth) {
-            // Clear all auth data - this ensures a fresh QR scan on next connect
             this._clearAuth()
-            
-            // Reset internal state completely
             this._setState({
                 status: 'disconnected',
                 qrCode: null,
@@ -382,41 +325,35 @@ export class WhatsAppService extends EventEmitter {
                 isVerified: false,
                 connectedPhoneNumber: null,
             })
-            console.log('[WhatsAppService] Disconnect complete - auth cleared')
         } else {
             this._setState({
                 ...this.connectionState,
                 status: 'disconnected',
                 qrCode: null,
             })
-            console.log('[WhatsAppService] Disconnect complete - auth preserved')
         }
     }
 
     setTargetNumber(phoneNumber: string): void {
-        // Block if same as worker
         if (this.connectionState.connectedPhoneNumber) {
             const connectedDigits = this.connectionState.connectedPhoneNumber.replace(/\D/g, '')
             const targetDigits = phoneNumber.replace(/\D/g, '')
-            
-            // Check last 10 digits to be safe with country codes
             if (targetDigits.slice(-10) === connectedDigits.slice(-10)) {
-                throw new Error('Cannot use the same number for both Worker and Personal. Please use a different number for your personal account.')
+                throw new Error('Cannot use the same number for both Worker and Personal.')
             }
         }
 
-        // Save the verified target phone number
-        const phoneFile = path.join(this.authDir, 'phone.txt')
-        fs.writeFileSync(phoneFile, phoneNumber)
+        fs.writeFileSync(path.join(this.authDir, 'phone.txt'), phoneNumber)
         
-        // Update connection state with verified status
+        // Build the JID for message filtering (use top-level import, not require)
+        this.targetPhoneJid = formatWhatsAppJid(phoneNumber)
+        console.log('[WhatsAppService] Target JID set for message filtering:', this.targetPhoneJid)
+        
         this._setState({
             ...this.connectionState,
             phoneNumber: phoneNumber,
             isVerified: true,
         })
-        
-        console.log('[WhatsAppService] Target number set and verified:', phoneNumber)
     }
 
     async sendMessage(to: string, content: string): Promise<{ success: boolean; error?: string }> {
@@ -424,23 +361,25 @@ export class WhatsAppService extends EventEmitter {
             return { success: false, error: 'WhatsApp not connected' }
         }
 
-        // Rate limiting
         const now = Date.now()
         if (now - this.lastMessageTime < this.MESSAGE_RATE_LIMIT_MS) {
-            return { success: false, error: 'Rate limit exceeded. Please wait a moment.' }
+            return { success: false, error: 'Rate limit exceeded.' }
         }
         this.lastMessageTime = now
 
         try {
-            // Validate and format JID
             const jid = formatWhatsAppJid(to)
             if (!jid) {
-                return { success: false, error: 'Invalid phone number format' }
+                console.error('[WhatsAppService] Invalid JID for:', to)
+                return { success: false, error: 'Invalid phone format' }
             }
             
+            console.log('[WhatsAppService] Sending message to:', jid)
             await this.socket.sendMessage(jid, { text: content })
+            console.log('[WhatsAppService] Message sent successfully to:', jid)
             return { success: true }
         } catch (error) {
+            console.error('[WhatsAppService] Send error:', error)
             return { success: false, error: error instanceof Error ? error.message : String(error) }
         }
     }
@@ -451,17 +390,13 @@ export class WhatsAppService extends EventEmitter {
         }
         try {
             const jid = formatWhatsAppJid(to)
-            if (!jid) {
-                return { success: false, error: 'Invalid phone number format' }
-            }
+            if (!jid) return { success: false, error: 'Invalid phone format' }
             await this.socket.sendPresenceUpdate(state, jid)
             return { success: true }
         } catch (error) {
             return { success: false, error: error instanceof Error ? error.message : String(error) }
         }
     }
-
-    // ── Private helpers ─────────────────────────────────────────────────────
 
     private _setState(state: WhatsAppConnectionState): void {
         this.connectionState = state
@@ -471,21 +406,11 @@ export class WhatsAppService extends EventEmitter {
     private _clearAuth(): void {
         try {
             if (fs.existsSync(this.authDir)) {
-                console.log('[WhatsAppService] Clearing auth directory:', this.authDir)
                 fs.rmSync(this.authDir, { recursive: true, force: true })
-                console.log('[WhatsAppService] Auth directory cleared')
-            } else {
-                console.log('[WhatsAppService] No auth directory to clear')
             }
+            fs.mkdirSync(this.authDir, { recursive: true })
         } catch (err) {
             console.error('[WhatsAppService] Error clearing auth:', err)
-        }
-        
-        // Also ensure the parent directory exists for next connect
-        try {
-            fs.mkdirSync(this.authDir, { recursive: true })
-        } catch {
-            // ignore - will be created on next connect
         }
     }
 
@@ -493,28 +418,16 @@ export class WhatsAppService extends EventEmitter {
     private _parseMessage(raw: any): WhatsAppMessage | null {
         try {
             if (!raw?.key || !raw?.message) return null
-
-            // Extract text content from various message types
             const msg = raw.message
-            const textContent: string | null =
-                msg.conversation ||
-                msg.extendedTextMessage?.text ||
-                msg.imageMessage?.caption ||
-                msg.videoMessage?.caption ||
-                msg.documentMessage?.caption ||
-                null
-
+            const textContent = msg.conversation || msg.extendedTextMessage?.text || 
+                              msg.imageMessage?.caption || msg.videoMessage?.caption || 
+                              msg.documentMessage?.caption
             if (!textContent) return null
 
-            const type: WhatsAppMessage['type'] = msg.imageMessage
-                ? 'image'
-                : msg.videoMessage
-                    ? 'video'
-                    : msg.documentMessage
-                        ? 'document'
-                        : msg.audioMessage
-                            ? 'audio'
-                            : 'text'
+            const type: WhatsAppMessage['type'] = msg.imageMessage ? 'image' : 
+                                                msg.videoMessage ? 'video' : 
+                                                msg.documentMessage ? 'document' : 
+                                                msg.audioMessage ? 'audio' : 'text'
 
             return {
                 id: raw.key.id ?? `wa_${Date.now()}`,
@@ -531,5 +444,4 @@ export class WhatsAppService extends EventEmitter {
     }
 }
 
-// Singleton instance — created once in main process
 export const whatsappService = new WhatsAppService()

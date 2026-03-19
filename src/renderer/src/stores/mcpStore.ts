@@ -118,37 +118,16 @@ export const useMcpStore = create<McpState>()((set, get) => ({
             let initialServers: MCPServer[] = []
 
             if (stored && Array.isArray(stored)) {
-                initialServers = stored.map(s => {
-                    const updated = { ...s };
+                // Reset runtime state (connected, error) but keep persisted config and cached tools
+                initialServers = stored.map(s => ({
+                    ...s,
+                    connected: false,
+                    tools: s.tools || [],
+                    error: undefined
+                }) as MCPServer);
 
-                    // Migration: Fix servers that have "internal" command placeholder
-                    if (updated.command === 'internal') {
-                        const defaultMatch = DEFAULT_MCP_SERVERS.find(d => d.name === updated.name);
-                        if (defaultMatch) {
-                            updated.command = defaultMatch.command;
-                            updated.args = defaultMatch.args;
-                            console.log(`[mcpStore] Migrated server "${updated.name}" from internal to ${updated.command}`);
-                        }
-                    }
-
-                    // Migration: Enable MarkItDown auto-connect
-                    if (updated.name === 'markitdown') {
-                        updated.autoConnect = true;
-                    }
-
-                    return {
-                        ...updated,
-                        // Reset runtime state but KEEP cached tools for lazy-connect
-                        connected: false,
-                        tools: updated.tools || [],
-                        error: undefined
-                    } as MCPServer;
-                });
-
-                // Migration: Remove old WhatsApp MCP since we now have direct integration
-                const beforeCount = initialServers.length;
-                initialServers = initialServers.filter(s => !s.name.toLowerCase().includes('whatsapp'));
-                let hasNewDefaults = beforeCount !== initialServers.length;
+                // Ensure all default servers exist (add any that are missing)
+                let hasNewDefaults = false;
                 DEFAULT_MCP_SERVERS.forEach(def => {
                     if (!initialServers.some(s => s.name === def.name)) {
                         initialServers.push({
@@ -162,20 +141,16 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                     }
                 });
 
-                if (hasNewDefaults || initialServers.some((s, i) => JSON.stringify(s) !== JSON.stringify(stored[i]))) {
+                if (hasNewDefaults) {
                     await electron.store.set(storageKey, initialServers);
                 }
             } else {
-                // Defaults (only for anonymous or empty user profile? Maybe always safe to default?)
-                // If user has NO servers, maybe we should give them defaults?
-                // Let's stick to defaults for now.
                 initialServers = DEFAULT_MCP_SERVERS.map(s => ({
                     ...s,
                     id: generateId(),
                     connected: false,
                     tools: [],
                     type: s.type as 'stdio' | 'sse' | 'http',
-                    activeUserId: uid // Not strictly needed on server obj but harmless
                 }))
                 await electron.store.set(storageKey, initialServers)
             }

@@ -118,6 +118,12 @@ export interface AgentRuntimeOptions {
      * instead of the visible UI context.
      */
     isHeadless?: boolean;
+
+    /**
+     * WhatsApp connection state passed down from the UI.
+     * Keeps agent reasoning logic decoupled from UI state stores.
+     */
+    whatsappContext?: { isConnected: boolean; isEnabled: boolean };
 }
 
 // ── Internal State Types ───────────────────────────────────────────────────────

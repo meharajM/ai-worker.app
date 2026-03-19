@@ -32,11 +32,15 @@ dist/
 build/Release
 # Test artifacts
 tests/temp-storage-test/
-tests/temp-user-data/
+tests/temp-user-data*/
+tests/visual*/
 tests/screenshots/
 test-results/
 playwright-report/
 blob-report/
+
+# WhatsApp Integration Data (NEVER commit these!)
+whatsapp_auth/
 
 # Python (Vosk Bridge)
 __pycache__/

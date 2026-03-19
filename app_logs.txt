@@ -1,0 +1,411 @@
+
+> ai-worker@0.1.0 dev
+> electron-vite dev
+
+vite v7.3.1 building ssr environment for development...
+transforming...
+✓ 53 modules transformed.
+rendering chunks...
+out/main/DependencyService-BZbsB2Q1.js    2.48 kB
+out/main/MemoryTestRunner-BkcZK9St.js     2.89 kB
+out/main/index.js                       212.86 kB
+✓ built in 1.55s
+
+electron main process built successfully
+
+-----
+
+vite v7.3.1 building ssr environment for development...
+transforming...
+✓ 1 modules transformed.
+rendering chunks...
+out/preload/index.mjs  7.74 kB
+✓ built in 31ms
+
+electron preload scripts built successfully
+
+-----
+
+dev server running for the electron renderer process at:
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+
+starting electron app...
+
+[IPC] Memory handlers registered
+[Store] Registered store handlers with sensitive key protection
+[Secure] Registered secure storage handlers. Encryption available: true
+[WhatsAppService] Found existing auth credentials. User can connect when ready.
+[MCP INFO] 2026-03-18T20:23:16.704Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_45jmqlrfj",
+  "type": "stdio",
+  "command": "internal",
+  "args": "",
+  "hasEnv": false
+}
+[PlaywrightService] Service initialized (browser will launch on demand)
+[MCP INFO] 2026-03-18T20:23:16.706Z - In-process Playwright connection established 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_45jmqlrfj",
+  "inProcess": true
+}
+[MCP INFO] 2026-03-18T20:23:16.706Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_9zprf84ya",
+  "type": "stdio",
+  "command": "internal-memory",
+  "args": "",
+  "hasEnv": false
+}
+[MemoryService] Initializing with UnifiedMemoryBackend architecture...
+[MCP INFO] 2026-03-18T20:23:16.707Z - In-process Memory connection established 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_9zprf84ya",
+  "inProcess": true
+}
+[MCP INFO] 2026-03-18T20:23:16.753Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_evmjl0wch",
+  "type": "stdio",
+  "command": "internal-filesystem",
+  "args": "",
+  "hasEnv": false
+}
+[MCP INFO] 2026-03-18T20:23:16.753Z - In-process Filesystem connection established 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_evmjl0wch",
+  "inProcess": true
+}
+[MCP INFO] 2026-03-18T20:23:16.754Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_rh8w4uonv",
+  "type": "stdio",
+  "command": "uvx",
+  "args": "markitdown-mcp",
+  "hasEnv": false
+}
+[MCP INFO] 2026-03-18T20:23:16.809Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_45jmqlrfj",
+  "type": "stdio",
+  "command": "internal",
+  "args": "",
+  "hasEnv": false
+}
+[PlaywrightService] Service initialized (browser will launch on demand)
+[MCP INFO] 2026-03-18T20:23:16.810Z - In-process Playwright connection established 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_45jmqlrfj",
+  "inProcess": true
+}
+[MCP INFO] 2026-03-18T20:23:16.810Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_9zprf84ya",
+  "type": "stdio",
+  "command": "internal-memory",
+  "args": "",
+  "hasEnv": false
+}
+[MemoryService] Initializing with UnifiedMemoryBackend architecture...
+[MCP INFO] 2026-03-18T20:23:16.810Z - In-process Memory connection established 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_9zprf84ya",
+  "inProcess": true
+}
+[MCP INFO] 2026-03-18T20:23:16.831Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_evmjl0wch",
+  "type": "stdio",
+  "command": "internal-filesystem",
+  "args": "",
+  "hasEnv": false
+}
+[MCP INFO] 2026-03-18T20:23:16.832Z - In-process Filesystem connection established 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_evmjl0wch",
+  "inProcess": true
+}
+[MCP INFO] 2026-03-18T20:23:16.832Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_rh8w4uonv",
+  "type": "stdio",
+  "command": "uvx",
+  "args": "markitdown-mcp",
+  "hasEnv": false
+}
+[Antigravity] Restored session for umer.gvt@gmail.com
+[Antigravity] Restored session for umer.gvt@gmail.com
+[MCP INFO] 2026-03-18T20:23:16.946Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_45jmqlrfj",
+  "type": "stdio",
+  "command": "internal",
+  "args": "",
+  "hasEnv": false
+}
+[PlaywrightService] Service initialized (browser will launch on demand)
+[MCP INFO] 2026-03-18T20:23:16.947Z - In-process Playwright connection established 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_45jmqlrfj",
+  "inProcess": true
+}
+[MCP INFO] 2026-03-18T20:23:16.947Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_9zprf84ya",
+  "type": "stdio",
+  "command": "internal-memory",
+  "args": "",
+  "hasEnv": false
+}
+[MemoryService] Initializing with UnifiedMemoryBackend architecture...
+[MCP INFO] 2026-03-18T20:23:16.947Z - In-process Memory connection established 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_9zprf84ya",
+  "inProcess": true
+}
+[MCP INFO] 2026-03-18T20:23:16.968Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_evmjl0wch",
+  "type": "stdio",
+  "command": "internal-filesystem",
+  "args": "",
+  "hasEnv": false
+}
+[MCP INFO] 2026-03-18T20:23:16.968Z - In-process Filesystem connection established 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_evmjl0wch",
+  "inProcess": true
+}
+[MCP INFO] 2026-03-18T20:23:16.969Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_rh8w4uonv",
+  "type": "stdio",
+  "command": "uvx",
+  "args": "markitdown-mcp",
+  "hasEnv": false
+}
+[MCP INFO] 2026-03-18T20:23:16.999Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_45jmqlrfj",
+  "type": "stdio",
+  "command": "internal",
+  "args": "",
+  "hasEnv": false
+}
+[PlaywrightService] Service initialized (browser will launch on demand)
+[MCP INFO] 2026-03-18T20:23:16.999Z - In-process Playwright connection established 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_45jmqlrfj",
+  "inProcess": true
+}
+[MCP INFO] 2026-03-18T20:23:17.000Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_9zprf84ya",
+  "type": "stdio",
+  "command": "internal-memory",
+  "args": "",
+  "hasEnv": false
+}
+[MemoryService] Initializing with UnifiedMemoryBackend architecture...
+[MCP INFO] 2026-03-18T20:23:17.001Z - In-process Memory connection established 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_9zprf84ya",
+  "inProcess": true
+}
+[MCP INFO] 2026-03-18T20:23:17.009Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_evmjl0wch",
+  "type": "stdio",
+  "command": "internal-filesystem",
+  "args": "",
+  "hasEnv": false
+}
+[MCP INFO] 2026-03-18T20:23:17.009Z - In-process Filesystem connection established 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_evmjl0wch",
+  "inProcess": true
+}
+[MCP INFO] 2026-03-18T20:23:17.010Z - MCP connection requested 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_rh8w4uonv",
+  "type": "stdio",
+  "command": "uvx",
+  "args": "markitdown-mcp",
+  "hasEnv": false
+}
+2026-03-19 01:53:17.090 Electron[49473:6999943] +[IMKClient subclass]: chose IMKClient_Modern
+2026-03-19 01:53:17.090 Electron[49473:6999943] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+[49473:0319/015317.957507:ERROR:CONSOLE:1] "Request Autofill.enable failed. {"code":-32601,"message":"'Autofill.enable' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)
+[49473:0319/015317.957713:ERROR:CONSOLE:1] "Request Autofill.setAddresses failed. {"code":-32601,"message":"'Autofill.setAddresses' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)
+Knowledge Graph MCP Server running on stdio
+[ServerMemoryAdapter] Connected to server-memory, storage: /Users/meharaj/Library/Application Support/ai-worker/memory
+[ServerMemoryAdapter] Failed to parse search response: Unexpected non-whitespace character after JSON at position 216 (line 1 column 217)
+[MemoryService] Backend initialized: server-memory
+[MemoryService] No legacy SQLite database found, skipping migration
+[MemoryService] Initialization complete
+Knowledge Graph MCP Server running on stdio
+[ServerMemoryAdapter] Connected to server-memory, storage: /Users/meharaj/Library/Application Support/ai-worker/memory
+[ServerMemoryAdapter] Failed to parse search response: Unexpected non-whitespace character after JSON at position 216 (line 1 column 217)
+[MemoryService] Backend initialized: server-memory
+[MemoryService] No legacy SQLite database found, skipping migration
+[MemoryService] Initialization complete
+Knowledge Graph MCP Server running on stdio
+[ServerMemoryAdapter] Connected to server-memory, storage: /Users/meharaj/Library/Application Support/ai-worker/memory
+[ServerMemoryAdapter] Failed to parse search response: Unexpected non-whitespace character after JSON at position 216 (line 1 column 217)
+[MemoryService] Backend initialized: server-memory
+[MemoryService] No legacy SQLite database found, skipping migration
+[MemoryService] Initialization complete
+Knowledge Graph MCP Server running on stdio
+[ServerMemoryAdapter] Connected to server-memory, storage: /Users/meharaj/Library/Application Support/ai-worker/memory
+[ServerMemoryAdapter] Failed to parse search response: Unexpected non-whitespace character after JSON at position 216 (line 1 column 217)
+[MemoryService] Backend initialized: server-memory
+[MemoryService] No legacy SQLite database found, skipping migration
+[MemoryService] Initialization complete
+[MCP INFO] 2026-03-18T20:23:23.640Z - MCP server connected 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_rh8w4uonv",
+  "duration": 6671
+}
+[MCP INFO] 2026-03-18T20:23:23.641Z - MCP server connected 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_rh8w4uonv",
+  "duration": 6809
+}
+[MCP INFO] 2026-03-18T20:23:23.645Z - MCP server connected 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_rh8w4uonv",
+  "duration": 6635
+}
+[MCP INFO] 2026-03-18T20:23:23.646Z - MCP server connected 
+Context: {
+  "operation": "connect",
+  "serverId": "mcp_1773834404796_rh8w4uonv",
+  "duration": 6892
+}
+[MCP INFO] 2026-03-18T20:23:23.647Z - MCP tools listed 
+Context: {
+  "operation": "list-tools",
+  "serverId": "mcp_1773834404796_rh8w4uonv",
+  "count": 1
+}
+[MCP INFO] 2026-03-18T20:23:23.648Z - MCP tools listed 
+Context: {
+  "operation": "list-tools",
+  "serverId": "mcp_1773834404796_rh8w4uonv",
+  "count": 1
+}
+[MCP INFO] 2026-03-18T20:23:23.651Z - MCP tools listed 
+Context: {
+  "operation": "list-tools",
+  "serverId": "mcp_1773834404796_rh8w4uonv",
+  "count": 1
+}
+[MCP INFO] 2026-03-18T20:23:23.652Z - MCP tools listed 
+Context: {
+  "operation": "list-tools",
+  "serverId": "mcp_1773834404796_rh8w4uonv",
+  "count": 1
+}
+[WhatsAppService] Connection update: { connection: 'connecting', qr: false }
+[WhatsAppService] Connection update: { connection: undefined, qr: false }
+[WhatsAppService] Connection update: { connection: undefined, qr: false }
+[WhatsAppService] Connection update: { connection: 'open', qr: false }
+[IPC] whatsapp:send-message { to: '+917022364061', contentLength: 334 }
+[WhatsAppService] Sending message to: 917022364061@s.whatsapp.net
+[WhatsAppService] Message sent successfully to: 917022364061@s.whatsapp.net
+[IPC] whatsapp:send-message result: true
+Closing session: SessionEntry {
+  _chains: {
+    BbsV03zchXJRNCKEZ5WlQ7q3C9sONpfnuTbVLWv5RtIv: { chainKey: [Object], chainType: 1, messageKeys: {} }
+  },
+  registrationId: 1424919319,
+  currentRatchet: {
+    ephemeralKeyPair: {
+      pubKey: <Buffer 05 bb 15 d3 7c dc 85 72 51 34 22 84 67 95 a5 43 ba b7 0b db 0e 36 97 e7 b9 36 d5 2d 6b f9 46 d2 2f>,
+      privKey: <Buffer 8f fb 3a 2b 7c aa a1 cc b3 1b 86 a5 20 a0 28 94 ef b1 71 b3 5e a1 13 4b 04 fd 89 05 f3 1e 24 8c>
+    },
+    lastRemoteEphemeralKey: <Buffer 05 55 c2 1b 13 79 5b 15 e6 07 04 ba 54 95 46 51 1a 96 f0 2b 7c 21 90 c9 94 c1 a3 6b d8 52 4b d1 6e>,
+    previousCounter: 0,
+    rootKey: <Buffer a8 2d 94 61 01 ab 85 f6 32 bd 37 2e 83 e1 fc d4 12 14 2a 99 51 e7 30 ba e3 3c 31 65 24 2f ed af>
+  },
+  indexInfo: {
+    baseKey: <Buffer 05 36 d4 21 d3 80 63 20 0e 5d 8d 41 c3 b1 2b f8 9b 35 36 7b 8f 4b e4 b1 ca 2b 73 85 aa a4 44 87 71>,
+    baseKeyType: 1,
+    closed: -1,
+    used: 1773862118851,
+    created: 1773862118851,
+    remoteIdentityKey: <Buffer 05 a8 5d 40 6a f6 09 43 dc f7 5d 1d a7 93 57 19 cf 4b f3 7f 3a 98 e9 8b 01 ba 42 3f 56 63 98 f8 08>
+  },
+  pendingPreKey: {
+    signedKeyId: 4554700,
+    baseKey: <Buffer 05 36 d4 21 d3 80 63 20 0e 5d 8d 41 c3 b1 2b f8 9b 35 36 7b 8f 4b e4 b1 ca 2b 73 85 aa a4 44 87 71>,
+    preKeyId: 3300
+  }
+}
+Closing session: SessionEntry {
+  _chains: {
+    Ba6euxSht4gbQNnyJUAM0ZDLkoWBSe9ifEHZ3PdSE0h6: { chainKey: [Object], chainType: 1, messageKeys: {} }
+  },
+  registrationId: 1424919319,
+  currentRatchet: {
+    ephemeralKeyPair: {
+      pubKey: <Buffer 05 ae 9e bb 14 a1 b7 88 1b 40 d9 f2 25 40 0c d1 90 cb 92 85 81 49 ef 62 7c 41 d9 dc f7 52 13 48 7a>,
+      privKey: <Buffer df 36 a5 d8 e2 3c 6a 52 30 d9 66 7e 27 81 65 4a 39 0f a0 94 a9 c9 33 18 12 9a 80 c2 c2 d5 58 9d>
+    },
+    lastRemoteEphemeralKey: <Buffer 05 55 c2 1b 13 79 5b 15 e6 07 04 ba 54 95 46 51 1a 96 f0 2b 7c 21 90 c9 94 c1 a3 6b d8 52 4b d1 6e>,
+    previousCounter: 0,
+    rootKey: <Buffer ec e3 bc e1 db 1a c9 cc 7a 73 7f 6b 0c ef 7c f2 8d ab 53 a4 35 2a ba 12 ae 62 86 27 0e 9c 7d d5>
+  },
+  indexInfo: {
+    baseKey: <Buffer 05 78 1f c1 b7 fd aa 27 12 18 08 22 a2 63 62 d1 2d 28 c7 81 a3 41 6e 3d e6 ea 45 1b aa 44 01 14 6f>,
+    baseKeyType: 1,
+    closed: -1,
+    used: 1773865422151,
+    created: 1773865422151,
+    remoteIdentityKey: <Buffer 05 a8 5d 40 6a f6 09 43 dc f7 5d 1d a7 93 57 19 cf 4b f3 7f 3a 98 e9 8b 01 ba 42 3f 56 63 98 f8 08>
+  },
+  pendingPreKey: {
+    signedKeyId: 4554700,
+    baseKey: <Buffer 05 78 1f c1 b7 fd aa 27 12 18 08 22 a2 63 62 d1 2d 28 c7 81 a3 41 6e 3d e6 ea 45 1b aa 44 01 14 6f>,
+    preKeyId: 4042
+  }
+}
+[IPC] whatsapp:send-presence { to: '208924523425834@lid', state: 'composing' }
+[IPC] whatsapp:send-presence { to: '208924523425834@lid', state: 'paused' }
+(node:49473) electron: Failed to load URL: http://localhost:5173/ with error: ERR_CONNECTION_REFUSED
+(Use `Electron --trace-warnings ...` to show where the warning was created)
+[49473:0319/015902.696099:ERROR:CONSOLE:1] "Request Autofill.enable failed. {"code":-32601,"message":"'Autofill.enable' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)
+[49473:0319/015902.696258:ERROR:CONSOLE:1] "Request Autofill.setAddresses failed. {"code":-32601,"message":"'Autofill.setAddresses' wasn't found"}", source: devtools://devtools/bundled/core/protocol_client/protocol_client.js (1)

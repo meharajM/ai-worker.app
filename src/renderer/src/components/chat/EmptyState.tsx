@@ -1,4 +1,3 @@
-import React from 'react'
 import { WorkflowTiles } from '../WorkflowTiles'
 import { useWhatsAppStore } from '../../stores/whatsappStore'
 import { MessageCircle, Loader2 } from 'lucide-react'
@@ -22,12 +21,6 @@ export function EmptyState() {
     }
   }
 
-  // Fix stale state: if we're not connected but whatsappEnabled is true, reset it
-  React.useEffect(() => {
-    if (!isConnected && whatsappEnabled) {
-      setWhatsAppEnabled(false)
-    }
-  }, [isConnected, whatsappEnabled, setWhatsAppEnabled])
 
   return (
     <div className="flex flex-col items-center justify-center min-h-full max-w-4xl mx-auto w-full pt-8 pb-32">

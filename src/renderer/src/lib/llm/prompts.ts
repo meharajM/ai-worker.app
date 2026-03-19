@@ -1,7 +1,6 @@
 import { LLMTool, ServerInfo } from "../types";
 import { getUserEnvironmentContext } from "../user-environment";
 import { EXECUTION_PLAN_SCHEMA } from "../agent-protocol";
-import { useWhatsAppStore } from "../../stores/whatsappStore";
 
 /**
  * Filter tools to most relevant subset for sub-agents (reduces token usage)
@@ -105,8 +104,10 @@ export // Build robust but token-efficient system prompt
     servers?: ServerInfo[],
     useJsonFallback = false,
     dynamicRules?: string,
-    isSubAgent = false, // NEW: Flag for lightweight prompt
-    workspacePath?: string // Injected workspace path for filesystem scoping
+    isSubAgent = false,
+    workspacePath?: string,
+    /** Optional WhatsApp context — callers read the store and pass only what we need */
+    whatsappContext?: { isConnected: boolean; isEnabled: boolean }
   ): Promise<string> {
   // Use compact prompt for sub-agents
   if (isSubAgent) {
@@ -114,7 +115,7 @@ export // Build robust but token-efficient system prompt
   }
 
   const toolCount = tools?.length || 0;
-  const serverCount = servers?.length || 0;
+  const _serverCount = servers?.length || 0;
 
   if (toolCount === 0) {
     return `You are AI - Worker, a helpful voice - first assistant.When tools become available, use them to perform actions instead of providing manual instructions.Be concise for voice output.`;
@@ -145,13 +146,6 @@ export // Build robust but token-efficient system prompt
           ? ` (params: ${paramNames}${Object.keys(properties).length > 3 ? "..." : ""
           })`
           : "";
-
-        const server = servers?.find(s => s.toolCount > 0 && tools?.some(t => t.name.startsWith(tool.name.split('_')[0])));
-        // Heuristic: check if we can query mcp.ts directly or pass server mapping. 
-        // Since we don't have direct mapping here, we can rely on grouping by server context below or just hint.
-        // Better: The 'servers' list passed to this function usually contains aggregate info. 
-        // Let's simplified: The "Connected MCP Servers" section below handles the grouping.
-        // We will just leave the tool description as is, but emphasize the Agent Roles above.
 
         return `${idx + 1}. **${tool.name}**${paramHint}: ${tool.description}`;
       })
@@ -207,14 +201,10 @@ Example: "search for nike shoes on Google" requires:
 DO NOT stop after just navigating - complete the entire workflow!`;
   }
 
-  // Detect WhatsApp context
-  const whatsappState = useWhatsAppStore.getState();
-  const isWaConnected = whatsappState.connectionState.status === 'connected';
-  const isWaEnabled = whatsappState.whatsappEnabled;
+  // Build WhatsApp context note from passed-in parameter (no store dependency)
   let whatsappNote = "";
-
-  if (isWaConnected) {
-    if (isWaEnabled) {
+  if (whatsappContext?.isConnected) {
+    if (whatsappContext.isEnabled) {
       whatsappNote = `\n\n**WHATSAPP MODE ACTIVE**: The user is currently communicating with you directly through WhatsApp! Your responses will be sent straight to their phone. Keep your responses concise, well-formatted for mobile, and use emojis where appropriate. Break long messages into smaller paragraphs.`;
     } else {
       whatsappNote = `\n\n**WHATSAPP CONNECTED**: You have an active connection to the user's WhatsApp. If you are completing a long-running task, you can use the messaging tools to send a notification to the user's phone.`;
