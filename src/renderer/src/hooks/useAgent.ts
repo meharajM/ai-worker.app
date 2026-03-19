@@ -271,7 +271,7 @@ export function useAgent(): UseAgentReturn {
                          * Called by AgentRuntime to update progress.
                          * Always targets `originSessionId`.
                          */
-                        onProgressUpdate: (progress?: number, eta?: number, plan?: unknown) => {
+                        onProgressUpdate: (progress?: number, eta?: number, plan?: any) => {
                             useChatStore.getState().updateSessionProgress(
                                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                                 originSessionId, progress, eta, plan as any

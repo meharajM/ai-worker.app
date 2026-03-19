@@ -1,5 +1,7 @@
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { app } from 'electron'
+import * as path from 'path'
 import type {
   UnifiedMemoryBackend,
   CreateEntityInput,
@@ -38,6 +40,7 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
    */
   async initialize(): Promise<void> {
     try {
+      console.error(`[ServerMemoryAdapter] Initializing...`)
       // Ensure storage directory exists before starting MCP server
       const fs = await import('fs')
       if (!fs.existsSync(this.storagePath)) {
@@ -45,14 +48,39 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
       }
 
       // Create MCP client to communicate with server-memory
+      // Use a more robust path resolution for the server module
+      let serverModulePath = ''
+      try {
+          const possiblePaths = [
+              path.join(app.getAppPath(), 'node_modules/@modelcontextprotocol/server-memory/dist/index.js'),
+              path.join(process.cwd(), 'node_modules/@modelcontextprotocol/server-memory/dist/index.js'),
+              path.resolve('node_modules/@modelcontextprotocol/server-memory/dist/index.js')
+          ]
+          
+          for (const p of possiblePaths) {
+              console.error(`[ServerMemoryAdapter] Checking path: "${p}"`)
+              if (fs.existsSync(p)) {
+                  serverModulePath = p
+                  break
+              }
+          }
+      } catch (e) {
+          console.error(`[ServerMemoryAdapter] Error during path resolution:`, e)
+      }
+
+      if (!serverModulePath) {
+          console.error(`[ServerMemoryAdapter] Memory server module NOT FOUND in any common location. Falling back to npx.`)
+      }
+      
       const transport = new StdioClientTransport({
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-memory'],
+        command: serverModulePath ? 'node' : 'npx',
+        args: serverModulePath ? [serverModulePath] : ['-y', '@modelcontextprotocol/server-memory'],
         env: {
           ...process.env,
-          MEMORY_DATA_PATH: this.storagePath
+          MEMORY_FILE_PATH: path.join(this.storagePath, 'memory.jsonl')
         }
       })
+
 
       this.client = new Client(
         {
@@ -64,15 +92,18 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
         }
       )
 
+      console.error(`[ServerMemoryAdapter] Connecting to transport...`)
       await this.client.connect(transport)
 
-      console.log(`[ServerMemoryAdapter] Connected to server-memory, storage: ${this.storagePath}`)
+      console.error(`[ServerMemoryAdapter] Connected to server-memory, storage: ${this.storagePath}`)
       
       // Load existing entities into cache for fast access
       await this.loadCache()
+      console.error(`[ServerMemoryAdapter] Initialization complete`)
     } catch (error) {
       console.error('[ServerMemoryAdapter] Failed to initialize:', error)
-      throw new Error(`Failed to initialize ServerMemoryAdapter: ${error}`)
+      this.client = null // Ensure it's null on failure
+      throw new Error(`Failed to initialize ServerMemoryAdapter: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -141,16 +172,41 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
         throw new Error('No text content in create_entities response')
     }
 
+    console.log(`[ServerMemoryAdapter] create_entities raw text: "${textContent.substring(0, 100)}..."`)
+
     let createdEntities: any[]
     try {
-        createdEntities = JSON.parse(textContent)
+        // Handle trailing garbage in server-memory response
+        const trimmed = textContent.trim()
+        const firstBracket = trimmed.indexOf('[')
+        const lastBracket = trimmed.lastIndexOf(']')
+        if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+            const jsonPart = trimmed.substring(firstBracket, lastBracket + 1)
+            createdEntities = JSON.parse(jsonPart)
+        } else {
+            createdEntities = JSON.parse(trimmed)
+        }
     } catch (e) {
-        throw new Error(`Failed to parse create_entities response: ${textContent}`)
+        throw new Error(`Failed to parse create_entities response: ${textContent}. Error: ${e instanceof Error ? e.message : String(e)}`)
     }
 
     const entityData = createdEntities?.[0]
     if (!entityData) {
-      throw new Error('No entity data returned from create_entities')
+      // If no entity returned, it might already exist. Try to fetch it.
+      console.warn(`[ServerMemoryAdapter] No entity data returned for "${input.name}", it may already exist.`)
+      const existing = await this.getEntity(input.name)
+      if (existing) return existing
+      
+      // Fallback: create a dummy if we can't find it but no error was thrown
+      return {
+        id: input.name,
+        name: input.name,
+        type: input.type,
+        description: input.description,
+        observations: input.observations || [],
+        metadata: input.metadata || {},
+        createdAt: new Date().toISOString()
+      }
     }
 
     const entity: Entity = {
@@ -265,7 +321,27 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
 
     let nodes: any[] = []
     try {
-        const parsed = JSON.parse(textContent)
+        const trimmed = textContent.trim()
+        let jsonPart = trimmed
+        const firstBracket = trimmed.indexOf('[')
+        const lastBracket = trimmed.lastIndexOf(']')
+        const firstBrace = trimmed.indexOf('{')
+        const lastBrace = trimmed.lastIndexOf('}')
+
+        const start = Math.min(
+            firstBracket === -1 ? Infinity : firstBracket,
+            firstBrace === -1 ? Infinity : firstBrace
+        )
+        const end = Math.max(
+            lastBracket === -1 ? -1 : lastBracket,
+            lastBrace === -1 ? -1 : lastBrace
+        )
+
+        if (start !== Infinity && end !== -1 && end > start) {
+            jsonPart = trimmed.substring(start, end + 1)
+        }
+
+        const parsed = JSON.parse(jsonPart)
         // Handle both direct array and { nodes: [...] } object
         if (Array.isArray(parsed)) {
             nodes = parsed

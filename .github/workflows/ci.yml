@@ -38,8 +38,8 @@ jobs:
       - name: Build for Testing
         run: npm run build
       
-      - name: Run E2E Mock Tests
-        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" npm run test:mock
+      - name: Run All E2E Tests
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" npm run test:e2e
       
       - name: Upload Test Artifacts
         if: failure()

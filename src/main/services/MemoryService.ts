@@ -41,7 +41,7 @@ export interface Entity {
 }
 
 /**
- * Knowledge Graph Relation (Legacy SQLite format)
+ * Knowledge Graph Relationship (Legacy SQLite format)
  */
 export interface Relation {
     id: string
@@ -173,23 +173,6 @@ const MEMORY_TOOLS: ToolSchema[] = [
 
 /**
  * MemoryService - Knowledge Graph with Unified Backend
- * 
- * ARCHITECTURE:
- * - Uses UnifiedMemoryBackend interface for swappable backends
- * - Default: ServerMemoryAdapter (@modelcontextprotocol/server-memory)
- * - Future: MementoMCPAdapter (Neo4j) for scaling
- * - Privacy: PII/Secret detection before storage
- * - Metrics: Auto-track usage for migration suggestions
- * 
- * MIGRATION PATH:
- * - Existing SQLite data → Export to JSON
- * - Import to ServerMemoryAdapter
- * - When scaling needed → Migrate to MementoMCP
- * 
- * Usage:
- *   const memory = MemoryService.getInstance()
- *   await memory.initialize()
- *   const entity = await memory.createEntity('John Doe', 'person', 'Engineer')
  */
 export class MemoryService {
     private static instance: MemoryService
@@ -206,6 +189,7 @@ export class MemoryService {
     private legacyDbPath: string
 
     private initialized = false
+    private initializationPromise: Promise<void> | null = null
 
     private constructor() {
         this.legacyDbPath = path.join(app.getPath('userData'), 'memory.db')
@@ -229,31 +213,34 @@ export class MemoryService {
 
     /**
      * Initialize the memory system
-     * - Loads backend from config (server-memory or memento-mcp)
-     * - Migrates legacy SQLite data if needed
-     * - Sets up privacy checks and metrics
      */
     async initialize(): Promise<void> {
         if (this.initialized) return
+        if (this.initializationPromise) return this.initializationPromise
 
-        try {
-            console.log('[MemoryService] Initializing with UnifiedMemoryBackend architecture...')
+        this.initializationPromise = (async () => {
+            try {
+                console.log('[MemoryService] Initializing with UnifiedMemoryBackend architecture...')
 
-            // Create backend from factory
-            this.backend = MemoryServiceFactory.create()
-            await this.backend.initialize()
+                // Create backend from factory
+                this.backend = MemoryServiceFactory.create()
+                await this.backend.initialize()
 
-            console.log(`[MemoryService] Backend initialized: ${MemoryServiceFactory.getCurrentBackend()}`)
+                console.log(`[MemoryService] Backend initialized: ${MemoryServiceFactory.getCurrentBackend()}`)
 
-            // Check if legacy SQLite data exists and needs migration
-            await this.migrateLegacyDataIfNeeded()
+                // Check if legacy SQLite data exists and needs migration
+                await this.migrateLegacyDataIfNeeded()
 
-            this.initialized = true
-            console.log('[MemoryService] Initialization complete')
-        } catch (error) {
-            console.error('[MemoryService] Failed to initialize:', error)
-            throw error
-        }
+                this.initialized = true
+                console.log('[MemoryService] Initialization complete')
+            } catch (error) {
+                console.error('[MemoryService] Failed to initialize:', error)
+                this.initializationPromise = null
+                throw error
+            }
+        })()
+
+        return this.initializationPromise
     }
 
     /**
@@ -365,7 +352,7 @@ export class MemoryService {
         description: string = '',
         metadata: Record<string, any> = {}
     ): Promise<Entity> {
-        if (!this.backend) await this.initialize()
+        await this.initialize()
 
         // Ensure string inputs
         let safeDesc = description || ''
@@ -416,8 +403,7 @@ export class MemoryService {
      * Get entity by ID
      */
     async getEntity(id: string): Promise<Entity | undefined> {
-        if (!this.backend) await this.initialize()
-
+        await this.initialize()
         const backendEntity = await this.backend!.getEntity(id)
         return backendEntity ? this.convertToLegacyEntity(backendEntity) : undefined
     }
@@ -426,15 +412,11 @@ export class MemoryService {
      * Search entities with metrics tracking
      */
     async search(query: string, limit: number = 10): Promise<Entity[]> {
-        if (!this.backend) await this.initialize()
-
+        await this.initialize()
         const startTime = Date.now()
-
         const results = await this.backend!.search(query, { limit })
-
         const latency = Date.now() - startTime
         this.metricsCollector.recordLatency(latency)
-
         return results.map(e => this.convertToLegacyEntity(e))
     }
 
@@ -452,8 +434,7 @@ export class MemoryService {
         description: string = '',
         weight: number = 1.0
     ): Promise<Relation> {
-        if (!this.backend) await this.initialize()
-
+        await this.initialize()
         const relation = await this.backend!.createRelation({
             fromEntityId: fromId,
             toEntityId: toId,
@@ -490,7 +471,7 @@ export class MemoryService {
      */
     async callTool(name: string, args: any): Promise<ToolCallResponse> {
         try {
-            if (!this.backend) await this.initialize()
+            await this.initialize()
 
             switch (name) {
                 case 'memory_create_entity': {
@@ -523,7 +504,7 @@ export class MemoryService {
                     // Check if updateEntity exists on backend (it should via UnifiedMemoryBackend)
                     if (this.backend && 'updateEntity' in this.backend) {
                         try {
-                            const updated = await this.backend.updateEntity(args.id, {
+                            const updated = await (this.backend as any).updateEntity(args.id, {
                                 description: args.description,
                                 observations: args.observation ? [args.observation] : undefined,
                                 metadata: args.metadata
@@ -559,7 +540,7 @@ export class MemoryService {
      * Get memory statistics
      */
     async getStats() {
-        if (!this.backend) await this.initialize()
+        await this.initialize()
         return await this.backend!.getStats()
     }
 
@@ -567,7 +548,7 @@ export class MemoryService {
      * Export all data
      */
     async exportAll(): Promise<ExportData> {
-        if (!this.backend) await this.initialize()
+        await this.initialize()
         return await this.backend!.exportAll()
     }
 
@@ -575,7 +556,7 @@ export class MemoryService {
      * Trigger migration to Memento-MCP
      */
     async migrateToMemento() {
-        if (!this.backend) await this.initialize()
+        await this.initialize()
         return await this.migrationService.migrateToMemento(this.backend!)
     }
 
@@ -583,7 +564,7 @@ export class MemoryService {
      * Check if migration is suggested based on current metrics
      */
     async shouldSuggestMigration(): Promise<boolean> {
-        if (!this.backend) await this.initialize()
+        await this.initialize()
         return await this.metricsCollector.shouldSuggestMigration()
     }
 

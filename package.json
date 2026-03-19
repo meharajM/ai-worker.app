@@ -16,7 +16,7 @@
         "typecheck": "tsc --noEmit",
         "lint": "eslint src/",
         "lint:fix": "eslint src/ --fix",
-        "test:e2e": "node tests/integration_test.cjs && node tests/e2e_ui_mocked.cjs && node tests/speech_e2e.cjs",
+        "test:e2e": "node tests/attachment_handling.test.cjs && node tests/integration_test.cjs && node tests/e2e_ui_mocked.cjs && node tests/speech_e2e.cjs && node tests/playwright_tools_test.cjs && node tests/run_memory_verification.cjs",
         "test:mock": "node tests/e2e_ui_mocked.cjs",
         "test:playwright": "node tests/playwright_tools_test.cjs",
         "test:speech": "node tests/speech_e2e.cjs",
