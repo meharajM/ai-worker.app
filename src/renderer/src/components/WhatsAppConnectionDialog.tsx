@@ -147,6 +147,7 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
             const result = await electron.whatsapp.sendMessage(normalizedPhone, confirmationMessage)
             
             if (result.success) {
+                setWhatsAppEnabled(true)
                 setStep('connected')
             } else {
                 setErrorMessage(result.error || 'Failed to send confirmation message')
