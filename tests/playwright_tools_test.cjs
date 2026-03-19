@@ -393,7 +393,8 @@ const os = require('os');
         // --- 15. Final Screenshot ---
         console.log('\n--- 15. Final Screenshot ---');
         const shotRes = await callTool('screenshot', { fullPage: true });
-        if (!shotRes.text.includes('"type":"image"') || !shotRes.text.includes('"data"')) throw new Error('screenshot return missing image data');
+        if (!shotRes.text.includes('"type": "image"') && !shotRes.text.includes('"type":"image"')) throw new Error('screenshot return missing image type');
+        if (!shotRes.text.includes('"data"')) throw new Error('screenshot return missing image data');
         console.log('✅ screenshot returns image data');
 
         console.log('\n🎉 COMPREHENSIVE TOOLS VALIDATION PASSED (36/36 tools covered)');

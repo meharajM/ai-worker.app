@@ -234,17 +234,20 @@ export function registerMcpHandlers(): void {
         if (inProcessPlaywrightConnections.has(id)) {
             const res = await PlaywrightService.getInstance().callTool(toolName, args)
             if (res.error) return { result: null, error: res.error }
-            return { result: { content: [{ type: 'text', text: String(res.result) }] } }
+            const text = typeof res.result === 'string' ? res.result : JSON.stringify(res.result, null, 2)
+            return { result: { content: [{ type: 'text', text }] } }
         }
         if (inProcessMemoryConnections.has(id)) {
             const res = await MemoryService.getInstance().callTool(toolName, args)
             if (res.error) return { result: null, error: res.error }
-            return { result: { content: [{ type: 'text', text: String(res.result) }] } }
+            const text = typeof res.result === 'string' ? res.result : JSON.stringify(res.result, null, 2)
+            return { result: { content: [{ type: 'text', text }] } }
         }
         if (inProcessFilesystemConnections.has(id)) {
             const res = await FileSystemService.getInstance().callTool(toolName, args)
             if (res.error) return { result: null, error: res.error }
-            return { result: { content: [{ type: 'text', text: String(res.result) }] } }
+            const text = typeof res.result === 'string' ? res.result : JSON.stringify(res.result, null, 2)
+            return { result: { content: [{ type: 'text', text }] } }
         }
 
         const client = activeConnections.get(id)
