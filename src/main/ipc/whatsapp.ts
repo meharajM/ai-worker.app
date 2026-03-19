@@ -75,6 +75,25 @@ export function registerWhatsAppHandlers(): void {
         return whatsappService.sendPresence(to.trim(), state as 'unavailable' | 'available' | 'composing' | 'recording' | 'paused')
     })
 
+    ipcMain.handle('whatsapp:send-media-message', async (_event, to: unknown, filePath: unknown, caption: unknown, type: unknown) => {
+        if (typeof to !== 'string' || to.trim() === '') {
+            throw new Error('Invalid "to" argument')
+        }
+        if (typeof filePath !== 'string' || filePath.trim() === '') {
+            throw new Error('Invalid "filePath" argument')
+        }
+        
+        const validTypes = ['image', 'video', 'audio', 'document']
+        const mediaType = typeof type === 'string' && validTypes.includes(type) ? type : 'image'
+        
+        return whatsappService.sendMediaMessage(
+            to.trim(),
+            filePath.trim(),
+            typeof caption === 'string' ? caption.trim() : undefined,
+            mediaType as any
+        )
+    })
+
     ipcMain.handle('whatsapp:set-target-number', async (_event, phoneNumber: unknown) => {
         if (typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
             throw new Error('Invalid phone number argument')

@@ -7,6 +7,29 @@ function extractTextForLegacyProviders(content: string | LLMContentPart[]): stri
 }
 export { extractTextForLegacyProviders };
 
+/**
+ * Converts a file URL (file://) to a Base64 data URI using Electron's FS bridge.
+ * Essential for multimodal/vision LLM requests.
+ */
+export async function fileUrlToBase64(fileUrl: string): Promise<string | null> {
+    if (!fileUrl.startsWith('file://')) return null;
+
+    try {
+        const electron = (await import("../electron")).default;
+        const filePath = fileUrl.replace('file://', '');
+        
+        if (electron.fs?.readFileBase64) {
+           const result = await electron.fs.readFileBase64(filePath);
+           if (result.success && result.content) {
+               return result.content; 
+           }
+        }
+    } catch (err) {
+        console.error('[LLM Utils] Base64 conversion failed:', err);
+    }
+    return null;
+}
+
 export function ensureRecord(input: unknown): Record<string, unknown> {
   if (input === null || input === undefined) return {};
   if (typeof input === 'object' && !Array.isArray(input)) return input as Record<string, unknown>;

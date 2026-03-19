@@ -35,8 +35,8 @@
 import { useCallback, useEffect } from "react";
 import { useChatStore } from "../stores/chatStore";
 import { useSettingsStore } from "../stores/settingsStore";
-import { type LLMMessage } from "../lib/llm";
-import { resolveWhatsAppTarget, setWhatsAppTyping, setWhatsAppPaused, getWhatsAppSystemPrompt, sendWhatsAppResponse } from "../lib/whatsapp-integration";
+import { type LLMMessage, type LLMContentPart } from "../lib/types";
+import { resolveWhatsAppTarget, setWhatsAppTyping, setWhatsAppPaused, getWhatsAppSystemPrompt, sendWhatsAppResponse, resolveWhatsAppMessageToLLM } from "../lib/whatsapp-integration";
 
 /**
  * State returned by `useAgent`.
@@ -52,7 +52,7 @@ export interface UseAgentReturn {
      * @param attachments - Optional file attachments (Electron exposes `.path`).
      * @param isHeadless - If true, suppresses browser UI during task execution.
      */
-    handleSubmit: (content: string, attachments?: File[], isHeadless?: boolean) => Promise<void>;
+    handleSubmit: (content: string, attachments?: File[], isHeadless?: boolean, multimodalWhatsAppMessage?: any) => Promise<void>;
 }
 
 /**
@@ -84,14 +84,18 @@ export function useAgent(): UseAgentReturn {
      * 10. Always: stop per-session processing state, clear session-level progress
      */
     const handleSubmit = useCallback(
-        async (content: string, attachments?: File[], isHeadless?: boolean) => {
-            if (!content.trim() && (!attachments || attachments.length === 0)) return;
+        async (content: string, attachments?: File[], isHeadless?: boolean, multimodalWhatsAppMessage?: any) => {
+            if (!content.trim() && (!attachments || attachments.length === 0) && !multimodalWhatsAppMessage) return;
 
             const { addMessage, startProcessing } = useChatStore.getState();
 
-            // Map File objects to plain metadata. Electron natively hides `.path` on
-            // files dragging into the window due to context isolation. We use the
-            // explicitly exposed webUtils wrapper to retrieve the reliable OS path.
+            // 1. Resolve starting message shape
+            let userLLMMessage: LLMMessage | null = null;
+            if (multimodalWhatsAppMessage) {
+                userLLMMessage = await resolveWhatsAppMessageToLLM(multimodalWhatsAppMessage);
+            }
+
+            // 2. Map Attachment Metadata (for local browser uploads)
             const attachmentData = attachments?.map((file) => {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const nativePath = (window as any).electron?.utils?.getPathForFile(file)
@@ -106,8 +110,11 @@ export function useAgent(): UseAgentReturn {
 
             // Add the user's message to the store immediately so it appears in the
             // chat UI before the agent starts processing.
-            // This also auto-creates a session and sets activeSessionId if none exists!
-            addMessage({ role: "user", content, attachments: attachmentData });
+            addMessage({ 
+                role: "user", 
+                content: userLLMMessage ? (typeof userLLMMessage.content === 'string' ? userLLMMessage.content : "[Media Message]") : content, 
+                attachments: userLLMMessage?.attachments ?? attachmentData 
+            });
 
             // ── CRITICAL: Capture originSessionId before any await ─────────────
             // This is determined once at submit time and is used for ALL callbacks,
@@ -151,11 +158,43 @@ export function useAgent(): UseAgentReturn {
                     const msg: LLMMessage = {
                         role: m.role as "user" | "assistant" | "system",
                         content: m.content,
-                        // Preserve Gemini 2.0 thought signatures for tool-call correctness.
-                        // Without this, Gemini 400s with "missing thought_signature".
                         ...(m.thought ? { thought: m.thought } : {}),
                         ...(m.thought_signature ? { thought_signature: m.thought_signature } : {}),
                     };
+
+                    // Handle Multimodal Recovery for WhatsApp (re-link media for the LLM)
+                    if (m.attachments && m.attachments.length > 0 && m.role === 'user') {
+                        const parts: LLMContentPart[] = [];
+                        
+                        // Add media parts first (consistent with submit flow)
+                        for (const att of m.attachments) {
+                            if (att.type === 'image') {
+                                parts.push({ 
+                                    type: 'image_url', 
+                                    image_url: { url: `file://${att.path}` } 
+                                });
+                            } else if (att.type === 'audio') {
+                                parts.push({ 
+                                    type: 'text', 
+                                    text: `[User sent an audio message/voice note: file://${att.path}]` 
+                                });
+                            } else if (att.type === 'document' || att.type === 'video') {
+                                parts.push({ 
+                                    type: 'text', 
+                                    text: `[User sent a ${att.type}: file://${att.path}]` 
+                                });
+                            }
+                        }
+
+                        // Add original text content if present
+                        if (m.content && m.content !== "[Media Message]") {
+                             parts.push({ type: 'text', text: m.content });
+                        }
+
+                        if (parts.length > 0) {
+                            msg.content = parts;
+                        }
+                    }
 
                     if (m.toolCalls) {
                         msg.tool_calls = m.toolCalls.map((tc) => ({
@@ -167,9 +206,6 @@ export function useAgent(): UseAgentReturn {
 
                     reconstructedHistory.push(msg);
 
-                    // WHY synthetic tool messages: The LLM API requires that every
-                    // tool_call in an assistant message is followed by a corresponding
-                    // tool result message.
                     if (m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0) {
                         for (const tc of m.toolCalls) {
                             if (tc.result !== undefined && tc.result !== null) {
@@ -380,11 +416,12 @@ export function useAgent(): UseAgentReturn {
         };
 
         const handleAppSubmit = (e: Event) => {
-            const customEvent = e as CustomEvent<{ content: string }>;
-            const { activeSessionId, isSessionProcessing, sessions, createSession } = useChatStore.getState();
+            const customEvent = e as CustomEvent<{ content: string, whatsappMessage?: any }>;
+            const { activeSessionId, createSession } = useChatStore.getState();
             const content = customEvent.detail?.content;
+            const whatsappMessage = customEvent.detail?.whatsappMessage;
             
-            if (!content) return;
+            if (!content && !whatsappMessage) return;
             
             // If no active session, create one
             let sessionId = activeSessionId;
@@ -395,7 +432,7 @@ export function useAgent(): UseAgentReturn {
             
             // If session is processing, we still want to queue the message
             // by calling handleSubmit - it will add the message and process
-            handleSubmit(content);
+            handleSubmit(content, undefined, false, whatsappMessage);
         };
 
         window.addEventListener("agent-action", handleAgentAction as EventListener);

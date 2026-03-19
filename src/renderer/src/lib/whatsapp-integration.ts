@@ -1,6 +1,6 @@
 import { useWhatsAppStore } from '../stores/whatsappStore';
 import { useChatStore } from '../stores/chatStore';
-import { type LLMMessage } from './llm';
+import { type LLMMessage, type LLMContentPart } from './types';
 import electron from './electron';
 
 /**
@@ -51,11 +51,57 @@ export const resolveWhatsAppTarget = (text: string): string | null => {
 /**
  * Returns the mobile-formatting system prompt to be invisibly injected 
  * into the agent's context whenever it is handling a WhatsApp message.
+ * Optimized for multimodal interactions.
  */
 export const getWhatsAppSystemPrompt = (): LLMMessage => ({
     role: "system",
-    content: "WHATSAPP MODE ACTIVE: Keep responses concise, well-formatted for mobile screens, and use emojis."
+    content: "WHATSAPP MODE ACTIVE: Keep responses concise, well-formatted for mobile screens, and use emojis. You may receive images, audio, or documents; acknowledge them directly if they are relevant to the user request."
 });
+
+/**
+ * Resolves a raw WhatsApp message into a structured LLMMessage,
+ * handling multimodal content (images, audio, docs) by fetching
+ * actual file content or creating descriptive proxies.
+ */
+export const resolveWhatsAppMessageToLLM = async (waMsg: any): Promise<LLMMessage> => {
+    const parts: LLMContentPart[] = [];
+    
+    // 1. Handle Multimodal Attachments (Priority for Vision models)
+    if (waMsg.mediaUrl) {
+        if (waMsg.type === 'image') {
+            parts.push({ 
+                type: 'image_url', 
+                image_url: { url: waMsg.mediaUrl } 
+            });
+        } else if (waMsg.type === 'audio') {
+            parts.push({ 
+                type: 'text', 
+                text: `[User sent an audio message/voice note: ${waMsg.mediaUrl}]` 
+            });
+        } else if (waMsg.type === 'document' || waMsg.type === 'video') {
+            parts.push({ 
+                type: 'text', 
+                text: `[User sent a ${waMsg.type}: ${waMsg.mediaUrl}]` 
+            });
+        }
+    }
+
+    // 2. Handle Text / Caption (Append at the end)
+    if (waMsg.content && waMsg.content !== '[Media Message]') {
+        parts.push({ type: 'text', text: waMsg.content });
+    }
+
+    return {
+        role: "user",
+        // Fallback to plain string if it's just one text part, otherwise use multimodal array
+        content: parts.length === 1 && parts[0].type === 'text' ? parts[0].text : parts,
+        attachments: waMsg.mediaUrl ? [{
+            name: waMsg.caption || `whatsapp_${waMsg.type}_${Date.now()}`,
+            path: waMsg.mediaUrl.replace('file://', ''),
+            type: waMsg.type
+        }] : undefined
+    };
+};
 
 /**
  * Convenience methods for presence updates.
