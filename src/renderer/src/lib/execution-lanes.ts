@@ -9,6 +9,7 @@ export const LANE_TIMEOUTS = {
     BROWSER_ACTION: 30_000,       // 30s  - click, type, select, hover, etc.
     BROWSER_SNAPSHOT: 15_000,     // 15s  - screenshot, snapshot (fast)
     FILE_SYSTEM: 30_000,          // 30s  - file read/write
+    EXCEL_OPERATION: 90_000,      // 90s  - Excel tools via uvx Python process
 } as const;
 
 /**
@@ -240,6 +241,10 @@ export class LaneManager {
      * default.
      */
     getTimeoutForTool(toolName: string): number {
+        if (toolName.startsWith('excel_') || toolName.includes('workbook') || toolName.includes('worksheet')) {
+            return LANE_TIMEOUTS.EXCEL_OPERATION;
+        }
+
         // Navigation tools – network-dependent, need more time
         const NAVIGATION_TOOLS = ['navigate', 'browser_navigate', 'playwright_navigate', 'goto'];
         if (NAVIGATION_TOOLS.some(n => toolName.includes(n))) {
