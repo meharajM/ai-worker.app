@@ -258,6 +258,11 @@ export class FileSystemService {
             // Cleanup
             await fs.rm(change.shadowPath)
             this.pendingChanges.delete(changeId)
+            // Remove from session tracking to prevent stale polling results
+            for (const [, ids] of this.sessionChanges.entries()) {
+                const idx = ids.indexOf(changeId)
+                if (idx !== -1) { ids.splice(idx, 1); break }
+            }
 
             console.log(`[FileSystemService] ✓ Committed ${change.type} to ${change.originalPath}`)
         } catch (error) {
@@ -277,6 +282,11 @@ export class FileSystemService {
         try {
             await fs.rm(change.shadowPath)
             this.pendingChanges.delete(changeId)
+            // Remove from session tracking to prevent stale polling results
+            for (const [, ids] of this.sessionChanges.entries()) {
+                const idx = ids.indexOf(changeId)
+                if (idx !== -1) { ids.splice(idx, 1); break }
+            }
             console.log(`[FileSystemService] ✗ Discarded ${change.type} for ${change.originalPath}`)
         } catch (error) {
             console.error(`[FileSystemService] Failed to discard ${changeId}:`, error)
