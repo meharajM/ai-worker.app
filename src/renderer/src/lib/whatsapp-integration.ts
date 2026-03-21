@@ -1,6 +1,7 @@
 import { useWhatsAppStore } from '../stores/whatsappStore';
 import { useChatStore } from '../stores/chatStore';
 import { type LLMMessage, type LLMContentPart } from './types';
+import { whatsappTypeToMediaType, buildMediaLLMParts } from './media-utils';
 import electron from './electron';
 
 /**
@@ -64,30 +65,16 @@ export const getWhatsAppSystemPrompt = (): LLMMessage => ({
  * actual file content or creating descriptive proxies.
  */
 export const resolveWhatsAppMessageToLLM = async (waMsg: any): Promise<LLMMessage> => {
-    const parts: LLMContentPart[] = [];
+    let parts: LLMContentPart[] = [];
     
     // 1. Handle Multimodal Attachments (Priority for Vision models)
     if (waMsg.mediaUrl) {
-        if (waMsg.type === 'image') {
-            parts.push({ 
-                type: 'image_url', 
-                image_url: { url: waMsg.mediaUrl } 
-            });
-        } else if (waMsg.type === 'audio') {
-            parts.push({ 
-                type: 'text', 
-                text: `[User sent an audio message/voice note: ${waMsg.mediaUrl}]` 
-            });
-        } else if (waMsg.type === 'document' || waMsg.type === 'video') {
-            parts.push({ 
-                type: 'text', 
-                text: `[User sent a ${waMsg.type}: ${waMsg.mediaUrl}]` 
-            });
-        }
-    }
-
-    // 2. Handle Text / Caption (Append at the end)
-    if (waMsg.content && waMsg.content !== '[Media Message]') {
+        const localPath = waMsg.mediaUrl.replace('file://', '');
+        const mediaType = whatsappTypeToMediaType(waMsg.type, localPath);
+        
+        // Use global media util to construct standard payload
+        parts = buildMediaLLMParts(localPath, mediaType, waMsg.content && waMsg.content !== '[Media Message]' ? waMsg.content : undefined);
+    } else if (waMsg.content && waMsg.content !== '[Media Message]') {
         parts.push({ type: 'text', text: waMsg.content });
     }
 

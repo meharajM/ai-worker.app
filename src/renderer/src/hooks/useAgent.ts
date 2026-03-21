@@ -35,8 +35,9 @@
 import { useCallback, useEffect } from "react";
 import { useChatStore } from "../stores/chatStore";
 import { useSettingsStore } from "../stores/settingsStore";
-import { type LLMMessage, type LLMContentPart } from "../lib/types";
+import { type LLMMessage } from "../lib/types";
 import { resolveWhatsAppTarget, setWhatsAppTyping, setWhatsAppPaused, getWhatsAppSystemPrompt, sendWhatsAppResponse, resolveWhatsAppMessageToLLM } from "../lib/whatsapp-integration";
+import { buildAttachmentLLMParts } from "../lib/media-utils";
 
 /**
  * State returned by `useAgent`.
@@ -164,36 +165,7 @@ export function useAgent(): UseAgentReturn {
 
                     // Handle Multimodal Recovery for WhatsApp (re-link media for the LLM)
                     if (m.attachments && m.attachments.length > 0 && m.role === 'user') {
-                        const parts: LLMContentPart[] = [];
-                        
-                        // Add media parts first (consistent with submit flow)
-                        for (const att of m.attachments) {
-                            if (att.type === 'image') {
-                                parts.push({ 
-                                    type: 'image_url', 
-                                    image_url: { url: `file://${att.path}` } 
-                                });
-                            } else if (att.type === 'audio') {
-                                parts.push({ 
-                                    type: 'text', 
-                                    text: `[User sent an audio message/voice note: file://${att.path}]` 
-                                });
-                            } else if (att.type === 'document' || att.type === 'video') {
-                                parts.push({ 
-                                    type: 'text', 
-                                    text: `[User sent a ${att.type}: file://${att.path}]` 
-                                });
-                            }
-                        }
-
-                        // Add original text content if present
-                        if (m.content && m.content !== "[Media Message]") {
-                             parts.push({ type: 'text', text: m.content });
-                        }
-
-                        if (parts.length > 0) {
-                            msg.content = parts;
-                        }
+                        msg.content = buildAttachmentLLMParts(m.attachments, m.content);
                     }
 
                     if (m.toolCalls) {

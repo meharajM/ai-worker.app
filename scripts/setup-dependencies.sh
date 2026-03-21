@@ -69,6 +69,14 @@ install_mac() {
     else
         echo "✅ ffmpeg already installed"
     fi
+
+    # Install Playwright browsers if missing
+    echo "📦 Ensuring Playwright browser binaries are installed..."
+    npx playwright install
+
+    # Pre-cache MarkItDown with ALL extras (pdf, docx, xlsx, pptx, audio)
+    echo "📦 Pre-installing markitdown with all extras (pdf/docx/audio support)..."
+    uvx --with markitdown[all] markitdown-mcp --help > /dev/null 2>&1 || true
 }
 
 # Function to install on Linux
@@ -133,6 +141,14 @@ install_linux() {
     else
         echo "✅ ffmpeg already installed"
     fi
+
+    # Install Playwright browsers if missing
+    echo "📦 Ensuring Playwright browser binaries and OS dependencies are installed..."
+    npx playwright install --with-deps
+
+    # Pre-cache MarkItDown with ALL extras (pdf, docx, xlsx, pptx, audio)
+    echo "📦 Pre-installing markitdown with all extras (pdf/docx/audio support)..."
+    uvx --with markitdown[all] markitdown-mcp --help > /dev/null 2>&1 || true
 }
 
 # Main installation logic

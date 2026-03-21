@@ -68,7 +68,7 @@ export interface WhatsAppMessage {
     to: string
     content: string
     timestamp: number
-    type: 'text' | 'image' | 'video' | 'document' | 'audio'
+    type: 'text' | 'image' | 'video' | 'document' | 'audio' | 'spreadsheet'
     isFromMe: boolean
     mediaUrl?: string
     caption?: string
@@ -586,7 +586,7 @@ export class WhatsAppService extends EventEmitter {
         to: string,
         filePath: string,
         caption?: string,
-        type: 'image' | 'video' | 'audio' | 'document' = 'image'
+        type: 'image' | 'video' | 'audio' | 'document' | 'spreadsheet' = 'image'
     ): Promise<{ success: boolean; error?: string }> {
         if (!this.socket || this.connectionState.status !== 'connected') {
             return { success: false, error: 'WhatsApp not connected' }
@@ -612,7 +612,7 @@ export class WhatsAppService extends EventEmitter {
             } else if (type === 'audio') {
                 // ptt: true sends it as a "Voice Note"
                 messageContent = { audio: buffer, ptt: true }
-            } else if (type === 'document') {
+            } else if (type === 'document' || type === 'spreadsheet') {
                 const fileName = path.basename(filePath)
                 messageContent = { document: buffer, fileName, caption, mimetype: 'application/octet-stream' }
             }
@@ -694,15 +694,22 @@ export class WhatsAppService extends EventEmitter {
                 textContent = `[User shared a live location: Lat ${msg.liveLocationMessage.degreesLatitude}, Long ${msg.liveLocationMessage.degreesLongitude}]`
             }
 
+            const docFileName = msg.documentMessage?.fileName || '';
+            const docExt = docFileName.split('.').pop()?.toLowerCase() || '';
+            const SPREADSHEET_EXTS = new Set(['xlsx', 'xls', 'csv', 'ods', 'tsv', 'numbers']);
+            const isSpreadsheet = msg.documentMessage && SPREADSHEET_EXTS.has(docExt);
+
             const type: WhatsAppMessage['type'] = msg.imageMessage
                 ? 'image'
                 : msg.videoMessage
                     ? 'video'
-                    : msg.documentMessage
-                        ? 'document'
-                        : msg.audioMessage
-                            ? 'audio'
-                            : 'text'
+                    : isSpreadsheet
+                        ? 'spreadsheet'
+                        : msg.documentMessage
+                            ? 'document'
+                            : msg.audioMessage
+                                ? 'audio'
+                                : 'text'
 
             let mediaUrl: string | undefined = undefined;
 
@@ -725,9 +732,27 @@ export class WhatsAppService extends EventEmitter {
                         else if (msg.videoMessage) ext = 'mp4';
                         else if (msg.audioMessage) ext = 'ogg';
                         else if (msg.documentMessage) ext = msg.documentMessage.fileName?.split('.').pop() || 'bin';
-
-                        const tempPath = path.join(app.getPath('temp'), `wa_media_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`);
+                        let tempPath = path.join(app.getPath('temp'), `wa_media_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`);
                         fs.writeFileSync(tempPath, buffer);
+
+                        // MarkItDown explicitly supports .mp3 and .wav, but often ignores .ogg directly.
+                        if (ext === 'ogg') {
+                            try {
+                                const { execSync } = require('child_process');
+                                const mp3Path = tempPath.replace('.ogg', '.mp3');
+                                const envPath = `${process.env.PATH || ''}:/usr/local/bin:/opt/homebrew/bin:${process.env.HOME || ''}/.local/bin`;
+                                // Synchronous execution since these files are very small audio clips (a few seconds/KBs)
+                                execSync(`ffmpeg -y -i "${tempPath}" "${mp3Path}"`, { 
+                                    env: { ...process.env, PATH: envPath },
+                                    stdio: 'ignore' 
+                                });
+                                try { fs.unlinkSync(tempPath); } catch { /* ignore */ }
+                                tempPath = mp3Path;
+                            } catch (convErr) {
+                                console.error('[WhatsAppService] MP3 conversion failed, attempting to pass OGG:', convErr);
+                            }
+                        }
+
                         mediaUrl = `file://${tempPath}`;
                         console.log(`[WhatsAppService] Successfully saved ${type} to ${tempPath}`);
                     }
