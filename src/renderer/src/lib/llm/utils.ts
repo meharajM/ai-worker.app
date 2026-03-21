@@ -120,6 +120,26 @@ export // Parse tool calls from JSON in response content
           arguments: ensureRecord(params)
         }];
       }
+
+      // Plan+Commands Format: { "analysis": "...", "plan": "...", "commands": [{"type": "tool_name", ...args}] }
+      // Some models (e.g. Ollama-hosted) output this planning blob when in JSON fallback mode.
+      // Without handling it here the raw JSON leaks to the user as a chat bubble.
+      if (parsed.commands && Array.isArray(parsed.commands) && parsed.commands.length > 0) {
+        console.log('[LLM] Identified Plan+Commands JSON Format. Recovering tool calls from commands array.');
+        const calls = parsed.commands
+          .filter((cmd: unknown) => typeof cmd === 'object' && cmd !== null && typeof (cmd as Record<string, unknown>).type === 'string')
+          .map((cmd: Record<string, unknown>, idx: number) => {
+            const { type, ...args } = cmd;
+            const toolName = type as string;
+            console.log(`[LLM] Recovered command as tool call: ${toolName}`, args);
+            return {
+              id: `cmd_call_${Date.now()}_${idx}`,
+              name: toolName,
+              arguments: ensureRecord(args),
+            };
+          });
+        if (calls.length > 0) return calls;
+      }
     }
   } catch (error) {
     // Failed to parse, return undefined

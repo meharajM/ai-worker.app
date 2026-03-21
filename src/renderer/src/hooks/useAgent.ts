@@ -137,6 +137,12 @@ export function useAgent(): UseAgentReturn {
                 openrouterModel: settings.openrouterModel,
             };
 
+            // Resolve the WhatsApp target once — shared by the try block (typing/delivery)
+            // and the finally block (paused presence). Resolving it twice risks a race
+            // condition if the user disconnects mid-run (the finally call would return null,
+            // leaving the typing indicator stuck on the personal phone).
+            const targetJid = resolveWhatsAppTarget(content);
+
             try {
                 // ── Step 1: Reconstruct LLM message history ────────────────────────
                 // WHY getState() here: We need the freshest messages AFTER addMessage()
@@ -192,7 +198,6 @@ export function useAgent(): UseAgentReturn {
                 // ── Step 3: Dynamically import AgentRuntime ────────────────────────
                 const { AgentRuntime } = await import("../lib/agent-runtime");
 
-                const targetJid = resolveWhatsAppTarget(content);
                 if (targetJid) {
                     console.log(`[useAgent] WhatsApp flow detected/enabled. JID: ${targetJid}`);
                     setWhatsAppTyping(targetJid);
@@ -324,9 +329,9 @@ export function useAgent(): UseAgentReturn {
                     content: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
                 });
             } finally {
-                // Clear the composing state if this was a WhatsApp message
-                const targetJid = resolveWhatsAppTarget(content);
-
+                // Clear the composing state if this was a WhatsApp message.
+                // Uses the same targetJid captured before the try block — safe even if
+                // the user disconnects mid-run (no second resolver call).
                 if (targetJid) {
                     setWhatsAppPaused(targetJid);
                 }
@@ -381,7 +386,7 @@ export function useAgent(): UseAgentReturn {
 
         const handleAppSubmit = (e: Event) => {
             const customEvent = e as CustomEvent<{ content: string }>;
-            const { activeSessionId, isSessionProcessing, sessions, createSession } = useChatStore.getState();
+            const { activeSessionId, createSession } = useChatStore.getState();
             const content = customEvent.detail?.content;
             
             if (!content) return;
