@@ -153,6 +153,7 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
                     error: null,
                     phoneNumber: null,
                     workerNumber: null,
+                    handshakeStatus: 'idle',
                 })
             } else {
                 setStep('idle')
@@ -163,11 +164,16 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
         }
     }, [setConnectionState, setTargetPhoneNumber, setWhatsAppEnabled])
 
-    const handleClose = useCallback(() => {
-        if (step !== 'connecting' && step !== 'qr' && !isVerifying) {
-            closeDialog()
+    const handleClose = useCallback(async () => {
+        // If they close during verify, we should probably clear the handshake on the backend
+        if (step === 'verify' || handshakeCode) {
+            try {
+                await electron.whatsapp.disconnect(false); // Disconnect without clearing auth to just reset socket/state
+                setHandshakeCode(null);
+            } catch (e) { console.error(e); }
         }
-    }, [step, isVerifying, closeDialog])
+        closeDialog()
+    }, [step, handshakeCode, closeDialog])
 
     if (!isDialogOpen) return null
 
@@ -347,26 +353,47 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
                                         </>
                                     ) : (
                                         <div className="space-y-4 text-center py-2 animate-in fade-in zoom-in duration-300">
-                                            <div className="p-5 bg-white/5 border border-[#25D366]/30 rounded-2xl">
-                                                <p className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold mb-2">Verification Handshake</p>
-                                                <div className="text-3xl font-mono font-black text-[#25D366] tracking-[0.2em] my-3">
-                                                    {handshakeCode.slice(0, 3)}-{handshakeCode.slice(3)}
-                                                </div>
+                                            <div className={`p-5 bg-white/5 border ${connectionState.handshakeStatus === 'expired' ? 'border-red-500/50' : 'border-[#25D366]/30'} rounded-2xl`}>
+                                                <p className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold mb-2">
+                                                    {connectionState.handshakeStatus === 'expired' ? 'Handshake Expired' : 'Verification Handshake'}
+                                                </p>
+                                                
+                                                {connectionState.handshakeStatus === 'expired' ? (
+                                                    <div className="py-4">
+                                                        <AlertCircle size={32} className="text-red-400 mx-auto mb-2" />
+                                                        <p className="text-xs text-[var(--color-text-secondary)]">The 5-minute window has expired.</p>
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-3xl font-mono font-black text-[#25D366] tracking-[0.2em] my-3">
+                                                        {handshakeCode.slice(0, 3)}-{handshakeCode.slice(3)}
+                                                    </div>
+                                                )}
+                                                
                                                 <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed px-2">
-                                                    We sent a message to your phone. <b>Reply with the code above</b> to finish linking.
+                                                    {connectionState.handshakeStatus === 'expired' 
+                                                        ? 'Please try sending a new code.' 
+                                                        : <>We sent a message to your phone. <b>Reply with the code above</b> to finish linking.</>
+                                                    }
                                                 </p>
                                             </div>
                                             
-                                            <div className="flex flex-col items-center gap-2 py-2">
-                                                <Loader2 size={18} className="text-[#25D366] animate-spin" />
-                                                <p className="text-[11px] text-[var(--color-text-muted)] italic">Waiting for your reply...</p>
-                                            </div>
-
+                                            {connectionState.handshakeStatus !== 'expired' && (
+                                                <div className="flex flex-col items-center gap-2 py-2">
+                                                    <Loader2 size={18} className="text-[#25D366] animate-spin" />
+                                                    <p className="text-[11px] text-[var(--color-text-muted)] italic">Waiting for your reply...</p>
+                                                </div>
+                                            )}
+                                            
                                             <button 
-                                                onClick={() => setHandshakeCode(null)}
+                                                onClick={() => {
+                                                    setHandshakeCode(null);
+                                                    if (connectionState.handshakeStatus === 'expired') {
+                                                        // Requesting a new code is fine
+                                                    }
+                                                }}
                                                 className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:underline underline-offset-4 transition-colors"
                                             >
-                                                Use different phone number
+                                                {connectionState.handshakeStatus === 'expired' ? 'Start Over' : 'Use different phone number'}
                                             </button>
                                         </div>
                                     )}

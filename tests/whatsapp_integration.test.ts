@@ -31,7 +31,7 @@ describe('WhatsApp Integration Logic', () => {
         before(() => {
             // Reset state
             useWhatsAppStore.setState({
-                connectionState: { status: 'disconnected', qrCode: null, error: null, phoneNumber: null, workerNumber: null },
+                connectionState: { status: 'disconnected', qrCode: null, error: null, phoneNumber: null, workerNumber: null, handshakeStatus: 'idle' },
                 whatsappEnabled: false
             });
         });
@@ -43,7 +43,7 @@ describe('WhatsApp Integration Logic', () => {
             
             // Re-enable whatsapp mode and connect
             useWhatsAppStore.setState({
-                connectionState: { status: 'connected', qrCode: null, error: null, phoneNumber: '5551234@s.whatsapp.net', workerNumber: null },
+                connectionState: { status: 'connected', qrCode: null, error: null, phoneNumber: '5551234@s.whatsapp.net', workerNumber: null, handshakeStatus: 'verified' },
                 whatsappEnabled: true
             });
             const validJid = resolveWhatsAppTarget('📱 **WhatsApp** (919876543210@s.whatsapp.net):\nHello!');
@@ -52,7 +52,7 @@ describe('WhatsApp Integration Logic', () => {
 
         it('should fallback to global target when enabled without specific message text', () => {
             useWhatsAppStore.setState({
-                connectionState: { status: 'connected', qrCode: null, error: null, phoneNumber: '8881234@s.whatsapp.net', workerNumber: null },
+                connectionState: { status: 'connected', qrCode: null, error: null, phoneNumber: '8881234@s.whatsapp.net', workerNumber: null, handshakeStatus: 'verified' },
                 whatsappEnabled: true
             });
             const validJid = resolveWhatsAppTarget('Just a random message');

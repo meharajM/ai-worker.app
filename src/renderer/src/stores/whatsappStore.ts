@@ -18,6 +18,7 @@ export interface WhatsAppConnectionState {
     error: string | null
     phoneNumber: string | null
     workerNumber: string | null
+    handshakeStatus: 'idle' | 'pending' | 'expired' | 'verified' | null
 }
 
 interface WhatsAppState {
@@ -53,6 +54,7 @@ export const useWhatsAppStore = create<WhatsAppState>()(
                 error: null,
                 phoneNumber: null,
                 workerNumber: null,
+                handshakeStatus: 'idle',
             },
             whatsappEnabled: false,
             targetPhoneNumber: null,
