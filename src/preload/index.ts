@@ -100,7 +100,9 @@ const electronAPI = {
         writeInternalFile: (workspacePath: string | undefined, filename: string, content: string) =>
             ipcRenderer.invoke('fs:write-internal-file', workspacePath, filename, content),
         readInternalFile: (workspacePath: string | undefined, filename: string) =>
-            ipcRenderer.invoke('fs:read-internal-file', workspacePath, filename)
+            ipcRenderer.invoke('fs:read-internal-file', workspacePath, filename),
+        readFileBase64: (filePath: string) =>
+            ipcRenderer.invoke('fs:read-file-base64', filePath)
     },
     // Memory operations
     memory: {
@@ -157,6 +159,8 @@ const electronAPI = {
             ipcRenderer.invoke('whatsapp:send-message', to, content),
         sendPresence: (to: string, state: string) =>
             ipcRenderer.invoke('whatsapp:send-presence', to, state),
+        sendMediaMessage: (to: string, filePath: string, caption?: string, type?: string) =>
+            ipcRenderer.invoke('whatsapp:send-media-message', to, filePath, caption, type),
         onConnectionChange: (callback: (state: unknown) => void) => {
             const listener = (_event: any, state: unknown) => callback(state)
             ipcRenderer.on('whatsapp:connection-change', listener)

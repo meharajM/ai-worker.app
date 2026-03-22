@@ -188,6 +188,12 @@ export const electron = {
                 return await window.electron.fs.readInternalFile(workspacePath, filename)
             }
             return { success: false, error: 'Not supported in browser' }
+        },
+        readFileBase64: async (filePath: string) => {
+            if (isElectron() && window.electron?.fs && window.electron.fs.readFileBase64) {
+                return await window.electron.fs.readFileBase64(filePath)
+            }
+            return { success: false, error: 'Not supported in browser' }
         }
     },
 
@@ -322,6 +328,13 @@ export const electron = {
                 return window.electron.whatsapp.sendPresence(to, state)
             }
             console.warn('[Browser] WhatsApp sendPresence not supported')
+            return { success: false, error: 'Not supported in browser mode' }
+        },
+        sendMediaMessage: async (to: string, filePath: string, caption?: string, type?: string) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.sendMediaMessage(to, filePath, caption, type)
+            }
+            console.warn('[Browser] WhatsApp sendMediaMessage not supported')
             return { success: false, error: 'Not supported in browser mode' }
         },
         onConnectionChange: (callback: (state: import('../stores/whatsappStore').WhatsAppConnectionState) => void): (() => void) => {

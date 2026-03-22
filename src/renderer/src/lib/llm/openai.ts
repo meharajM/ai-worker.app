@@ -248,14 +248,53 @@ export async function testOpenAIConnection(
   }
 }
 
+import { fileUrlToBase64 } from "./utils";
+
 // Helper to format messages for OpenAI-compatible APIs
-function formatMessagesForOpenAI(messages: LLMMessage[]): Record<string, unknown>[] {
-  return messages.map(m => {
+async function formatMessagesForOpenAI(messages: LLMMessage[], model: string = ''): Promise<Record<string, unknown>[]> {
+  const result: Record<string, unknown>[] = [];
+  
+  for (const m of messages) {
     // Basic message structure
     const formatted: Record<string, unknown> = {
-      role: m.role,
-      content: m.content
+      role: m.role
     };
+
+    if (typeof m.content === 'string') {
+      formatted.content = m.content;
+    } else {
+      // Process multimodal parts, resolving file:// URLs to base64
+      // Also filter out image parts if the provider is likely non-vision (OpenRouter specific safety)
+      const processedParts = (await Promise.all(m.content.map(async (part) => {
+        if (part.type === 'image_url') {
+          // If using a known non-vision model (heuristic check if needed) or just to be safe
+          // we resolve the base64 but return null if it fails
+          if (part.image_url.url.startsWith('file://')) {
+            const base64 = await fileUrlToBase64(part.image_url.url);
+            if (!base64) return null;
+            return {
+              type: 'image_url',
+              image_url: { url: base64 }
+            };
+          }
+        }
+        return part;
+      }))).filter(Boolean) as any[];
+
+      // SAFETY: If every part was an image and filtered out, or if this is a legacy model,
+      // fallback to extracting just the text to avoid "no endpoint supports image" errors.
+      const hasImages = processedParts.some(p => p.type === 'image_url');
+      if (hasImages && (model.includes('sonnet-3-5') || model.includes('haiku') || (!model.includes('gpt-4o') && !model.includes('vision') && !model.includes('gemini')))) {
+         console.warn(`[LLM OpenAI] Potential non-vision model "${model}" detected. Filtering image inputs to prevent API errors.`);
+         const textOnly = processedParts
+           .map(p => p.type === 'text' ? p.text : '')
+           .filter(Boolean)
+           .join('\n');
+         formatted.content = textOnly || "[Image Attachment]";
+      } else {
+         formatted.content = processedParts;
+      }
+    }
 
     // Add tool_calls if present (and strictly stringify arguments)
     if (m.tool_calls && m.tool_calls.length > 0) {
@@ -281,8 +320,9 @@ function formatMessagesForOpenAI(messages: LLMMessage[]): Record<string, unknown
       formatted.name = m.name;
     }
 
-    return formatted;
-  });
+    result.push(formatted);
+  }
+  return result;
 }
 
 export // Call OpenAI-compatible API
@@ -339,13 +379,15 @@ export // Call OpenAI-compatible API
   }
 
   console.log(`[LLM Chat] Calling OpenAI-compatible API at: ${baseUrl}/chat/completions`);
+  const formattedMessages = await formatMessagesForOpenAI(useJsonFallback ? requestMessages : messages, model);
+  
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers,
     signal: abortSignal,
     body: JSON.stringify({
       model: model,
-      messages: formatMessagesForOpenAI(useJsonFallback ? requestMessages : messages),
+      messages: formattedMessages,
       ...(useJsonFallback
         ? {}
         : {

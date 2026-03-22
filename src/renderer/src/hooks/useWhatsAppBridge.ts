@@ -43,6 +43,9 @@ export function useWhatsAppBridge(): void {
         id: string
         from: string
         content: string
+        type: string
+        mediaUrl?: string
+        caption?: string
         timestamp: number
         isFromMe: boolean
     }) => {
@@ -51,8 +54,12 @@ export function useWhatsAppBridge(): void {
 
         // Read state at execution time, not render time (prevents stale closures)
         // Trigger the AI agent execution pipeline via generic window event
+        // We pass the RAW message object so useAgent can extract multimodal content (images, etc)
         window.dispatchEvent(new CustomEvent('app:submit-message', {
-            detail: { content: `📱 **WhatsApp** (${message.from}): ${message.content}` }
+            detail: { 
+                content: `📱 **WhatsApp** (${message.from}): ${message.content}`,
+                whatsappMessage: message 
+            }
         }))
     }, [])
 

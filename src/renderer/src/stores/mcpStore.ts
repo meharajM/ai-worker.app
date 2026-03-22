@@ -91,7 +91,7 @@ const DEFAULT_MCP_SERVERS = [
         description: 'MarkItDown - Convert documents (PDF, Word, Excel, images, audio) to Markdown',
         type: 'stdio',
         command: 'uvx',
-        args: ['markitdown-mcp'],
+        args: ['markitdown-mcp[all]'], // [all] ensures pdf, docx, xlsx, pptx, audio extras are included
         autoConnect: true // Enable auto-connect (requires uv/python)
     }
 ]
@@ -131,9 +131,14 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                         }
                     }
 
-                    // Migration: Enable MarkItDown auto-connect
+                    // Migration: Enable MarkItDown auto-connect and upgrade to [all] extras
                     if (updated.name === 'markitdown') {
                         updated.autoConnect = true;
+                        // Upgrade old arg 'markitdown-mcp' → 'markitdown-mcp[all]' for full file support
+                        if (updated.args?.includes('markitdown-mcp') && !updated.args.includes('markitdown-mcp[all]')) {
+                            updated.args = ['markitdown-mcp[all]'];
+                            console.log('[mcpStore] Migrated markitdown args to include [all] extras');
+                        }
                     }
 
                     return {

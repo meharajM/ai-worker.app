@@ -68,7 +68,7 @@ export interface WhatsAppMessage {
     to: string
     content: string
     timestamp: number
-    type: 'text' | 'image' | 'video' | 'document' | 'audio'
+    type: 'text' | 'image' | 'video' | 'document' | 'audio' | 'spreadsheet'
     isFromMe: boolean
     mediaUrl?: string
     caption?: string
@@ -358,12 +358,12 @@ export class WhatsAppService extends EventEmitter {
 
             // Incoming messages
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            sock.ev.on('messages.upsert', (upsert: { messages: any[]; type: string }) => {
+            sock.ev.on('messages.upsert', async (upsert: { messages: any[]; type: string }) => {
                 const { messages, type } = upsert
                 if (type !== 'notify') return
                 
                 for (const raw of messages) {
-                    const msg = this._parseMessage(raw)
+                    const msg = await this._parseMessage(raw, sock)
                     if (msg) {
                         const fromClean = msg.from.split('@')[0].split(':')[0]
                         console.log(`[WhatsAppService] Incoming: from=${msg.from} (clean=${fromClean}) isFromMe=${msg.isFromMe} content="${msg.content.substring(0, 50)}"`)
@@ -582,6 +582,55 @@ export class WhatsAppService extends EventEmitter {
         }
     }
 
+    async sendMediaMessage(
+        to: string,
+        filePath: string,
+        caption?: string,
+        type: 'image' | 'video' | 'audio' | 'document' | 'spreadsheet' = 'image'
+    ): Promise<{ success: boolean; error?: string }> {
+        if (!this.socket || this.connectionState.status !== 'connected') {
+            return { success: false, error: 'WhatsApp not connected' }
+        }
+
+        try {
+            const jid = formatWhatsAppJid(to)
+            if (!jid) {
+                return { success: false, error: 'Invalid phone number format' }
+            }
+
+            if (!fs.existsSync(filePath)) {
+                return { success: false, error: 'File not found' }
+            }
+
+            const buffer = fs.readFileSync(filePath)
+            
+            let messageContent: any = {}
+            if (type === 'image') {
+                messageContent = { image: buffer, caption }
+            } else if (type === 'video') {
+                messageContent = { video: buffer, caption }
+            } else if (type === 'audio') {
+                // ptt: true sends it as a "Voice Note"
+                messageContent = { audio: buffer, ptt: true }
+            } else if (type === 'document' || type === 'spreadsheet') {
+                const fileName = path.basename(filePath)
+                messageContent = { document: buffer, fileName, caption, mimetype: 'application/octet-stream' }
+            }
+
+            const result = await this.socket.sendMessage(jid, messageContent)
+            
+            if (result && result.key && result.key.id && result.message) {
+                sentMessagesCache.set(result.key.id, result.message)
+            }
+
+            console.log(`[WhatsAppService] Media message (${type}) sent successfully to: ${jid}`)
+            return { success: true }
+        } catch (error) {
+            console.error('[WhatsAppService] Send media error:', error)
+            return { success: false, error: error instanceof Error ? error.message : String(error) }
+        }
+    }
+
     // ── Private helpers ─────────────────────────────────────────────────────
 
     private _setState(state: WhatsAppConnectionState): void {
@@ -609,7 +658,7 @@ export class WhatsAppService extends EventEmitter {
         }
     }
 
-    private _parseMessage(raw: any): WhatsAppMessage | null {
+    private async _parseMessage(raw: any, socket?: any): Promise<WhatsAppMessage | null> {
         try {
             if (!raw?.key || !raw?.message) return null
 
@@ -634,21 +683,85 @@ export class WhatsAppService extends EventEmitter {
                 textContent = msg.viewOnceMessage.message.conversation
             } else if (msg.ephemeralMessage?.message?.extendedTextMessage?.text) {
                 textContent = msg.ephemeralMessage.message.extendedTextMessage.text
-            } else if (msg.ephemeralMessage?.message?.conversation) {
                 textContent = msg.ephemeralMessage.message.conversation
+            } else if (msg.stickerMessage) {
+                textContent = `[User sent a sticker: ${msg.stickerMessage.mimetype}]`
+            } else if (msg.contactMessage) {
+                textContent = `[User shared a contact: ${msg.contactMessage.displayName} (${msg.contactMessage.vcard})]`
+            } else if (msg.locationMessage) {
+                textContent = `[User shared a location: Lat ${msg.locationMessage.degreesLatitude}, Long ${msg.locationMessage.degreesLongitude}]`
+            } else if (msg.liveLocationMessage) {
+                textContent = `[User shared a live location: Lat ${msg.liveLocationMessage.degreesLatitude}, Long ${msg.liveLocationMessage.degreesLongitude}]`
             }
 
-            if (!textContent) return null
+            const docFileName = msg.documentMessage?.fileName || '';
+            const docExt = docFileName.split('.').pop()?.toLowerCase() || '';
+            const SPREADSHEET_EXTS = new Set(['xlsx', 'xls', 'csv', 'ods', 'tsv', 'numbers']);
+            const isSpreadsheet = msg.documentMessage && SPREADSHEET_EXTS.has(docExt);
 
             const type: WhatsAppMessage['type'] = msg.imageMessage
                 ? 'image'
                 : msg.videoMessage
                     ? 'video'
-                    : msg.documentMessage
-                        ? 'document'
-                        : msg.audioMessage
-                            ? 'audio'
-                            : 'text'
+                    : isSpreadsheet
+                        ? 'spreadsheet'
+                        : msg.documentMessage
+                            ? 'document'
+                            : msg.audioMessage
+                                ? 'audio'
+                                : 'text'
+
+            let mediaUrl: string | undefined = undefined;
+
+            if (socket && (msg.imageMessage || msg.videoMessage || msg.audioMessage || msg.documentMessage)) {
+                try {
+                    const { downloadMediaMessage } = await import('@whiskeysockets/baileys')
+                    const buffer = await downloadMediaMessage(
+                        raw,
+                        'buffer',
+                        {},
+                        { 
+                            logger: console as any,
+                            reuploadRequest: socket.updateMediaMessage 
+                        }
+                    )
+                    
+                    if (Buffer.isBuffer(buffer)) {
+                        let ext = 'bin';
+                        if (msg.imageMessage) ext = 'jpg';
+                        else if (msg.videoMessage) ext = 'mp4';
+                        else if (msg.audioMessage) ext = 'ogg';
+                        else if (msg.documentMessage) ext = msg.documentMessage.fileName?.split('.').pop() || 'bin';
+                        let tempPath = path.join(app.getPath('temp'), `wa_media_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`);
+                        fs.writeFileSync(tempPath, buffer);
+
+                        // MarkItDown explicitly supports .mp3 and .wav, but often ignores .ogg directly.
+                        if (ext === 'ogg') {
+                            try {
+                                const { execSync } = require('child_process');
+                                const mp3Path = tempPath.replace('.ogg', '.mp3');
+                                const envPath = `${process.env.PATH || ''}:/usr/local/bin:/opt/homebrew/bin:${process.env.HOME || ''}/.local/bin`;
+                                // Synchronous execution since these files are very small audio clips (a few seconds/KBs)
+                                execSync(`ffmpeg -y -i "${tempPath}" "${mp3Path}"`, { 
+                                    env: { ...process.env, PATH: envPath },
+                                    stdio: 'ignore' 
+                                });
+                                try { fs.unlinkSync(tempPath); } catch { /* ignore */ }
+                                tempPath = mp3Path;
+                            } catch (convErr) {
+                                console.error('[WhatsAppService] MP3 conversion failed, attempting to pass OGG:', convErr);
+                            }
+                        }
+
+                        mediaUrl = `file://${tempPath}`;
+                        console.log(`[WhatsAppService] Successfully saved ${type} to ${tempPath}`);
+                    }
+                } catch (err) {
+                    console.error('[WhatsAppService] Failed to download media:', err)
+                }
+            }
+
+            if (!textContent && !mediaUrl) return null
 
             // Handle LID vs PN (WhatsApp is moving towards LIDs for some users)
             // senderPn usually contains the actual phone number JID
@@ -658,12 +771,15 @@ export class WhatsAppService extends EventEmitter {
                 id: raw.key.id ?? `wa_${Date.now()}`,
                 from: fromJid,
                 to: raw.key.fromMe ? (raw.key.senderPn || raw.key.remoteJid || '') : 'me',
-                content: textContent,
+                content: textContent || '[Media Message]',
                 timestamp: (raw.messageTimestamp as number) * 1000 || Date.now(),
                 type,
+                mediaUrl,
+                caption: textContent ?? undefined,
                 isFromMe: raw.key.fromMe ?? false,
             }
-        } catch {
+        } catch (err) {
+            console.error('[WhatsAppService] Unhandled parsing error:', err);
             return null
         }
     }
