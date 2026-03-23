@@ -13,10 +13,15 @@ const assert = require('assert');
 function generateAttachmentContext(attachments) {
     if (!attachments || attachments.length === 0) return '';
     
-    const resourceList = attachments.map(a => `- ${a.name} (Path: ${a.path})`).join('\n');
-    const toolHint = `\n\n[To analyze these files, use the 'convert_to_markdown' tool with file:// URIs. Example: convert_to_markdown(uri="file:///absolute/path")]`;
-    
-    return `\n\n[System Note: User attached the following files. Use absolute paths to access them.]\n${resourceList}${toolHint}`;
+    const validAttachments = attachments.filter(a => a.path && a.path.trim() !== "");
+    if (validAttachments.length === 0) return '';
+
+    const callLines = validAttachments.map((a, i) => {
+        const uri = a.path.startsWith("file://") ? a.path : `file://${a.path}`;
+        return `${i + 1}. ${a.name}\n   → convert_to_markdown(uri="${uri}")`;
+    }).join('\n');
+
+    return `\n\n[ATTACHED FILES — act on these immediately and read each one NOW using the exact call shown]\n${callLines}\n\nCRITICAL: Copy the uri/file_path argument CHARACTER-FOR-CHARACTER from above. Do NOT use just the filename. Do NOT construct a URI yourself. Reading attached files does NOT require a workspace to be selected.`;
 }
 
 // Helper: Check if file is supported
@@ -82,14 +87,12 @@ test('Handle very long paths', () => {
 // === CONTEXT GENERATION TESTS ===
 console.log('\n📝 Context Generation Tests');
 
-test('Generate context for single attachment', () => {
+test('Generate context for standard attachment', () => {
     const attachments = [{ name: 'screenshot.png', path: '/Users/test/screenshot.png' }];
     const context = generateAttachmentContext(attachments);
     
     assert.ok(context.includes('screenshot.png'));
-    assert.ok(context.includes('/Users/test/screenshot.png'));
-    assert.ok(context.includes('convert_to_markdown'));
-    assert.ok(context.includes('file://'));
+    assert.ok(context.includes('convert_to_markdown(uri="file:///Users/test/screenshot.png")'));
 });
 
 test('Generate context for multiple attachments', () => {
@@ -100,10 +103,9 @@ test('Generate context for multiple attachments', () => {
     ];
     const context = generateAttachmentContext(attachments);
     
-    assert.ok(context.includes('image.png'));
-    assert.ok(context.includes('document.pdf'));
-    assert.ok(context.includes('audio.m4a'));
-    assert.strictEqual((context.match(/Path:/g) || []).length, 3);
+    assert.ok(context.includes('image.png\n   → convert_to_markdown'));
+    assert.ok(context.includes('document.pdf\n   → convert_to_markdown'));
+    assert.ok(context.includes('audio.m4a\n   → convert_to_markdown'));
 });
 
 test('Return empty string for no attachments', () => {
@@ -111,20 +113,12 @@ test('Return empty string for no attachments', () => {
     assert.strictEqual(context, '');
 });
 
-test('Include tool usage hint', () => {
-    const attachments = [{ name: 'test.pdf', path: '/Users/test/test.pdf' }];
-    const context = generateAttachmentContext(attachments);
-    
-    assert.ok(context.includes('convert_to_markdown'));
-    assert.ok(context.includes('file:///absolute/path'));
-});
-
 test('Handle empty paths', () => {
     const attachments = [{ name: 'test.png', path: '' }];
     const context = generateAttachmentContext(attachments);
     
-    assert.ok(context.includes('test.png'));
-    assert.ok(context.includes('Path: '));
+    // Empty paths should be filtered out by validAttachments
+    assert.strictEqual(context, '');
 });
 
 // === FILE URI TESTS ===

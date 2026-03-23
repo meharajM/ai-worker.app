@@ -167,6 +167,15 @@ const electronAPI = {
             return () => ipcRenderer.removeListener('whatsapp:message', listener)
         },
     },
+    // Plugin framework operations
+    plugins: {
+        loadAll: () => ipcRenderer.invoke('plugins:load-all'),
+        getLoaded: () => ipcRenderer.invoke('plugins:get-loaded'),
+        executeTool: (pluginId: string, toolName: string, args: Record<string, unknown>) =>
+            ipcRenderer.invoke('plugins:execute-tool', pluginId, toolName, args),
+        emitEvent: (eventName: string, payload: any) =>
+            ipcRenderer.invoke('plugins:emit-event', eventName, payload),
+    },
     // General utils
     utils: {
         getPathForFile: (file: File): string => {

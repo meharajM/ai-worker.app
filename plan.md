@@ -55,7 +55,10 @@ ai-worker-app/
 │   │   │   ├── app.ts
 │   │   │   ├── mcp.ts
 │   │   │   ├── llm.ts
+│   │   │   ├── plugins.ts
 │   │   │   └── store.ts
+│   │   ├── services/
+│   │   │   └── PluginManager.ts
 │   │   └── utils/
 │   │       └── env.ts
 │   ├── preload/
@@ -481,6 +484,24 @@ ai-worker-app/
 - [x] Architecture verification passed (No side effects)
 - [x] General purpose tasks execute without bias
 - [x] Safety protocols trigger correctly on sensitive tasks
+
+---
+
+### ✅ Phase 20: Plugin Architecture & OpenCode Compatibility [COMPLETED]
+
+**Goal:** Provide a secure Main-process sandbox for dynamic plugins and extract hardcoded domain tools (like Excel) from the core application.
+
+**Implementation:**
+- [x] Create **PluginManager** service (`src/main/services/PluginManager.ts`)
+- [x] Emulate OpenCode SDK plugin context (`$`, environment)
+- [x] Refactor Agent Runtime to discover and invoke plugin tools over IPC
+- [x] Implement plugin lifecycle events (`session.started`, `session.idle`)
+- [x] Build `smart-excel` plugin to dynamically inject headless tools & native macOS checks
+
+**Validation:** ✅
+- [x] Cross-process secure execution isolates plugin NodeJS code from Renderer
+- [x] Custom tools written in Javascript execute synchronously via IPC
+- [x] Core intelligence engine successfully decoupled from domain-specific hacks
 
 ### 🚀 Phase 16: App Launch Preparation [IN PROGRESS]
 

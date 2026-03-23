@@ -307,10 +307,6 @@ function getInstallInstructions(cmd: string, args?: string[]): string {
             steps += `\n\n📄 **MarkItDown** will be automatically available once uv is installed. It converts PDFs, Word docs, Excel, images, and audio files to Markdown!`
         }
 
-        if (args?.some(a => a.includes('excel-mcp-server'))) {
-            steps += `\n\n📊 **Excel MCP Server** will be automatically available once uv is installed. It allows AI to create, read, and modify Excel files with charts, pivot tables, and formatting!`
-        }
-
         return `${header}\n\n${steps}`
     }
 

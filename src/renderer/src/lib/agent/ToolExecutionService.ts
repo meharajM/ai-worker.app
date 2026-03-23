@@ -20,6 +20,7 @@
  */
 
 import { executeToolCall } from "../mcp";
+import { usePluginStore } from "../../stores/pluginStore";
 import { analyzeToolOutput } from "../result-reporter";
 import { type LLMMessage } from "../types";
 import { laneManager } from "../execution-lanes";
@@ -208,7 +209,23 @@ async function _executeWithRetry(
         const lane = laneManager.getLane(name, { tabId });
         const timeoutMs = laneManager.getTimeoutForTool(name);
         const result = await lane.run(
-            async () => executeToolCall(name, args),
+            async () => {
+                const pluginTool = usePluginStore.getState().getTools().find(t => t.name === name);
+                
+                if (pluginTool) {
+                    const electronPlugins = (window.electron as any)?.plugins;
+                    electronPlugins?.emitEvent('tool.execute.before', { toolName: name, args });
+                    try {
+                        const res = await electronPlugins.executeTool(pluginTool.pluginId, name, args);
+                        electronPlugins?.emitEvent('tool.execute.after', { toolName: name, result: res });
+                        return { content: [{ type: 'text', text: res }] };
+                    } catch (e: any) {
+                        throw new Error(e.message || String(e));
+                    }
+                }
+                
+                return executeToolCall(name, args);
+            },
             timeoutMs,
             signal
         );

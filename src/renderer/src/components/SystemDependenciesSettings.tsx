@@ -21,7 +21,7 @@ export function SystemDependenciesSettings() {
                 <Check size={18} className="text-[#00a896]" /> System Dependencies
             </h4>
             <p className="text-sm text-white/60 mb-6">
-                These tools enable core features like audio encoding, offline models, the MarkItDown parser, and the Excel MCP Server.
+                These tools enable core features like audio encoding, offline models, and the MarkItDown parser.
             </p>
 
             <div className="space-y-3">

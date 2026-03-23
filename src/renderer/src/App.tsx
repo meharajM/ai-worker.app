@@ -36,6 +36,7 @@ import { useWhatsAppBridge } from "./hooks/useWhatsAppBridge";
 import { MissingDependenciesScreen } from "./components/MissingDependenciesScreen";
 import { ExperimentProvider } from "./lib/experiments/experimentProvider";
 import { useThemeSync } from "./hooks/useThemeSync";
+import { usePluginStore } from "./stores/pluginStore";
 
 function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
@@ -72,6 +73,9 @@ function App() {
     if (!mcp.initialized) {
       mcp.initialize();
     }
+    
+    // Trigger the initial plugin load from the main process
+    usePluginStore.getState().fetchPlugins();
   }, []);
 
   // ── Business logic hooks ──────────────────────────────────────────────────

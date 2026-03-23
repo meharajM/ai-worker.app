@@ -9,6 +9,7 @@ import { registerFsHandlers } from './fs'
 import { registerMemoryHandlers } from './memory'
 import { registerAntigravityHandlers } from './antigravity'
 import { registerWhatsAppHandlers } from './whatsapp'
+import { registerPluginHandlers } from './plugins'
 
 export function setupIpcHandlers(): void {
     registerAppHandlers()
@@ -22,4 +23,5 @@ export function setupIpcHandlers(): void {
     registerFsHandlers()
     registerAntigravityHandlers()
     registerWhatsAppHandlers()
+    registerPluginHandlers()
 }
