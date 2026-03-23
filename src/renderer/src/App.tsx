@@ -39,7 +39,10 @@ import { useThemeSync } from "./hooks/useThemeSync";
 
 function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
-  const [dependenciesResolved, setDependenciesResolved] = useState(false);
+  const [dependenciesResolved, setDependenciesResolved] = useState(() => {
+    // Allows automated tests to skip the long background shell executions
+    return localStorage.getItem('skipDepsCheck') === 'true'
+  });
 
   useEffect(() => {
     const triggerCheck = () => setDependenciesResolved(false);
