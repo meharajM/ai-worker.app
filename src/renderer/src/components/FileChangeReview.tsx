@@ -34,18 +34,20 @@ export const FileChangeReview: React.FC = () => {
     }, [])
 
     const handleApprove = async (id: string) => {
+        // Optimistically remove the card so the UI feels instant
+        setChanges(prev => prev.filter(c => c.id !== id))
         try {
             await window?.electron?.fs.approveChange(id)
-            setChanges(prev => prev.filter(c => c.id !== id))
         } catch (error) {
             console.error('Failed to approve change:', error)
         }
     }
 
     const handleReject = async (id: string) => {
+        // Optimistically remove the card so the UI feels instant
+        setChanges(prev => prev.filter(c => c.id !== id))
         try {
             await window?.electron?.fs.rejectChange(id)
-            setChanges(prev => prev.filter(c => c.id !== id))
         } catch (error) {
             console.error('Failed to reject change:', error)
         }

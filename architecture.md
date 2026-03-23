@@ -635,6 +635,8 @@ graph LR
     subgraph "Default Servers"
         Playwright[Playwright<br/>Browser Automation]
         SequentialThinking[Sequential Thinking<br/>Step-by-step Reasoning]
+        MarkItDown[MarkItDown<br/>Document to Markdown]
+        Excel[Excel<br/>Excel Data Manipulation]
     end
 
     Stdio --> Command
@@ -643,6 +645,8 @@ graph LR
     Name --> Type
     Playwright --> Stdio
     SequentialThinking --> Stdio
+    MarkItDown --> Stdio
+    Excel --> Stdio
 ```
 
 **Default MCP Servers:**
@@ -660,12 +664,21 @@ graph LR
   - Args: `-y @modelcontextprotocol/server-sequential-thinking`
   - Description: Enables step-by-step reasoning for complex tasks
 
-- **MarkItDown** (`markitdown`)
-  - Type: `stdio`
+- **MarkItDown** (`markitdown-mcp`)
+  - Type: Stdio
   - Command: `uvx`
   - Args: `markitdown-mcp`
   - Description: Convert documents (PDF, Word, Excel, Images) to Markdown
-  - **Auto-Connect**: Enabled by default
+
+### 7.3 Plugin Architecture (New in v1.x)
+To maintain a modular core, domain-specific tools (like native Excel execution) are no longer bundled as default MCP servers. Instead, they are dynamically loaded via the **OpenCode Compatibility Plugin Architecture**.
+
+- **Location**: `plugins/` directory (either in root during dev, or in `userData` in prod).
+- **Execution Engine**: OpenCode Plugins are securely evaluated in the Node.js **Main Process** sandbox (`PluginManager.ts`) to prevent renderer security leaks (`nodeIntegration: false`).
+- **Dynamic Capabilities**:
+  - Plugins can inject custom `mcpServers` (like `excel-mcp-server`) dynamically into the application state.
+  - Plugins can define OpenCode-style Javascript `tool` endpoints, granting the AI access to native OS libraries, AppleScript (`$`), or arbitrary Node dependencies safely without modifying core agent files.
+- **IPC Flow**: When the LLM calls a plugin tool, the Agent Runtime (Renderer) delegates execution to `PluginManager.ts` (Main Process) via IPC, returning the stringified result.
 
 **Initialization Logic:**
 

@@ -25,6 +25,7 @@
  */
 
 import { chat } from "./llm";
+import { usePluginStore } from "../stores/pluginStore";
 import { LLMMessage, LLMTool, ServerInfo, type LLMResponse } from "./types";
 import { pruneContext } from "./dcp";
 import { getAllTools, getServers } from "./mcp";
@@ -164,7 +165,7 @@ export class AgentRuntime implements IAgentClient {
         finalPrompt +=
           `\n\n[ATTACHED FILES — act on these immediately and read each one NOW using the exact call shown]\n` +
           `${callLines}\n\n` +
-          `CRITICAL: Copy the uri argument CHARACTER-FOR-CHARACTER from above. ` +
+          `CRITICAL: Copy the uri/file_path argument CHARACTER-FOR-CHARACTER from above. ` +
           `Do NOT use just the filename. Do NOT construct a URI yourself. ` +
           `Reading attached files does NOT require a workspace to be selected.`;
       }
@@ -316,7 +317,16 @@ export class AgentRuntime implements IAgentClient {
       this.addMessage({ role: "user", content: finalPrompt });
     }
 
-    return this._runLoop(finalPrompt);
+    try {
+      if (!this.options.isSubAgent) {
+        (window.electron as any)?.plugins?.emitEvent('session.started', { agentId: this.agentInstanceId });
+      }
+      return await this._runLoop(finalPrompt);
+    } finally {
+      if (!this.options.isSubAgent) {
+        (window.electron as any)?.plugins?.emitEvent('session.idle', { agentId: this.agentInstanceId });
+      }
+    }
   }
 
   getHistory(): LLMMessage[] {
@@ -634,9 +644,11 @@ export class AgentRuntime implements IAgentClient {
 
   private _getAvailableTools(): LLMTool[] {
     const mcpTools = getAllTools();
+    const pluginTools = usePluginStore.getState().getTools();
     const toolMap = new Map<string, LLMTool>();
     const all = [
       ...mcpTools.map((t) => ({ name: t.name, description: t.description, parameters: t.inputSchema })),
+      ...pluginTools.map((t) => ({ name: t.name, description: t.description, parameters: t.inputSchema })),
       ...CLIENT_TOOLS.map((t) => ({ name: t.name, description: t.description, parameters: t.inputSchema })),
     ];
     for (const tool of all) {

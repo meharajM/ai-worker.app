@@ -92,11 +92,13 @@ export function ChatView({ onClearChat }: ChatViewProps) {
           ))
         )}
 
-        {/* Typing indicator */}
+        {/* Typing indicator — hidden when progress bar is active */}
         {isProcessing &&
           !messages[messages.length - 1]?.content.includes(
             'Parallel Execution'
-          ) && <TypingIndicator />}
+          ) &&
+          !(activeSession?.progress && activeSession.progress > 0) &&
+          <TypingIndicator />}
 
         {/* Progress banner */}
         {activeSession && (

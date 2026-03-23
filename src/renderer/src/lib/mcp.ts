@@ -106,27 +106,10 @@ function ensureRecord(args: Record<string, unknown> | null | undefined): Record<
 
 // Execute a tool call with retry logic for connection errors
 
-// ── MCP Idle Disconnect Timers ──────────────────────────────────────────────────
-// Automatically disconnect backend processes (Node/Python) after 10m of inactivity
-// to ensure idle agents don't consume gigabytes of background RAM.
-const mcpIdleTimers = new Map<string, NodeJS.Timeout>();
-const MCP_IDLE_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
-
-function resetMcpIdleTimer(serverId: string, serverName: string) {
-  const existing = mcpIdleTimers.get(serverId);
-  if (existing) clearTimeout(existing);
-
-  const timer = setTimeout(async () => {
-    logMcpRenderer("info", `Disconnecting server ${serverName} due to ${MCP_IDLE_TIMEOUT_MS / 60000}m of inactivity...`, { serverId, serverName });
-    try {
-      await disconnectServer(serverId);
-    } catch (err) {
-      logMcpRenderer("warn", `Failed to idle-disconnect server ${serverName}`, { error: String(err) });
-    }
-  }, MCP_IDLE_TIMEOUT_MS);
-
-  mcpIdleTimers.set(serverId, timer);
-}
+// ── No idle disconnect timers ──────────────────────────────────────────────────
+// MCP servers remain connected for the lifetime of the app.
+// Cleanup happens only on manual app close, handled in main/index.ts via
+// McpProcessManager.teardownAll() in the 'before-quit' handler.
 
 export async function executeToolCall(
   toolName: string,
@@ -266,8 +249,8 @@ export async function executeToolCall(
     });
     try {
       await connectServer(server.id);
-      // Let the connection settle briefly just in case the server needs a moment to be ready
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // connectServer() fully awaits the IPC round-trip and sets connected=true
+      // in the Zustand store synchronously before resolving — no settle delay needed.
     } catch (err) {
       return {
         result: null,
@@ -276,8 +259,7 @@ export async function executeToolCall(
     }
   }
 
-  // Reset idle timer for this server since it's actively being used
-  resetMcpIdleTimer(server.id, server.name);
+
 
   let lastError: string | undefined;
 
@@ -298,9 +280,10 @@ export async function executeToolCall(
 
         if (isConnectionClosed) {
           lastError = result.error;
+          // Keep tools cached — clearing them would break findServerForTool() on
+          // the next call, preventing lazy-connect from recovering automatically.
           useMcpStore.getState().updateServerState(server.id, {
             connected: false,
-            tools: [],
             error: "Connection closed unexpectedly"
           });
 

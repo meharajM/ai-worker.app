@@ -855,3 +855,28 @@ The agent's browser tools feature built-in protective layers to prevent hallucin
 | 21F: Sub-agent isolation | N/A | ✅ | ✅ | ✅ |
 | 21G: Instant reply (no tools) | N/A | ❌ (correct) | ❌ (correct) | N/A |
 
+---
+
+## 22. Excel Document Native Access (excel-mcp-server)
+
+**Test A: Read and Write Excel Data**
+**Prompt:**
+> "Create a new Excel workbook named 'quarterly_sales.xlsx' in my Documents folder, add an 'Q1' worksheet, and write sample sales data for Jan, Feb, and March into it."
+
+**Expected Behavior:**
+- 📄 Agent successfully uses `create_workbook` or `write_data_to_excel` to generate the file.
+- ✅ Returns confirmation that the file was created and data was written.
+
+**Test B: Check Native OS State (Plugin Custom Tool)**
+**Prompt:**
+> "Use your smart excel check tool to see if the Microsoft Excel application is currently open on my Mac."
+**Expected Behavior:**
+- 🖥️ Agent uses the `smart_excel_check` custom node tool (powered by AppleScript inside the plugin) to return real-time OS state.
+
+**Test C: The Ultimate Excel Stress Test (All-in-One)**
+**Prompt:**
+> "Create a new Excel workbook at '~/Documents/Financial_Report_2026.xlsx' and a worksheet named 'Q1_Data'. Write 3 months of sample revenue and expenses data across 3 columns: Month, Revenue, and Expenses (Jan, Feb, Mar). First, use applying formulas to add a 'Profit' column (Revenue - Expenses). Second, calculate a 'Total' row at the bottom using SUM formulas. Third, format the top header row to have a bold font and a blue background color using HTML hex (#0000FF). Fourth, format the financial numbers as currency. Fifth, add a second worksheet named 'Dashboard'. On the Dashboard, create a bar chart visualizing Revenue vs Expenses per month from the Q1_Data sheet. Finally, create a pivot table calculating the average profit by month. Tell me when you are done."
+**Expected Behavior:**
+- 🗂️ Agent seamlessly calls multiple distinct Excel tools sequentially.
+- ⚙️ Flow: `create_workbook` -> `create_worksheet` -> `write_data_to_excel` -> `apply_formula` -> `format_range` -> `create_worksheet` -> `create_chart` -> `create_pivot_table`.
+

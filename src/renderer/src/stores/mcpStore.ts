@@ -136,6 +136,11 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                         updated.autoConnect = true;
                     }
 
+                    // Migration: Ensure Excel MCP server auto-connects for existing users
+                    if (updated.name === 'excel') {
+                        updated.autoConnect = true;
+                    }
+
                     return {
                         ...updated,
                         // Reset runtime state but KEEP cached tools for lazy-connect
