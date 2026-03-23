@@ -1,6 +1,6 @@
 {
     "name": "ai-worker",
-    "version": "0.1.0",
+    "version": "0.0.1",
     "type": "module",
     "description": "Voice-first desktop workspace with MCP integration",
     "main": "./out/main/index.js",

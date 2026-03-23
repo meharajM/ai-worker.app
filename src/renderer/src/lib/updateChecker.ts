@@ -49,7 +49,9 @@ function isNewerVersion(newVersion: string, currentVersion: string): boolean {
 }
 
 export async function checkUpdateAvailable(
-  updateUrl: string = 'https://raw.githubusercontent.com/mhrj/ai-worker/main/update.json'
+  updateUrl: string = import.meta.env.DEV 
+    ? '/mock-update.json' 
+    : 'https://raw.githubusercontent.com/meharajM/ai-worker/main/update.json'
 ): Promise<{ available: boolean; config?: UpdateConfig; forceUpdate: boolean }> {
   try {
     const response = await fetch(updateUrl)
