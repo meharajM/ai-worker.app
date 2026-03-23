@@ -188,6 +188,12 @@ export const electron = {
                 return await window.electron.fs.readInternalFile(workspacePath, filename)
             }
             return { success: false, error: 'Not supported in browser' }
+        },
+        readFileBase64: async (filePath: string) => {
+            if (isElectron() && window.electron?.fs && window.electron.fs.readFileBase64) {
+                return await window.electron.fs.readFileBase64(filePath)
+            }
+            return { success: false, error: 'Not supported in browser' }
         }
     },
 
@@ -289,14 +295,20 @@ export const electron = {
             if (isElectron() && window.electron?.whatsapp) {
                 return window.electron.whatsapp.getState()
             }
-            return { status: 'disconnected' as const, qrCode: null, error: null, phoneNumber: null }
+            return { status: 'disconnected' as const, qrCode: null, error: null, phoneNumber: null, workerNumber: null }
         },
-        connect: async (phoneNumber: string) => {
+        connect: async (phoneNumber?: string) => {
             if (isElectron() && window.electron?.whatsapp) {
                 return window.electron.whatsapp.connect(phoneNumber)
             }
             console.warn('[Browser] WhatsApp not supported in browser mode')
             return { success: false, error: 'Not supported in browser mode' }
+        },
+        setTargetNumber: async (phoneNumber: string): Promise<{ success: boolean; error?: string; handshakeCode?: string }> => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.setTargetNumber(phoneNumber)
+            }
+            return { success: false, error: 'Electron not available' }
         },
         disconnect: async (clearAuth?: boolean) => {
             if (isElectron() && window.electron?.whatsapp) {
@@ -316,6 +328,13 @@ export const electron = {
                 return window.electron.whatsapp.sendPresence(to, state)
             }
             console.warn('[Browser] WhatsApp sendPresence not supported')
+            return { success: false, error: 'Not supported in browser mode' }
+        },
+        sendMediaMessage: async (to: string, filePath: string, caption?: string, type?: string) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.sendMediaMessage(to, filePath, caption, type)
+            }
+            console.warn('[Browser] WhatsApp sendMediaMessage not supported')
             return { success: false, error: 'Not supported in browser mode' }
         },
         onConnectionChange: (callback: (state: import('../stores/whatsappStore').WhatsAppConnectionState) => void): (() => void) => {

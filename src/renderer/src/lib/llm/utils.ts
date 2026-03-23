@@ -7,6 +7,29 @@ function extractTextForLegacyProviders(content: string | LLMContentPart[]): stri
 }
 export { extractTextForLegacyProviders };
 
+/**
+ * Converts a file URL (file://) to a Base64 data URI using Electron's FS bridge.
+ * Essential for multimodal/vision LLM requests.
+ */
+export async function fileUrlToBase64(fileUrl: string): Promise<string | null> {
+    if (!fileUrl.startsWith('file://')) return null;
+
+    try {
+        const electron = (await import("../electron")).default;
+        const filePath = fileUrl.replace('file://', '');
+        
+        if (electron.fs?.readFileBase64) {
+           const result = await electron.fs.readFileBase64(filePath);
+           if (result.success && result.content) {
+               return result.content; 
+           }
+        }
+    } catch (err) {
+        console.error('[LLM Utils] Base64 conversion failed:', err);
+    }
+    return null;
+}
+
 export function ensureRecord(input: unknown): Record<string, unknown> {
   if (input === null || input === undefined) return {};
   if (typeof input === 'object' && !Array.isArray(input)) return input as Record<string, unknown>;
@@ -84,10 +107,20 @@ export // Parse tool calls from JSON in response content
       .replace(/```\n?/g, "")
       .trim();
 
-    // Try to extract JSON object
-    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+    // Try to extract JSON object (handling multiple contiguous JSON blocks)
+    let jsonStrFixed = jsonStr;
+    if (jsonStrFixed.match(/\}\s*\{/)) {
+      jsonStrFixed = `[${jsonStrFixed.replace(/\}\s*\{/g, '},{')}]`;
+    }
+
+    const jsonMatch = jsonStrFixed.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
+      let parsed = JSON.parse(jsonMatch[0]);
+
+      // If the model output multiple identical JSON objects, just evaluate the first one.
+      if (Array.isArray(parsed) && parsed.length > 0) {
+          parsed = parsed[0];
+      }
 
       // Standard Format: { "tool_calls": [...] }
       if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
@@ -119,6 +152,36 @@ export // Parse tool calls from JSON in response content
           name: parsed.tool,
           arguments: ensureRecord(params)
         }];
+      }
+
+      // Bare Execution Plan Format: { "goal": "...", "steps": [...] }
+      if (parsed.goal && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
+        console.log('[LLM] Identified Bare Execution Plan Format. Recovering as create_execution_plan tool call.');
+        return [{
+          id: `plan_call_${Date.now()}`,
+          name: 'create_execution_plan',
+          arguments: ensureRecord({ goal: parsed.goal, steps: parsed.steps })
+        }];
+      }
+
+      // Plan+Commands Format: { "analysis": "...", "plan": "...", "commands": [{"type": "tool_name", ...args}] }
+      // Some models (e.g. Ollama-hosted) output this planning blob when in JSON fallback mode.
+      // Without handling it here the raw JSON leaks to the user as a chat bubble.
+      if (parsed.commands && Array.isArray(parsed.commands) && parsed.commands.length > 0) {
+        console.log('[LLM] Identified Plan+Commands JSON Format. Recovering tool calls from commands array.');
+        const calls = parsed.commands
+          .filter((cmd: unknown) => typeof cmd === 'object' && cmd !== null && typeof (cmd as Record<string, unknown>).type === 'string')
+          .map((cmd: Record<string, unknown>, idx: number) => {
+            const { type, ...args } = cmd;
+            const toolName = type as string;
+            console.log(`[LLM] Recovered command as tool call: ${toolName}`, args);
+            return {
+              id: `cmd_call_${Date.now()}_${idx}`,
+              name: toolName,
+              arguments: ensureRecord(args),
+            };
+          });
+        if (calls.length > 0) return calls;
       }
     }
   } catch (error) {

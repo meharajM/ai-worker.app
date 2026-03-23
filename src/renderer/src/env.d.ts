@@ -77,6 +77,8 @@ interface ElectronAPI {
             Promise<{ success: boolean; path?: string; error?: string }>
         readInternalFile: (workspacePath: string | undefined, filename: string) =>
             Promise<{ success: boolean; content?: string; error?: string }>
+        readFileBase64: (filePath: string) =>
+            Promise<{ success: boolean; content?: string; error?: string }>
     }
 
     memory: {
@@ -118,11 +120,14 @@ interface ElectronAPI {
             qrCode: string | null
             error: string | null
             phoneNumber: string | null
+            workerNumber: string | null
         }>
-        connect: (phoneNumber: string) => Promise<{ success: boolean; error?: string }>
+        connect: (phoneNumber?: string) => Promise<{ success: boolean; error?: string }>
+        setTargetNumber: (phoneNumber: string) => Promise<{ success: boolean; error?: string }>
         disconnect: (clearAuth?: boolean) => Promise<{ success: boolean; error?: string }>
         sendMessage: (to: string, content: string) => Promise<{ success: boolean; error?: string }>
         sendPresence: (to: string, state: string) => Promise<{ success: boolean; error?: string }>
+        sendMediaMessage: (to: string, filePath: string, caption?: string, type?: string) => Promise<{ success: boolean; error?: string }>
         onConnectionChange: (callback: (state: unknown) => void) => () => void
         onMessage: (callback: (message: unknown) => void) => () => void
     }

@@ -160,6 +160,7 @@ export async function callGemini(
 ): Promise<LLMResponse> {
   const { apiKey, model, antigravity } = await getGeminiSettings(settings);
   const { buildGatewayRequest, unwrapGatewayResponse, sanitizeToolSchema } = await import('../antigravity-gateway');
+  const { fileUrlToBase64 } = await import('./utils');
   const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
 
   // Build a lookup: tool_call_id → function name
@@ -188,21 +189,36 @@ export async function callGemini(
       if (typeof m.content === 'string') {
         parts.push({ text: m.content });
       } else {
-        m.content.forEach(part => {
+        for (const part of m.content) {
           if (part.type === 'text') {
             parts.push({ text: part.text });
           } else if (part.type === 'image_url') {
-            const matches = part.image_url.url.match(/^data:([^;]+);base64,(.+)$/);
-            if (matches) {
-              parts.push({
-                inline_data: {
-                  mime_type: matches[1],
-                  data: matches[2]
-                }
-              });
+            if (part.image_url.url.startsWith('file://')) {
+              const base64Content = await fileUrlToBase64(part.image_url.url);
+              if (base64Content) {
+                 const matches = base64Content.match(/^data:([^;]+);base64,(.+)$/);
+                 if (matches) {
+                    parts.push({
+                      inline_data: {
+                        mime_type: matches[1],
+                        data: matches[2]
+                      }
+                    });
+                 }
+              }
+            } else {
+              const matches = part.image_url.url.match(/^data:([^;]+);base64,(.+)$/);
+              if (matches) {
+                parts.push({
+                  inline_data: {
+                    mime_type: matches[1],
+                    data: matches[2]
+                  }
+                });
+              }
             }
           }
-        });
+        }
       }
     }
 

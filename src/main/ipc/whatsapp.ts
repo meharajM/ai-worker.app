@@ -38,11 +38,9 @@ export function registerWhatsAppHandlers(): void {
     })
 
     ipcMain.handle('whatsapp:connect', async (_event, phoneNumber: unknown) => {
-        if (typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
-            throw new Error('Invalid phone number argument')
-        }
+        const phone = typeof phoneNumber === 'string' && phoneNumber.trim() !== '' ? phoneNumber.trim() : undefined
         try {
-            await whatsappService.connect(phoneNumber.trim())
+            await whatsappService.connect(phone)
             return { success: true }
         } catch (error) {
             return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -67,7 +65,6 @@ export function registerWhatsAppHandlers(): void {
         }
         return whatsappService.sendMessage(to.trim(), content.trim())
     })
-
     ipcMain.handle('whatsapp:send-presence', async (_event, to: unknown, state: unknown) => {
         if (typeof to !== 'string' || to.trim() === '') {
             throw new Error('Invalid "to" argument')
@@ -76,5 +73,31 @@ export function registerWhatsAppHandlers(): void {
             throw new Error('Invalid "state" argument')
         }
         return whatsappService.sendPresence(to.trim(), state as 'unavailable' | 'available' | 'composing' | 'recording' | 'paused')
+    })
+
+    ipcMain.handle('whatsapp:send-media-message', async (_event, to: unknown, filePath: unknown, caption: unknown, type: unknown) => {
+        if (typeof to !== 'string' || to.trim() === '') {
+            throw new Error('Invalid "to" argument')
+        }
+        if (typeof filePath !== 'string' || filePath.trim() === '') {
+            throw new Error('Invalid "filePath" argument')
+        }
+        
+        const validTypes = ['image', 'video', 'audio', 'document']
+        const mediaType = typeof type === 'string' && validTypes.includes(type) ? type : 'image'
+        
+        return whatsappService.sendMediaMessage(
+            to.trim(),
+            filePath.trim(),
+            typeof caption === 'string' ? caption.trim() : undefined,
+            mediaType as any
+        )
+    })
+
+    ipcMain.handle('whatsapp:set-target-number', async (_event, phoneNumber: unknown) => {
+        if (typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
+            throw new Error('Invalid phone number argument')
+        }
+        return whatsappService.setTargetPhoneNumber(phoneNumber.trim())
     })
 }

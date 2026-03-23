@@ -11,7 +11,7 @@ export function formatWhatsAppJid(to: string): string | null {
     if (!to) return null;
     
     // If it's already a JID, return as is
-    if (to.includes('@s.whatsapp.net') || to.includes('@g.us')) {
+    if (to.includes('@s.whatsapp.net') || to.includes('@g.us') || to.includes('@lid')) {
         return to;
     }
     

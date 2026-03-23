@@ -42,21 +42,42 @@ export class DependencyService {
         // Check uv (Required for uvx)
         results.push(await this.checkCommand('uv', '--version', true))
 
+        // Check Playwright browsers
+        results.push(await this.checkPlaywrightBrowsers())
+
         return results
     }
 
     private async checkCommand(cmd: string, versionFlag: string, required: boolean): Promise<DependencyCheckResult> {
+        // Expand PATH for GUI environments (like Electron) which might not inherit full shell profiles
+        const delimiter = process.platform === 'win32' ? ';' : ':'
+        const extraPaths = [
+            '/usr/local/bin',
+            '/opt/homebrew/bin',
+            `${process.env.HOME || process.env.USERPROFILE}/.cargo/bin`,
+            `${process.env.HOME || process.env.USERPROFILE}/.local/bin`
+        ].join(delimiter)
+        
+        const expandedPath = `${process.env.PATH || ''}${delimiter}${extraPaths}`
+        const env = { ...process.env, PATH: expandedPath }
+        
         try {
-            const { stdout } = await execAsync(`${cmd} ${versionFlag}`)
+            const { stdout } = await execAsync(`${cmd} ${versionFlag}`, { env })
             // Parse version simplistically
             const version = stdout.split('\n')[0].trim()
-            const { stdout: path } = await execAsync(`which ${cmd}`)
+            // In Windows, 'which' is often absent but `where` is. Since we just want the path,
+            // we catch error if 'which' fails and just log cmd name
+            let pathOut = cmd
+            try {
+                const { stdout: whichOut } = await execAsync(process.platform === 'win32' ? `where ${cmd}` : `which ${cmd}`, { env })
+                pathOut = whichOut
+            } catch { /* ignore */ }
 
             return {
                 name: cmd,
                 installed: true,
                 version,
-                path: path.trim(),
+                path: pathOut.trim(),
                 required
             }
         } catch (error) {
@@ -65,6 +86,46 @@ export class DependencyService {
                 installed: false,
                 error: (error as Error).message,
                 required
+            }
+        }
+    }
+
+    private async checkPlaywrightBrowsers(): Promise<DependencyCheckResult> {
+        try {
+            // Import playwright to evaluate executable paths natively
+            const playwright = require('playwright')
+            const fs = require('fs')
+
+            const checks = [
+                { name: 'chromium', path: playwright.chromium.executablePath() },
+                { name: 'firefox', path: playwright.firefox.executablePath() },
+                { name: 'webkit', path: playwright.webkit.executablePath() }
+            ]
+
+            const missing = checks.filter(c => !fs.existsSync(c.path))
+
+            if (missing.length > 0) {
+                return {
+                    name: 'playwright-browsers',
+                    installed: false,
+                    error: `Missing browser binaries: ${missing.map(m => m.name).join(', ')}`,
+                    required: true
+                }
+            }
+
+            return {
+                name: 'playwright-browsers',
+                installed: true,
+                version: 'installed',
+                path: 'managed by playwright',
+                required: true
+            }
+        } catch (error) {
+            return {
+                name: 'playwright-browsers',
+                installed: false,
+                error: (error as Error).message,
+                required: true
             }
         }
     }
