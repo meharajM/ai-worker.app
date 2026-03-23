@@ -165,15 +165,15 @@ export function WhatsAppConnectionDialog(): React.JSX.Element | null {
     }, [setConnectionState, setTargetPhoneNumber, setWhatsAppEnabled])
 
     const handleClose = useCallback(async () => {
-        // If they close during verify, we should probably clear the handshake on the backend
-        if (step === 'verify' || handshakeCode) {
+        // If they abort during the active verify step, clear the socket.
+        if (step === 'verify') {
             try {
                 await electron.whatsapp.disconnect(false); // Disconnect without clearing auth to just reset socket/state
                 setHandshakeCode(null);
             } catch (e) { console.error(e); }
         }
         closeDialog()
-    }, [step, handshakeCode, closeDialog])
+    }, [step, closeDialog])
 
     if (!isDialogOpen) return null
 

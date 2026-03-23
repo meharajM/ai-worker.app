@@ -82,6 +82,8 @@ export class WhatsAppService extends EventEmitter {
     private lastMessageTime = 0
     private readonly MESSAGE_RATE_LIMIT_MS = 1000 // 1 message per second
     private wakeLockId: number | null = null
+    private explicitDisconnect = false
+    private processedMessageIds = new Set<string>()
     
     // Handshake state
     private pendingHandshake: {
@@ -139,6 +141,7 @@ export class WhatsAppService extends EventEmitter {
     }
 
     async connect(targetPhoneNumber?: string): Promise<void> {
+        this.explicitDisconnect = false
         if (this.connectionState.status === 'connected') return
         if (this.connectionState.status === 'connecting') return
         
@@ -270,12 +273,13 @@ export class WhatsAppService extends EventEmitter {
                         errorMessage?.toLowerCase().includes('restart required')
                     
                     // Check if this is a network-related disconnection (not user-initiated)
-                    const isNetworkError = statusCode === undefined || 
+                    // If we intentionally disconnected via this.explicitDisconnect, skip the error handling heuristics.
+                    const isNetworkError = !this.explicitDisconnect && (statusCode === undefined || 
                         statusCode === 428 || // Server unreachable
                         statusCode === 503 || // Service unavailable  
-                        statusCode === 504  // Gateway timeout
+                        statusCode === 504)  // Gateway timeout
 
-                    if (statusCode !== loggedOutCode) {
+                    if (statusCode !== loggedOutCode && !this.explicitDisconnect) {
                         // Handle Stream Error - don't clear auth, just show QR again
                         if (isStreamError) {
                             console.log('[WhatsAppService] Stream error detected, showing QR for re-auth...')
@@ -360,8 +364,22 @@ export class WhatsAppService extends EventEmitter {
                 if (type !== 'notify') return
                 
                 for (const raw of messages) {
+                    const rawId = raw.key?.id
+                    if (rawId && this.processedMessageIds.has(rawId)) {
+                        console.log(`[WhatsAppService] Dropping duplicate/seen message ID: ${rawId}`)
+                        continue
+                    }
+
                     const msg = await this._parseMessage(raw, sock)
                     if (msg) {
+                        if (rawId) {
+                            this.processedMessageIds.add(rawId)
+                            if (this.processedMessageIds.size > 200) {
+                                const first = this.processedMessageIds.values().next().value
+                                if (first) this.processedMessageIds.delete(first)
+                            }
+                        }
+
                         const fromClean = msg.from.split('@')[0].split(':')[0]
                         console.log(`[WhatsAppService] Incoming: from=${msg.from} (clean=${fromClean}) isFromMe=${msg.isFromMe} content="${msg.content.substring(0, 50)}"`)
 
@@ -505,6 +523,7 @@ export class WhatsAppService extends EventEmitter {
     }
 
     async disconnect(clearAuth = true): Promise<void> {
+        this.explicitDisconnect = true
         console.log(`[WhatsAppService] Disconnecting (clearAuth=${clearAuth})...`)
         
         if (this.wakeLockId !== null) {

@@ -48,7 +48,7 @@ describe('MarkItDown End-to-End Compatibility', () => {
             testMarkItDown(`/var/folders/hf/xnnl863n2739s5vcnwl_9rw40000gn/T/${tempFiles[0]}`);
         }
     });
-    
+
     it('should successfully convert a PDF (.pdf) file', () => {
         const tempFiles = fs.readdirSync('/var/folders/hf/xnnl863n2739s5vcnwl_9rw40000gn/T').filter(f => f.startsWith('wa_media_') && f.endsWith('.pdf'));
         if (tempFiles.length > 0) {

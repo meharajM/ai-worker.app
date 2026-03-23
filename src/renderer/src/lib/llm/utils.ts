@@ -107,10 +107,20 @@ export // Parse tool calls from JSON in response content
       .replace(/```\n?/g, "")
       .trim();
 
-    // Try to extract JSON object
-    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+    // Try to extract JSON object (handling multiple contiguous JSON blocks)
+    let jsonStrFixed = jsonStr;
+    if (jsonStrFixed.match(/\}\s*\{/)) {
+      jsonStrFixed = `[${jsonStrFixed.replace(/\}\s*\{/g, '},{')}]`;
+    }
+
+    const jsonMatch = jsonStrFixed.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
+      let parsed = JSON.parse(jsonMatch[0]);
+
+      // If the model output multiple identical JSON objects, just evaluate the first one.
+      if (Array.isArray(parsed) && parsed.length > 0) {
+          parsed = parsed[0];
+      }
 
       // Standard Format: { "tool_calls": [...] }
       if (parsed.tool_calls && Array.isArray(parsed.tool_calls)) {
@@ -141,6 +151,16 @@ export // Parse tool calls from JSON in response content
           id: `json_call_${Date.now()}`,
           name: parsed.tool,
           arguments: ensureRecord(params)
+        }];
+      }
+
+      // Bare Execution Plan Format: { "goal": "...", "steps": [...] }
+      if (parsed.goal && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
+        console.log('[LLM] Identified Bare Execution Plan Format. Recovering as create_execution_plan tool call.');
+        return [{
+          id: `plan_call_${Date.now()}`,
+          name: 'create_execution_plan',
+          arguments: ensureRecord({ goal: parsed.goal, steps: parsed.steps })
         }];
       }
 
