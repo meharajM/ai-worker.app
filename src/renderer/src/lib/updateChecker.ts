@@ -49,18 +49,15 @@ function isNewerVersion(newVersion: string, currentVersion: string): boolean {
 }
 
 export async function checkUpdateAvailable(
-  updateUrl?: string
+  updateUrl: string = 'https://raw.githubusercontent.com/mhrj/ai-worker/main/update.json'
 ): Promise<{ available: boolean; config?: UpdateConfig; forceUpdate: boolean }> {
-  const url = updateUrl || (typeof import.meta !== 'undefined' && import.meta.env?.DEV 
-    ? '/mock-update.json' 
-    : 'https://raw.githubusercontent.com/meharajM/ai-worker/main/update.json')
+  const url = updateUrl; // Keep it simple for production
 
   try {
     const response = await fetch(url)
     if (!response.ok) return { available: false, forceUpdate: false }
 
     const config: UpdateConfig = await response.json()
-    console.log('[updateChecker] Config received:', config)
 
     // Use window.electron safely
     const electronApp = window.electron?.app
@@ -70,10 +67,7 @@ export async function checkUpdateAvailable(
     }
 
     const currentVersionStr = await electronApp.getVersion()
-    console.log('[updateChecker] Current version:', currentVersionStr)
-    
     const userRolloutId = (await getRolloutId()) as number
-    console.log('[updateChecker] User rolloutId:', userRolloutId)
 
     const currentVersionScore = parseVersion(currentVersionStr)
     const latestVersionScore = parseVersion(config.latestVersion)
@@ -82,9 +76,6 @@ export async function checkUpdateAvailable(
     const isForceUpdate = currentVersionScore < minRequiredScore
     const hasNewVersion = latestVersionScore > currentVersionScore
     const isRolloutBucket = userRolloutId <= (config.rolloutPercentage || 100)
-    
-    console.log('[updateChecker] isRolloutBucket:', isRolloutBucket, 'hasNewVersion:', hasNewVersion, 'isForceUpdate:', isForceUpdate)
-
     const available = hasNewVersion && (isRolloutBucket || isForceUpdate)
 
     return {

@@ -9,13 +9,10 @@ export function UpdateNotification() {
   const [isVisible, setIsVisible] = useState(false)
 
   useEffect(() => {
-    console.log('[UpdateNotification] Component mounted')
     async function check() {
-      console.log('[UpdateNotification] Starting update check (3s delay)...')
       // Small delay on startup so it doesn't jarringly block the initial load
       setTimeout(async () => {
         const { available, config, forceUpdate } = await checkUpdateAvailable()
-        console.log('[UpdateNotification] Check result:', { available, config, forceUpdate })
         if (available && config) {
           // Check if user previously skipped this non-forced version
           const skippedVersion = await electron.store.get('system.skippedUpdate')

@@ -1,7 +1,0 @@
-{
-  "latestVersion": "99.0.0",
-  "rolloutPercentage": 100,
-  "downloadUrl": "https://github.com/meharajM/ai-worker.app/releases",
-  "minRequiredVersion": "0.1.0",
-  "releaseNotes": "This is a manual test update! The release flow is working correctly if you see this notification."
-}
