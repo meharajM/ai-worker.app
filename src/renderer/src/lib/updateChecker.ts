@@ -49,12 +49,14 @@ function isNewerVersion(newVersion: string, currentVersion: string): boolean {
 }
 
 export async function checkUpdateAvailable(
-  updateUrl: string = import.meta.env.DEV 
-    ? '/mock-update.json' 
-    : 'https://raw.githubusercontent.com/meharajM/ai-worker/main/update.json'
+  updateUrl?: string
 ): Promise<{ available: boolean; config?: UpdateConfig; forceUpdate: boolean }> {
+  const url = updateUrl || (typeof import.meta !== 'undefined' && import.meta.env?.DEV 
+    ? '/mock-update.json' 
+    : 'https://raw.githubusercontent.com/meharajM/ai-worker/main/update.json')
+
   try {
-    const response = await fetch(updateUrl)
+    const response = await fetch(url)
     if (!response.ok) return { available: false, forceUpdate: false }
 
     const config: UpdateConfig = await response.json()
