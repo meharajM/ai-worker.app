@@ -1,0 +1,88 @@
+{
+	"mcp_servers": [
+		{
+			"name": "playwright",
+			"description": "Native Playwright Service - Browser automation (Internal)",
+			"type": "stdio",
+			"command": "internal",
+			"args": [],
+			"autoConnect": true,
+			"id": "mcp_1774275208249_ezld5blme",
+			"connected": false,
+			"tools": [],
+			"activeUserId": null
+		},
+		{
+			"name": "memory",
+			"description": "Core Memory Service - Knowledge Graph (Internal)",
+			"type": "stdio",
+			"command": "internal-memory",
+			"args": [],
+			"autoConnect": true,
+			"id": "mcp_1774275208249_91ucn9jw5",
+			"connected": false,
+			"tools": [],
+			"activeUserId": null
+		},
+		{
+			"name": "filesystem",
+			"description": "Safe Filesystem Service - Read/Write files with safety checks (Internal)",
+			"type": "stdio",
+			"command": "internal-filesystem",
+			"args": [],
+			"autoConnect": true,
+			"id": "mcp_1774275208249_booofc1u9",
+			"connected": false,
+			"tools": [],
+			"activeUserId": null
+		},
+		{
+			"name": "markitdown",
+			"description": "MarkItDown - Convert documents (PDF, Word, Excel, images, audio) to Markdown",
+			"type": "stdio",
+			"command": "uvx",
+			"args": [
+				"markitdown-mcp[all]"
+			],
+			"autoConnect": true,
+			"id": "mcp_1774275208249_s57dvjwki",
+			"connected": false,
+			"tools": [],
+			"activeUserId": null
+		}
+	],
+	"ai-worker-settings": {
+		"state": {
+			"ttsEnabled": true,
+			"ttsRate": 1,
+			"ttsPitch": 1,
+			"ttsVoice": null,
+			"speechLang": "en-US",
+			"offlineSpeech": true,
+			"voskModel": "en-us",
+			"preferredProvider": "auto",
+			"ollamaModel": "qwen2.5:3b",
+			"ollamaBaseUrl": "http://localhost:11434",
+			"openaiApiKey": "",
+			"openaiBaseUrl": "https://api.openai.com/v1",
+			"openaiModel": "gpt-4o-mini",
+			"geminiApiKey": "",
+			"geminiModel": "gemini-2.5-flash",
+			"openrouterApiKey": "",
+			"openrouterModel": "anthropic/claude-3.5-sonnet",
+			"browserModel": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC",
+			"theme": "dark",
+			"playwrightBrowser": "auto",
+			"playwrightHeadless": false,
+			"fileSystemSafeMode": true,
+			"memoryBackend": "server-memory",
+			"activeUserId": null,
+			"isSyncing": false,
+			"lastSyncTime": 0
+		},
+		"version": 0
+	},
+	"system": {
+		"rolloutId": 29
+	}
+}

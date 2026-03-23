@@ -29,6 +29,25 @@ function parseVersion(v: string): number {
   return score
 }
 
+// Helper function to compare versions
+function isNewerVersion(newVersion: string, currentVersion: string): boolean {
+  const newParts = newVersion.split('.').map(Number);
+  const currentParts = currentVersion.split('.').map(Number);
+
+  for (let i = 0; i < Math.max(newParts.length, currentParts.length); i++) {
+    const newPart = newParts[i] || 0;
+    const currentPart = currentParts[i] || 0;
+
+    if (newPart > currentPart) {
+      return true;
+    }
+    if (newPart < currentPart) {
+      return false;
+    }
+  }
+  return false; // Versions are the same
+}
+
 export async function checkUpdateAvailable(
   updateUrl: string = 'https://raw.githubusercontent.com/mhrj/ai-worker/main/update.json'
 ): Promise<{ available: boolean; config?: UpdateConfig; forceUpdate: boolean }> {
@@ -37,30 +56,35 @@ export async function checkUpdateAvailable(
     if (!response.ok) return { available: false, forceUpdate: false }
 
     const config: UpdateConfig = await response.json()
-    const currentVersionStr = await electron.getVersion()
+    console.log('[updateChecker] Config received:', config)
+
+    // Use window.electron safely
+    const electronApp = window.electron?.app
+    if (!electronApp) {
+      console.error('[updateChecker] window.electron.app is not available')
+      return { available: false, forceUpdate: false }
+    }
+
+    const currentVersionStr = await electronApp.getVersion()
+    console.log('[updateChecker] Current version:', currentVersionStr)
     
-    const currentVersion = parseVersion(currentVersionStr)
-    const latestVersion = parseVersion(config.latestVersion)
-    const minRequired = config.minRequiredVersion ? parseVersion(config.minRequiredVersion) : 0
+    const userRolloutId = (await getRolloutId()) as number
+    console.log('[updateChecker] User rolloutId:', userRolloutId)
 
-    const isForceUpdate = currentVersion < minRequired
+    const currentVersionScore = parseVersion(currentVersionStr)
+    const latestVersionScore = parseVersion(config.latestVersion)
+    const minRequiredScore = config.minRequiredVersion ? parseVersion(config.minRequiredVersion) : 0
 
-    // If current version is already greater or equal to latest, no update
-    if (currentVersion >= latestVersion) {
-      return { available: false, forceUpdate: false }
-    }
+    const isForceUpdate = currentVersionScore < minRequiredScore
+    const hasNewVersion = latestVersionScore > currentVersionScore
+    const isRolloutBucket = userRolloutId <= (config.rolloutPercentage || 100)
+    
+    console.log('[updateChecker] isRolloutBucket:', isRolloutBucket, 'hasNewVersion:', hasNewVersion, 'isForceUpdate:', isForceUpdate)
 
-    // Check rollout percentage (1-100)
-    // If the rollout is 25%, users with rolloutId 1-25 will get it.
-    const rolloutId = await getRolloutId()
-    const includedInRollout = rolloutId <= config.rolloutPercentage
-
-    if (!includedInRollout && !isForceUpdate) {
-      return { available: false, forceUpdate: false }
-    }
+    const available = hasNewVersion && (isRolloutBucket || isForceUpdate)
 
     return {
-      available: true,
+      available,
       config,
       forceUpdate: isForceUpdate
     }
