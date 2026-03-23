@@ -721,6 +721,7 @@ export class WhatsAppService extends EventEmitter {
                 textContent = msg.viewOnceMessage.message.conversation
             } else if (msg.ephemeralMessage?.message?.extendedTextMessage?.text) {
                 textContent = msg.ephemeralMessage.message.extendedTextMessage.text
+            } else if (msg.ephemeralMessage?.message?.conversation) {
                 textContent = msg.ephemeralMessage.message.conversation
             } else if (msg.stickerMessage) {
                 textContent = `[User sent a sticker: ${msg.stickerMessage.mimetype}]`

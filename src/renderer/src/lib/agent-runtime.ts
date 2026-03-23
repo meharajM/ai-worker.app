@@ -487,9 +487,20 @@ export class AgentRuntime implements IAgentClient {
           }
 
           if (consecutiveErrors >= this.maxConsecutiveErrors) {
+            let cleanError = resultStr;
+            try {
+              const parsed = JSON.parse(resultStr);
+              if (parsed.error) cleanError = parsed.error;
+            } catch {
+              // Not JSON, use raw
+            }
+            
+            // Strip out ASCII art boxes (often from Playwright) which look terrible on WhatsApp
+            cleanError = cleanError.replace(/[╔║╚═╗╝]/g, '').trim();
+
             const bailoutMsg: LLMMessage = {
               role: "assistant",
-              content: `Bailing out after ${consecutiveErrors} consecutive errors. Last error: ${resultStr}`,
+              content: `Bailing out after ${consecutiveErrors} consecutive errors. Last error: ${cleanError}`,
             };
             this.addMessage(bailoutMsg);
             return bailoutMsg;
