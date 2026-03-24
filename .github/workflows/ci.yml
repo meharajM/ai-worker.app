@@ -52,6 +52,7 @@ jobs:
     needs: test
     if: |
       startsWith(github.ref, 'refs/tags/') || 
+      github.ref == 'refs/heads/prod' ||
       (github.event_name == 'pull_request' && (
         contains(github.event.pull_request.labels.*.name, 'build-all') ||
         contains(github.event.pull_request.labels.*.name, 'build-linux') ||
@@ -90,11 +91,13 @@ jobs:
             dist/*.AppImage
             dist/*.deb
             dist/*.blockmap
+            dist/*.yml
 
   build-macos:
     needs: test
     if: |
       startsWith(github.ref, 'refs/tags/') || 
+      github.ref == 'refs/heads/prod' ||
       (github.event_name == 'pull_request' && (
         contains(github.event.pull_request.labels.*.name, 'build-all') ||
         contains(github.event.pull_request.labels.*.name, 'build-macos')
@@ -114,7 +117,7 @@ jobs:
         run: npm install
 
       - name: Build MacOS
-        run: npm run build:mac
+        run: npm run build:mac:universal
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -126,11 +129,12 @@ jobs:
             dist/*.dmg
             dist/*.zip
             dist/*.blockmap
+            dist/*.yml
 
   release:
     needs: [build-linux-win, build-macos]
-    # Allow release if either build succeeded and it's a tag
-    if: always() && startsWith(github.ref, 'refs/tags/')
+    # Allow release if both builds succeed and it is a tag OR a push to prod
+    if: success() && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/prod')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -148,9 +152,12 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'latest-prod' }}
+          name: ${{ github.ref_type == 'tag' && github.ref_name || 'Production Release (Latest)' }}
           files: release-artifacts/**/*
           draft: false
           prerelease: false
+          make_latest: true
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
