@@ -152,6 +152,14 @@ jobs:
       - name: List Artifacts (Debug)
         run: ls -R release-artifacts
       
+      - name: Clean up old "latest" release on GitHub
+        if: github.ref == 'refs/heads/prod'
+        run: |
+          gh release delete latest-prod -y --cleanup-tag || true
+          git push --delete origin latest-prod || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -174,3 +182,21 @@ jobs:
           aws s3 sync release-artifacts/ s3://${{ secrets.R2_BUCKET_NAME }}/ \
             --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com \
             --delete
+
+      - name: Instant Quota Cleanup (Delete Workflow Artifacts)
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId
+            });
+            for (const artifact of data.artifacts) {
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id
+              });
+            }
