@@ -380,19 +380,15 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         try {
             console.log('Checking for Missing Dependencies modal...');
             // In some environments, the modal might take a moment to trigger IPC and render
-            const modalVisible = await window.locator('text=Missing Dependencies').isVisible({ timeout: 10000 }).catch(() => false);
-
-            if (modalVisible) {
-                console.log('Found Missing Dependencies modal, dismissing...');
-                const skipBtn = window.locator('text=Skip for now').first();
-                await skipBtn.click();
-                await window.locator('text=Missing Dependencies').waitFor({ state: 'hidden', timeout: 5000 });
-                console.log('✅ Dismissed Missing Dependencies modal');
-            } else {
-                console.log('ℹ️ No Missing Dependencies modal detected after 10s');
-            }
+            await window.locator('text=Missing Dependencies').waitFor({ state: 'visible', timeout: 8000 });
+            
+            console.log('Found Missing Dependencies modal, dismissing...');
+            const skipBtn = window.locator('text=Skip for now').first();
+            await skipBtn.click();
+            await window.locator('text=Missing Dependencies').waitFor({ state: 'hidden', timeout: 5000 });
+            console.log('✅ Dismissed Missing Dependencies modal');
         } catch (e) {
-            console.log('ℹ️ Error while checking/dismissing modal:', e.message);
+            console.log('ℹ️ No Missing Dependencies modal detected after 8s');
         }
 
         // Switch to OpenAI (Mocked)
