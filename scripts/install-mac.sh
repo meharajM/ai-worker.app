@@ -5,7 +5,7 @@
 
 set -e
 
-R2_BASE="https://downloads.aiworker.app"
+R2_BASE="https://downloads.ai-worker.tech"
 TMP_DIR="$(mktemp -d)"
 APP_NAME="AI-Worker"
 INSTALL_DIR="/Applications"

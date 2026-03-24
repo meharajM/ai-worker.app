@@ -7,7 +7,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$R2Base = "https://downloads.aiworker.app"
+$R2Base = "https://downloads.ai-worker.tech"
 $TempDir = [System.IO.Path]::GetTempPath()
 $ManifestUrl = "$R2Base/latest.yml"
 
