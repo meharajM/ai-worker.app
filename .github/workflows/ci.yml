@@ -9,7 +9,29 @@ on:
     types: [opened, synchronize, labeled]
 
 jobs:
+  cleanup-before:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Purge All Old Artifacts
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.actions.listArtifactsForRepo({
+               owner: context.repo.owner,
+               repo: context.repo.repo,
+               per_page: 100
+            });
+            for (const artifact of data.artifacts) {
+               await github.rest.actions.deleteArtifact({
+                 owner: context.repo.owner,
+                 repo: context.repo.repo,
+                 artifact_id: artifact.id
+               });
+            }
+
   test:
+    needs: cleanup-before
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,6 +65,7 @@ jobs:
       
       - name: Upload Test Artifacts
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: test-failure-screenshots
@@ -84,6 +107,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Artifacts
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: release-ubuntu-latest
@@ -94,6 +118,17 @@ jobs:
             dist/*.deb
             dist/*.blockmap
             dist/*.yml
+            
+      - name: Direct Upload to Cloudflare R2 (Linux/Win)
+        if: github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/')
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: true
+        run: |
+          aws s3 cp dist/ s3://${{ secrets.R2_BUCKET_NAME }}/ \
+            --recursive --exclude "*" --include "*.exe" --include "*.AppImage" --include "*.deb" --include "*.blockmap" --include "*.yml" \
+            --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
 
   build-macos:
     needs: test
@@ -124,6 +159,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Artifacts
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: release-macos-latest
@@ -134,23 +170,31 @@ jobs:
             dist/*.blockmap
             dist/*.yml
 
+      - name: Direct Upload to Cloudflare R2 (MacOS)
+        if: github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/')
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_EC2_METADATA_DISABLED: true
+        run: |
+          aws s3 cp dist/ s3://${{ secrets.R2_BUCKET_NAME }}/ \
+            --recursive --exclude "*" --include "*.dmg" --include "*.zip" --include "*.blockmap" --include "*.yml" \
+            --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+
   release:
     needs: [build-linux-win, build-macos]
-    # Allow release if both builds succeed and it is a tag OR a push to prod
-    if: success() && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/prod')
+    if: always() && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/prod')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Download all artifacts
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           path: release-artifacts
           pattern: release-*
           merge-multiple: true
-      
-      - name: List Artifacts (Debug)
-        run: ls -R release-artifacts
       
       - name: Clean up old "latest" release on GitHub
         if: github.ref == 'refs/heads/prod'
@@ -161,6 +205,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Release
+        continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'latest-prod' }}
@@ -173,30 +218,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload to Cloudflare R2
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_EC2_METADATA_DISABLED: true
-        run: |
-          aws s3 sync release-artifacts/ s3://${{ secrets.R2_BUCKET_NAME }}/ \
-            --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com \
-            --delete
-
       - name: Instant Quota Cleanup (Delete Workflow Artifacts)
         if: always()
         uses: actions/github-script@v7
         with:
           script: |
-            const { data } = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: context.runId
-            });
-            for (const artifact of data.artifacts) {
-              await github.rest.actions.deleteArtifact({
+            try {
+              const { data } = await github.rest.actions.listWorkflowRunArtifacts({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                artifact_id: artifact.id
+                run_id: context.runId
               });
+              for (const artifact of data.artifacts) {
+                await github.rest.actions.deleteArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: artifact.id
+                });
+              }
+            } catch (e) {
+              console.log("Cleanup failed or no artifacts found", e);
             }
