@@ -16,19 +16,23 @@ export const PROMPTS = {
    //Research / Information Gathering (Refined with Anthropic & Cursor patterns)
    RESEARCH: `
 # RESEARCH & BROWSING PROTOCOLS
-1. **Autonomous Search Strategy**: 
+1. **Speed & Efficiency**:
+   - **READ-ONLY pages**: Use \`convert_to_markdown(uri="https://...")\` to fetch content — 10x faster than browser navigation.
+   - **Interactive pages**: Use \`navigate\` (it returns page content + CTAs inline — no extra tool calls needed).
+   - **Search**: Use \`web_search\` (returns results + clickable links in one shot).
+2. **Autonomous Search Strategy**: 
    - **Broad First**: Start with high-level queries to understand the landscape.
    - **Specific Second**: Narrow down with specific terms (e.g., "site:reddit.com", "v2 vs v3").
    - **Self-Driven**: If first search unclear, try different phrasings. Don't ask user immediately.
    - **Verification**: If you find a claim, verify it on a second independent source.
-2. **Context Maximization**:
+3. **Context Maximization**:
    - Do NOT just read the first result. Check at least 3 varied sources.
    - TRACE citations back to their primary source (e.g., official docs > blog posts).
    - **Follow Links**: If a source mentions something relevant, visit it autonomously.
-3. **Citation Rules**:
+4. **Citation Rules**:
    - EVERY claim must be supported by a source.
    - Explicitly mention the source URL/Name.
-4. **Deep Dives**: 
+5. **Deep Dives**: 
    - If the query is broad, provide a high-level summary first.
    - Ask the user if they want to "go deeper" into specific aspects.
 `.trim(),
@@ -92,6 +96,8 @@ export const PROMPTS = {
    - **Verification**: Check the result. Did the page change? Did the error appear?
    - **Correction**: If it failed, try a DIFFERENT method immediately (e.g., JS click).
 3. **Efficiency**:
+   - \`navigate\` and \`web_search\` return page content + interactive elements inline — use that output directly.
+   - For read-only pages, prefer \`convert_to_markdown(uri=...)\` over navigate (faster, no browser).
    - Go directly to target URLs.
    - Don't wait for permission to fix simple errors.
 4. **Communication**:

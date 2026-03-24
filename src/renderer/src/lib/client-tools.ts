@@ -111,7 +111,11 @@ export const STATEFUL_BROWSER_TOOLS = [
   'new_tab',
   'switch_tab',
   'close_tab',
-  'get_tabs'
+  'get_tabs',
+  // Compound / recipe tools — also browser-stateful
+  'browser_action_sequence',
+  'web_search',
+  'fill_form',
 ];
 
 // Tools that modify file system state (using fileLock)
@@ -183,6 +187,50 @@ export const MEMORY_UPDATE_ENTITY_TOOL: MCPTool = {
   }
 };
 
+// ============================================================
+// Browser Turbo / Recipe Tools
+// Imported from shared schema (single source of truth).
+// The actual execution happens in PlaywrightService.callTool().
+// ============================================================
+
+import {
+  BROWSER_ACTION_SEQUENCE_SCHEMA,
+  WEB_SEARCH_SCHEMA,
+  FILL_FORM_SCHEMA,
+} from '../../../shared/browser-tool-schemas';
+
+export const BROWSER_ACTION_SEQUENCE_TOOL: MCPTool = BROWSER_ACTION_SEQUENCE_SCHEMA as MCPTool;
+export const WEB_SEARCH_TOOL: MCPTool = WEB_SEARCH_SCHEMA as MCPTool;
+export const FILL_FORM_TOOL: MCPTool = FILL_FORM_SCHEMA as MCPTool;
+
+export const WHATSAPP_SEND_MEDIA_TOOL: MCPTool = {
+  name: "whatsapp_send_media",
+  description: "Send a media file (image, video, audio, document) to a WhatsApp chat. Use this when the user explicitly asks to send a file from their workspace to WhatsApp.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      filePath: { type: "string", description: "Absolute path to the file to send" },
+      to: { type: "string", description: "The WhatsApp number to send to (include country code without +). If replying to a message, extract from 'WhatsApp (number):' prefix." },
+      caption: { type: "string", description: "Optional message to accompany the file" },
+      type: { type: "string", enum: ["image", "video", "audio", "document"], description: "The type of media being sent (default: image)" }
+    },
+    required: ["filePath"] // 'to' is handled via fallback if omitted
+  }
+};
+
+export const WHATSAPP_SEND_MESSAGE_TOOL: MCPTool = {
+  name: "whatsapp_send_message",
+  description: "Send a text message to a WhatsApp chat. Use this to notify the user of task completion or to ask a question.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      content: { type: "string", description: "The message text to send to the WhatsApp chat" },
+      to: { type: "string", description: "The WhatsApp number to send to. If replying to a message, extract from 'WhatsApp (number):' prefix." }
+    },
+    required: ["content"]
+  }
+};
+
 export const CLIENT_TOOLS = [
   PLANNING_TOOL,
   SUB_AGENT_TOOL,
@@ -191,5 +239,8 @@ export const CLIENT_TOOLS = [
   MEMORY_CREATE_ENTITY_TOOL,
   MEMORY_CREATE_RELATION_TOOL,
   MEMORY_SEARCH_TOOL,
-  MEMORY_UPDATE_ENTITY_TOOL
+  MEMORY_UPDATE_ENTITY_TOOL,
+  WHATSAPP_SEND_MEDIA_TOOL,
+  WHATSAPP_SEND_MESSAGE_TOOL,
 ];
+

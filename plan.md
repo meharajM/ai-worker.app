@@ -432,16 +432,18 @@ ai-worker-app/
 - [x] Documentation updated
 ### ✅ Phase 15: Internal Automation (Playwright) [COMPLETED]
 
-**Goal:** Implement internal zero-latency browser automation via Playwright.
+**Goal:** Implement internal zero-latency browser automation via Playwright with advanced detection evasion.
 
 **Implementation:**
-- [x] Implement **Internal Playwright Service** (`src/main/services/PlaywrightService.ts`) regarding the zero-latency automation
+- [x] Implement **Internal Playwright Service** (`src/main/services/PlaywrightService.ts`) for zero-latency automation
 - [x] Add E2E tests for all Playwright tools (`tests/playwright_tools_test.cjs`)
 - [x] Expose 30+ automation tools (navigate, click, fill, screenshot, etc.) directly via main process
+- [x] Implement **Advanced Headless Evasion** in `BrowserManager` (Stealth flags, Web-Security bypass, timezone mocking)
+- [x] Implement **Human-like Inputs** using `ghost-cursor` and variable typing delays in `ClickTool` and `TypeTool`
 
 **Validation:** ✅
 - [x] Playwright tools execute successfully in E2E tests
-- [x] Zero-latency automation verified
+- [x] Zero-latency automation and Stealth capability verified
 
 ---
 
@@ -459,18 +461,7 @@ ai-worker-app/
 - [x] AI uses natural language without jargon
 - [x] Shopping/Booking tasks trigger confirmation if details missing
 - [x] High-risk tasks (payment/OTP) flagged for confirmation
-### ✅ Phase 15: Internal Automation (Playwright) [COMPLETED]
 
-**Goal:** Implement internal zero-latency browser automation via Playwright.
-
-**Implementation:**
-- [x] Implement **Internal Playwright Service** (`src/main/services/PlaywrightService.ts`) regarding the zero-latency automation
-- [x] Add E2E tests for all Playwright tools (`tests/playwright_tools_test.cjs`)
-- [x] Expose 30+ automation tools (navigate, click, fill, screenshot, etc.) directly via main process
-
-**Validation:** ✅
-- [x] Playwright tools execute successfully in E2E tests
-- [x] Zero-latency automation verified
 
 ---
 
@@ -525,12 +516,18 @@ ai-worker-app/
 
 ### 🏁 Phase 18: Distribution & V1 Launch
 
-**Goal:** Public release and update mechanism.
+**Goal:** Public release, auto-updates, and update mechanism.
 
 **Implementation:**
 - [ ] Set up GitHub Actions for automated multi-platform releases
 - [ ] Configure Code Signing (Apple Developer / Windows Certs)
 - [ ] Direct download server / S3 bucket setup
+- [ ] **Auto-Updater Implementation**
+  - [ ] Install `electron-updater` (already bundled with `electron-builder`)
+  - [ ] Configure `autoUpdater.checkForUpdatesAndNotify()` in main process
+  - [ ] Configure `publish` settings in `electron-builder` config (GitHub Releases provider)
+  - [ ] Add update notification UI (toast/dialog for "Update available, restart to apply")
+  - [ ] Test update flow: publish v0.1.1 → verify v0.1.0 auto-downloads and applies
 - [ ] Initial social launch (Product Hunt / Twitter)
 
 ---

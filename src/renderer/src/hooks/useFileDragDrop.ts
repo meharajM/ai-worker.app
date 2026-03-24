@@ -77,13 +77,13 @@ export function useFileDragDrop({
     const handleDragLeave = useCallback((e: DragEvent) => {
         e.preventDefault()
         e.stopPropagation()
-        
+
         // Only set isDragging to false if we're leaving the drop zone entirely
         // This prevents flickering when dragging over child elements
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
         const x = e.clientX
         const y = e.clientY
-        
+
         if (x <= rect.left || x >= rect.right || y <= rect.top || y >= rect.bottom) {
             setIsDragging(false)
         }
@@ -106,7 +106,7 @@ export function useFileDragDrop({
         setIsDragging(false)
 
         const files = Array.from(e.dataTransfer.files)
-        
+
         if (files.length === 0) return
 
         // Filter supported files if validation is enabled
@@ -143,7 +143,7 @@ export function useFileDragDrop({
                     // We can't create a real File with content easily, but we have the path
                     // capable of being used by our system which relies on .path
                     const name = path.split('/').pop() || 'unknown_file'
-                    
+
                     // Allow "duck typing" for our internal usage
                     const proxyFile = {
                         name,
@@ -157,7 +157,7 @@ export function useFileDragDrop({
                         text: async () => '',
                         arrayBuffer: async () => new ArrayBuffer(0)
                     } as unknown as File
-                    
+
                     files.push(proxyFile)
                 })
             }
@@ -168,7 +168,7 @@ export function useFileDragDrop({
             const validFiles = validateFiles
                 ? files.filter(isSupportedFile)
                 : files
-            
+
             // Note: We might be validating based on name only for proxy files, which is fine
 
             if (validFiles.length > 0) {
@@ -195,12 +195,16 @@ export function useFileDragDrop({
  * Generate a prompt for file conversion based on the number of files
  */
 export function generateFileConversionPrompt(files: File[]): string {
-    // Extract file paths (Electron provides .path property)
-    const filePaths = files.map(f => (f as any).path || f.name)
-    
+    // Extract file paths (Electron provides .path property on standard inputs,
+    // but drag-and-drop requires webUtils wrapper)
+    const filePaths = files.map(f => {
+        const path = (window as any).electron?.utils?.getPathForFile(f) || (f as any).path || f.name;
+        return path;
+    })
+
     if (files.length === 1) {
         return `Convert this file to markdown: ${filePaths[0]}`
     }
-    
+
     return `Convert these files to markdown:\n${filePaths.map(p => `- ${p}`).join('\n')}`
 }

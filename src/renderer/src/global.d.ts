@@ -32,6 +32,10 @@ interface ElectronAPI {
     app: {
         getVersion: () => Promise<string>
         getName: () => Promise<string>
+        selectFolder: () => Promise<string | null>
+        getMissingDependencies: () => Promise<any[]>
+        getAllDependencies: () => Promise<any[]>
+        runSetupScript: () => Promise<void>
     }
 
     speech: {
@@ -67,6 +71,14 @@ interface ElectronAPI {
         cleanup: () => Promise<{ success: boolean; error?: string }>
         onResult: (callback: (result: { text: string; final: boolean }) => void) => () => void
         onDownloadProgress: (callback: (data: { modelId: string; progress: number }) => void) => () => void
+    }
+
+    clipboard: {
+        readFilePaths: () => string[]
+    }
+
+    utils: {
+        getPathForFile: (file: File) => string
     }
 }
 

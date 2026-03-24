@@ -54,7 +54,7 @@ const NOISE_PATTERNS = [
 const PRESENTABLE_PATTERNS = {
     products: [
         /(?:₹|Rs\.?|INR|USD|\$)\s*[\d,]+(?:\.\d{2})?/i, // Price patterns
-        /(?:rating|stars?|reviews?)\s*[:\-]?\s*[\d.]+/i, // Rating patterns
+        /(?:rating|stars?|reviews?)\s*[:-]?\s*[\d.]+/i, // Rating patterns
         /(?:add to cart|buy now|in stock|out of stock)/i, // Shopping actions
     ],
     navigation: [
@@ -87,7 +87,7 @@ function isNoise(output: string): boolean {
 /**
  * Try to extract product information from output
  */
-function extractProducts(output: string | any): ExtractedProduct[] | null {
+function extractProducts(output: unknown): ExtractedProduct[] | null {
     const products: ExtractedProduct[] = [];
 
     // Skip if this looks like Playwright interactive elements
@@ -98,19 +98,19 @@ function extractProducts(output: string | any): ExtractedProduct[] | null {
     }
 
     // Try to parse as JSON array of products
-    if (typeof output === 'object' && Array.isArray(output)) {
+    if (typeof output === 'object' && output !== null && Array.isArray(output)) {
         // Check if it's a Playwright element array
-        if (output.length > 0 && output[0].index !== undefined && output[0].type) {
+        if (output.length > 0 && typeof output[0] === 'object' && output[0] !== null && (output[0] as Record<string, unknown>).index !== undefined) {
             return null; // This is interactive elements, not products
         }
 
-        for (const item of output.slice(0, 5)) { // Max 5 products
+        for (const item of output.slice(0, 5) as Record<string, unknown>[]) { // Max 5 products
             if (item.name || item.title || item.product) {
                 products.push({
-                    name: item.name || item.title || item.product,
-                    price: item.price || item.cost,
-                    rating: item.rating || item.stars,
-                    url: item.url || item.link,
+                    name: (item.name || item.title || item.product) as string,
+                    price: (item.price || item.cost) as string,
+                    rating: (item.rating || item.stars) as string,
+                    url: (item.url || item.link) as string,
                 });
             }
         }
@@ -140,12 +140,13 @@ function extractProducts(output: string | any): ExtractedProduct[] | null {
 /**
  * Try to extract navigation/page load information
  */
-function extractNavigation(output: string | any): ExtractedNavigation | null {
-    if (typeof output === 'object') {
-        if (output.url || output.href) {
+function extractNavigation(output: unknown): ExtractedNavigation | null {
+    if (typeof output === 'object' && output !== null && !Array.isArray(output)) {
+        const data = output as Record<string, unknown>;
+        if (data.url || data.href) {
             return {
-                url: output.url || output.href,
-                title: output.title || output.pageTitle,
+                url: (data.url || data.href) as string,
+                title: (data.title || data.pageTitle) as string,
             };
         }
     }
@@ -169,12 +170,12 @@ function extractNavigation(output: string | any): ExtractedNavigation | null {
 /**
  * Try to extract text from MCP-style content objects
  */
-function extractMcpContent(output: any): string | null {
+function extractMcpContent(output: unknown): string | null {
     // Handle {"content": [{"type": "text", "text": "..."}]} pattern
-    if (output && typeof output === 'object' && Array.isArray(output.content)) {
-        const textParts = output.content
-            .filter((c: any) => c.type === 'text' && c.text)
-            .map((c: any) => c.text)
+    if (output && typeof output === 'object' && 'content' in output && Array.isArray(output.content)) {
+        const textParts = (output.content as Array<{ type: string; text?: string }>)
+            .filter((c) => c.type === 'text' && c.text)
+            .map((c) => c.text as string)
             .join('\n');
 
         // If the extracted text itself is JSON, try to parse it
@@ -184,7 +185,7 @@ function extractMcpContent(output: any): string | null {
                 // If it's a list of products/objects, let extractProducts handle it
                 if (Array.isArray(parsed)) return null;
                 // Otherwise return as is (to be flattened later) or just text
-            } catch (e) { /* ignore */ }
+            } catch { /* ignore */ }
         }
 
         return textParts.length > 0 ? textParts : null;
@@ -195,7 +196,7 @@ function extractMcpContent(output: any): string | null {
 /**
  * flatten simple JSON objects to bullet definitions
  */
-function flattenJsonToBullets(obj: any): string | null {
+function flattenJsonToBullets(obj: unknown): string | null {
     if (typeof obj !== 'object' || obj === null) return null;
 
     // If array, map each item
@@ -204,13 +205,14 @@ function flattenJsonToBullets(obj: any): string | null {
         return items.length > 0 ? items.join('\n') : null;
     }
 
+    const dataObj = obj as Record<string, unknown>;
     // Capture meaningful keys
     const keys = ['name', 'title', 'product', 'price', 'cost', 'rating', 'status', 'message'];
-    const foundKeys = keys.filter(k => obj[k]);
+    const foundKeys = keys.filter(k => dataObj[k]);
 
     if (foundKeys.length > 0) {
         const parts = foundKeys.map(k => {
-            const val = obj[k];
+            const val = dataObj[k];
             if (typeof val === 'object') return null;
             return k === 'name' || k === 'title' ? `**${val}**` : `${k}: ${val}`;
         }).filter(Boolean);
@@ -225,11 +227,21 @@ function flattenJsonToBullets(obj: any): string | null {
  */
 export function analyzeToolOutput(
     toolName: string,
-    output: any
+    output: unknown
 ): PresentableResult {
+    // 0. If output is a stringified JSON object, parse it back to an object
+    let parsedOutput = output;
+    if (typeof output === 'string' && (output.trim().startsWith('{') || output.trim().startsWith('['))) {
+        try {
+            parsedOutput = JSON.parse(output);
+        } catch {
+            // Keep as string if parsing fails
+        }
+    }
+
     // 1. Try to extract content from MCP structure first
-    const mcpContent = extractMcpContent(output);
-    const effectiveOutput = mcpContent || output;
+    const mcpContent = extractMcpContent(parsedOutput);
+    const effectiveOutput = mcpContent || parsedOutput;
 
     // Convert to string for pattern matching
     const outputStr = typeof effectiveOutput === 'string'
@@ -245,8 +257,9 @@ export function analyzeToolOutput(
     }
 
     // Check for errors first
-    if (effectiveOutput?.error || PRESENTABLE_PATTERNS.error.some(p => p.test(outputStr))) {
-        const errorMsg = effectiveOutput?.error || outputStr.match(/error[:\s]+([^\n]+)/i)?.[1] || 'An error occurred';
+    const dataObj = effectiveOutput as Record<string, unknown>;
+    if (dataObj?.error || PRESENTABLE_PATTERNS.error.some(p => p.test(outputStr))) {
+        const errorMsg = (dataObj?.error as string) || outputStr.match(/error[:\s]+([^\n]+)/i)?.[1] || 'An error occurred';
         return {
             hasPresentableData: true,
             summary: `⚠️ ${errorMsg.substring(0, 100)}`,
@@ -307,7 +320,7 @@ export function analyzeToolOutput(
                 }
                 // If complex JSON and not flattening, ignore it to avoid dumping raw data
                 return { hasPresentableData: false, summary: '' };
-            } catch (e) {
+            } catch {
                 // Not JSON, proceed to text check
             }
         }

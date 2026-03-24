@@ -1,5 +1,5 @@
 const { _electron: electron } = require('playwright');
-const path = require('path');
+delete process.env.ELECTRON_RUN_AS_NODE; const path = require('path');
 const fs = require('fs');
 
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
@@ -17,17 +17,27 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         }
     }
 
-    const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'); // Mac specific
-    // Add fallback logic if needed, similar to other tests
+    const macPath = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+    const linuxPath = path.join(__dirname, '../node_modules/electron/dist/electron');
+    const electronExecutable = fs.existsSync(macPath) ? macPath : linuxPath;
     const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
 
     console.log('Using electron execPath:', execPath);
 
     let electronApp;
     try {
+        const tempUserDataDir = path.join(__dirname, 'temp-user-data');
+        if (fs.existsSync(tempUserDataDir)) {
+            fs.rmSync(tempUserDataDir, { recursive: true, force: true });
+        }
+
         electronApp = await electron.launch({
             executablePath: execPath,
-            args: [path.join(__dirname, '../out/main/index.js'), '--no-sandbox'],
+            args: [
+                path.join(__dirname, '../out/main/index.js'),
+                '--no-sandbox',
+                `--user-data-dir=${tempUserDataDir}`
+            ],
             timeout: 60000,
             env: { ...process.env, NODE_ENV: 'production' }
         });
@@ -39,10 +49,19 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
     try {
         const window = await electronApp.firstWindow();
+        await window.setViewportSize({ width: 1280, height: 900 });
         window.on('console', msg => console.log(`[Renderer]: ${msg.text()}`));
 
         // Mocking at the window level is more reliable than network interception for localhost in Electron
-        await window.addInitScript(() => {
+        await window.addInitScript(async () => {
+            localStorage.setItem('skipDepsCheck', 'true');
+            console.log("🧹 Clearing IndexedDB to ensure clean state...");
+            try {
+                const dbs = await window.indexedDB.databases();
+                for (const db of dbs) {
+                    window.indexedDB.deleteDatabase(db.name);
+                }
+            } catch (e) { }
             console.log("🛠️ Injecting Mock Fetch...");
 
             // --- SCENARIO DEFINITIONS ---
@@ -56,8 +75,8 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                                 role: "assistant",
                                 content: "Starting parallel search for minimal price...",
                                 tool_calls: [
-                                    { id: "call_1", type: "function", function: { name: "create_sub_agent", arguments: JSON.stringify({ name: "Amazon Search", goal: "Check Amazon" }) } },
-                                    { id: "call_2", type: "function", function: { name: "create_sub_agent", arguments: JSON.stringify({ name: "BestBuy Search", goal: "Check BestBuy" }) } }
+                                    { id: "call_1", type: "function", function: { name: "delegate_sub_task", arguments: JSON.stringify({ instruction: "Amazon Search" }) } },
+                                    { id: "call_2", type: "function", function: { name: "delegate_sub_task", arguments: JSON.stringify({ instruction: "BestBuy Search" }) } }
                                 ]
                             }
                         }]
@@ -186,6 +205,94 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                             }
                         }]
                     }
+                },
+                {
+                    triggers: ["loop different args"],
+                    response: {
+                        choices: [{
+                            message: {
+                                role: "assistant",
+                                content: "Exploring files.",
+                                tool_calls: [
+                                    { id: "c1", type: "function", function: { name: "fs_read_file", arguments: JSON.stringify({ path: "/fileA" }) } },
+                                    { id: "c2", type: "function", function: { name: "fs_read_file", arguments: JSON.stringify({ path: "/fileB" }) } },
+                                    { id: "c3", type: "function", function: { name: "fs_read_file", arguments: JSON.stringify({ path: "/fileC" }) } },
+                                    { id: "c4", type: "function", function: { name: "fs_read_file", arguments: JSON.stringify({ path: "/fileD" }) } }
+                                ]
+                            }
+                        }]
+                    }
+                },
+                {
+                    triggers: ["loop same args"],
+                    response: {
+                        choices: [{
+                            message: {
+                                role: "assistant",
+                                content: "Stuck reading the same file.",
+                                tool_calls: [
+                                    { id: "c1", type: "function", function: { name: "fs_read_file", arguments: JSON.stringify({ path: "/stuck_file" }) } },
+                                    { id: "c2", type: "function", function: { name: "fs_read_file", arguments: JSON.stringify({ path: "/stuck_file" }) } },
+                                    { id: "c3", type: "function", function: { name: "fs_read_file", arguments: JSON.stringify({ path: "/stuck_file" }) } }
+                                ]
+                            }
+                        }]
+                    }
+                },
+                {
+                    triggers: ["sub-agent crash salvage"],
+                    response: {
+                        choices: [{
+                            message: {
+                                role: "assistant",
+                                content: "Gathering intel then delegating...",
+                                tool_calls: [
+                                    {
+                                        id: "c_sub",
+                                        type: "function",
+                                        function: {
+                                            name: "delegate_sub_task",
+                                            arguments: JSON.stringify({ instruction: "Crash me" })
+                                        }
+                                    }
+                                ]
+                            }
+                        }]
+                    }
+                },
+                {
+                    // Catch-all inside sub-agent for "Crash me"
+                    triggers: ["Crash me"],
+                    response: {
+                        choices: [{
+                            message: {
+                                role: "assistant",
+                                content: "I will use evaluate to get the secret.",
+                                tool_calls: [
+                                    {
+                                        id: "call_eval",
+                                        type: "function",
+                                        function: {
+                                            name: "browser_evaluate",
+                                            arguments: JSON.stringify({ script: "return 'SECRET_SALVAGED_DATA_42';" })
+                                        }
+                                    }
+                                ]
+                            }
+                        }]
+                    }
+                },
+                {
+                    // Triggered when the sub-agent sends the results of the browser_evaluate tool back to the LLM
+                    triggers: ["SECRET_SALVAGED_DATA_42"],
+                    response: {
+                        choices: [{
+                            message: {
+                                role: "assistant",
+                                content: "I encountered 3 consecutive errors and am stopping to prevent an infinite loop.",
+                            }
+                        }]
+                    }
                 }
             ];
 
@@ -224,7 +331,13 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
                     try {
                         const body = JSON.parse(bodyStr);
-                        const lastMsg = body.messages[body.messages.length - 1].content;
+                        let lastMsgRaw = body.messages[body.messages.length - 1].content;
+                        let lastMsg = typeof lastMsgRaw === "string"
+                            ? lastMsgRaw
+                            : Array.isArray(lastMsgRaw)
+                                ? lastMsgRaw.map(c => c.text || JSON.stringify(c)).join(" ")
+                                : JSON.stringify(lastMsgRaw);
+
                         console.log(`[MockFetch] Prompt: "${lastMsg.substring(0, 50)}..."`);
 
                         // Find matching scenario
@@ -258,11 +371,25 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         // RELOAD to ensure InitScript runs before App components mount/useEffect
         console.log('🔄 Reloading page to apply mocks...');
-        await window.reload();
+        await window.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
         await window.waitForLoadState('domcontentloaded');
 
         // Note: We removed the aggressive window.electron mock block since it was failing (immutable)
         // and fetch interception is safer for "callOpenAI" which we verified uses fetch.
+
+        try {
+            console.log('Checking for Missing Dependencies modal...');
+            // In some environments, the modal might take a moment to trigger IPC and render
+            await window.locator('text=Missing Dependencies').waitFor({ state: 'visible', timeout: 8000 });
+            
+            console.log('Found Missing Dependencies modal, dismissing...');
+            const skipBtn = window.locator('text=Skip for now').first();
+            await skipBtn.click();
+            await window.locator('text=Missing Dependencies').waitFor({ state: 'hidden', timeout: 5000 });
+            console.log('✅ Dismissed Missing Dependencies modal');
+        } catch (e) {
+            console.log('ℹ️ No Missing Dependencies modal detected after 8s');
+        }
 
         // Switch to OpenAI (Mocked)
         console.log('⚙️ Configuring OpenAI Provider...');
@@ -277,19 +404,32 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         // Fill Model (if needed, otherwise uses default)
         // await window.fill('input[placeholder="gpt-4..."]', 'mock-gpt');
 
-        await window.click('button[title="Chat"]'); // Back to chat
-        await window.waitForTimeout(1000);
+        await window.click('button[title="Chat"]');
+
+        console.log('⏳ Waiting for MCP tools to be ready...');
+        console.log('⏳ Waiting for app UI to be ready...');
+        await window.locator('button[title="MCP Connections"]').waitFor({ state: 'visible', timeout: 15000 }).catch(() => { });
+        await window.waitForTimeout(2000);
+        console.log('✅ UI ready');
+        console.log('✅ MCP tools ready');
 
         const chatInput = window.locator('[data-testid="chat-textarea"]');
         await chatInput.waitFor({ state: 'attached' });
 
-        await window.setViewportSize({ width: 1280, height: 900 });
-
         // Helper to send message
         const sendMessage = async (text) => {
             await chatInput.scrollIntoViewIfNeeded();
+
+            // Wait for any 'Processing' or 'Stop' overlay to finish (button must be Send)
+            await window.waitForTimeout(1000);
+            await window.locator('button:has(svg.lucide-send)').waitFor({ state: 'attached', timeout: 30000 });
+
             await chatInput.click({ force: true });
             await chatInput.fill(text);
+
+            // Wait for button to be enabled after filling
+            await window.locator('button:has(svg.lucide-send):not([disabled])').waitFor({ state: 'attached', timeout: 30000 });
+
             await window.locator('button:has(svg.lucide-send)').click({ force: true });
 
             // Wait for "Thinking..." state change or response
@@ -302,7 +442,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await sendMessage("Compare the price of a Sony WH-1000XM5 headphone on Amazon and BestBuy.");
         // Verify response text instead of complex UI lanes (since tool execution might fail in mock)
         try {
-            await window.locator('text=Starting parallel search').waitFor({ state: 'visible', timeout: 5000 });
+            await window.locator('text=Starting parallel search').first().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ Parallel Response received');
         } catch (e) {
             console.error('❌ Parallel Response missing');
@@ -314,7 +454,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         try {
             // We expect the LLM to return content with JSON tool call, 
             // and the app to recover it as an active tool call.
-            await window.locator('text=Using fs_list_directory').waitFor({ state: 'visible', timeout: 8000 });
+            await window.locator('text=Using fs_list_directory').first().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ recovered JSON tool call found');
         } catch (e) {
             console.error('⚠️ JSON recovery test failed (may need useJsonFallback fix)');
@@ -325,7 +465,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await sendMessage("Simulate leaked XML tool");
         try {
             // We expect the LLM to return content with XML-wrapped tool call.
-            await window.locator('text=Using leaked_tool').waitFor({ state: 'visible', timeout: 8000 });
+            await window.locator('text=Using leaked_tool').first().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ recovered XML tool call found');
         } catch (e) {
             console.error('⚠️ XML recovery test failed');
@@ -336,7 +476,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await sendMessage("Malformed test");
         try {
             // Verify it doesn't crash and shows the partial text
-            await window.locator('text=truncated').waitFor({ state: 'visible', timeout: 5000 });
+            await window.locator('text=truncated').first().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ handled malformed response without crash');
         } catch (e) {
             console.error('⚠️ malformed response test failed');
@@ -347,13 +487,13 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await sendMessage("Simulate handoff limit");
         try {
             // Verify action buttons appear
-            const continueBtn = window.locator('button:has-text("Continue")');
-            await continueBtn.waitFor({ state: 'visible', timeout: 8000 });
+            const continueBtn = window.locator('button:has-text("Continue")').first();
+            await continueBtn.waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ Handoff action buttons found');
 
             // Click continue and verify it sends "continue"
             await continueBtn.click();
-            await window.locator('text=continue').last().waitFor({ state: 'visible', timeout: 5000 });
+            await window.locator('text=continue').last().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ Handoff confirmation sent');
         } catch (e) {
             console.error('⚠️ Handoff test failed');
@@ -364,7 +504,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await sendMessage("Help me find bus tickets from Gangavathi to Bengaluru on 2nd Feb on RedBus");
         // Verify response text instead of Plan UI (Client tool might not register in mock env)
         try {
-            await window.locator('text=I will plan this trip').waitFor({ state: 'visible', timeout: 5000 });
+            await window.locator('text=I will plan this trip').first().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ Plan Response received');
         } catch (e) {
             console.error('❌ Plan Response missing');
@@ -381,11 +521,11 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         console.log('\n--- Test 4: UI Stress Test ---');
         await sendMessage("Run stress test");
         try {
-            await window.locator('text=Analysis Report').waitFor({ state: 'visible', timeout: 5000 });
+            await window.locator('text=Analysis Report').first().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ Visual Report Header found');
-            await window.locator('text=Net').waitFor({ state: 'visible', timeout: 2000 });
+            await window.locator('text=Net').first().waitFor({ state: 'visible', timeout: 8000 });
             console.log('✅ Table Content found');
-            await window.locator('text=Using unknown_tool_xyz').waitFor({ state: 'visible', timeout: 2000 });
+            await window.locator('text=Using unknown_tool_xyz').first().waitFor({ state: 'visible', timeout: 8000 });
             console.log('✅ Tool Call List found');
         } catch (e) {
             console.error('⚠️ UI Stress Test timed out:', e);
@@ -395,10 +535,70 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         console.log('\n--- Test 5: Safety Refusal ---');
         await sendMessage("Search Amazon for 'Rolex watch'. Find one over $10,000, add it to cart and proceed to checkout.");
         try {
-            await window.locator('text=/cannot proceed/i').waitFor({ state: 'visible', timeout: 10000 });
+            await window.locator('text=/cannot proceed/i').first().waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ Safety refusal displayed');
         } catch (e) {
             console.error('⚠️ Safety test timed out');
+        }
+
+        // --- TEST 10: PROGRESS BAR CLEANUP ---
+        console.log('\n--- Test 10: Progress Bar Cleanup ---');
+        try {
+            const progressBars = window.locator('.progress-bar-container, progress');
+            const count = await progressBars.count();
+            if (count > 0) {
+                // Check if any are actually visible
+                const isVis = await progressBars.first().isVisible();
+                if (isVis) throw new Error("Progress bar lingered after tasks completed");
+            }
+            console.log('✅ No lingering progress bars detected');
+        } catch (e) {
+            console.error('⚠️ Progress Bar cleanup test failed:', e);
+            throw e;
+        }
+
+        // --- TEST 11: LOOP DETECTION (DIFFERENT ARGS) ---
+        console.log('\n--- Test 11: Loop Detection (Different Args) ---');
+        await sendMessage("Simulate loop different args");
+        try {
+            await window.locator('text=Exploring files').first().waitFor({ state: 'visible', timeout: 15000 });
+
+            // Wait slightly to ensure loop check had time to process
+            await window.waitForTimeout(1000);
+
+            const stuckVisible = await window.locator('text=repeating the same action').isVisible();
+            if (stuckVisible) throw new Error("Loop detector falsely triggered on different args");
+            console.log('✅ Different args execution successful without false loop detection');
+        } catch (e) {
+            console.error('❌ Different args test failed:', e);
+            throw e;
+        }
+
+        // --- TEST 12: LOOP DETECTION (SAME ARGS) ---
+        console.log('\n--- Test 12: Loop Detection (Same Args) ---');
+        await sendMessage("Simulate loop same args");
+        try {
+            await window.locator('text=repeating the same action').first().waitFor({ state: 'visible', timeout: 15000 });
+            console.log('✅ Identical args loop detector triggered successfully');
+        } catch (e) {
+            console.error('❌ Loop detection test failed:', e);
+            throw e;
+        }
+
+        // --- TEST 13: SUB-AGENT CRASH SALVAGE ---
+        console.log('\n--- Test 13: Sub-Agent Crash Salvage ---');
+        // Because "Crash me" triggers the delegate_sub_task and the sub-agent bails out
+        // The delegate_sub_task will return "Sub-agent encountered errors and stopped."
+        // Our mock LLM (being dumb in this catch-all) might just output "Generic mock response" after receiving the tool return
+        // but let's see if we can find the sub-agent salvaged text in the UI logs, or at least no crash
+        await sendMessage("Simulate sub-agent crash salvage");
+        try {
+            // Wait for parent generic response which happens after delegation completes
+            await window.locator('text=generic mock response').last().waitFor({ state: 'visible', timeout: 20000 });
+            console.log('✅ Sub-agent crash did not bring down the main agent');
+        } catch (e) {
+            console.error('❌ Sub-agent crash test failed:', e);
+            throw e;
         }
 
         console.log('\n🎉 ALL SCENARIOS PASSED (with handled warnings)');

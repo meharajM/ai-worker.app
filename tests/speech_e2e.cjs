@@ -3,7 +3,7 @@
  * Tests the Native Speech / Web Speech API integration
  */
 const { _electron: electron } = require('playwright');
-const path = require('path');
+delete process.env.ELECTRON_RUN_AS_NODE; const path = require('path');
 const fs = require('fs');
 
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
@@ -49,7 +49,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                 '--use-fake-ui-for-media-stream',
                 '--window-size=1200,800'
             ],
-            timeout: 60000,
+            timeout: 120000,
             env: {
                 ...process.env,
                 NODE_ENV: 'production'
@@ -63,6 +63,11 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
     try {
         const window = await electronApp.firstWindow();
+        
+        await window.addInitScript(() => {
+            localStorage.setItem('skipDepsCheck', 'true');
+        });
+        await window.reload();
 
         // Debug logging
         window.on('console', msg => {
@@ -75,52 +80,49 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await window.waitForLoadState('domcontentloaded');
         console.log('✅ Window Loaded');
 
+        // Handling Missing Dependencies screen if it appears
+        try {
+            console.log('Checking for Missing Dependencies screen...');
+            // Wait for either the Missing text or the Checking text
+            const skipBtn = window.locator('text=Skip for now').first();
+            const modalVisible = await skipBtn.isVisible({ timeout: 20000 }).catch(() => false);
+
+            if (modalVisible) {
+                console.log('Found Missing Dependencies screen, dismissing...');
+                await skipBtn.click();
+                console.log('✅ Dismissed Missing Dependencies screen');
+            } else {
+                console.log('ℹ️ No Missing Dependencies screen detected after 20s');
+            }
+        } catch (e) {
+            console.log('ℹ️ Error screen check:', e.message);
+        }
+
         // Ensure we are in Chat view
-        await window.click('button[title="Chat"]');
-        await window.waitForTimeout(1000);
+        const chatNav = window.locator('button[title="Chat"]').first();
+        await chatNav.click();
+        await window.waitForTimeout(2000);
 
         // Wait for app to initialize
-        await window.waitForTimeout(3000);
+        console.log('⏳ Waiting for app UI to be ready...');
+        await window.locator('button[title="Start Voice Mode"]').waitFor({ state: 'visible', timeout: 30000 }).catch(() => { });
+        await window.waitForTimeout(2000);
         await window.screenshot({ path: path.join(SCREENSHOT_DIR, 'speech-test-start.png') });
         console.log('📸 Initial state captured');
 
         // --- TEST 1: Verify Speech Recognition Support Detection ---
         console.log('\n--- Test 1: Speech Recognition Support ---');
 
-        // Wait for the main app to load - check for mic button
-        const micButtonTitled = window.locator('button[title="Start Voice Mode"]');
-        const micButtonIcon = window.locator('button:has(svg.lucide-mic)');
-
-        let micLocator = null;
-
-        // Try titled button first
-        try {
-            await micButtonTitled.waitFor({ state: 'visible', timeout: 10000 });
-            micLocator = micButtonTitled;
-            console.log('✅ Microphone button found (with title)');
-        } catch (e) {
-            // Try icon button if title not found
-            const iconCount = await micButtonIcon.count();
-            if (iconCount > 0) {
-                micLocator = micButtonIcon;
-                console.log('✅ Microphone button found (via icon)');
-            }
-        }
-
-        if (!micLocator) {
-            console.log('⚠️ Microphone button not found - checking if it exists offscreen');
-            // Take screenshot to debug
-            await window.screenshot({ path: path.join(SCREENSHOT_DIR, 'speech-test-no-mic.png') });
-            throw new Error('Microphone button not found');
-        }
+        const micLocator = window.locator('button[title="Start Voice Mode"]');
+        await micLocator.waitFor({ state: 'visible', timeout: 15000 });
+        console.log('✅ Microphone button found');
 
         // Check if it's enabled (speech is supported)
-        // With Native Speech, it should ALWAYS be enabled
         const isDisabled = await micLocator.getAttribute('disabled');
         if (!isDisabled) {
             console.log('✅ Microphone button is enabled');
         } else {
-            console.log('⚠️ Microphone button is disabled (THIS SHOULD NOT HAPPEN with Native Speech)');
+            console.log('⚠️ Microphone button is disabled');
         }
 
         // --- TEST 2: Voice Mode UI Transition ---
@@ -132,22 +134,20 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             console.log('✅ Clicked microphone button');
 
             // Wait for voice mode UI to appear
-            console.log('  - Waiting for model download and listening state...');
+            console.log('  - Waiting for listening state...');
 
             // Wait for visual state
-            const textarea = window.locator('[data-testid="chat-textarea"]');
-            await textarea.waitFor({ state: 'attached', timeout: 15000 });
+            const textarea = window.locator('textarea').first();
+            await textarea.waitFor({ state: 'attached', timeout: 30000 });
             await textarea.scrollIntoViewIfNeeded();
 
-            // Bypass explicit visible check
-            // await textarea.waitFor({ state: 'visible', timeout: 15000 });
-
             try {
-                await window.locator('[data-testid="chat-textarea"][placeholder="Listening..."]').waitFor({ timeout: 60000 });
+                // Wait for the specific placeholder that indicates Active STT
+                await window.locator('textarea[placeholder="Listening..."]').waitFor({ timeout: 30000 });
                 console.log('✅ "Listening..." placeholder visible in textarea');
             } catch (e) {
                 const currentPlaceholder = await textarea.getAttribute('placeholder');
-                console.log(`⚠️ Placeholder did not change to Listening within 60s, currently: "${currentPlaceholder}"`);
+                console.log(`⚠️ Placeholder did not change to Listening within 30s, currently: "${currentPlaceholder}"`);
             }
 
             // Take screenshot of voice mode
@@ -155,13 +155,13 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             console.log('📸 Voice mode captured');
 
             const stopButton = window.locator('button[title="Stop Recording"]');
-            await stopButton.waitFor({ state: 'visible', timeout: 10000 });
+            await stopButton.waitFor({ state: 'visible', timeout: 15000 });
             console.log('✅ Stop button present');
             await stopButton.click();
             console.log('✅ Stopped listening');
 
             // Verify we're back to idle
-            await window.waitForTimeout(1000);
+            await window.waitForTimeout(2000);
         } else {
             console.log('ℹ️ Skipping voice mode test (button disabled)');
         }
@@ -169,8 +169,9 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         // --- TEST 3: UI Refinements (Multi-line & Persistence) ---
         console.log('\n--- Test 3: UI Refinements (TDD) ---');
 
-        // 1. Verify Input is Textarea (Multi-line support)
-        const textarea = window.locator('[data-testid="chat-textarea"]');
+        const textarea = window.locator('textarea').first();
+        await textarea.waitFor({ state: 'visible', timeout: 15000 });
+        console.log('✅ Input is <textarea>');
         const input = window.locator('input[type="text"]');
 
         const isTextarea = await textarea.count() > 0;

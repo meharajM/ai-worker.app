@@ -2,11 +2,14 @@
     "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
     "include": [
         "src/main/**/*",
+        "src/shared/**/*",
         "src/preload/**/*",
         "src/renderer/src/env.d.ts",
         "electron-vite.config.ts"
     ],
     "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
         "composite": true,
         "types": [
             "electron-vite/node"

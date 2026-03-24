@@ -21,10 +21,10 @@ export interface CorporateLogEntry {
     durationMs?: number
     details: {
         model?: string
-        input?: any
-        output?: any
+        input?: unknown
+        output?: unknown
         error?: string
-        metadata?: any
+        metadata?: unknown
     }
 }
 
@@ -35,14 +35,14 @@ interface LogState {
 }
 
 // Global reference to electron API (defined in preload)
-const electron = (window as any).electron
+const electron = (window as unknown as { electron: { logs: { add: (e: CorporateLogEntry) => Promise<void>; getPath: () => Promise<string>; openFolder: () => Promise<void> } } }).electron
 
 // Keys to scrub from logs
 const SENSITIVE_KEYS = [
     'api_key', 'apikey', 'key', 'token', 'secret', 'password', 'credential', 'auth', 'authorization', 'access_token'
 ]
 
-function sanitize(obj: any): any {
+function sanitize(obj: unknown): unknown {
     if (!obj) return obj
     if (typeof obj !== 'object') return obj
 
@@ -50,8 +50,9 @@ function sanitize(obj: any): any {
         return obj.map(item => sanitize(item))
     }
 
-    const cleaned: any = {}
-    for (const [key, value] of Object.entries(obj)) {
+    const dataObj = obj as Record<string, unknown>
+    const cleaned: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(dataObj)) {
         const lowerKey = key.toLowerCase()
         if (SENSITIVE_KEYS.some(secret => lowerKey.includes(secret))) {
             cleaned[key] = '***REDACTED***'
@@ -78,7 +79,7 @@ export const useLogStore = create<LogState>(() => ({
         }
 
         // Fire and forget - don't block the UI for logging
-        electron.logs.add(fullEntry).catch((err: any) =>
+        electron.logs.add(fullEntry).catch((err: unknown) =>
             console.error('Failed to persist log:', err)
         )
     },

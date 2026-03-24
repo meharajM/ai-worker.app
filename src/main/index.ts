@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initEnv, __dirname } from './utils/env'
 import { setupIpcHandlers } from './ipc'
+import { McpProcessManager } from './services/McpProcessManager'
 
 
 // Enable experimental on-device AI features (Gemini Nano / Chrome Prompt API)
@@ -68,12 +69,12 @@ function createWindow(): void {
 
     mainWindow.webContents.setWindowOpenHandler((details) => {
         const url = details.url
-        
+
         // Allow Firebase/Google OAuth popups to open in new window
-        if (url.includes('accounts.google.com') || 
+        if (url.includes('accounts.google.com') ||
             url.includes('.firebaseapp.com') ||
             url.includes('googleapis.com')) {
-            return { 
+            return {
                 action: 'allow',
                 overrideBrowserWindowOptions: {
                     width: 500,
@@ -86,7 +87,7 @@ function createWindow(): void {
                 }
             }
         }
-        
+
         // Open other external links in system browser
         shell.openExternal(url)
         return { action: 'deny' }
@@ -109,19 +110,7 @@ function createWindow(): void {
     }
 }
 
-import { DependencyService } from './services/DependencyService'
-
 app.whenReady().then(async () => {
-    // Check dependencies on startup
-    const depService = DependencyService.getInstance()
-    const deps = await depService.checkDependencies()
-    const missing = deps.filter(d => !d.installed && d.required)
-    
-    if (missing.length > 0) {
-        // Run this slightly delayed so the main window has a chance to appear (or use dialog directly)
-        depService.showMissingDependencyDialog(missing)
-    }
-
     electronApp.setAppUserModelId('com.aiworker.app')
 
     // Verify environment and paths
@@ -140,6 +129,19 @@ app.whenReady().then(async () => {
     app.on('activate', function () {
         if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
+})
+
+let isQuitting = false
+app.on('before-quit', async (event) => {
+    if (isQuitting) return
+    
+    // Prevent default quit, cleanup, then quit
+    event.preventDefault()
+    isQuitting = true
+    
+    await McpProcessManager.getInstance().teardownAll()
+    
+    app.quit()
 })
 
 app.on('window-all-closed', () => {

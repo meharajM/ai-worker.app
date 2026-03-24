@@ -66,7 +66,7 @@ export class ModelServer {
 
         // Critical Fix: Ensure no accidental spaces in URL parsing
         const requestUrl = new URL(req.url, 'http://127.0.0.1')
-        let pathname = decodeURIComponent(requestUrl.pathname)
+        const pathname = decodeURIComponent(requestUrl.pathname)
 
         if (!pathname.startsWith('/models/')) {
             res.statusCode = 404

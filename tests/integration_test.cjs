@@ -1,5 +1,5 @@
 const { _electron: electron } = require('playwright');
-const path = require('path');
+delete process.env.ELECTRON_RUN_AS_NODE;const path = require('path');
 const fs = require('fs');
 
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
@@ -16,7 +16,9 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             if (file.endsWith('.png')) fs.unlinkSync(path.join(SCREENSHOT_DIR, file));
         }
     }
-    const electronExecutable = path.join(__dirname, '../node_modules/electron/dist/electron');
+    const macPath = path.join(__dirname, '../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+    const linuxPath = path.join(__dirname, '../node_modules/electron/dist/electron');
+    const electronExecutable = fs.existsSync(macPath) ? macPath : linuxPath;
     const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
 
     console.log('Using electron execPath:', execPath);
@@ -33,7 +35,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                 '--disable-gpu',
                 '--disable-dev-shm-usage'
             ],
-            timeout: 45000,
+            timeout: 120000,
             env: {
                 ...process.env,
                 NODE_ENV: 'production'
@@ -54,6 +56,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
     try {
         const window = await electronApp.firstWindow();
+        await window.setViewportSize({ width: 1280, height: 800 });
 
         window.on('console', msg => console.log(`[Renderer]: ${msg.text()}`));
         window.on('pageerror', err => console.error(`[Renderer Error]: ${err}`));

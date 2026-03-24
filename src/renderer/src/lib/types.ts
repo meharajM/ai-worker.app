@@ -11,11 +11,20 @@ export interface MessageAction {
 export interface LLMMessage {
   role: "user" | "assistant" | "system" | "tool";
   content: string | LLMContentPart[];
-  tool_calls?: any[];
+  tool_calls?: {
+    id: string;
+    type: "function";
+    function: {
+      name: string;
+      arguments: Record<string, unknown>;
+    };
+  }[];
   tool_call_id?: string;
   name?: string; // For Gemini/OpenAI tool names
   actions?: MessageAction[]; // For button-based interactions
   attachments?: { name: string; path: string; type: string }[]; // User-uploaded files
+  thought?: string; // Gemini 2.0 reasoning — must be echoed back in subsequent turns
+  thought_signature?: string; // Gemini tool-call integrity token — required to avoid 400 errors
 }
 
 export interface LLMTool {
@@ -38,14 +47,16 @@ export interface LLMResponse {
     name: string;
     arguments: Record<string, unknown>;
   }[];
+  thought?: string;
+  thought_signature?: string;
   provider: string;
   model: string;
 }
 
-export type LLMProvider = "browser" | "ollama" | "openai" | "gemini" | "openrouter";
+export type LLMProvider = "browser" | "ollama" | "openai" | "gemini" | "openrouter" | "anthropic" | "groq";
 
 export interface LLMSettings {
-  preferredProvider?: "auto" | "ollama" | "openai" | "browser" | "gemini" | "openrouter";
+  preferredProvider?: "auto" | "ollama" | "openai" | "browser" | "gemini" | "openrouter" | "anthropic" | "groq";
   ollamaModel?: string;
   ollamaBaseUrl?: string;
   openaiApiKey?: string;
@@ -53,6 +64,13 @@ export interface LLMSettings {
   openaiModel?: string;
   geminiApiKey?: string;
   geminiModel?: string;
+  geminiOAuthToken?: string;
+  geminiOAuthHeaders?: Record<string, string>;
   openrouterApiKey?: string;
   openrouterModel?: string;
+  anthropicApiKey?: string;
+  anthropicModel?: string;
+  groqApiKey?: string;
+  groqModel?: string;
+  browserModel?: string;
 }

@@ -30,6 +30,13 @@ node_modules/
 out/
 dist/
 build/Release
+# Test artifacts
+tests/temp-storage-test/
+tests/temp-user-data/
+tests/screenshots/
+test-results/
+playwright-report/
+blob-report/
 
 # Python (Vosk Bridge)
 __pycache__/
@@ -42,15 +49,6 @@ public/models/*.zip
 
 # Native Speech Binaries (Compiled)
 resources/speech/speech_macos
-
-# Test Artifacts (Screenshots, Reports)
-tests/screenshots/*.png
-test-results/
-playwright-report/
-blob-report/
-node_modules
-out
-dist
 
 # Environment files (NEVER commit these!)
 .env

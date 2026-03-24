@@ -35,7 +35,7 @@ test('should filter XML think tags (OpenAI format)', () => {
 
 // Test markdown think blocks (Gemini format)
 test('should filter markdown think blocks (Gemini format)', () => {
-    const input = '```think\\nAnalyzing request...\\n```\\nHere is the response';
+    const input = '```think\nAnalyzing request...\n```\nHere is the response';
     const result = filterThinkBlocks(input);
     assert(result.thinking === 'Analyzing request...', 'thinking should be extracted');
     assert(result.cleanedContent === 'Here is the response', 'content should be cleaned');

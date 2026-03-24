@@ -1,3 +1,5 @@
+@import './styles/design-tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -6,4 +8,98 @@
   body {
     @apply m-0 p-0 overflow-hidden;
   }
+
+  /* Custom Webkit Scrollbar — uses CSS variables for theme support */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-scrollbar-thumb);
+    border-radius: var(--radius-pill);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-scrollbar-thumb-hover);
+  }
+}
+
+@layer components {
+  /* Custom toggle styles - Dark theme optimized */
+  .toggle {
+    appearance: none;
+    -webkit-appearance: none;
+    position: relative;
+    width: 3rem; /* 48px */
+    height: 1.5rem; /* 24px */
+    border-radius: 9999px;
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+    flex-shrink: 0;
+  }
+  
+  .toggle::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 2px;
+    transform: translateY(-50%);
+    width: 1.125rem; /* 18px */
+    height: 1.125rem; /* 18px */
+    border-radius: 9999px;
+    background-color: var(--color-text-dim);
+    transition: transform 0.2s ease, background-color 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  }
+  
+  .toggle:checked, .toggle-success:checked {
+    background-color: var(--color-success);
+    border-color: var(--color-success);
+    box-shadow: 0 0 8px rgba(48, 209, 88, 0.3);
+  }
+  
+  .toggle:checked::before, .toggle-success:checked::before {
+    transform: translate(1.375rem, -50%);
+    background-color: white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  }
+  
+  .toggle:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  /* Small toggle variant for McpServerCard */
+  .toggle.toggle-sm {
+    width: 2rem; /* 32px */
+    height: 1rem; /* 16px */
+  }
+  
+  .toggle.toggle-sm::before {
+    left: 1px;
+    width: 0.75rem; /* 12px */
+    height: 0.75rem; /* 12px */
+  }
+  
+  .toggle.toggle-sm:checked::before {
+    transform: translate(1rem, -50%); /* 16px to right */
+  }
+}
+
+@layer utilities {
+  .bg-input {
+    background-color: var(--color-input-bg);
+  }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
 }

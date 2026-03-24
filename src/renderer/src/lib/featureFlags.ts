@@ -17,8 +17,7 @@ export function isDevelopmentMode(): boolean {
   return (
     process.env.NODE_ENV === 'development' ||
     process.env.ELECTRON_IS_DEV === '1' ||
-    (window as any).electron?.isDev ||
-    // @ts-ignore - electron-toolkit utils
+    (window as unknown as { electron?: { isDev?: boolean } })?.electron?.isDev ||
     (window.require && window.require('@electron-toolkit/utils')?.is?.dev) ||
     window.location.hostname === 'localhost' ||
     window.location.port !== ''

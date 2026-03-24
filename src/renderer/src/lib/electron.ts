@@ -1,6 +1,4 @@
-/// <reference path="../env.d.ts" />
-
-// Platform detection and Electron API wrapper
+import '../env.d.ts'
 // Provides fallbacks for browser environment
 
 export const isElectron = (): boolean => {
@@ -159,9 +157,49 @@ export const electron = {
 
     },
 
+    // FS operations
+    fs: {
+        getPendingChanges: async () => {
+            if (isElectron() && window.electron?.fs) {
+                return await window.electron.fs.getPendingChanges()
+            }
+            return []
+        },
+        approveChange: async (changeId: string) => {
+            if (isElectron() && window.electron?.fs) {
+                return await window.electron.fs.approveChange(changeId)
+            }
+            return { success: false }
+        },
+        rejectChange: async (changeId: string) => {
+            if (isElectron() && window.electron?.fs) {
+                return await window.electron.fs.rejectChange(changeId)
+            }
+            return { success: false }
+        },
+        writeInternalFile: async (workspacePath: string | undefined, filename: string, content: string) => {
+            if (isElectron() && window.electron?.fs && window.electron.fs.writeInternalFile) {
+                return await window.electron.fs.writeInternalFile(workspacePath, filename, content)
+            }
+            return { success: false, error: 'Not supported in browser' }
+        },
+        readInternalFile: async (workspacePath: string | undefined, filename: string) => {
+            if (isElectron() && window.electron?.fs && window.electron.fs.readInternalFile) {
+                return await window.electron.fs.readInternalFile(workspacePath, filename)
+            }
+            return { success: false, error: 'Not supported in browser' }
+        },
+        readFileBase64: async (filePath: string) => {
+            if (isElectron() && window.electron?.fs && window.electron.fs.readFileBase64) {
+                return await window.electron.fs.readFileBase64(filePath)
+            }
+            return { success: false, error: 'Not supported in browser' }
+        }
+    },
+
     // Memory operations
     memory: {
-        callTool: async (name: string, args: any) => {
+        callTool: async (name: string, args: Record<string, unknown>) => {
             if (isElectron() && window.electron?.memory) {
                 return await window.electron.memory.callTool(name, args)
             }
@@ -181,9 +219,50 @@ export const electron = {
         }
     },
 
+    // Antigravity OAuth operations (Google sign-in for Gemini access)
+    antigravity: {
+        initialize: async (): Promise<{ signedIn: boolean; email: string | null; projectId: string | null }> => {
+            if (isElectron() && window.electron?.antigravity) {
+                return await window.electron.antigravity.initialize()
+            }
+            return { signedIn: false, email: null, projectId: null }
+        },
+        signIn: async (): Promise<{ signedIn: boolean; email: string | null; projectId: string | null }> => {
+            if (isElectron() && window.electron?.antigravity) {
+                return await window.electron.antigravity.signIn()
+            }
+            console.warn('[Browser] Antigravity sign-in not available in browser mode')
+            throw new Error('Antigravity sign-in requires the desktop app')
+        },
+        getToken: async (): Promise<{ token: string | null; headers: Record<string, string> | null }> => {
+            if (isElectron() && window.electron?.antigravity) {
+                return await window.electron.antigravity.getToken()
+            }
+            return { token: null, headers: null }
+        },
+        signOut: async (): Promise<{ success: boolean }> => {
+            if (isElectron() && window.electron?.antigravity) {
+                return await window.electron.antigravity.signOut()
+            }
+            return { success: true }
+        },
+        getStatus: async (): Promise<{ signedIn: boolean; email: string | null; projectId: string | null }> => {
+            if (isElectron() && window.electron?.antigravity) {
+                return await window.electron.antigravity.getStatus()
+            }
+            return { signedIn: false, email: null, projectId: null }
+        },
+        callGateway: async (url: string, headers: Record<string, string>, body: string): Promise<unknown> => {
+            if (isElectron() && window.electron?.antigravity) {
+                return await window.electron.antigravity.callGateway(url, headers, body)
+            }
+            throw new Error('Antigravity gateway calls require the desktop app')
+        },
+    },
+
     // Log operations
     logs: {
-        add: async (entry: any) => {
+        add: async (entry: unknown) => {
             if (isElectron() && window.electron?.logs) {
                 return await window.electron.logs.add(entry)
             }
@@ -208,7 +287,71 @@ export const electron = {
             }
             return []
         }
-    }
+    },
+
+    // WhatsApp operations
+    whatsapp: {
+        getState: async () => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.getState()
+            }
+            return { status: 'disconnected' as const, qrCode: null, error: null, phoneNumber: null, workerNumber: null }
+        },
+        connect: async (phoneNumber?: string) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.connect(phoneNumber)
+            }
+            console.warn('[Browser] WhatsApp not supported in browser mode')
+            return { success: false, error: 'Not supported in browser mode' }
+        },
+        setTargetNumber: async (phoneNumber: string): Promise<{ success: boolean; error?: string; handshakeCode?: string }> => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.setTargetNumber(phoneNumber)
+            }
+            return { success: false, error: 'Electron not available' }
+        },
+        disconnect: async (clearAuth?: boolean) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.disconnect(clearAuth)
+            }
+            return { success: true }
+        },
+        sendMessage: async (to: string, content: string) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.sendMessage(to, content)
+            }
+            console.warn('[Browser] WhatsApp sendMessage not supported')
+            return { success: false, error: 'Not supported in browser mode' }
+        },
+        sendPresence: async (to: string, state: string) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.sendPresence(to, state)
+            }
+            console.warn('[Browser] WhatsApp sendPresence not supported')
+            return { success: false, error: 'Not supported in browser mode' }
+        },
+        sendMediaMessage: async (to: string, filePath: string, caption?: string, type?: string) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                return window.electron.whatsapp.sendMediaMessage(to, filePath, caption, type)
+            }
+            console.warn('[Browser] WhatsApp sendMediaMessage not supported')
+            return { success: false, error: 'Not supported in browser mode' }
+        },
+        onConnectionChange: (callback: (state: import('../stores/whatsappStore').WhatsAppConnectionState) => void): (() => void) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return window.electron.whatsapp.onConnectionChange(callback as any)
+            }
+            return () => {}
+        },
+        onMessage: (callback: (message: import('../stores/whatsappStore').WhatsAppConnectionState) => void): (() => void) => {
+            if (isElectron() && window.electron?.whatsapp) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return window.electron.whatsapp.onMessage(callback as any)
+            }
+            return () => {}
+        },
+    },
 }
 
 export default electron

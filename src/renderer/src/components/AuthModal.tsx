@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { X, Mail, Lock, User, Github, AlertCircle, Loader2 } from 'lucide-react'
+import { X, Mail, Lock, User, AlertCircle, Loader2, Sparkles, Check } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { AnimatePresence, motion } from 'framer-motion'
 
@@ -15,8 +15,12 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
     const [name, setName] = useState('')
     const [confirmPassword, setConfirmPassword] = useState('')
     const [localError, setLocalError] = useState<string | null>(null)
-    
-    const { signInWithGoogle, signInWithEmail, signUpWithEmail, loading, error: storeError } = useAuthStore()
+
+    const {
+        signInWithGoogle, signInWithEmail, signUpWithEmail,
+        signInWithAntigravity, antigravitySignedIn, antigravityEmail, antigravityLoading,
+        loading, error: storeError
+    } = useAuthStore()
 
     // Reset state when mode changes
     React.useEffect(() => {
@@ -60,29 +64,37 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
         }
     }
 
+    const handleAntigravitySignIn = async () => {
+        try {
+            await signInWithAntigravity()
+        } catch (err) {
+            console.error(err)
+        }
+    }
+
     return (
         <AnimatePresence>
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-                <motion.div 
+                <motion.div
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}
-                    className="w-full max-w-md bg-[#1a1d23] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+                    className="w-full max-w-md bg-[var(--color-card-elevated)] border border-[var(--color-border)] rounded-2xl shadow-glass overflow-hidden"
                 >
                     {/* Header */}
-                    <div className="relative p-6 border-b border-white/5 bg-gradient-to-r from-[#4fd1c5]/5 to-transparent">
-                        <button 
+                    <div className="relative p-6 border-b border-[var(--color-border)] bg-gradient-to-r from-[var(--color-brand-teal)]/5 to-transparent">
+                        <button
                             onClick={onClose}
-                            className="absolute top-4 right-4 text-white/40 hover:text-white transition-colors"
+                            className="absolute top-4 right-4 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
                         >
                             <X size={20} />
                         </button>
-                        <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-white/60">
+                        <h2 className="text-2xl font-bold text-[var(--color-text-primary)]">
                             {mode === 'signin' ? 'Welcome Back' : 'Create Account'}
                         </h2>
-                        <p className="text-sm text-white/40 mt-1">
-                            {mode === 'signin' 
-                                ? 'Sign in to sync your preferences across devices' 
+                        <p className="text-sm text-[var(--color-text-muted)] mt-1">
+                            {mode === 'signin'
+                                ? 'Sign in to sync your preferences across devices'
                                 : 'Join AI-Worker to customize your experience'
                             }
                         </p>
@@ -91,7 +103,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                     <div className="p-6 space-y-6">
                         {/* Store/Local Error */}
                         {(storeError || localError) && (
-                            <motion.div 
+                            <motion.div
                                 initial={{ opacity: 0, y: -10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-2"
@@ -104,15 +116,15 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                         <form onSubmit={handleSubmit} className="space-y-4">
                             {mode === 'signup' && (
                                 <div className="space-y-1">
-                                    <label className="text-xs font-medium text-white/60 ml-1">Full Name</label>
+                                    <label className="text-xs font-medium text-[var(--color-text-muted)] ml-1">Full Name</label>
                                     <div className="relative group">
-                                        <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-[#4fd1c5] transition-colors" />
+                                        <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-dim)] group-focus-within:text-[var(--color-brand-teal)] transition-colors" />
                                         <input
                                             type="text"
                                             value={name}
                                             onChange={(e) => setName(e.target.value)}
                                             placeholder="John Doe"
-                                            className="w-full bg-black/30 border border-white/10 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-[#4fd1c5]/50 focus:bg-black/50 transition-all"
+                                            className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] rounded-xl py-2.5 pl-10 pr-4 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-dim)] focus:outline-none focus:border-[var(--color-brand-teal)]/50 focus:bg-[var(--color-surface)] transition-all"
                                             required
                                         />
                                     </div>
@@ -120,30 +132,30 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                             )}
 
                             <div className="space-y-1">
-                                <label className="text-xs font-medium text-white/60 ml-1">Email Address</label>
+                                <label className="text-xs font-medium text-[var(--color-text-muted)] ml-1">Email Address</label>
                                 <div className="relative group">
-                                    <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-[#4fd1c5] transition-colors" />
+                                    <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-dim)] group-focus-within:text-[var(--color-brand-teal)] transition-colors" />
                                     <input
                                         type="email"
                                         value={email}
                                         onChange={(e) => setEmail(e.target.value)}
                                         placeholder="you@example.com"
-                                        className="w-full bg-black/30 border border-white/10 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-[#4fd1c5]/50 focus:bg-black/50 transition-all"
+                                        className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] rounded-xl py-2.5 pl-10 pr-4 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-dim)] focus:outline-none focus:border-[var(--color-brand-teal)]/50 focus:bg-[var(--color-surface)] transition-all"
                                         required
                                     />
                                 </div>
                             </div>
 
                             <div className="space-y-1">
-                                <label className="text-xs font-medium text-white/60 ml-1">Password</label>
+                                <label className="text-xs font-medium text-[var(--color-text-muted)] ml-1">Password</label>
                                 <div className="relative group">
-                                    <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-[#4fd1c5] transition-colors" />
+                                    <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-dim)] group-focus-within:text-[var(--color-brand-teal)] transition-colors" />
                                     <input
                                         type="password"
                                         value={password}
                                         onChange={(e) => setPassword(e.target.value)}
                                         placeholder="••••••••"
-                                        className="w-full bg-black/30 border border-white/10 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-[#4fd1c5]/50 focus:bg-black/50 transition-all"
+                                        className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] rounded-xl py-2.5 pl-10 pr-4 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-dim)] focus:outline-none focus:border-[var(--color-brand-teal)]/50 focus:bg-[var(--color-surface)] transition-all"
                                         required
                                         minLength={6}
                                     />
@@ -152,15 +164,15 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
                             {mode === 'signup' && (
                                 <div className="space-y-1">
-                                    <label className="text-xs font-medium text-white/60 ml-1">Confirm Password</label>
+                                    <label className="text-xs font-medium text-[var(--color-text-muted)] ml-1">Confirm Password</label>
                                     <div className="relative group">
-                                        <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-[#4fd1c5] transition-colors" />
+                                        <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-dim)] group-focus-within:text-[var(--color-brand-teal)] transition-colors" />
                                         <input
                                             type="password"
                                             value={confirmPassword}
                                             onChange={(e) => setConfirmPassword(e.target.value)}
                                             placeholder="••••••••"
-                                            className="w-full bg-black/30 border border-white/10 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-[#4fd1c5]/50 focus:bg-black/50 transition-all"
+                                            className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] rounded-xl py-2.5 pl-10 pr-4 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-dim)] focus:outline-none focus:border-[var(--color-brand-teal)]/50 focus:bg-[var(--color-surface)] transition-all"
                                             required
                                             minLength={6}
                                         />
@@ -171,7 +183,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                             <button
                                 type="submit"
                                 disabled={loading}
-                                className="w-full py-2.5 bg-gradient-to-r from-[#4fd1c5] to-[#38a169] text-white font-medium rounded-xl hover:shadow-lg hover:shadow-[#4fd1c5]/20 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                className="w-full py-2.5 bg-gradient-to-r from-[var(--color-brand-teal)] to-[var(--color-success)] text-[var(--color-bg-dark)] font-medium rounded-xl hover:shadow-lg hover:shadow-[var(--color-brand-teal)]/20 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             >
                                 {loading && <Loader2 size={16} className="animate-spin" />}
                                 {mode === 'signin' ? 'Sign In' : 'Create Account'}
@@ -180,9 +192,9 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
                         <div className="relative flex items-center justify-center">
                             <div className="absolute inset-0 flex items-center">
-                                <span className="w-full border-t border-white/10" />
+                                <span className="w-full border-t border-[var(--color-border)]" />
                             </div>
-                            <span className="relative bg-[#1a1d23] px-3 text-xs text-white/40 uppercase tracking-wider">
+                            <span className="relative bg-[var(--color-card-elevated)] px-3 text-xs text-[var(--color-text-muted)] uppercase tracking-wider">
                                 Or continue with Google
                             </span>
                         </div>
@@ -191,7 +203,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                         <button
                             onClick={handleGoogleSignIn}
                             disabled={loading}
-                            className="w-full flex items-center justify-center gap-3 py-2.5 bg-white text-black rounded-lg font-medium hover:bg-white/90 transition-all active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed group"
+                            className="w-full flex items-center justify-center gap-3 py-2.5 bg-white text-black border border-gray-200 dark:border-none rounded-lg font-medium hover:bg-gray-50 transition-all active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed group"
                         >
                             {loading ? <Loader2 size={18} className="animate-spin" /> : (
                                 <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -204,13 +216,40 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                             Continue with Google
                         </button>
 
+                        {/* Antigravity sign-in for free Gemini access */}
+                        {antigravitySignedIn ? (
+                            <div className="flex items-center gap-2 p-3 bg-[#4fd1c5]/10 border border-[#4fd1c5]/20 rounded-lg">
+                                <Check size={16} className="text-[#4fd1c5] flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-medium text-[#4fd1c5]">Free Gemini AI enabled</p>
+                                    <p className="text-xs text-[var(--color-text-muted)] truncate">{antigravityEmail}</p>
+                                </div>
+                            </div>
+                        ) : (
+                            <button
+                                onClick={handleAntigravitySignIn}
+                                disabled={antigravityLoading || loading}
+                                className="w-full flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-[var(--color-brand-teal)]/10 to-[var(--color-accent)]/10 border border-[var(--color-brand-teal)]/30 text-[var(--color-text-primary)] rounded-lg font-medium hover:from-[var(--color-brand-teal)]/20 hover:to-[var(--color-accent)]/20 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {antigravityLoading ? (
+                                    <Loader2 size={16} className="animate-spin" />
+                                ) : (
+                                    <Sparkles size={16} className="text-[#667eea]" />
+                                )}
+                                <span>Enable Free Gemini AI</span>
+                            </button>
+                        )}
+                        <p className="text-[10px] text-[var(--color-text-dim)] text-center -mt-3">
+                            Sign in with Google to access Gemini models without an API key
+                        </p>
+
                         <div className="text-center text-sm">
-                            <span className="text-white/40">
+                            <span className="text-[var(--color-text-muted)]">
                                 {mode === 'signin' ? "Don't have an account?" : "Already have an account?"}
                             </span>
                             <button
                                 onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}
-                                className="ml-2 text-[#4fd1c5] hover:text-[#4fd1c5]/80 font-medium transition-colors"
+                                className="ml-2 text-[var(--color-brand-teal)] hover:text-[var(--color-brand-teal)]/80 font-medium transition-colors"
                             >
                                 {mode === 'signin' ? 'Sign Up' : 'Sign In'}
                             </button>
@@ -221,3 +260,4 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
         </AnimatePresence>
     )
 }
+

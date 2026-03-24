@@ -1,5 +1,20 @@
-import { AgentRuntime } from "./agent-runtime";
+/**
+ * memory-reflector.ts — Background agent for extracting long-term memories.
+ *
+ * Architecture: This module is intentionally decoupled from AgentRuntime.
+ *   It uses a DYNAMIC import of AgentRuntime inside `analyze()` to:
+ *   1. Break the potential circular dependency (agent-runtime → memory-reflector → agent-runtime)
+ *   2. Keep the module lazy-loaded (only loaded when first analysis runs)
+ *   3. Allow Phase 3 to swap AgentRuntime for RemoteAgentClient without touching this file
+ *
+ * Phase 3 note: In Phase 3, `analyze()` will import RemoteAgentClient instead of
+ *   AgentRuntime. The `IAgentClient` interface ensures the swap is type-safe.
+ *
+ * Consumed by: useAgent.ts (fire-and-forget after each chat submission)
+ */
+import type { IAgentClient } from "./agent/IAgentClient";
 import { LLMMessage } from "./types";
+
 
 /**
  * MemoryReflector
@@ -25,7 +40,7 @@ export class MemoryReflector {
     /**
      * Fire-and-forget analysis of recent conversation history.
      */
-    async analyze(recentHistory: LLMMessage[], settings: any) {
+    async analyze(recentHistory: LLMMessage[], settings: Record<string, unknown> | null | undefined) {
         if (this.isAnalyzing) {
             console.log('[MemoryReflector] Skipping analysis - already busy');
             return;
@@ -41,15 +56,18 @@ export class MemoryReflector {
             // Take the last 4 messages to keep context small but relevant
             const contextWindow = recentHistory.slice(-4);
 
-            const reflectorAgent = new AgentRuntime({
+            // Phase 3 swap point: replace AgentRuntime with RemoteAgentClient here.
+            // The IAgentClient interface ensures the swap is type-safe.
+            const { AgentRuntime } = await import("./agent-runtime");
+            const reflectorAgent: IAgentClient = new AgentRuntime({
                 settings,
                 isSubAgent: true,
-                requireConfirmation: false,
                 // We don't listen to messages, just results
-                onMessage: (msg: LLMMessage) => {
-                    // console.log('[MemoryReflector] Internal thought:', msg.content);
+                onMessage: (_msg: LLMMessage) => {
+                    // console.log('[MemoryReflector] Internal thought:', _msg.content);
                 }
             });
+
 
             // Specific prompt for the reflector
             const prompt = `

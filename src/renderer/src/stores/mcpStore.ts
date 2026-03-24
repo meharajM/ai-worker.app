@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
 import electron from '../lib/electron'
 import { STORAGE_KEYS } from '../lib/constants'
 
@@ -64,14 +63,6 @@ function getPersistenceKey(uid: string | null) {
 
 const DEFAULT_MCP_SERVERS = [
     {
-        name: 'sequential-thinking',
-        description: 'Sequential Thinking MCP Server - Enables step-by-step reasoning for complex tasks',
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
-        autoConnect: true
-    },
-    {
         name: 'playwright',
         description: 'Native Playwright Service - Browser automation (Internal)',
         type: 'stdio',
@@ -100,7 +91,7 @@ const DEFAULT_MCP_SERVERS = [
         description: 'MarkItDown - Convert documents (PDF, Word, Excel, images, audio) to Markdown',
         type: 'stdio',
         command: 'uvx',
-        args: ['markitdown-mcp'],
+        args: ['markitdown-mcp[all]'], // [all] ensures pdf, docx, xlsx, pptx, audio extras are included
         autoConnect: true // Enable auto-connect (requires uv/python)
     }
 ]
@@ -128,7 +119,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
 
             if (stored && Array.isArray(stored)) {
                 initialServers = stored.map(s => {
-                    let updated = { ...s };
+                    const updated = { ...s };
 
                     // Migration: Fix servers that have "internal" command placeholder
                     if (updated.command === 'internal') {
@@ -140,22 +131,29 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                         }
                     }
 
-                    // Migration: Enable MarkItDown auto-connect
+                    // Migration: Enable MarkItDown auto-connect and upgrade to [all] extras
                     if (updated.name === 'markitdown') {
                         updated.autoConnect = true;
+                        // Upgrade old arg 'markitdown-mcp' → 'markitdown-mcp[all]' for full file support
+                        if (updated.args?.includes('markitdown-mcp') && !updated.args.includes('markitdown-mcp[all]')) {
+                            updated.args = ['markitdown-mcp[all]'];
+                            console.log('[mcpStore] Migrated markitdown args to include [all] extras');
+                        }
                     }
 
                     return {
                         ...updated,
-                        // Reset runtime state
+                        // Reset runtime state but KEEP cached tools for lazy-connect
                         connected: false,
-                        tools: [],
+                        tools: updated.tools || [],
                         error: undefined
                     } as MCPServer;
                 });
 
-                // Also ensure all current defaults exist if they are missing
-                let hasNewDefaults = false;
+                // Migration: Remove old WhatsApp MCP since we now have direct integration
+                const beforeCount = initialServers.length;
+                initialServers = initialServers.filter(s => !s.name.toLowerCase().includes('whatsapp'));
+                let hasNewDefaults = beforeCount !== initialServers.length;
                 DEFAULT_MCP_SERVERS.forEach(def => {
                     if (!initialServers.some(s => s.name === def.name)) {
                         initialServers.push({
@@ -163,7 +161,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                             id: generateId(),
                             connected: false,
                             tools: [],
-                            type: def.type as any,
+                            type: def.type as 'stdio' | 'sse' | 'http',
                         });
                         hasNewDefaults = true;
                     }
@@ -189,8 +187,9 @@ export const useMcpStore = create<McpState>()((set, get) => ({
 
             set({ servers: initialServers, initialized: true })
 
-            // Auto-connect
-            const autoConnectServers = initialServers.filter(s => s.autoConnect)
+            // Lazy connect: Only auto-connect on startup if we don't have cached tool schemas.
+            // This prevents spawning expensive Node/Python child processes for unused servers.
+            const autoConnectServers = initialServers.filter(s => s.autoConnect && s.tools.length === 0)
             for (const server of autoConnectServers) {
                 // Connect sequentially to avoid overwhelming
                 get().connectServer(server.id).catch(console.error)
@@ -307,7 +306,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
             })
 
             if (result.success) {
-                const toolsResult = await electron.mcp.listTools(id) as { tools: any[], error?: string }
+                const toolsResult = await electron.mcp.listTools(id) as { tools: { name: string; description: string; inputSchema?: Record<string, unknown> }[], error?: string }
 
                 set(state => ({
                     servers: state.servers.map(s =>
@@ -323,19 +322,25 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                         } : s
                     )
                 }))
-            } else {
-                throw new Error(result.error || 'Connection failed')
             }
         } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+
             set(state => ({
                 servers: state.servers.map(s =>
                     s.id === id ? {
                         ...s,
                         connected: false,
-                        error: error instanceof Error ? error.message : String(error)
+                        error: errorMessage
                     } : s
                 )
             }))
+
+            // If the process failed to spawn due to missing system tools (e.g. uv, python, node), surface the setup screen
+            if (errorMessage.includes('Environment Setup Needed') || errorMessage.includes('ENOENT')) {
+                window.dispatchEvent(new Event('app:check-dependencies'))
+            }
+
             // Re-throw so UI can catch if needed, but state is already updated
             throw error
         }
@@ -346,7 +351,8 @@ export const useMcpStore = create<McpState>()((set, get) => ({
             await electron.mcp.disconnect(id)
             set(state => ({
                 servers: state.servers.map(s =>
-                    s.id === id ? { ...s, connected: false, tools: [] } : s
+                    // Keep tools cached for lazy load later
+                    s.id === id ? { ...s, connected: false } : s
                 )
             }))
         } catch (error) {
@@ -415,7 +421,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
                     id: generateId(), // Generate new local ID
                     name: remote.name,
                     description: remote.description || '',
-                    type: remote.type as any,
+                    type: remote.type as 'stdio' | 'sse' | 'http',
                     command: remote.command,
                     args: remote.args,
                     url: remote.url,
@@ -453,26 +459,26 @@ export const useMcpStore = create<McpState>()((set, get) => ({
     getAllTools: () => {
         const toolMap: Map<string, MCPTool> = new Map();
         get().servers.forEach((server) => {
-            if (server.connected) {
-                server.tools.forEach(tool => {
-                    const existing = toolMap.get(tool.name);
+            // No longer require `server.connected` -> we serve cached tools for lazy-connect
+            server.tools.forEach(tool => {
+                const existing = toolMap.get(tool.name);
 
-                    // If we don't have this tool yet, or if the new one has a richer schema, take it
-                    const newScore = Object.keys(tool.inputSchema?.properties || {}).length;
-                    const existingScore = existing ? Object.keys(existing.inputSchema?.properties || {}).length : -1;
+                // If we don't have this tool yet, or if the new one has a richer schema, take it
+                const newScore = Object.keys(tool.inputSchema?.properties || {}).length;
+                const existingScore = existing ? Object.keys(existing.inputSchema?.properties || {}).length : -1;
 
-                    if (!existing || newScore > existingScore) {
-                        toolMap.set(tool.name, tool);
-                    }
-                });
-            }
+                if (!existing || newScore > existingScore) {
+                    toolMap.set(tool.name, tool);
+                }
+            });
         });
         return Array.from(toolMap.values());
     },
 
     findServerForTool: (toolName) => {
+        // Return server if it has the tool cached, regardless of connected state
         return get().servers.find(s =>
-            s.connected && s.tools.some(t => t.name === toolName)
+            s.tools.some(t => t.name === toolName)
         ) || null
     }
 }))

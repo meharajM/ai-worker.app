@@ -67,6 +67,7 @@ graph LR
         IPC[IPC Handlers<br/>Modular Handlers]
         MCP[MCP Client Manager<br/>@modelcontextprotocol/sdk]
         Playwright[Playwright Service<br/>Internal Browser Automation]
+        McpManager[McpProcessManager<br/>Process Lifecycle & tree-kill]
         Speech[Speech Services<br/>ModelManager & ModelServer]
         Env[Environment Utils<br/>fix-path, ESM shims]
     end
@@ -74,9 +75,10 @@ graph LR
     subgraph "IPC Modules"
         AppHandlers[app.ts<br/>App Info & Shell]
         MCPHandlers[mcp.ts<br/>MCP Operations]
-        LLMHandlers[llm.ts<br/>LLM Placeholder]
-        StoreHandlers[store.ts<br/>Storage Operations]
+        SSEHandlers[sse.ts<br/>SSE Operations]
         SpeechHandlers[speech.ts<br/>Speech Operations]
+        AntigravityHandlers[antigravity.ts<br/>OAuth & Gateway]
+        WhatsAppHandlers[whatsapp.ts<br/>WhatsApp Operations]
     end
 
     App --> IPC
@@ -85,9 +87,13 @@ graph LR
     IPC --> LLMHandlers
     IPC --> StoreHandlers
     IPC --> SpeechHandlers
+    IPC --> AntigravityHandlers
+    IPC --> WhatsAppHandlers
     MCPHandlers --> MCP
     MCPHandlers --> Playwright
     SpeechHandlers --> Speech
+    AntigravityHandlers --> AntigravityAuthService[AntigravityAuthService]
+    WhatsAppHandlers --> WhatsAppService[WhatsAppService]
     App --> Env
 ```
 
@@ -96,6 +102,9 @@ graph LR
 - Window management and lifecycle
 - IPC handler registration
 - MCP server connections (Stdio/SSE)
+- **MCP Process Governance**: Managed by `McpProcessManager` using `tree-kill` for guaranteed recursive cleanup of runaway child processes.
+- Antigravity OAuth flow & Gateway access
+- WhatsApp connection management & message handling
 - Speech Model Management (Download/Serving)
 - System-level operations (file system, shell)
 - Environment setup (PATH fixing, ESM compatibility)
@@ -118,6 +127,7 @@ graph TB
         ShellAPI[Shell Operations]
         AppAPI[App Info]
         SpeechAPI[Speech Operations]
+        WhatsAppAPI[WhatsApp Operations]
     end
 
     ContextBridge --> MCPAPI
@@ -126,6 +136,7 @@ graph TB
     ContextBridge --> ShellAPI
     ContextBridge --> AppAPI
     ContextBridge --> SpeechAPI
+    ContextBridge --> WhatsAppAPI
     IPCInvoke --> ContextBridge
 ```
 
@@ -156,26 +167,31 @@ graph TB
         SettingsPanel[SettingsPanel]
         Header[Header]
         Sidebar[Sidebar]
+        WhatsAppDialog[WhatsAppConnectionDialog]
     end
 
     subgraph "Stores"
         ChatStore[chatStore]
         SettingsStore[settingsStore]
         AuthStore[authStore]
+        WhatsAppStore[whatsappStore]
     end
 
     subgraph "Libraries"
-        LLMLib[llm.ts]
+        LLMLib[llm/]
         WebLLMLib[webllm.ts]
         MCPLib[mcp.ts]
         ElectronLib[electron.ts]
         VoskLib[vosk.ts]
+        ThinkFilter[thinkBlockFilter.ts]
         Constants[constants.ts]
     end
 
     subgraph "Hooks"
          UseSpeech[useSpeechRecognition]
          UseVisualizer[useAudioVisualizer]
+         UseDragDrop[useFileDragDrop]
+         UseWhatsAppBridge[useWhatsAppBridge]
     end
 
     ReactApp --> Components
@@ -184,6 +200,8 @@ graph TB
     Components --> Hooks
     Hooks --> VoskLib
     Hooks --> UseVisualizer
+    Hooks --> UseDragDrop
+    Hooks --> UseWhatsAppBridge
     Stores --> Lib
     Lib --> ElectronLib
     
@@ -229,6 +247,7 @@ graph TD
 
     VoiceInput --> SpeechRecognition[useSpeechRecognition<br/>STT Hook]
     VoiceInput --> SpeechSynthesis[useSpeechSynthesis<br/>TTS Hook with Dynamic Controls]
+    ChatView --> UseFileDragDrop[useFileDragDrop<br/>Attachment Handling]
 ```
 
 ### State Management Architecture
@@ -236,22 +255,48 @@ graph TD
 ```mermaid
 graph LR
     subgraph "Zustand Stores"
-        ChatStore[chatStore<br/>Messages & Processing]
+        ChatStore["chatStore<br/>Sessions, Messages<br/>Per-Session Processing"]
         SettingsStore[settingsStore<br/>User Preferences]
         AuthStore[authStore<br/>Authentication]
     end
 
-    subgraph "Persistence"
+    subgraph "Persistence (ai-worker-chat-v3)"
         LocalStorage[localStorage<br/>Browser Storage]
         ElectronStore[electron-store<br/>Main Process]
     end
 
-    ChatStore -->|Persist| LocalStorage
+    subgraph "Ephemeral (not persisted)"
+        ProcessingMap["_processingSessions<br/>Map&lt;sessionId, AbortController&gt;"]
+    end
+
+    ChatStore -->|Persist sessions + prefs| LocalStorage
+    ChatStore --- ProcessingMap
     SettingsStore -->|Persist| LocalStorage
     AuthStore -->|Persist| LocalStorage
 
     SettingsStore -.->|Sync API Keys| ElectronStore
 ```
+
+#### chatStore — Per-Session Processing (v3)
+
+The chat store manages multiple independent sessions concurrently. The key design change is the `_processingSessions` Map:
+
+| API | Description |
+|-----|-------------|
+| `startProcessing(sessionId)` | Creates a new `AbortController` for the session, returns its `AbortSignal`. |
+| `stopProcessing(sessionId)` | Removes the session from the Map (agent completed normally). |
+| `abortSession(sessionId)` | Calls `.abort()` then removes the session (user-initiated cancel). |
+| `isSessionProcessing(sessionId)` | Returns `true` if the session has an active controller. |
+
+**Why this matters:**
+- Switching sessions never cancels a background agent
+- Each session has its own `AbortSignal` — aborting Session A does not affect Session B
+- `_processingSessions` is excluded from `partialize` and always resets on page load
+
+> [!NOTE]
+> Storage key bumped from `ai-worker-chat-v2` → `ai-worker-chat-v3`.
+> Old persisted flat fields (`isProcessing`, `abortController`) no longer exist in the state shape.
+
 
 ---
 
@@ -280,6 +325,41 @@ sequenceDiagram
     App->>TTS: speak(response)
     TTS-->>User: Audio Output
 ```
+
+### Attachment Processing Flow
+
+When a user attaches a file (via the paperclip button, drag-and-drop, or paste), the system follows a zero-friction pipeline that no longer requires a workspace to be pre-selected.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant VoiceInput as VoiceInput (UI)
+    participant ChatStore
+    participant AgentRuntime
+    participant MarkItDown as MarkItDown MCP
+
+    User->>VoiceInput: Attach file (button / drag-drop / paste)
+    VoiceInput->>VoiceInput: maybeSetWorkspaceFromFiles()<br/>auto-derives parent dir as workspace
+    VoiceInput->>ChatStore: addMessage(user + attachmentData)
+    Note over ChatStore: Attachments stored with name, path, type
+
+    User->>VoiceInput: Submit message
+    VoiceInput->>AgentRuntime: chat(content, attachments)
+
+    Note over AgentRuntime: Builds [ATTACHED FILES] block<br/>with file:// URIs + immediate instruction
+    AgentRuntime->>AgentRuntime: Append attachmentContext to user prompt
+
+    AgentRuntime->>MarkItDown: convert_to_markdown(uri="file:///path")
+    MarkItDown-->>AgentRuntime: Markdown content
+    AgentRuntime->>AgentRuntime: Inject content into LLM context
+    AgentRuntime->>LLM Provider: Send prompt + file content
+```
+
+**Key design decisions:**
+
+- **Auto-workspace derivation** (`VoiceInput.tsx` → `maybeSetWorkspaceFromFiles`): When a file is attached and no workspace is set, the parent directory of the first file is silently set as the session workspace. This applies to button selection and drag-and-drop.
+- **Attachment context format** (`agent-runtime.ts`): The `[ATTACHED FILES]` block now includes ready-to-use `file://` URIs and an explicit instruction to call `convert_to_markdown` immediately — removing any ambiguity.
+- **Scoped workspace requirement** (`prompts.ts`): The system prompt now distinguishes *read* operations (attached files — no workspace needed) from *write/create* operations (which do require a workspace). The AI is explicitly told not to ask for a workspace just because a file was attached.
 
 ### MCP Connection Flow
 
@@ -390,6 +470,63 @@ graph TB
 | `electron.speech.checkSupport()`| `speech:check-support`| `speech.ts`    | Check/Verify Model     |
 | `electron.speech.downloadModel()`| `speech:download-model`| `speech.ts`  | Download logic         |
 | `electron.speech.getModelPath()`| `speech:get-model-path`| `speech.ts`   | Get model server URL   |
+| `electron.whatsapp.connect()`   | `whatsapp:connect`    | `whatsapp.ts`  | Connect to WhatsApp    |
+| `electron.whatsapp.disconnect()`| `whatsapp:disconnect` | `whatsapp.ts`  | Disconnect & clear auth|
+| `electron.whatsapp.getState()`  | `whatsapp:get-state`  | `whatsapp.ts`  | Get current status     |
+| `electron.whatsapp.sendMessage()`| `whatsapp:send-message`| `whatsapp.ts`  | Send a WhatsApp message|
+| `electron.whatsapp.sendPresence()`| `whatsapp:send-presence`| `whatsapp.ts` | Send typing status    |
+
+---
+
+## WhatsApp Integration
+
+AI-Worker includes a first-class WhatsApp integration that allows the agent to communicate with users directly on their mobile devices.
+
+### Architecture Overview
+
+The integration uses a **Bridge Pattern** between the Main and Renderer processes:
+
+1.  **WhatsAppService (Main)**: A singleton service running in Node.js that manages the connection using the Baileys library. It handles authentication, QR code generation, socket management, and message parsing.
+2.  **whatsappStore (Renderer)**: A Zustand store that mirrors the connection state and manages user preferences (e.g., whether "WhatsApp Mode" is enabled).
+3.  **useWhatsAppBridge (Hook)**: A bridge that subscribes to IPC events from the main process (`whatsapp:connection-change`, `whatsapp:message`) and updates the renderer's store and chat UI in real-time.
+
+### Connection Lifecycle
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as WhatsAppConnectionDialog
+    participant Main as WhatsAppService
+    participant WA as WhatsApp Servers
+
+    User->>UI: Enter Phone Number
+    UI->>Main: whatsapp:connect(phone)
+    Main->>WA: Initialize Socket
+    WA-->>Main: QR Code
+    Main-->>UI: QR Code Data
+    User->>WA: Scan QR with Phone
+    WA-->>Main: Auth Success
+    Main-->>UI: Connected
+    Note over Main: Auth saved to userData/whatsapp-auth
+```
+
+### Communication Flows
+
+#### 1. WhatsApp Mode (Direct Chat)
+When WhatsApp Mode is enabled, the agent responds directly to the user's WhatsApp messages.
+- **Input**: `useWhatsAppBridge` detects an incoming message → dispatches `app:submit-message` event → `useAgent` triggers the agent loop.
+  - *Deduplication*: A native `processedMessageIds` Set in the main process robustly deduplicates incoming payload streams from `baileys`. This prevents concurrent duplicate agent invocations while maintaining a capped 200-message memory.
+- **Output**: `useAgent` detects the message originated from WhatsApp → calls `electron.whatsapp.sendMessage` after the LLM generates a response.
+
+#### 2. Autonomous Notifications
+The agent can use WhatsApp to send status updates or ask questions during long-running tasks.
+- **Messaging**: The agent can call the `whatsapp_send_message` tool to notify the user (e.g., "Task complete, check your dashboard").
+- **Interaction**: The agent can call the `whatsapp_ask_question` tool to wait for user input from their phone.
+
+### Persistence & Security
+- **Authentication**: WhatsApp session credentials (`creds.json` and `phone.txt`) are stored in the application's `userData/whatsapp-auth` directory. Explicitly disconnecting via the UI clears this data.
+- **Connection Stability**: To prevent unintended data loss, the `WhatsAppService` strictly isolates transient network timeout/stream errors from explicit user disconnects (using an `explicitDisconnect` flag). This ensures auto-reconnect routines safely restore sessions without prematurely calling the auth wipe function.
+- **Privacy**: The application only communicates with the phone number provided during setup. All communication is end-to-end encrypted by WhatsApp.
 
 ---
 
@@ -402,9 +539,13 @@ AI-Worker comes with two pre-configured MCP servers that are automatically initi
 1. **Playwright Server** (`playwright`)
 
    - Purpose: Browser automation and web interaction
-   - Mode: **Internal Service** (Zero-latency, in-process)
+   - Mode: **Internal Service** (Zero-latency, in-process, stealth-enabled)
    - Configuration: `command: 'internal'` (Automatically routed by `mcp.ts`)
-   - Tools: 30+ tools including navigate, click, fill, screenshot, get_state, evaluate
+   - Capabilities:
+     - 30+ tools including navigate, click, fill, screenshot, get_state, evaluate.
+     - **Advanced Headless Evasion**: Built-in stealth flags, network TLS impersonation, and rich context mocking (User-Agent, Locale, Hardware).
+     - **Headless-to-Headed State Promotion**: Active headless contexts can be "promoted" to visible windows via `surfaceBrowser()`. The `BrowserManager` dynamically re-routes persistent data directories to ensure cookies and session state are preserved during the transition.
+     - **Human-Like Inputs**: Utilizes `ghost-cursor` for Bezier-curve mouse movements and variable typing delays to bypass behavioral biometrics (e.g., Turnstile).
 
 2. **Sequential Thinking Server** (`sequential-thinking`)
    - Purpose: Step-by-step reasoning for complex tasks
@@ -513,13 +654,20 @@ graph LR
   - Type: `stdio`
   - Command: `npx`
   - Args: `-y @modelcontextprotocol/server-playwright`
-  - Description: Browser automation and web interaction tools
-
+  - Description: Browser automation and web interaction tools (includes headless `background_scrape` for background extraction). Now reinforced with advanced headless evasion natively in the `BrowserManager`.
+  
 - **Sequential Thinking** (`sequential-thinking`)
   - Type: `stdio`
   - Command: `npx`
   - Args: `-y @modelcontextprotocol/server-sequential-thinking`
   - Description: Enables step-by-step reasoning for complex tasks
+
+- **MarkItDown** (`markitdown`)
+  - Type: `stdio`
+  - Command: `uvx`
+  - Args: `markitdown-mcp`
+  - Description: Convert documents (PDF, Word, Excel, Images) to Markdown
+  - **Auto-Connect**: Enabled by default
 
 **Initialization Logic:**
 
@@ -531,85 +679,115 @@ graph LR
 
 ---
 
-## LLM & Agent Architecture
+### LLM & Agent Architecture
 
 AI-Worker implements a reactive, tool-calling agent loop managed by the `AgentRuntime`. It prioritizes a **Plan-First** approach for complex tasks.
 
-### Agent Loop (AgentRuntime)
+#### Modular LLM Provider System
 
-The `AgentRuntime` manages the conversation lifecycle, including planning, tool execution, and context pruning. It features an **Autonomous Interaction Loop** capable of parallel tool dispatch and self-correction.
+The LLM logic is refactored into a modular provider system located in `src/renderer/src/lib/llm/`. This structure isolates provider-specific logic (OpenAI, Gemini, Ollama, WebLLM) and shared utilities.
 
 ```mermaid
 graph TD
-    User[User Input] --> Runtime[AgentRuntime]
-    Runtime --> DCP[Prune Context]
-    DCP --> Plan[Call LLM: create_execution_plan]
-    Plan --> Step1[Parallel Dispatch: Tool 1 + Tool 2]
-    Step1 --> Result1[Consolidate Results]
-    Result1 --> Progress[update_progress_summary]
-    Progress --> DCP2[Prune Context]
-    DCP2 --> Step2[Next Actions]
+    Orchestrator[llm.ts<br/>Orchestrator]
+    
+    subgraph "lib/llm/ Modules"
+        OpenAI[openai.ts]
+        Gemini[gemini.ts]
+        Ollama[ollama.ts]
+        Browser[browser-llm.ts]
+        Prompts[prompts.ts]
+        Utils[utils.ts]
+        Types[types.ts]
+    end
+
+    Orchestrator --> OpenAI
+    Orchestrator --> Gemini
+    Orchestrator --> Ollama
+    Orchestrator --> Browser
+    
+    OpenAI & Gemini & Ollama & Browser --> Prompts
+    OpenAI & Gemini & Ollama & Browser --> Utils
+    OpenAI & Gemini & Ollama & Browser --> Types
 ```
 
-### Specialized Sub-agents
+- **llm.ts**: Central entry point. Handles provider auto-selection and message pruning (DCP).
+- **openai.ts / gemini.ts / ...**: Provider-specific API formatting and calling.
+- **prompts.ts**: System prompt generation and tool filtering.
+- **utils.ts**: Shared JSON parsing and content normalization. Includes resilient JSON extraction (`parseToolCallsFromJson`) that automatically repairs contiguous malformed JSON syntax (e.g., `} {` into `},{`), effectively safeguarding the tools engine against boundaries hallucinated by smaller LLMs.
 
-The system dynamically context-aware agent roles based on connected MCP servers. These are injected into the system prompt:
+#### Reasoning & Thinking Blocks
 
-- **NavigationAgent**: Specialized in `playwright` tools (browser control, screenshots).
-- **FilesystemAgent**: Specialized in `filesystem` tools (read, write, list).
-- **SystemAgent**: General purpose task handling.
+The system implements a universal thinking filter (`thinkBlockFilter.ts`) to handle reasoning outputs from advanced models (e.g., Gemini 2.0, DeepSeek-R1).
 
-### LLM Provider Priority
+- **Multi-Format Support**: Detects and strips XML `<think>`, `<thinking>`, `<thought>` tags and Markdown ```think``` blocks.
+- **Leaked Reasoning Detection**: Proactively identifies reasoning patterns that escape designated blocks, ensuring a clean UI summary.
+- **Gemini 2.0 Integration**: Specifically handles Gemini's native `thought` and `thought_signature` fields, echoing them back in message history for consistent tool-calling contexts.
 
-1. **Browser LLMs** (WebLLM): On-device models (Llama 3, Phi 3) via WebGPU.
-2. **Standard APIs** (OpenAI, Gemini, OpenRouter): High-intelligence cloud models.
-3. **Local LLMs** (Ollama): Privacy-focused local serving.
+### Agent Runtime Architecture (Phase 2 Refactor)
 
-### Dynamic Prompt Injection & Task Categorization
+The `AgentRuntime` has been refactored from a monolithic class into a modular system of specialized services, orchestrated by a lean facade. This prepares the system for a client-server architecture in Phase 3.
 
-The `AgentRuntime` implements a **Dynamic Prompt Injection** mechanism to adapt the agent's behavior based on the task type.
+```mermaid
+graph TD
+    User[User Input] --> Runtime[AgentRuntime Facade]
+    
+    subgraph "Core Services"
+        Orchestration[OrchestrationService<br/>Task Decomposition]
+        Tools[ToolExecutionService<br/>Loop Handling & Self-Healing]
+        SpecialHandlers[SpecialToolHandlers<br/>High-level Tools]
+        LLMOrchestrator[llm.ts<br/>Provider Selection]
+        State[AgentStateService<br/>Memory & Checkpoints]
+    end
 
-**Flow:**
-1.  **Task Analysis**: The user request is analyzed by `confirmation-message.ts` to identify the intent category (`SHOPPING`, `RESEARCH`, `ADMIN`, `GENERAL`).
-2.  **Prompt Selection**: The runtime selects the appropriate instruction set from the `Prompt Library` (`prompt-library.ts`).
-3.  **Injection**: `buildSystemPrompt` injects these rules *after* the tool definitions but *before* the core instructions. this ensures high priority context.
+    Runtime --> State
+    Runtime --> Orchestration
+    Orchestration -->|Sub-Agents| Runtime
+    Runtime --> LLMOrchestrator
+    LLMOrchestrator --> Providers[llm/ Providers<br/>OpenAI, Gemini, Ollama, Browser]
+    Runtime --> Tools
+    Runtime --> SpecialHandlers
+    
+    Tools --> MCP[MCP Tools]
+    State --> Memory[Memory DB]
+```
 
-**Categories:**
-- **SHOPPING**: Enforces "Speaking Money Protocol", "Size Checks", and stops at checkout.
-- **RESEARCH**: Enforces citation rules and balanced sourcing.
-- **ADMIN/FORMS**: Enforces double-checking inputs and privacy.
-- **GENERAL**: Optimized for speed and direct navigation.
+#### 1. AgentRuntime Facade
+- **Role**: Entry point for the UI (`useAgent.ts`).
+- **Responsibility**: Coordinates the high-level loop (Think -> Act -> Observe) and manages context limits.
+- **Interface**: Implements `IAgentClient`, ensuring the UI is decoupled from the implementation (ready for remote execution).
 
-#### Composed Prompts & Parallelism
-The system utilizes a **Composable Prompt Engine** (`getComposedPrompts`) that allows multiple behavioral protocols to be active simultaneously. For instance, a task can be categorized as both `RESEARCH` and `PARALLEL_EXECUTION`.
+#### 2. AgentStateService
+- **Responsibility**: Manages the agent's memory lifecycle.
+- **Key Features**:
+  - **Session Management**: Initializes and restores execution state.
+  - **Context Loading**: Loads parent context for sub-agents to share knowledge.
+  - **Handoff Detection**: Automatically prompts for user intervention if the context limit is reached.
 
-**Parallel Execution Protocol**:
-- Detects independent sub-tasks (e.g., comparing multiple websites).
-- Enforces simultaneous `delegate_sub_task` calls in a single turn.
-- Reduces total execution time by running independent operations in dedicated worker tabs.
+#### 3. SpecialToolHandlers
+- **Responsibility**: Owns inline handlers for complex "agent-specific" logic.
+- **Key Features**:
+  - Coordinates multi-step execution plans (`create_execution_plan`).
+  - Spawns sub-agents for isolated research (`delegate_sub_task`) and salvages partial data on failure.
+  - Generates progress checkpoints for context preservation (`update_progress_summary`).
+  - Runs advanced browser analysis like semantic accessibility trees (`scan_page_accessibility`).
 
-### Refusal Detection & Safety Layer
+#### 4. OrchestrationService
+- **Responsibility**: Spawns and manages sub-agents.
+- **Patterns**:
+  - **Parallel Orchestration**: Spawns N sub-agents for independent contexts (e.g., comparing 3 websites).
+  - **Sequential Orchestration**: Executes multi-step plans where step N+1 depends on step N.
+  - **Sub-Agent Factory**: Uses a factory pattern to create new `AgentRuntime` instances, breaking circular dependencies.
 
-To ensure robustness across different LLM capabilities, the `AgentRuntime` implements a deterministic safety layer that intercepts and corrects agent behavior:
-
-1.  **Refusal Interceptor**: Regular expressions scan every model response for refusal patterns (e.g., "I don't have access", "I am a text model").
-2.  **Auto-Correction**: If a refusal is detected when tools are available, the system injects a high-priority `[SYSTEM CORRECTION]` message.
-3.  **Tool-Call Mandate**: The correction provides a direct example of valid tool usage (e.g., `navigate({url: "google.com"})`). This "jumpstarts" models that incorrectly assume they are limited to text.
-4.  **Loop Prevention**: Correction is applied only once per turn to prevent recursive refusal loops.
-
-### Structured Response Protocol
-
-The system enforces a strict dual-layer response format to separate internal reasoning from user interaction:
-
-1.  **Internal Layer (`<think>`)**:
-    - Wrapped in XML-like tags.
-    - Used for planning, analysis, and self-correction.
-    - **Hidden** from the standard chat view (expandable for debugging).
-
-2.  **Presentation Layer**:
-    - Plain text outside tags.
-    - Direct, natural language responses.
-    - **Filtered** by the UI (`MessageBubble.tsx`) to strip any leaked meta-commentary (e.g., "The user asked for X, so I will...").
+#### 5. ToolExecutionService
+- **Responsibility**: Safely executes tools and robustly handles errors.
+- **Loop Detection**: Prevents infinite loops by detecting repetitive arguments or similar patterns (same tool N times in a row).
+- **Self-Healing**: Automatically retries failed actions with context-aware recovery strategies:
+  - **Context Destroyed**: 1s wait + retry (handles navigation race conditions).
+  - **Stale Element**: Immediate retry (handles dynamic DOM updates).
+  - **Lane/Tool Timeout**: Retry with extended/doubled timeout.
+  - **Network/Browser Error**: Transient error recovery with exponential backoff.
+- **Output Formatting**: Truncates large outputs (max 5000 chars) and formats results for the LLM with recovery hints (e.g., suggesting `get_interactive_elements` on click failure).
 
 ### Sub-Agent Delegation Flow
 
@@ -618,11 +796,12 @@ The system supports recursive task delegation through the `delegate_sub_task` to
 #### How It Works
 
 1.  **Main Agent Decides**: The main agent determines a sub-task is too complex or requires isolation.
-2.  **Tool Call**: Calls `delegate_sub_task` with specific instructions and context.
+2.  **Tool Call**: Calls `delegate_sub_task` with specific instructions and context. The `SpecialToolHandlers` service intercepts this.
 3.  **Recursive Runtime**: The system instantiates a *new* `AgentRuntime` (the "Sub-Agent").
 4.  **Context Inheritance**: The Sub-Agent inherits the parent's `taskCategory`, ensuring it loads the correct safety protocols (e.g., a Shopping sub-agent also knows not to buy things).
 5.  **Isolated Execution**: The Sub-Agent runs its own loop (Plan -> Act -> Verify) with a fresh context window.
-6.  **Result Aggregation**: The Sub-Agent returns a final summary string, which becomes the tool result for the Main Agent.
+6.  **Bailout & Salvage**: If the Sub-Agent fails (e.g. consecutive errors), `SpecialToolHandlers` detects the bailout and scans the Sub-Agent's history to salvage any useful partial data found before failure.
+7.  **Result Aggregation**: The `SpecialToolHandlers` returns the final summary (or salvaged data) string, which becomes the tool result for the Main Agent.
 
 ```mermaid
 sequenceDiagram
@@ -661,15 +840,53 @@ sequenceDiagram
 To support parallel execution of sub-agents and tool calls while maintaining internal state consistency, AI-Worker implements a granular resource locking system.
 
 #### 1. Hybrid Execution Engine
-Tools are classified into three categories:
+Tools are classified into three categories by the `laneManager` (singleton in `execution-lanes.ts`):
 
-- **Stateful Browser Tools**: Tools that modify the browser state (e.g., `navigate`, `click`). These share a global **Browser Lock** to prevent race conditions during tab operations.
-- **Stateful File Tools**: Tools that modify the filesystem. These use **Granular Locks** (Keyed Mutexes) where the lock key is the absolute file path. Multiple sub-agents can read/write different files simultaneously without blocking each other.
-- **Stateless Tools**: Tools like `search`, `memory_retrieve`, or `sequential-thinking` that have no side effects. these run in **True Parallelism**.
+- **Stateful Browser Tools**: Tools that modify the browser state (e.g., `navigate`, `click`). These share a global **Browser Lock** via a serial execution lane.
+- **Tab-Scoped Tools**: Tools bound to a specific tab (e.g., `screenshot(tabId)`). These run in a **Tab Serial Lane**, allowing parallel work across different tabs.
+- **Stateful File Tools**: Tools that modify the filesystem. These use **Granular Locks** (Keyed Mutexes) keyed by absolute file path.
+
+
+- **Stateful Browser Tools**: Tools that modify the browser state (e.g., `navigate`, `click`). These share a global **Browser Lock** via a serial execution lane.
+- **Tab-Scoped Tools**: Tools bound to a specific tab (e.g., `screenshot(tabId)`). These run in a **Tab Serial Lane**, allowing parallel work across different tabs.
+- **Stateful File Tools**: Tools that modify the filesystem. These use **Granular Locks** (Keyed Mutexes) keyed by absolute file path.
+- **Stateless Tools**: Tools like `search`, `memory_retrieve`, or `sequential-thinking` that have no side effects. These run in **True Parallelism** via the API Parallel lane.
 
 #### 2. Isolation Strategy
 - **Sub-Agent Tabs**: Each sub-agent is provisioned with a **dedicated browser tab** (`tabId`). This ensures that one sub-agent's navigation does not interrupt another's workflow.
-- **Auto-Cleanup**: Tabs are automatically closed upon sub-task completion to prevent memory leaks.
+
+- **Auto-Cleanup**: After each sub-agent completes, its tab is closed *and* `laneManager.cleanupTabLane(tabId)` is called to remove the stale `LaneQueue` from memory. Without this, long sessions accumulate leaked queues.
+- **Multi-Session Abort Isolation**: Each chat session has its own `AbortController` stored in `chatStore._processingSessions`. Calling `abortSession(sessionA)` only cancels Session A — Session B continues unaffected.
+
+#### 3. Multi-Session Concurrency Model
+
+Users can run tasks in multiple chat sessions simultaneously. Here is the lifecycle:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Sidebar as ChatSidebar
+    participant StoreA as chatStore (Session A)
+    participant StoreB as chatStore (Session B)
+    participant AgentA as AgentRuntime (A)
+    participant AgentB as AgentRuntime (B)
+
+    User->>StoreA: handleSubmit() on Session A
+    StoreA->>AgentA: startProcessing(A) → AbortSignal_A
+    Note over StoreA: _processingSessions: {A: ctrl_A}
+    User->>Sidebar: Switch to Session B
+    User->>StoreB: handleSubmit() on Session B
+    StoreB->>AgentB: startProcessing(B) → AbortSignal_B
+    Note over StoreA: _processingSessions: {A: ctrl_A, B: ctrl_B}
+    Note over Sidebar: Shows spinner next to both A and B
+    User->>Sidebar: Click ✕ on Session A
+    StoreA->>AgentA: abortSession(A) → ctrl_A.abort()
+    Note over StoreA: _processingSessions: {B: ctrl_B}
+    AgentB->>StoreB: stopProcessing(B) when done
+    Note over StoreA: _processingSessions: {} (empty)
+```
+
+
 
 ### Universal Self-Healing Architecture
 
@@ -716,11 +933,20 @@ sequenceDiagram
 | **Context Destroyed** | 1s wait + retry. | Navigation race conditions |
 | **Timeout** | Double the timeout + retry. | Slow loading pages |
 
-#### 2. Navigation & Recovery Fallbacks
-- **Auto-Google**: If a URL navigation fails (DNS or typo), the agent automatically converts the URL into a Google search query.
-- **Fuzzy Selector Fallback**: If a strict CSS selector (ID/Class) fails, the system automatically tries "fuzzy" matching or text-based selectors.
+#### 2. Runtime Preconditions (Pre-Validation & Auto-Fallback)
+The `PlaywrightService` implements proactive validation for multi-step tools (`browser_action_sequence` and `fill_form`) to prevent hallucinated selectors from causing partial executions or long timeouts.
 
-#### 3. Sub-Agent Panic Mode
+### Browser Lifecycle (Idle Timeout)
+To prevent the Chromium process from holding hundreds of megabytes of RAM while the application is idle, `BrowserManager.ts` implements an automatic idle timeout. If no browser tools are requested for 5 minutes, the Chromium process is gracefully terminated. It will seamlessly relaunch (JIT) the next time the agent requires browser capabilities.
+- **Auto-Observation Guard**: Automatically checks `page.$(selector)` implicitly before executing any step.
+- **Fail-Fast Sequence Validation**: Validates all selectors in a sequence *before* running. If a selector is missing, the sequence aborts instantly (~50ms) instead of waiting for a 30s timeout, saving tokens and time. 
+- **Smart Auto-Fallback**: If a `click` selector is invalid but acts like or is accompanied by valid `text`, the runtime automatically upgrades the action to `click_text` on the fly.
+
+#### 3. Navigation & Recovery Fallbacks
+- **Auto-Google**: If a URL navigation fails (DNS or typo), the agent automatically converts the URL into a Google search query.
+- **Fuzzy Selector Fallback**: If a strict CSS selector (ID/Class) fails during execution, the system automatically tries "fuzzy" matching or text-based selectors.
+
+#### 4. Sub-Agent Panic Mode
 If a sub-agent enters an unproductive loop (3+ turns with no progress), it triggers **Panic Mode**:
 1. It stops searching/clicking blindly.
 2. It takes a visual snapshot of the page.
@@ -732,41 +958,49 @@ If a sub-agent enters an unproductive loop (3+ turns with no progress), it trigg
 
 The system includes **automatic task decomposition** that intelligently spawns sub-agents based on context boundaries. This prevents "context drowning" where the main loop becomes overwhelmed by tool noise.
 
-#### Decision Logic
+#### Decision Logic (LLM-Based)
+
+The system now utilizes an **LLM-based analysis step** (`analyzeTaskWithLLM`) to determine the optimal execution strategy, replacing the previous regex-only approach.
 
 | Scenario | Strategy | Implementation |
 |----------|----------|----------------|
-| **Multiple websites** | Parallel sub-agents | 1 sub-agent per website |
-| **Single website, 3+ actions** | Sub-agent | Protects main context |
-| **Single website, 1-2 actions** | Direct execution | No fork needed |
+| **Independent Contexts** (e.g., compare Amazon & eBay) | Parallel Sub-Agents | LLM identifies contexts + parallel safety |
+| **Complex Single Context** (4+ steps) | Sequential Sub-Agent | Protects main context history |
+| **Simple Task** | Direct Execution | Runs in main loop |
 
 #### Implementation
 
-Located in [task-decomposer.ts](file:///Users/suhail/ai-worker-app/src/renderer/src/lib/task-decomposer.ts):
+Located in [`task-decomposer.ts`](src/renderer/src/lib/task-decomposer.ts):
 
 ```typescript
 interface TaskDecomposition {
   type: 'single_context' | 'multi_context';
-  contexts: string[];           // URLs or app names
-  estimatedActions: number;     // Estimated action count
-  shouldFork: boolean;          // Whether to spawn sub-agents
+  contexts: string[];           // URLs or app names detected by LLM
+  estimatedActions: number;     // Heuristic count
+  shouldFork: boolean;          // Decision
   forkStrategy?: 'parallel' | 'sequential';
 }
 ```
+
+**Key Features:**
+- **LLM Analysis**: Prompts the model to extract contexts and verify independence.
+- **Caching**: Analysis results are cached (5m TTL) to prevent redundant calls.
+- **Fallbacks**: Defaults to sequential execution if LLM analysis fails.
 
 #### Auto-Fork Flow
 
 ```mermaid
 flowchart TD
-    A[User Request] --> B{Multiple websites?}
-    B -->|Yes| C[Parallel Sub-Agents]
-    B -->|No| D{3+ actions?}
-    D -->|Yes| E[Single Sub-Agent]
-    D -->|No| F[Direct Execution]
-    C --> G[Combine Results]
-    E --> G
-    F --> H[Response]
-    G --> H
+    A[User Request] --> B[LLM Analysis]
+    B --> C{Parallelizable?}
+    C -->|Yes| D[Parallel Sub-Agents]
+    C -->|No| E{Complex Task?}
+    E -->|Yes| F[Sequential Sub-Agent]
+    E -->|No| G[Direct Execution]
+    D --> H[Combine Results]
+    F --> H
+    G --> I[Response]
+    H --> I
 ```
 
 ### Strategic Result Extraction
@@ -1339,6 +1573,13 @@ graph LR
     UnsafeInline --> Security
 ```
 
+### Antigravity Gateway Security
+
+The Antigravity integration follows a "Privileged Proxy" model:
+1. **OAuth Isolation**: OAuth tokens are handled exclusively by the `AntigravityAuthService` in the main process. The renderer never sees the refresh token or client secret.
+2. **Gateway Proxying**: To avoid CORS issues and protect credentials, all calls to the Antigravity/Google Cloud Code Assist API are proxied through a dedicated IPC channel (`antigravity:call-gateway`).
+3. **Internal Projects**: The service automatically resolves the correct Google Cloud Project ID needed for the gateway, falling back to a pre-authorized default for seamless onboarding.
+
 ---
 
 ## Firebase Authentication
@@ -1733,13 +1974,25 @@ ai-worker-app/
 
 ---
 
-**Last Updated:** 2024-12-29  
-**Version:** 0.1.0  
-**Architecture Version:** 1.1
+**Last Updated:** 2026-03-18  
+**Version:** 0.2.0  
+**Architecture Version:** 1.3
 
-**Recent Updates:**
+- **WhatsApp Integration**: Implemented a comprehensive bridge for WhatsApp communication.
+  - `WhatsAppService.ts`: Main-process service using Baileys for socket management and auth.
+  - `whatsapp.ts`: IPC handlers for connection, state sync, and messaging.
+  - `whatsappStore.ts`: Renderer-process state management for WhatsApp.
+  - `WhatsAppConnectionDialog.tsx` & `WhatsAppToggle.tsx`: UI components for managing the connection.
+  - `useWhatsAppBridge.ts`: Real-time event syncing between Main and Renderer.
+  - Integrated WhatsApp response logic into `useAgent.ts` for automated mobile interaction.
+- **File Attachment UX Fix**: Resolved the AI asking users to select a workspace when analyzing attached files.
+  - `VoiceInput.tsx`: Added `maybeSetWorkspaceFromFiles()` — auto-derives workspace from the parent directory of the first attached file (applied to button-select and drag-and-drop).
+  - `agent-runtime.ts`: Strengthened the `attachmentContext` block injected into the user prompt; now provides ready-to-use `file://` URIs and an explicit directive to call `convert_to_markdown` immediately.
+  - `prompts.ts`: Scoped the "no workspace selected" system prompt instruction to apply only to write/create filesystem operations — reading attached files no longer triggers the workspace prompt.
+- **Sequential Step Failure Handling**: Stops agent execution flow on critical step failures, preventing inconsistent state from subsequent step execution.
+- **Lane Memory Leak Fix**: Added `cleanupTabLane` to `LaneManager`, called after sub-agent tab closure in both parallel and sequential orchestration flows.
+- **Agent Architecture Modularisation** (Phase 2): `AgentRuntime` refactored into `AgentStateService`, `ToolExecutionService`, `OrchestrationService`, and `SpecialToolHandlers` services.
 
-- Added default MCP server configuration (Playwright, Sequential Thinking)
 - Implemented automatic server initialization on first run
 - Added form pre-filling with Sequential Thinking defaults
 - Enhanced server management with automatic default restoration
@@ -1753,6 +2006,11 @@ ai-worker-app/
 - **Progress Checkpoints**: Standardized increment reporting via `update_progress_summary` mandatory checkpoints every 5-15 steps.
 - **Token Resilience**: Implemented 5,000ch tool output truncation with automated "Strategic Tips" for agent self-correction.
 - **Session Privacy**: Finalized session-level data isolation and auto-cleanup architecture.
+- **Antigravity Gateway**: Integrated Google OAuth flow and Cloud Code Assist API for high-limit Gemini access.
+- **Modular LLM Refactor**: Transitioned to a provider-based directory structure (`lib/llm/`) with isolated logic for Gemini, OpenAI, and Ollama.
+- **Universal Reasoning Filter**: Added `thinkBlockFilter` to strip internal thinking blocks from all LLM outputs.
+- **Self-Healing Tool Loop**: Enhanced `ToolExecutionService` with 8 context-aware recovery strategies for browser automation.
+- **Secure Storage**: Implemented user-scoped, OS-level encrypted storage for all LLM API keys and OAuth tokens.
 
 ---
 

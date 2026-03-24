@@ -674,3 +674,449 @@ echo "# Sample Document\n\nThis is a test file for MarkItDown.\n\n## Features\n-
 **3. Test Prompt:**
 > "Convert ~/Desktop/test.pdf to markdown and show me the result"
 
+---
+
+## 20. Browser Automation: Runtime Preconditions & Auto-Healing
+
+The agent's browser tools feature built-in protective layers to prevent hallucinated selectors from causing timeouts or corrupted states. Test these with the following prompts:
+
+**Test A: Fail-Fast Selector Pre-Validation (browser_action_sequence)**
+**Prompt:** 
+> "Go to wikipedia.com and use the browser_action_sequence tool. Make the first step click on the selector '#made-up-hallucinated-button-123' and the second step scroll down."
+
+**Expected Behavior:**
+- 🚫 Agent receives an **immediate** failure instead of waiting 30 seconds for a timeout.
+- ⚡ Error explicitly states "Sequence Aborted by Runtime Guard: Step 1 PRECONDITION FAILED".
+- 💡 Agent self-corrects by calling `get_interactive_elements` to find real selectors.
+
+**Test B: Smart Auto-Fallback (Heuristic Text Conversion)**
+**Prompt:**
+> "Go to news.ycombinator.com using browser_action_sequence. In the sequence, try to click the login button by providing the exact string 'login' into the `selector` field (do NOT use the text field or click_text action)."
+
+**Expected Behavior:**
+- ✅ The tool execution **succeeds** despite the invalid CSS selector.
+- 🔄 The Runtime Guard detects the selector 'login' is actually plain text, verifies the text exists on the page, and automatically converts the action to `click_text('login')`.
+- *(Verify in Terminal: `[PlaywrightService] Auto-correcting step... click('login') -> click_text('login')`)*
+
+**Test C: Form Field Protection (fill_form)**
+**Prompt:**
+> "Go to https://news.ycombinator.com/login and use the fill_form tool. Provide the correct selector for the password, but intentionally use `#wrong-username-box` for the username field."
+
+**Expected Behavior:**
+- 🛡️ The form fill aborts immediately after navigation, before typing anything.
+- ❌ Protects the form state by refusing to partially fill a form with invalid selectors.
+
+**Test D: Form Submit Auto-Correction**
+**Prompt:**
+> "Go to https://news.ycombinator.com/login and use the fill_form tool. Provide correct field selectors. For the `submit_selector`, use `#fake-submit`, but provide `login` for the `submit_text` field."
+
+**Expected Behavior:**
+- ✅ The form submission **succeeds**.
+- 🔄 The guard abandons the bad `submit_selector` and seamlessly falls back to the `submit_text` to complete the form.
+
+---
+
+## 21. Single Bubble, Progress Bar & Sub-Agent Isolation (Recent Fixes)
+
+> These prompts target the three changes made in the latest patch:
+> 1. **Single live bubble** — all tool calls across iterations accumulate into one "Agent Actions" card instead of spawning a new card per LLM call.
+> 2. **Progress bar + ETA for ALL execution types** — previously only appeared during direct `_runLoop` tool calls; now also fires for Parallel, Sequential, and Continuation Handoff paths.
+> 3. **Sub-agent `onMessageUpdate` isolation** — sub-agents can no longer accidentally update the parent's live bubble.
+
+---
+
+### 21A. Single Bubble — Direct Tool-Calling Agent
+**What to verify:** Only **one** "Agent Actions" card should appear for the entire task, updating in-place as each tool completes.
+
+**Prompt:**
+> "Go to bbc.com, find the top headline, then go to reuters.com and find their top headline, then compare the two."
+
+**What to watch in the UI:**
+- [ ] Exactly **one** `Agent Actions` card appears — it should NOT create a new card for each website visit
+- [ ] Tool calls accumulate inside that single card (BBC navigate → BBC read → Reuters navigate → Reuters read)
+- [ ] Each tool shows a spinner while running, then its result when done
+- [ ] The final text summary appears inside the **same** card, not as a separate bubble
+
+**What you should NOT see:**
+- ❌ Three separate "1 Agent Action", "2 Agent Actions", "3 Agent Actions" cards
+- ❌ A blank assistant bubble followed by a separate tool card
+
+**Console logs to check:**
+```
+[AgentRuntime] Iteration 1: Calling LLM...   ← first bubble created
+[AgentRuntime] Executing tool: browser_navigate
+[AgentRuntime] Executing tool: browser_get_text
+[AgentRuntime] Iteration 2: Calling LLM...   ← NO new bubble, updates existing
+[AgentRuntime] Executing tool: browser_navigate
+[AgentRuntime] Executing tool: browser_get_text
+[AgentRuntime] Iteration 3: Calling LLM...   ← final response, still same bubble
+```
+
+---
+
+### 21B. Progress Bar — Direct Agent (Multi-Step)
+**What to verify:** Progress bar and ETA appear while the agent is working.
+
+**Prompt:**
+> "Search Google for 'best mechanical keyboards 2024', open the first result, and give me the top 3 recommendations with prices."
+
+**What to watch in the UI:**
+- [ ] Progress bar appears at the **bottom of the chat** within 1-2 seconds of sending
+- [ ] ETA label shows `< 1m remaining` or similar
+- [ ] Bar advances as each tool completes
+- [ ] Bar **disappears** completely when the final answer is shown (it should not linger at 95%)
+
+---
+
+### 21C. Progress Bar — Parallel Orchestration
+**What to verify:** Progress bar appears and ticks forward during multi-site parallel execution.
+
+**Prompt:**
+> "Compare the price of AirPods Pro on Amazon, BestBuy, and Target."
+
+**What to watch in the UI:**
+- [ ] Progress bar appears at **5%** immediately when orchestration starts (before sub-agents finish)
+- [ ] Bar ticks forward as each sub-agent sends status messages
+- [ ] Bar reaches ~90% before the final aggregated result appears
+- [ ] Bar disappears once the comparison card is complete
+
+---
+
+### 21D. Progress Bar — Sequential Orchestration
+**What to verify:** Progress bar appears and advances step-by-step during sequential execution.
+
+**Prompt:**
+> "Help me book a bus from Bangalore to Mysore for tomorrow on RedBus — search for routes, pick the first available, and show me the available seats."
+
+**What to watch in the UI:**
+- [ ] Progress bar appears at **5%** when orchestration begins
+- [ ] Bar steps forward as each sequential step completes (`Step 1 completed ✓`, etc.)
+- [ ] ETA updates reflect remaining steps
+- [ ] Bar disappears after final summary
+
+---
+
+### 21E. Progress Bar — Continuation Handoff
+**What to verify:** Progress bar appears when the user confirms "Continue Task" after max iterations.
+
+**Prompt (force a long task):**
+> "Deeply analyze 10 different tech blogs (TechCrunch, Wired, The Verge, Ars Technica, Engadget, Gizmodo, AnandTech, Tom's Hardware, Hacker News, ZDNet). For each: navigate to the homepage, find the main headline, and extract the publication date. Compile a ranked list by recency."
+
+**What to watch in the UI:**
+- [ ] Agent hits max iterations → shows "Continue Task / Stop Here" buttons
+- [ ] Click **Continue Task**
+- [ ] Progress bar appears at **5%** immediately when continuation sub-agent starts
+- [ ] Bar disappears when the continuation sub-agent returns its result
+
+---
+
+### 21F. Sub-Agent Isolation — Parent Bubble Not Corrupted
+**What to verify:** When the main agent runs parallel sub-agents, the parent's live progress card is not accidentally overwritten with sub-agent tool calls.
+
+**Prompt:**
+> "Compare the job listings for 'React developer' on LinkedIn and Indeed."
+
+**What to watch in the UI:**
+- [ ] A **"⚡ Parallel Execution"** status card appears showing both sites with live status text
+- [ ] The status card updates correctly (`LinkedIn: Navigating... / Indeed: Searching...`)
+- [ ] The status card shows `Completed` for each site when done
+- [ ] **No sub-agent tool call cards** appear in the main chat (sub-agent work is invisible)
+- [ ] Each site's result appears as its own `✅ Analysis Complete` bubble
+
+**What you should NOT see:**
+- ❌ Sub-agent's individual tool calls appearing as separate cards in the main chat
+- ❌ The "⚡ Parallel Execution" card being overwritten with raw tool call data
+
+---
+
+### 21G. Immediate Reply — No Bubble, No Progress Bar
+**What to verify:** For instant answers with no tool usage, the progress bar should NOT appear and no empty tool card should be created.
+
+**Prompt:**
+> "What is the difference between TCP and UDP?"
+
+**What to watch in the UI:**
+- [ ] The answer appears immediately as a normal text bubble
+- [ ] **No** "Agent Actions" card appears
+- [ ] **No** progress bar appears (there are no tools to track)
+- [ ] Response feels instant
+
+---
+
+### Quick UI Checklist for Section 21
+
+| Scenario | Single Bubble? | Progress Bar? | ETA? | Bar Clears? |
+|---|---|---|---|---|
+| 21A: Direct multi-step (tool calls) | ✅ | ✅ | ✅ | ✅ |
+| 21B: Direct multi-step (progress) | ✅ | ✅ | ✅ | ✅ |
+| 21C: Parallel sub-agents | N/A (status card) | ✅ | ✅ | ✅ |
+| 21D: Sequential sub-agents | N/A (step cards) | ✅ | ✅ | ✅ |
+| 21E: Continuation handoff | ✅ | ✅ | ✅ | ✅ |
+| 21F: Sub-agent isolation | N/A | ✅ | ✅ | ✅ |
+| 21G: Instant reply (no tools) | N/A | ❌ (correct) | ❌ (correct) | N/A |
+
+---
+
+## 22. WhatsApp Integration — Use Cases & Verification Prompts
+
+> These prompts verify the full WhatsApp bidirectional integration added in the `whatsapp-implementation-v2` branch.
+>
+> **Prerequisites before running any test:**
+> - Built the app: `npm run build && npm start` (or `npm run dev`)
+> - WhatsApp connected: Header shows green dot + phone number
+> - Target phone number verified (not the same as the Worker phone)
+> - WhatsApp Mode toggle (💬 icon in chat toolbar) is **ON** (green pulse dot visible)
+
+---
+
+### 22A. Setup — First-Time Connection Flow
+
+**What to verify:** The connection dialog guides user through QR scan and phone number verification correctly.
+
+**Steps:**
+1. Click the **CONNECT** button in the app header (or the WhatsApp CTA in the empty state)
+2. The dialog opens — click **"Start Connection"**
+3. A QR code appears — scan it from the Worker phone (WhatsApp → Linked Devices → Link a Device)
+4. After scanning, enter your **Personal phone number** (different from Worker)
+5. Click **Verify** — the dialog closes, header shows `● Connected`
+
+**What to watch in the UI:**
+- [ ] Dialog has a clear 3-step flow: Intro → QR Code → Phone Verification
+- [ ] QR refreshes automatically if it expires
+- [ ] Entering the **same** number as the Worker phone shows error: *"Cannot use the same number for both Worker and Personal"*
+- [ ] Header status button updates from `CONNECT` to `● Connected`
+
+**Console Logs to Check:**
+```
+[WhatsAppService] Restored target JID filter: +91XXXXXXXXXX@s.whatsapp.net
+[Main] Wake lock acquired (WhatsApp connected). ID: 0
+[WhatsAppService] Target JID set for message filtering: +91XXXXXXXXXX@s.whatsapp.net
+```
+
+---
+
+### 22B. Auto-Reconnect on App Restart
+
+**What to verify:** After a full quit-and-relaunch, the app reconnects automatically — no QR scan needed.
+
+**Steps:**
+1. Fully quit the app (`Cmd+Q` on macOS)
+2. Relaunch the app
+3. Watch the header — within 5–10 seconds it should show `● Connected`
+
+**What to watch in the UI:**
+- [ ] Header briefly shows `Connecting...` then `● Connected` — **no manual click required**
+- [ ] Target phone number is pre-filled and message filter is already active
+- [ ] WhatsApp Mode toggle is restored from the previous session (persisted in Zustand)
+
+**What you should NOT see:**
+- The "CONNECT" button requiring user interaction
+- A dialog asking the user to re-scan the QR code
+
+**Console Logs to Check:**
+```
+[WhatsAppService] Found existing auth credentials. Auto-reconnecting...
+[WhatsAppService] Restored target JID filter: +91XXXXXXXXXX@s.whatsapp.net
+[WhatsAppService] Connection update: { connection: 'open' }
+[Main] Wake lock acquired (WhatsApp connected). ID: 0
+```
+
+---
+
+### 22C. Desktop → WhatsApp Mirror (UI → Phone)
+
+**What to verify:** When WhatsApp Mode is ON and you type in the desktop chat, the LLM response is mirrored to your personal phone.
+
+**Prompt (type in desktop chat with Mode ON):**
+> "What is the capital of France?"
+
+**What to watch:**
+- [ ] Message appears in desktop chat as normal
+- [ ] Your personal phone shows **"Typing..."** from the Worker number while AI processes
+- [ ] The AI's final answer appears on **both** desktop chat AND personal phone as a single WhatsApp message
+- [ ] No multiple partial fragments — only one clean complete message on phone
+
+**What you should NOT see:**
+- Multiple partial WhatsApp messages sent during streaming
+- No message on the phone at all (the original bug before this fix)
+
+**Console Logs to Check:**
+```
+[useAgent] WhatsApp flow detected/enabled. JID: +91XXXXXXXXXX@s.whatsapp.net
+[useAgent] Final WhatsApp delivery check...
+[WhatsAppService] Message sent successfully to: +91XXXXXXXXXX@s.whatsapp.net
+```
+
+---
+
+### 22D. Phone → Desktop Remote Operation (WhatsApp → AI → Phone)
+
+**What to verify:** A message from the personal phone triggers the AI agent on desktop and replies back.
+
+**Steps:**
+1. Ensure WhatsApp is connected and Mode toggle is **ON**
+2. **From your personal phone**, text the Worker number: `"Write me a haiku about coding"`
+3. Watch the desktop app
+
+**What to watch:**
+- [ ] The incoming message appears in the desktop chat prefixed with `📱 **WhatsApp** (from: +91XXXXXXXXXX):`
+- [ ] The AI begins processing (spinner / progress bar visible on desktop)
+- [ ] Worker phone shows **"Typing..."** back to your personal phone
+- [ ] The AI's haiku appears in the desktop chat AND is received on your personal phone
+
+**What you should NOT see:**
+- No response on the phone (the original core bug)
+- Messages from random contacts triggering the agent
+
+**Console Logs to Check:**
+```
+[useAgent] WhatsApp flow detected/enabled. JID: +91XXXXXXXXXX@s.whatsapp.net
+[useAgent] Final WhatsApp delivery check...
+[WhatsAppService] Message sent successfully to: +91XXXXXXXXXX@s.whatsapp.net
+```
+
+---
+
+### 22E. Security Filter — Only Verified Number Triggers Agent
+
+**What to verify:** Messages from other contacts or group chats do NOT trigger the AI.
+
+**Steps:**
+1. Ensure WhatsApp is connected
+2. From a **different phone** (not the personal/admin number), send a message to the Worker phone
+3. Watch the desktop app — nothing should happen
+
+**Console Logs to Check:**
+```
+[WhatsAppService] Dropping message from non-target sender: 9199XXXXXXXX
+```
+
+**Also test:** Send from a **group chat** that includes the Worker phone — same drop behavior expected.
+
+---
+
+### 22F. Long-Running Task — Remote Notification
+
+**What to verify:** You can start a task from the desktop and receive the result on your phone while away.
+
+**Prompt (type in desktop chat with Mode ON):**
+> "Analyze the Hacker News homepage and give me a summary of the top 5 stories."
+
+**Steps:**
+1. Send the prompt from desktop
+2. Lock your phone screen and put it face-down
+3. Wait 30–60 seconds for the agent to complete
+
+**What to watch:**
+- [ ] Personal phone receives the HN summary as a WhatsApp notification
+- [ ] Desktop chat also shows the full result
+
+---
+
+### 22G. System Awake — Wake Lock Verification
+
+**What to verify:** The OS does not suspend the app while WhatsApp is connected.
+
+**Steps:**
+1. Connect WhatsApp and leave the app running
+2. Set Mac to sleep after 1 min (System Prefs → Battery → Sleep: 1 min) — keep lid **open**
+3. Leave idle for 2 minutes
+4. From personal phone, send: `"Are you there?"`
+
+**What to watch:**
+- [ ] App responds normally despite idle time — no dropped messages, no reconnection delay
+
+**Console Logs to Check (on startup):**
+```
+[Main] Wake lock acquired (WhatsApp connected). ID: 0
+```
+
+**On app quit:**
+```
+[Main] Wake lock released (WhatsApp disconnected).
+```
+
+---
+
+### 22H. Rate Limiting — No WhatsApp Spam
+
+**What to verify:** Only one complete message is sent to WhatsApp, not fragmented streaming chunks.
+
+**Prompt:**
+> "List all 50 US states and their capitals."
+
+**What to watch:**
+- [ ] **Only one** WhatsApp message arrives on personal phone with the full answer
+- [ ] No duplicate or partial messages received on phone
+
+---
+
+### 22I. Disconnect — Stop vs. Logout
+
+**Test A — Stop Connection (preserve auth):**
+1. Click Connected status button in header → click **"Stop Connection"**
+2. Fully close and relaunch the app
+3. Expected: App **auto-reconnects** without QR scan
+
+**Console Logs to Check:**
+```
+[Main] Wake lock released (WhatsApp disconnected).
+[WhatsAppService] Found existing auth credentials. Auto-reconnecting...
+```
+
+**Test B — Logout (wipe auth):**
+1. Click Connected status button → click **"Logout"**
+2. Fully close and relaunch the app
+3. Expected: App shows **"CONNECT"** button — user must scan QR again
+
+**Console Logs to Check:**
+```
+[WhatsAppService] Auth cleared.
+```
+
+---
+
+### 22J. Multi-Turn Context over WhatsApp
+
+**What to verify:** Conversation context is maintained across multiple WhatsApp messages in the same session.
+
+**Steps (from personal phone):**
+1. Send: `"My name is Alex"`
+2. Wait for reply about Alex
+3. Send: `"What is my name?"`
+4. Expected reply: mentions Alex
+
+**What to watch:**
+- [ ] AI correctly recalls context from earlier in the WhatsApp conversation
+- [ ] All messages appear in the same desktop chat thread (not a new session per message)
+
+---
+
+### Quick Verification Checklist for Section 22
+
+| Scenario | Desktop Chat? | Phone Mirror? | Key Console Log |
+|---|---|---|---|
+| 22A: First-time setup | Dialog works | Connected status shows | `Wake lock acquired` |
+| 22B: Auto-reconnect on restart | Status restores | No QR needed | `Auto-reconnecting...` |
+| 22C: Desktop → Phone mirror | Normal chat | Single WA message | `Final WhatsApp delivery` |
+| 22D: Phone → AI → Phone | Shows prefixed msg | AI replies to phone | `Message sent successfully` |
+| 22E: Security filter | No unknown msgs | No AI triggered | `Dropping message from non-target` |
+| 22F: Background task notification | Result in chat | Phone notified | `Message sent successfully` |
+| 22G: Wake lock | App stays responsive | Message received | `Wake lock acquired` |
+| 22H: Rate limiting | One response | One WA message | `Rate limit` (if triggered) |
+| 22I: Stop vs Logout | Auth preserved/wiped | Reconnects or asks QR | `Auto-reconnecting` / `Auth cleared` |
+| 22J: Multi-turn context | Same session thread | Context remembered | — |
+
+---
+
+### What Changed in App Behavior After Today's Fixes
+
+The following behaviors are **new** — they did not work before these changes:
+
+| # | Old Behavior (broken) | New Behavior (fixed) | Fix Location |
+|---|---|---|---|
+| 1 | Desktop→Phone: LLM reply **never sent** to phone when typing from UI | LLM reply **always sent** when WA Mode is ON | `useAgent.ts` — `shouldMirrorToWhatsApp` |
+| 2 | App restart → user **must manually click Connect** again | App **auto-reconnects** silently on startup | `WhatsAppService.init()` — calls `connect()` |
+| 3 | macOS could **suspend the app**, dropping incoming messages | OS **prevented from sleeping** while WA connected | `index.ts` — `powerSaveBlocker` wake lock |
+| 4 | **All WhatsApp contacts** (groups, unknown) could trigger the AI | **Only the verified personal number** triggers the AI | `WhatsAppService.messages.upsert` — JID filter |
+| 5 | Agent sent partial streamed chunks to WhatsApp (rate-limited, garbled) | Agent sends **single complete final response** | Removed `onMessage` real-time delivery |

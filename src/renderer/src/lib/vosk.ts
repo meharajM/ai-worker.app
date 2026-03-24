@@ -1,5 +1,4 @@
 import { createModel, type KaldiRecognizer, type Model } from 'vosk-browser'
-import { startTransition } from 'react'
 
 interface VoskServiceState {
     model: Model | null

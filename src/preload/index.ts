@@ -42,6 +42,9 @@ const electronAPI = {
         getVersion: () => ipcRenderer.invoke('app:get-version'),
         getName: () => ipcRenderer.invoke('app:get-name'),
         selectFolder: () => ipcRenderer.invoke('app:select-folder'),
+        getMissingDependencies: () => ipcRenderer.invoke('app:get-missing-dependencies'),
+        getAllDependencies: () => ipcRenderer.invoke('app:get-all-dependencies'),
+        runSetupScript: () => ipcRenderer.invoke('app:run-setup-script'),
     },
 
     // Logging operations
@@ -94,6 +97,12 @@ const electronAPI = {
         getPendingChanges: () => ipcRenderer.invoke('fs:get-pending-changes'),
         approveChange: (changeId: string) => ipcRenderer.invoke('fs:approve-change', changeId),
         rejectChange: (changeId: string) => ipcRenderer.invoke('fs:reject-change', changeId),
+        writeInternalFile: (workspacePath: string | undefined, filename: string, content: string) =>
+            ipcRenderer.invoke('fs:write-internal-file', workspacePath, filename, content),
+        readInternalFile: (workspacePath: string | undefined, filename: string) =>
+            ipcRenderer.invoke('fs:read-internal-file', workspacePath, filename),
+        readFileBase64: (filePath: string) =>
+            ipcRenderer.invoke('fs:read-file-base64', filePath)
     },
     // Memory operations
     memory: {
@@ -105,12 +114,22 @@ const electronAPI = {
         checkMigration: () => ipcRenderer.invoke('memory:check-migration'),
         openFileLocation: () => ipcRenderer.invoke('memory:open-file-location'),
     },
+    // Antigravity OAuth operations (Google sign-in for Gemini access)
+    antigravity: {
+        initialize: () => ipcRenderer.invoke('antigravity:initialize'),
+        signIn: () => ipcRenderer.invoke('antigravity:sign-in'),
+        getToken: () => ipcRenderer.invoke('antigravity:get-token'),
+        signOut: () => ipcRenderer.invoke('antigravity:sign-out'),
+        getStatus: () => ipcRenderer.invoke('antigravity:get-status'),
+        callGateway: (url: string, headers: Record<string, string>, body: string) =>
+            ipcRenderer.invoke('antigravity:call-gateway', url, headers, body),
+    },
     // Clipboard operations
     clipboard: {
         readFilePaths: () => {
             const { clipboard } = require('electron')
             const paths: string[] = []
-            
+
             if (process.platform === 'darwin') {
                 const fileUrl = clipboard.read('public.file-url')
                 if (fileUrl) {
@@ -130,6 +149,46 @@ const electronAPI = {
             return paths
         }
     },
+    // WhatsApp operations
+    whatsapp: {
+        getState: () => ipcRenderer.invoke('whatsapp:get-state'),
+        connect: (phoneNumber?: string) => ipcRenderer.invoke('whatsapp:connect', phoneNumber),
+        setTargetNumber: (phoneNumber: string) => ipcRenderer.invoke('whatsapp:set-target-number', phoneNumber),
+        disconnect: (clearAuth?: boolean) => ipcRenderer.invoke('whatsapp:disconnect', clearAuth),
+        sendMessage: (to: string, content: string) =>
+            ipcRenderer.invoke('whatsapp:send-message', to, content),
+        sendPresence: (to: string, state: string) =>
+            ipcRenderer.invoke('whatsapp:send-presence', to, state),
+        sendMediaMessage: (to: string, filePath: string, caption?: string, type?: string) =>
+            ipcRenderer.invoke('whatsapp:send-media-message', to, filePath, caption, type),
+        onConnectionChange: (callback: (state: unknown) => void) => {
+            const listener = (_event: any, state: unknown) => callback(state)
+            ipcRenderer.on('whatsapp:connection-change', listener)
+            return () => ipcRenderer.removeListener('whatsapp:connection-change', listener)
+        },
+        onMessage: (callback: (message: unknown) => void) => {
+            const listener = (_event: any, message: unknown) => callback(message)
+            ipcRenderer.on('whatsapp:message', listener)
+            return () => ipcRenderer.removeListener('whatsapp:message', listener)
+        },
+    },
+    // General utils
+    utils: {
+        getPathForFile: (file: File): string => {
+            const { webUtils } = require('electron')
+            if (webUtils && webUtils.getPathForFile) {
+                try {
+                    const result = webUtils.getPathForFile(file)
+                    // webUtils may return an empty string if it fails
+                    if (result) return result
+                } catch (e) {
+                    console.error('webUtils.getPathForFile failed:', e)
+                }
+            }
+            // Fallback to internal path property if webUtils isn't available
+            return (file as any).path || ''
+        }
+    }
 }
 
 // Expose APIs to renderer

@@ -73,6 +73,12 @@ interface ElectronAPI {
         }>>
         approveChange: (changeId: string) => Promise<{ success: boolean; error?: string }>
         rejectChange: (changeId: string) => Promise<{ success: boolean; error?: string }>
+        writeInternalFile: (workspacePath: string | undefined, filename: string, content: string) =>
+            Promise<{ success: boolean; path?: string; error?: string }>
+        readInternalFile: (workspacePath: string | undefined, filename: string) =>
+            Promise<{ success: boolean; content?: string; error?: string }>
+        readFileBase64: (filePath: string) =>
+            Promise<{ success: boolean; content?: string; error?: string }>
     }
 
     memory: {
@@ -95,8 +101,35 @@ interface ElectronAPI {
         openFileLocation: () => Promise<{ success: boolean; error?: string }>
     }
 
+    antigravity?: {
+        initialize: () => Promise<{ signedIn: boolean; email: string | null; projectId: string | null }>
+        signIn: () => Promise<{ signedIn: boolean; email: string | null; projectId: string | null }>
+        getToken: () => Promise<{ token: string | null; headers: Record<string, string> | null }>
+        signOut: () => Promise<{ success: boolean }>
+        getStatus: () => Promise<{ signedIn: boolean; email: string | null; projectId: string | null }>
+        callGateway: (url: string, headers: Record<string, string>, body: string) => Promise<any>
+    }
+
     clipboard: {
         readFilePaths: () => string[]
+    }
+
+    whatsapp?: {
+        getState: () => Promise<{
+            status: 'disconnected' | 'connecting' | 'connected' | 'error'
+            qrCode: string | null
+            error: string | null
+            phoneNumber: string | null
+            workerNumber: string | null
+        }>
+        connect: (phoneNumber?: string) => Promise<{ success: boolean; error?: string }>
+        setTargetNumber: (phoneNumber: string) => Promise<{ success: boolean; error?: string }>
+        disconnect: (clearAuth?: boolean) => Promise<{ success: boolean; error?: string }>
+        sendMessage: (to: string, content: string) => Promise<{ success: boolean; error?: string }>
+        sendPresence: (to: string, state: string) => Promise<{ success: boolean; error?: string }>
+        sendMediaMessage: (to: string, filePath: string, caption?: string, type?: string) => Promise<{ success: boolean; error?: string }>
+        onConnectionChange: (callback: (state: unknown) => void) => () => void
+        onMessage: (callback: (message: unknown) => void) => () => void
     }
 }
 

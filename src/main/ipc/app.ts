@@ -19,4 +19,23 @@ export function registerAppHandlers(): void {
         })
         return result.canceled ? null : result.filePaths[0]
     })
+
+    // Dependencies
+    ipcMain.handle('app:get-missing-dependencies', async () => {
+        const { DependencyService } = await import('../services/DependencyService')
+        const depService = DependencyService.getInstance()
+        return await depService.getMissingDependencies()
+    })
+
+    ipcMain.handle('app:get-all-dependencies', async () => {
+        const { DependencyService } = await import('../services/DependencyService')
+        const depService = DependencyService.getInstance()
+        return await depService.getAllDependencies()
+    })
+
+    ipcMain.handle('app:run-setup-script', async () => {
+        const { DependencyService } = await import('../services/DependencyService')
+        const depService = DependencyService.getInstance()
+        return await depService.runSetupScript()
+    })
 }
