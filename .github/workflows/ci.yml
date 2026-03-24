@@ -46,6 +46,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-failure-screenshots
+          retention-days: 1
           path: test-mock-failure.png
 
   build-linux-win:
@@ -86,6 +87,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-ubuntu-latest
+          retention-days: 1
           path: |
             dist/*.exe
             dist/*.AppImage
@@ -125,6 +127,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-macos-latest
+          retention-days: 1
           path: |
             dist/*.dmg
             dist/*.zip
