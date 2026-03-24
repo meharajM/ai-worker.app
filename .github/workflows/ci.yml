@@ -129,6 +129,11 @@ jobs:
           aws s3 cp dist/ s3://${{ secrets.R2_BUCKET_NAME }}/ \
             --recursive --exclude "*" --include "*.exe" --include "*.AppImage" --include "*.deb" --include "*.blockmap" --include "*.yml" \
             --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          # Upload installer scripts
+          aws s3 cp scripts/install-linux.sh s3://${{ secrets.R2_BUCKET_NAME }}/install-linux.sh \
+            --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          aws s3 cp scripts/install-windows.ps1 s3://${{ secrets.R2_BUCKET_NAME }}/install-windows.ps1 \
+            --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
 
   build-macos:
     needs: test
@@ -179,6 +184,9 @@ jobs:
         run: |
           aws s3 cp dist/ s3://${{ secrets.R2_BUCKET_NAME }}/ \
             --recursive --exclude "*" --include "*.dmg" --include "*.zip" --include "*.blockmap" --include "*.yml" \
+            --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          # Upload mac installer script
+          aws s3 cp scripts/install-mac.sh s3://${{ secrets.R2_BUCKET_NAME }}/install-mac.sh \
             --endpoint-url https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
 
   release:
