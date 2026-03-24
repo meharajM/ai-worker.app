@@ -101,8 +101,12 @@ jobs:
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y wine64 wine32 nsis
-          npm run build:linux
-          npm run build:win
+          # Build JS bundle once (shared across all targets)
+          npm run build
+          # Linux: x64 + ARM64
+          npx electron-builder --linux --x64 --arm64
+          # Windows: x64 (covers all Windows via x64 emulation on ARM)
+          npm run check:wine && npx electron-builder --win --x64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
