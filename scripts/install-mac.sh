@@ -13,12 +13,14 @@ INSTALL_DIR="/Applications"
 echo "🚀 AI-Worker Installer"
 echo "Fetching latest version info..."
 
-# Download the latest-mac.yml manifest to find the exact DMG filename
+# Download the latest-mac.yml manifest to find the exact DMG filename.
+# electron-builder format example: "  - url: AI-Worker-0.1.0-universal.dmg"
+# The top-level path: points to the .zip (auto-updater), so we find the .dmg from the files list.
 MANIFEST=$(curl -fsSL "${R2_BASE}/latest-mac.yml")
-DMG_FILE=$(echo "$MANIFEST" | grep -E '^path:' | head -n1 | awk '{print $2}' | tr -d '[:space:]')
+DMG_FILE=$(echo "$MANIFEST" | grep '\.dmg' | grep 'url:' | awk '{print $NF}' | tr -d '[:space:]')
 
 if [ -z "$DMG_FILE" ]; then
-  echo "❌ Could not determine the latest build file. Please try again."
+  echo "❌ Could not find a .dmg file in the latest release manifest."
   exit 1
 fi
 
@@ -26,7 +28,11 @@ echo "📦 Downloading ${DMG_FILE}..."
 curl -fL --progress-bar "${R2_BASE}/${DMG_FILE}" -o "${TMP_DIR}/${DMG_FILE}"
 
 echo "💿 Mounting disk image..."
-MOUNT_POINT=$(hdiutil attach "${TMP_DIR}/${DMG_FILE}" -nobrowse -quiet | tail -n1 | awk '{print $NF}')
+# hdiutil columns use multiple spaces; the /Volumes/ path may also contain spaces.
+# Strip everything before /Volumes/ to reliably extract the full mount path.
+# Notice we DO NOT use -quiet, as -quiet completely silences output in scripts.
+MOUNT_OUTPUT=$(hdiutil attach "${TMP_DIR}/${DMG_FILE}" -nobrowse 2>&1)
+MOUNT_POINT=$(echo "$MOUNT_OUTPUT" | grep '/Volumes/' | sed 's|.*/Volumes/|/Volumes/|' | sed 's/[[:space:]]*$//')
 
 if [ -z "$MOUNT_POINT" ]; then
   echo "❌ Failed to mount the disk image."
