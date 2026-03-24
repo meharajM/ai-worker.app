@@ -10,9 +10,11 @@ export function MissingDependenciesScreen({ onResolved }: { onResolved: () => vo
     const [missing, setMissing] = useState<Dependency[]>([]);
     const [loading, setLoading] = useState(true);
     const [runningScript, setRunningScript] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
 
-    const checkDependencies = async () => {
-        setLoading(true);
+    const checkDependencies = async (isManualRefresh = false) => {
+        if (!isManualRefresh) setLoading(true);
+        if (isManualRefresh) setRefreshing(true);
         try {
             const electron = window.electron as any;
             if (!electron?.app) return;
@@ -25,6 +27,7 @@ export function MissingDependenciesScreen({ onResolved }: { onResolved: () => vo
             console.error("Failed to check dependencies", e);
         } finally {
             setLoading(false);
+            setRefreshing(false);
         }
     };
 
@@ -110,11 +113,13 @@ export function MissingDependenciesScreen({ onResolved }: { onResolved: () => vo
                         <button
                             onClick={() => {
                                 const electron = window.electron as any;
-                                if (electron?.app) checkDependencies();
+                                if (electron?.app) checkDependencies(true);
                             }}
-                            className="w-full py-2 text-sm text-[#4fd1c5] font-medium hover:text-[#4fd1c5]/80 transition-colors"
+                            disabled={refreshing}
+                            className={`w-full py-2 text-sm text-[#4fd1c5] font-medium hover:text-[#4fd1c5]/80 transition-colors flex items-center justify-center space-x-2 ${refreshing ? 'opacity-70 cursor-not-allowed' : ''}`}
                         >
-                            Refresh Status (click after closing the terminal)
+                            {refreshing && <div className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />}
+                            <span>Refresh Status (click after closing the terminal)</span>
                         </button>
                         <button
                             onClick={onResolved}
