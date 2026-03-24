@@ -316,7 +316,16 @@ export function useAgent(): UseAgentReturn {
                 });
 
                 // ── Step 6: Run the agent ──────────────────────────────────────────
-                const llmResponse = await runtime.chat(content, attachmentData);
+                // When the incoming message has multimodal content (WhatsApp image/audio),
+                // we pass the resolved LLMMessage content instead of the raw text string.
+                // This ensures the LLM receives the actual media parts, not "[Media Message]".
+                const agentContent = userLLMMessage
+                    ? (typeof userLLMMessage.content === 'string'
+                        ? userLLMMessage.content
+                        : content) // fallback to text prefix for JID context
+                    : content;
+                const agentAttachments = userLLMMessage?.attachments ?? attachmentData;
+                const llmResponse = await runtime.chat(agentContent, agentAttachments);
 
                 // ── Step 7: Handle Outbound WhatsApp Messages ──────────────────────
                 // If WhatsApp mode is enabled, we need to send the final assistant response
@@ -409,7 +418,7 @@ export function useAgent(): UseAgentReturn {
             
             // If session is processing, we still want to queue the message
             // by calling handleSubmit - it will add the message and process
-            handleSubmit(content, undefined, false, whatsappMessage);
+            handleSubmit(content || '', undefined, false, whatsappMessage);
         };
 
         window.addEventListener("agent-action", handleAgentAction as EventListener);

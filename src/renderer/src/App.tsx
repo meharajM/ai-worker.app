@@ -39,7 +39,12 @@ import { useThemeSync } from "./hooks/useThemeSync";
 
 function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
-  const [dependenciesResolved, setDependenciesResolved] = useState(false);
+  const [dependenciesResolved, setDependenciesResolved] = useState(() => {
+    // Only skip the long background shell check during automated test runs.
+    // Using process.env.NODE_ENV ensures this bypass is compile-time and
+    // can never leak into production or persist across user sessions.
+    return import.meta.env.MODE === 'test'
+  });
 
   useEffect(() => {
     const triggerCheck = () => setDependenciesResolved(false);

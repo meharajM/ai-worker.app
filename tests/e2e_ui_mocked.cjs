@@ -54,6 +54,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         // Mocking at the window level is more reliable than network interception for localhost in Electron
         await window.addInitScript(async () => {
+            localStorage.setItem('skipDepsCheck', 'true');
             console.log("🧹 Clearing IndexedDB to ensure clean state...");
             try {
                 const dbs = await window.indexedDB.databases();

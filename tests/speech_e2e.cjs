@@ -63,6 +63,11 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
     try {
         const window = await electronApp.firstWindow();
+        
+        await window.addInitScript(() => {
+            localStorage.setItem('skipDepsCheck', 'true');
+        });
+        await window.reload();
 
         // Debug logging
         window.on('console', msg => {

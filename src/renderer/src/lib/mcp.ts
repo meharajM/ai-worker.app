@@ -1,5 +1,6 @@
 import { useMcpStore, MCPServer, MCPTool } from "../stores/mcpStore";
 import electron from "./electron";
+import { useWhatsAppStore } from "../stores/whatsappStore";
 
 /// <reference path="../env.d.ts" />
 
@@ -240,6 +241,44 @@ export async function executeToolCall(
         return result;
       } catch (err) {
         return { result: null, error: `Direct memory tool call failed: ${err instanceof Error ? err.message : String(err)}` };
+      }
+    }
+
+    // FALLBACK: Check if it's an internal WhatsApp tool
+    if (toolName.startsWith('whatsapp_')) {
+      logMcpRenderer("info", "Executing whatsapp tool via direct IPC fallback", { tool: toolName });
+      try {
+        // Automatically resolve the target number
+        const targetJid = (safeArgs?.to as string) || useWhatsAppStore.getState().connectionState.phoneNumber;
+        if (!targetJid) {
+          return { result: null, error: "Missing 'to' parameter: Target WhatsApp number could not be resolved automatically." };
+        }
+
+        if (toolName === 'whatsapp_send_media') {
+          const filePath = safeArgs?.filePath as string;
+          if (!filePath) return { result: null, error: "Missing 'filePath' parameter." };
+          
+          const result = await electron.whatsapp.sendMediaMessage(
+            targetJid,
+            filePath,
+            safeArgs?.caption as string | undefined,
+            safeArgs?.type as string | undefined
+          ) as { success: boolean; error?: string };
+          
+          if (result && result.error) return { result: null, error: result.error };
+          return { result: "Media sent successfully." };
+          
+        } else if (toolName === 'whatsapp_send_message') {
+          const content = safeArgs?.content as string;
+          if (!content) return { result: null, error: "Missing 'content' parameter." };
+          
+          const result = await electron.whatsapp.sendMessage(targetJid, content) as { success: boolean; error?: string };
+          
+          if (result && result.error) return { result: null, error: result.error };
+          return { result: "Message sent successfully." };
+        }
+      } catch (err) {
+        return { result: null, error: `Direct whatsapp tool call failed: ${err instanceof Error ? err.message : String(err)}` };
       }
     }
 
