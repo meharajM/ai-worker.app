@@ -4,7 +4,7 @@
 
 set -e
 
-R2_BASE="https://downloads.aiworker.app"
+R2_BASE="https://downloads.ai-worker.tech"
 INSTALL_DIR="${HOME}/.local/bin"
 APP_NAME="AI-Worker"
 
