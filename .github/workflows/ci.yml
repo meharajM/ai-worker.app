@@ -11,6 +11,8 @@ on:
 jobs:
   cleanup-before:
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
     steps:
       - name: Purge All Old Artifacts
         continue-on-error: true
@@ -199,6 +201,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - name: Download all artifacts
         continue-on-error: true
