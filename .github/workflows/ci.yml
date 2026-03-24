@@ -59,6 +59,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
       
+      - name: Fix libsignal package name
+        run: npm run prebuild:electron
+
       - name: Build for Testing
         run: npm run build
       
@@ -103,6 +106,8 @@ jobs:
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y wine64 wine32 nsis
+          # Fix libsignal package name so electron-builder bundles it correctly
+          npm run prebuild:electron
           # Build JS bundle once (shared across all targets)
           npm run build
           # Linux: x64 + ARM64
