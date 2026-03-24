@@ -14,11 +14,18 @@ echo "🚀 AI-Worker Installer"
 echo "Fetching latest version info..."
 
 # Download the latest-mac.yml manifest to find the exact DMG filename
+# Note: electron-builder sets path: to the .zip (used for auto-updates),
+# so we explicitly grep the files: block for the .dmg URL instead.
 MANIFEST=$(curl -fsSL "${R2_BASE}/latest-mac.yml")
-DMG_FILE=$(echo "$MANIFEST" | grep -E '^path:' | head -n1 | awk '{print $2}' | tr -d '[:space:]')
+DMG_FILE=$(echo "$MANIFEST" | grep -E '\.dmg$' | grep -E '^\s*url:' | head -n1 | awk '{print $2}' | tr -d '[:space:]')
+
+# Fallback: try top-level path: field filtered to .dmg
+if [ -z "$DMG_FILE" ]; then
+  DMG_FILE=$(echo "$MANIFEST" | grep -E '^path:.*\.dmg' | head -n1 | awk '{print $2}' | tr -d '[:space:]')
+fi
 
 if [ -z "$DMG_FILE" ]; then
-  echo "❌ Could not determine the latest build file. Please try again."
+  echo "❌ Could not find a .dmg file in the latest release manifest."
   exit 1
 fi
 
