@@ -45,7 +45,7 @@ echo "📂 Installing ${APP_NAME}.app to ${INSTALL_DIR}..."
 if [ -d "${INSTALL_DIR}/${APP_NAME}.app" ]; then
   rm -rf "${INSTALL_DIR}/${APP_NAME}.app"
 fi
-cp -R "${MOUNT_POINT}/${APP_NAME}.app" "${INSTALL_DIR}/"
+cp -a "${MOUNT_POINT}/${APP_NAME}.app" "${INSTALL_DIR}/"
 
 # Strip the quarantine attribute so Gatekeeper does not block the app
 xattr -dr com.apple.quarantine "${INSTALL_DIR}/${APP_NAME}.app" 2>/dev/null || true
