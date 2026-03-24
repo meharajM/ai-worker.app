@@ -71,3 +71,4 @@ Thumbs.db
 
 # Build artifacts
 *.tsbuildinfo
+.env.r2

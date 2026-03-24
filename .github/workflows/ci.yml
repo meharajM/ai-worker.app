@@ -3,259 +3,113 @@ name: CI/CD
 on:
   push:
     branches: [ main, prod ]
-    tags: [ 'v*' ]
+    # tags: [ 'v*' ]  # DISABLED: Tag pushes double-fire with prod push on release day
   pull_request:
     branches: [ main, prod ]
-    types: [opened, synchronize, labeled]
+    types: [opened, synchronize]
+
+# All platform builds are done locally and published to Cloudflare R2
+# using the scripts in /scripts/publish-*.sh.
+# Reason: GitHub Actions macOS runners cost 10x the free-tier minute rate.
+# A single macOS build exhausts the monthly free quota. All CI here is
+# Linux-only (1x rate) and limited to quality gates (lint, typecheck, tests).
 
 jobs:
-  cleanup-before:
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-    steps:
-      - name: Purge All Old Artifacts
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { data } = await github.rest.actions.listArtifactsForRepo({
-               owner: context.repo.owner,
-               repo: context.repo.repo,
-               per_page: 100
-            });
-            for (const artifact of data.artifacts) {
-               await github.rest.actions.deleteArtifact({
-                 owner: context.repo.owner,
-                 repo: context.repo.repo,
-                 artifact_id: artifact.id
-               });
-            }
-
+  # ── Quality Gate ─────────────────────────────────────────────────────────────
+  # Runs on all PRs and pushes to main. Skipped on prod (already tested via main).
   test:
-    needs: cleanup-before
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
-      
+
       - name: Install dependencies
         run: npm install
-      
+
       - name: Install System Dependencies (Xvfb & Playwright deps)
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb libgbm1
-          npx playwright install
-          npx playwright install-deps
-      
+          # Only install chromium — firefox/webkit not tested, saves ~3 min per run
+          npx playwright install chromium
+          npx playwright install-deps chromium
+
       - name: Lint
         run: npm run lint
 
       - name: Typecheck
         run: npm run typecheck
-      
+
       - name: Fix libsignal package name
         run: npm run prebuild:electron
 
       - name: Build for Testing
         run: npm run build
-      
+
       - name: Run E2E Mock Tests
         run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" npm run test:mock
-      
-      - name: Upload Test Artifacts
-        if: failure()
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-failure-screenshots
-          retention-days: 1
-          path: test-mock-failure.png
 
-  build-linux-win:
-    needs: test
-    if: |
-      startsWith(github.ref, 'refs/tags/') || 
-      github.ref == 'refs/heads/prod' ||
-      (github.event_name == 'pull_request' && (
-        contains(github.event.pull_request.labels.*.name, 'build-all') ||
-        contains(github.event.pull_request.labels.*.name, 'build-linux') ||
-        contains(github.event.pull_request.labels.*.name, 'build-windows')
-      ))
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
+  # DISABLED: build-linux-win job
+  # Reason: All platform builds are now done locally via scripts/publish-*.sh.
+  # This avoids splitting the release process across CI and local, keeps it consistent,
+  # and eliminates all GitHub Actions minute usage for builds.
+  #
+  # build-linux-win:
+  #   needs: test
+  #   if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: write
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Setup Node.js
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 20
+  #         cache: 'npm'
+  #     - name: Install dependencies
+  #       run: npm install
+  #     - name: Build Linux & Windows
+  #       run: |
+  #         sudo dpkg --add-architecture i386
+  #         sudo apt-get update
+  #         sudo apt-get install -y wine64 wine32 nsis
+  #         npm run prebuild:electron
+  #         npm run build
+  #         npx electron-builder --linux --x64 --arm64
+  #         npm run check:wine && npx electron-builder --win --x64
+  #       env:
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #     - name: Upload to Cloudflare R2
+  #       env:
+  #         AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  #         AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  #         AWS_EC2_METADATA_DISABLED: true
+  #       run: |
+  #         aws s3 cp dist/ s3://${{ secrets.R2_BUCKET_NAME }}/ \
+  #           --recursive --exclude "*" \
+  #           --include "*.exe" --include "*.AppImage" --include "*.deb" \
+  #           --include "*.blockmap" --include "*.yml" \
+  #           --endpoint-url ${{ secrets.R2_ACCOUNT_ID }}
+  #         aws s3 cp scripts/install-linux.sh s3://${{ secrets.R2_BUCKET_NAME }}/install-linux.sh \
+  #           --endpoint-url ${{ secrets.R2_ACCOUNT_ID }}
+  #         aws s3 cp scripts/install-windows.ps1 s3://${{ secrets.R2_BUCKET_NAME }}/install-windows.ps1 \
+  #           --endpoint-url ${{ secrets.R2_ACCOUNT_ID }}
 
-      - name: Install dependencies
-        run: npm install
+  # DISABLED: build-macos job
+  # Reason: macos-latest runner costs 10x free-tier minute rate.
+  # Mac builds are done locally via: ./scripts/publish-mac.sh
+  #
+  # build-macos: (see git history for original config)
 
-      - name: Build Linux & Windows
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update
-          sudo apt-get install -y wine64 wine32 nsis
-          # Fix libsignal package name so electron-builder bundles it correctly
-          npm run prebuild:electron
-          # Build JS bundle once (shared across all targets)
-          npm run build
-          # Linux: x64 + ARM64
-          npx electron-builder --linux --x64 --arm64
-          # Windows: x64 (covers all Windows via x64 emulation on ARM)
-          npm run check:wine && npx electron-builder --win --x64
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Artifacts
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-ubuntu-latest
-          retention-days: 1
-          path: |
-            dist/*.exe
-            dist/*.AppImage
-            dist/*.deb
-            dist/*.blockmap
-            dist/*.yml
-            
-      - name: Direct Upload to Cloudflare R2 (Linux/Win)
-        if: github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/')
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_EC2_METADATA_DISABLED: true
-        run: |
-          aws s3 cp dist/ s3://${{ secrets.R2_BUCKET_NAME }}/ \
-            --recursive --exclude "*" --include "*.exe" --include "*.AppImage" --include "*.deb" --include "*.blockmap" --include "*.yml" \
-            --endpoint-url ${{ secrets.R2_ACCOUNT_ID }}
-          # Upload installer scripts
-          aws s3 cp scripts/install-linux.sh s3://${{ secrets.R2_BUCKET_NAME }}/install-linux.sh \
-            --endpoint-url ${{ secrets.R2_ACCOUNT_ID }}
-          aws s3 cp scripts/install-windows.ps1 s3://${{ secrets.R2_BUCKET_NAME }}/install-windows.ps1 \
-            --endpoint-url ${{ secrets.R2_ACCOUNT_ID }}
-
-  build-macos:
-    needs: test
-    if: |
-      startsWith(github.ref, 'refs/tags/') || 
-      github.ref == 'refs/heads/prod' ||
-      (github.event_name == 'pull_request' && (
-        contains(github.event.pull_request.labels.*.name, 'build-all') ||
-        contains(github.event.pull_request.labels.*.name, 'build-macos')
-      ))
-    runs-on: macos-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build MacOS
-        run: npm run build:mac:universal
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Artifacts
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-macos-latest
-          retention-days: 1
-          path: |
-            dist/*.dmg
-            dist/*.zip
-            dist/*.blockmap
-            dist/*.yml
-
-      - name: Direct Upload to Cloudflare R2 (MacOS)
-        if: github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/')
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_EC2_METADATA_DISABLED: true
-        run: |
-          aws s3 cp dist/ s3://${{ secrets.R2_BUCKET_NAME }}/ \
-            --recursive --exclude "*" --include "*.dmg" --include "*.zip" --include "*.blockmap" --include "*.yml" \
-            --endpoint-url ${{ secrets.R2_ACCOUNT_ID }}
-          # Upload mac installer script
-          aws s3 cp scripts/install-mac.sh s3://${{ secrets.R2_BUCKET_NAME }}/install-mac.sh \
-            --endpoint-url ${{ secrets.R2_ACCOUNT_ID }}
-
-  release:
-    needs: [build-linux-win, build-macos]
-    if: always() && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/prod')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      actions: write
-    steps:
-      - name: Download all artifacts
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          path: release-artifacts
-          pattern: release-*
-          merge-multiple: true
-      
-      - name: Clean up old "latest" release on GitHub
-        if: github.ref == 'refs/heads/prod'
-        run: |
-          gh release delete latest-prod -y --cleanup-tag || true
-          git push --delete origin latest-prod || true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create Release
-        continue-on-error: true
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'latest-prod' }}
-          name: ${{ github.ref_type == 'tag' && github.ref_name || 'Production Release (Latest)' }}
-          files: release-artifacts/**/*
-          draft: false
-          prerelease: false
-          make_latest: true
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Instant Quota Cleanup (Delete Workflow Artifacts)
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            try {
-              const { data } = await github.rest.actions.listWorkflowRunArtifacts({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                run_id: context.runId
-              });
-              for (const artifact of data.artifacts) {
-                await github.rest.actions.deleteArtifact({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  artifact_id: artifact.id
-                });
-              }
-            } catch (e) {
-              console.log("Cleanup failed or no artifacts found", e);
-            }
+  # DISABLED: release job
+  # Reason: Redundant — all artifacts go directly to Cloudflare R2.
+  # GitHub Releases not used as a distribution channel.
+  #
+  # release: (see git history for original config)

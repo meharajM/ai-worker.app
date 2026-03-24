@@ -44,7 +44,11 @@
         "build:win:arm": "npm run prebuild:electron && npm run check:wine && npm run build && electron-builder --win --arm64",
         "build:linux": "npm run prebuild:electron && npm run build && electron-builder --linux",
         "build:linux:intel": "npm run prebuild:electron && npm run build && electron-builder --linux --x64",
-        "build:linux:arm": "npm run prebuild:electron && npm run build && electron-builder --linux --arm64"
+        "build:linux:arm": "npm run prebuild:electron && npm run build && electron-builder --linux --arm64",
+        "publish:mac": "bash scripts/publish-mac.sh",
+        "publish:mac:universal": "bash scripts/publish-mac.sh --universal",
+        "publish:linux-win": "bash scripts/publish-linux-win.sh",
+        "publish:all": "bash scripts/publish-all.sh"
     },
     "dependencies": {
         "@electron-toolkit/utils": "^3.0.0",
