@@ -4,44 +4,77 @@
 
 Voice-first desktop workspace with MCP integration.
 
-## Testing & CI/CD
+## 🚀 Release & Publishing
 
-This project uses GitHub Actions for continuous integration.
+The release process is optimized to run locally on macOS to avoid High-Cost GitHub Actions runners (10x rate) and stay within the GitHub Free Tier limits.
 
-- **Tests**: Every push runs typechecking and automated E2E mock tests.
-- **Builds**: Multi-platform binaries (Linux, Windows, macOS) are built automatically for **Tags**.
-- **On-Demand Builds**: You can trigger specific builds on a Pull Request by adding one of these labels:
-    - `build-all`: Builds for all platforms.
-    - `build-linux`, `build-windows`, `build-macos`: Builds for specific platforms.
-- **Releases**: Creating a tag (e.g., `v1.0.0`) automatically creates a draft GitHub release with the compiled binaries.
-
-For local testing details, see [TESTING.md](./TESTING.md).
-
-## Building
-
-### Prerequisites
-
-- Node.js (Version defined in `.nvmrc` - run `nvm install` to setup)
-- NPM/Yarn/PNPM
-
-### Build for Host OS
+### 1. One-time Setup
+To publish releases to Cloudflare R2, create a `.env.r2` file in the project root:
 
 ```bash
+cp .env.r2.example .env.r2
+# Fill in your R2 credentials from the Cloudflare Dashboard
+```
+
+### 2. Publishing to Cloudflare R2
+Run any of the following commands from your local Mac. These will automatically **fix dependency issues**, run **quality checks** (lint/typecheck), **build** the binaries, and **upload** them to your R2 bucket.
+
+```bash
+# Build & Publish ALL platforms (Mac arm64 + Linux x64/arm64 + Windows x64)
+# Note: Linux builds require Docker Desktop to be running.
+npm run publish:all
+
+# Build & Publish Mac ONLY (Fastest, no Docker needed)
+npm run publish:mac
+
+# Build & Publish Mac Universal (Includes support for Intel Macs)
+npm run publish:mac:universal
+
+# Build & Publish Linux + Windows only
+npm run publish:linux-win
+```
+
+*All publish scripts will ask for a **'yes'** confirmation before proceeding to production.*
+
+---
+
+## 🛠️ CI/CD Pipeline (GitHub Actions)
+
+The GitHub Actions pipeline is configured as a **Quality Gate only** to maintain Free Tier status:
+
+- **Runs on**: Pull Requests and pushes to `main`.
+- **Jobs**: Runs `Lint`, `Typecheck`, and `E2E Mock Tests`.
+- **Infrastructure**: Only uses `ubuntu-latest` runners (1x cost). Artifact storage and macOS builds are disabled to save quota.
+
+---
+
+## 🏗️ Development & Building
+
+### Prerequisites
+- **Node.js**: (Version >=22.12.0)
+- **Homebrew**: (For auto-setup of build tools)
+- **Docker Desktop**: (Optional, only required for Linux builds on Mac)
+
+### Basic Commands
+```bash
+# Start dev server
+npm run dev
+
+# Local quality checks
+npm run lint
+npm run typecheck
+
+# Build JS/Renderer bundle
 npm run build
 ```
 
-### Build for Windows on Linux
+### Dependency Shim (WhatsApp)
+If you are building for production manually (without using the `publish` scripts), you **must** run the following first to fix the `libsignal` bundling issue:
+```bash
+npm run prebuild:electron
+```
+*(This is already handled automatically for you in all `npm run publish:*` scripts.)*
 
-To build the Windows `.exe` executable/installer on Linux, **Wine** is required.
+---
 
-1. Install Wine using the provided helper script:
-   ```bash
-   chmod +x install_build_deps.sh
-   ./install_build_deps.sh
-   ```
-   Or install it manually using your distribution's package manager (ensure you have both 64-bit and 32-bit support if needed).
-
-2. Run the Windows build command:
-   ```bash
-   npm run build:win
-   ```
+For local testing details, see [TESTING.md](./TESTING.md).

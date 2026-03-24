@@ -5,6 +5,7 @@
     "description": "Voice-first desktop workspace with MCP integration",
     "main": "./out/main/index.js",
     "author": "AI-Worker Team",
+    "homepage": "https://aiworker.app",
     "license": "MIT",
     "engines": {
         "node": ">=22.12.0"
