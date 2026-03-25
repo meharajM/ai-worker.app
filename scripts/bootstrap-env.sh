@@ -9,25 +9,33 @@ check_dependencies() {
   local needs_docker=$1
   local needs_wine=$2
 
-  echo "🔍 Verifying release environment..."
+  echo ""
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "  🚀 Bootstrapping Release Environment"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
   # 1. Homebrew
-  if ! command -v brew >/dev/null 2>&1; then
-    echo "🍺 Installing Homebrew..."
+  if command -v brew >/dev/null 2>&1; then
+    echo "✅ Homebrew is ready."
+  else
+    echo "🍺 Homebrew missing. Installing..."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   fi
 
   # 2. AWS CLI
-  if ! command -v aws >/dev/null 2>&1; then
-    echo "☁️  Installing AWS CLI (for R2 upload)..."
+  if command -v aws >/dev/null 2>&1; then
+    echo "✅ AWS CLI detected."
+  else
+    echo "☁️  AWS CLI missing. Installing via Homebrew..."
     brew install awscli
   fi
 
   # 3. Docker (Needed for Linux builds)
   if [ "$needs_docker" = true ]; then
-    if [ ! -d "/Applications/Docker.app" ]; then
-      echo "🐳 Docker Desktop is missing or broken. Installing/Repairing..."
-      brew uninstall --cask docker --force 2>/dev/null || true
+    if [ -d "/Applications/Docker.app" ] || command -v docker >/dev/null 2>&1; then
+      echo "✅ Docker Desktop detected."
+    else
+      echo "🐳 Docker Desktop missing. Installing via Homebrew..."
       brew install --cask docker
     fi
 
@@ -35,15 +43,11 @@ check_dependencies() {
     if ! docker info >/dev/null 2>&1; then
       echo "🐳 Starting Docker Desktop..."
       open -a Docker
-      echo "⏳ Waiting for Docker to be ready (this may take a minute)..."
-      for i in {1..120}; do
+      echo "⏳ Waiting for Docker to be ready..."
+      for i in {1..30}; do
         if docker info >/dev/null 2>&1; then
           echo "✅ Docker is up!"
           break
-        fi
-        if [ $i -eq 120 ]; then
-          echo "❌ Docker failed to start. Please open it manually and try again."
-          exit 1
         fi
         echo -n "."
         sleep 5
@@ -51,11 +55,20 @@ check_dependencies() {
     fi
   fi
 
-  # 4. Wine (Optional but recommended for Windows builds)
+  # 4. Wine (Optional)
   if [ "$needs_wine" = true ]; then
-    if ! command -v wine >/dev/null 2>&1; then
-       echo "🍷 Installing Wine (for Windows NSIS packaging)..."
-       brew install --cask wine-stable || echo "⚠️ Wine failed to install. Continuing anyway; electron-builder might use its own internal shim."
+    if command -v wine >/dev/null 2>&1 || command -v wine64 >/dev/null 2>&1; then
+       echo "✅ Wine detected."
+    else
+       echo "🍷 Wine not detected. electron-builder will use its own internal shim (skipping 1GB download)."
     fi
+  fi
+
+  # 5. FFMPEG (Optional - for WhatsApp media)
+  if command -v ffmpeg >/dev/null 2>&1; then
+    echo "✅ FFMPEG detected."
+  else
+    echo "🎞️  FFMPEG missing. Installing via Homebrew..."
+    brew install ffmpeg
   fi
 }

@@ -34,6 +34,11 @@ npm run publish:mac:universal
 npm run publish:linux-win
 ```
 
+### Advanced Tips
+If you need more control, you can pass flags to these scripts:
+- **Skip Quality Checks**: `npm run publish:all -- --skip-checks` (Saves time if you've already verified lint/typecheck).
+- **Just re-upload (No Build)**: `npm run publish:all -- --skip-build` (Just uploads existing `/dist` to R2).
+
 *All publish scripts will ask for a **'yes'** confirmation before proceeding to production.*
 
 ---
