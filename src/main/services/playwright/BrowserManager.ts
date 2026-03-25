@@ -364,7 +364,7 @@ export class BrowserManager {
                         locale: 'en-US',
                         timezoneId: 'America/New_York',
                         userAgent: MODERN_CHROME_UA,
-                        colorScheme: 'dark',
+                        colorScheme: 'dark' as const,
                         deviceScaleFactor: 2,
                         hasTouch: false,
                         isMobile: false
