@@ -515,6 +515,7 @@ sequenceDiagram
 #### 1. WhatsApp Mode (Direct Chat)
 When WhatsApp Mode is enabled, the agent responds directly to the user's WhatsApp messages.
 - **Input**: `useWhatsAppBridge` detects an incoming message → dispatches `app:submit-message` event → `useAgent` triggers the agent loop.
+  - *Deduplication*: A native `processedMessageIds` Set in the main process robustly deduplicates incoming payload streams from `baileys`. This prevents concurrent duplicate agent invocations while maintaining a capped 200-message memory.
 - **Output**: `useAgent` detects the message originated from WhatsApp → calls `electron.whatsapp.sendMessage` after the LLM generates a response.
 
 #### 2. Autonomous Notifications
@@ -523,7 +524,8 @@ The agent can use WhatsApp to send status updates or ask questions during long-r
 - **Interaction**: The agent can call the `whatsapp_ask_question` tool to wait for user input from their phone.
 
 ### Persistence & Security
-- **Authentication**: WhatsApp session credentials (creds.json) are stored in the application's `userData` directory. Disconnecting explicitly clears this data.
+- **Authentication**: WhatsApp session credentials (`creds.json` and `phone.txt`) are stored in the application's `userData/whatsapp-auth` directory. Explicitly disconnecting via the UI clears this data.
+- **Connection Stability**: To prevent unintended data loss, the `WhatsAppService` strictly isolates transient network timeout/stream errors from explicit user disconnects (using an `explicitDisconnect` flag). This ensures auto-reconnect routines safely restore sessions without prematurely calling the auth wipe function.
 - **Privacy**: The application only communicates with the phone number provided during setup. All communication is end-to-end encrypted by WhatsApp.
 
 ---
@@ -712,7 +714,7 @@ graph TD
 - **llm.ts**: Central entry point. Handles provider auto-selection and message pruning (DCP).
 - **openai.ts / gemini.ts / ...**: Provider-specific API formatting and calling.
 - **prompts.ts**: System prompt generation and tool filtering.
-- **utils.ts**: Shared JSON parsing and content normalization.
+- **utils.ts**: Shared JSON parsing and content normalization. Includes resilient JSON extraction (`parseToolCallsFromJson`) that automatically repairs contiguous malformed JSON syntax (e.g., `} {` into `},{`), effectively safeguarding the tools engine against boundaries hallucinated by smaller LLMs.
 
 #### Reasoning & Thinking Blocks
 

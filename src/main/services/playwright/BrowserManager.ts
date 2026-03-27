@@ -78,6 +78,23 @@ export class BrowserManager {
     }
 
     /**
+     * Helper to permanently fix profile locks. When the app hot-reloads or a previous instance
+     * crashes, Chrome leaves behind a 'SingletonLock' file that blocks future launches.
+     * Deleting this securely guarantees the browser can boot up on demand.
+     */
+    private clearChromeLock(userDataDir: string) {
+        try {
+            const lockPath = path.join(userDataDir, 'SingletonLock');
+            if (fs.existsSync(lockPath)) {
+                fs.unlinkSync(lockPath);
+                console.log(`[BrowserManager] 🔓 Cleared stale SingletonLock at ${lockPath}`);
+            }
+        } catch (e) {
+            console.warn(`[BrowserManager] Failed to clear SingletonLock:`, e);
+        }
+    }
+
+    /**
      * Surfaces the browser from headless mode to UI mode to allow the human to intervene.
      * Retains persistent context.
      */
@@ -201,6 +218,7 @@ export class BrowserManager {
                         }
 
                         console.log(`[BrowserManager] Trying browser: ${tryBrowser}...`);
+                        this.clearChromeLock(userDataDir);
                         this.context = await launcher.launchPersistentContext(userDataDir, tryOptions);
 
                         await this.context!.addInitScript(() => {
@@ -349,6 +367,7 @@ export class BrowserManager {
                         isMobile: false
                     };
 
+                    this.clearChromeLock(userDataDirHeadless);
                     this.headlessContext = await stealthChromium.launchPersistentContext(userDataDirHeadless, contextOptions);
 
                     await this.headlessContext!.addInitScript(() => {

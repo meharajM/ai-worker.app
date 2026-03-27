@@ -3,7 +3,6 @@ name: Auto Tag on Merge
 on:
   pull_request:
     branches:
-      - main
       - prod
     types:
       - closed
@@ -47,6 +46,9 @@ jobs:
         if: steps.bump_type.outputs.should_tag == 'true'
         uses: anothrNick/github-tag-action@1.64.0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Note: Using GITHUB_TOKEN here prevents the pushed tag from triggering 
+          # other workflows (like ci.yml). To make releases fully automated, 
+          # create a Personal Access Token (PAT) and save it as "GH_PAT" in your Repo Secrets.
+          GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
           DEFAULT_BUMP: ${{ steps.bump_type.outputs.bump }}
           WITH_V: true

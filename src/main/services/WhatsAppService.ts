@@ -262,95 +262,97 @@ export class WhatsAppService extends EventEmitter {
                         console.log('[Main] Wake lock released (WhatsApp disconnected).')
                         this.wakeLockId = null
                     }
+
                     const statusCode = lastDisconnect?.error?.output?.statusCode
                     const errorMessage = lastDisconnect?.error?.message || lastDisconnect?.reason || 'Unknown reason'
                     const loggedOutCode = DisconnectReason.loggedOut
                     
                     console.log('[WhatsAppService] Connection closed:', { statusCode, errorMessage, loggedOutCode })
-                    
-                    // Check for Stream Error - need to clear auth and retry
-                    const isStreamError = errorMessage?.toLowerCase().includes('stream errored') || 
-                        errorMessage?.toLowerCase().includes('restart required')
-                    
-                    // Check if this is a network-related disconnection (not user-initiated)
-                    // If we intentionally disconnected via this.explicitDisconnect, skip the error handling heuristics.
-                    const isNetworkError = !this.explicitDisconnect && (statusCode === undefined || 
-                        statusCode === 428 || // Server unreachable
-                        statusCode === 503 || // Service unavailable  
-                        statusCode === 504)  // Gateway timeout
+                    this.socket = null
 
-                    if (statusCode !== loggedOutCode && !this.explicitDisconnect) {
-                        // Handle Stream Error - don't clear auth, just show QR again
-                        if (isStreamError) {
-                            console.log('[WhatsAppService] Stream error detected, showing QR for re-auth...')
-                            this._setState({
-                                ...this.connectionState,
-                                status: 'disconnected',
-                                qrCode: null,
-                                error: null,
-                                phoneNumber: (effectivePhone as string | null) ?? null,
-                                workerNumber: this.connectionState.workerNumber
-                            })
-                            // Don't clear auth - just let user scan QR again with same credentials
-                            return
-                        }
-                        
-                        if (isNetworkError && effectivePhone) {
-                            // Network issue - try to auto-reconnect after a delay
-                            this._setState({
-                                ...this.connectionState,
-                                status: 'connecting',
-                                qrCode: null,
-                                error: null,
-                                phoneNumber: effectivePhone ?? null,
-                                workerNumber: this.connectionState.workerNumber
-                            })
-                            console.log('[WhatsAppService] Network disconnected, attempting auto-reconnect in 5s...')
-                            setTimeout(() => {
-                                if (this.connectionState.status === 'connecting') {
-                                    this.connect(effectivePhone).catch(e => {
-                                        console.error('[WhatsAppService] Auto-reconnect failed:', e)
-                                        this._setState({
-                                            ...this.connectionState,
-                                            status: 'error',
-                                            qrCode: null,
-                                            error: 'Failed to reconnect. Please try again.',
-                                            phoneNumber: effectivePhone ?? null,
-                                            workerNumber: this.connectionState.workerNumber
-                                        })
-                                    })
-                                }
-                            }, 5000)
-                        } else {
-                            // Provide more specific error message
-                            let specificError = 'Connection closed unexpectedly. Please reconnect.'
-                            if (errorMessage) {
-                                specificError = `Connection failed: ${errorMessage}`
-                            }
+                    if (this.explicitDisconnect) {
+                        return // disconnect() method handles state and auth clearing
+                    }
 
-                            console.error('[WhatsAppService] Connection error:', specificError)
-                            this._setState({
-                                ...this.connectionState,
-                                status: 'error',
-                                qrCode: null,
-                                error: specificError,
-                                phoneNumber: effectivePhone ?? null,
-                                workerNumber: this.connectionState.workerNumber
-                            })
-                        }
-                        // Logged out — clear auth so next connect shows a fresh QR
+                    if (statusCode === loggedOutCode) {
+                        console.log('[WhatsAppService] Logged out from external device. Clearing auth...')
                         this._clearAuth()
                         this._setState({
                             ...this.connectionState,
                             status: 'disconnected',
                             qrCode: null,
-                            error: null,
+                            error: 'Logged out from mobile device. Please scan QR again.',
                             phoneNumber: null,
                             workerNumber: null,
                             handshakeStatus: 'idle'
                         })
+                        return
                     }
-                    this.socket = null
+
+                    const isStreamError = errorMessage?.toLowerCase().includes('stream errored') || 
+                                          errorMessage?.toLowerCase().includes('restart required')
+                    
+                    if (isStreamError) {
+                        console.log('[WhatsAppService] Stream error detected, dropping to disconnected mode for manual re-auth...')
+                        this._setState({
+                            ...this.connectionState,
+                            status: 'disconnected',
+                            qrCode: null,
+                            error: null, // Let user click connect normally
+                            phoneNumber: (effectivePhone as string | null) ?? null,
+                            workerNumber: this.connectionState.workerNumber
+                        })
+                        return // Don't clear auth
+                    }
+                    
+                    const isNetworkError = statusCode === undefined || 
+                        statusCode === 428 || // Server unreachable
+                        statusCode === 503 || // Service unavailable  
+                        statusCode === 504  // Gateway timeout
+
+                    if (isNetworkError && effectivePhone) {
+                        console.log('[WhatsAppService] Network disconnected, attempting auto-reconnect in 5s...')
+                        this._setState({
+                            ...this.connectionState,
+                            status: 'connecting',
+                            qrCode: null,
+                            error: null,
+                            phoneNumber: effectivePhone ?? null,
+                            workerNumber: this.connectionState.workerNumber
+                        })
+                        
+                        setTimeout(() => {
+                            if (this.connectionState.status === 'connecting') {
+                                this.connect(effectivePhone).catch(e => {
+                                    console.error('[WhatsAppService] Auto-reconnect failed:', e)
+                                    this._setState({
+                                        ...this.connectionState,
+                                        status: 'error',
+                                        error: 'Failed to reconnect. Please try again.',
+                                    })
+                                })
+                            }
+                        }, 5000)
+                        return // Don't clear auth
+                    }
+
+                    // Fallback to absolute generic crash
+                    let specificError = 'Connection closed unexpectedly. Please reconnect.'
+                    if (errorMessage) {
+                        specificError = `Connection failed: ${errorMessage}`
+                    }
+                    console.error('[WhatsAppService] Connection error:', specificError)
+                    
+                    this._clearAuth()
+                    this._setState({
+                        ...this.connectionState,
+                        status: 'error',
+                        qrCode: null,
+                        error: specificError,
+                        phoneNumber: effectivePhone ?? null,
+                        workerNumber: this.connectionState.workerNumber,
+                        handshakeStatus: 'idle'
+                    })
                 }
             })
 
@@ -501,7 +503,7 @@ export class WhatsAppService extends EventEmitter {
             // Send the handshake message
             // We do NOT send the code in the message. The code is shown on the computer screen.
             // This proves the person at the computer has control over the phone.
-            const intro = `🤖 *AI-Worker Verification*\n\nPlease reply to this message with the *6-digit verification code* shown on your computer screen to link this as your personal device.`
+            const intro = `📬 *AI-Worker Verification*\n\nPlease reply to this message with the *6-digit verification code* shown on your computer screen to link this as your personal device.`
             
             const jid = formatWhatsAppJid(normalized)
             console.log(`[WhatsAppService] Attempting handshake to JID: ${jid} (Input: ${normalized})`)
@@ -719,6 +721,7 @@ export class WhatsAppService extends EventEmitter {
                 textContent = msg.viewOnceMessage.message.conversation
             } else if (msg.ephemeralMessage?.message?.extendedTextMessage?.text) {
                 textContent = msg.ephemeralMessage.message.extendedTextMessage.text
+            } else if (msg.ephemeralMessage?.message?.conversation) {
                 textContent = msg.ephemeralMessage.message.conversation
             } else if (msg.stickerMessage) {
                 textContent = `[User sent a sticker: ${msg.stickerMessage.mimetype}]`

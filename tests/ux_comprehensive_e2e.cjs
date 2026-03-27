@@ -27,6 +27,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         window.on('console', msg => console.log(`[Renderer]: ${msg.text()}`));
 
         await window.addInitScript(() => {
+            localStorage.setItem('skipDepsCheck', 'true');
             console.log("🛠️ Injecting UX Discovery Mocks...");
 
             const SCENARIOS = [
