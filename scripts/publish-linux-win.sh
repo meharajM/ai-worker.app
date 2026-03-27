@@ -8,6 +8,7 @@
 #   npm run publish:linux-win                        # Linux x64/arm64 + Windows x64
 #   npm run publish:linux-win -- --linux-only        # Linux only
 #   npm run publish:linux-win -- --win-only          # Windows only
+#   npm run publish:linux-win -- --yes               # non-interactive confirmation
 #   npm run publish:linux-win -- --skip-checks       # Skip lint + typecheck
 #   npm run publish:linux-win -- --skip-build        # Upload existing dist/ only
 #
@@ -22,6 +23,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$ROOT_DIR/.env.r2"
+LINUX_OUT_DIR="dist/linux-release"
+WIN_OUT_DIR="dist/win-release"
 
 # ── Load R2 credentials ───────────────────────────────────────────────────────
 if [ ! -f "$ENV_FILE" ]; then
@@ -40,17 +43,21 @@ set -a; source "$ENV_FILE"; set +a
 export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
 export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
 export AWS_EC2_METADATA_DISABLED=true
+export AWS_RETRY_MODE=adaptive
+export AWS_MAX_ATTEMPTS=12
 
 # ── Parse args ────────────────────────────────────────────────────────────────
 BUILD_LINUX=true
 BUILD_WIN=true
 SKIP_CHECKS=false
 SKIP_BUILD=false
+AUTO_CONFIRM=false
 
 for arg in "$@"; do
   case $arg in
     --linux-only)  BUILD_WIN=false ;;
     --win-only)    BUILD_LINUX=false ;;
+    --yes|-y|--non-interactive) AUTO_CONFIRM=true ;;
     --skip-checks) SKIP_CHECKS=true ;;
     --skip-build)  SKIP_BUILD=true; SKIP_CHECKS=true ;;
   esac
@@ -73,11 +80,15 @@ echo "║                                                      ║"
 echo "║  Files will be IMMEDIATELY available to all users.  ║"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
-read -r -p "  Type 'yes' to confirm and publish to production: " CONFIRM
-if [ "$CONFIRM" != "yes" ]; then
-  echo ""
-  echo "❌ Aborted. Nothing was built or uploaded."
-  exit 0
+if [ "$AUTO_CONFIRM" = false ]; then
+  read -r -p "  Type 'yes' to confirm and publish to production: " CONFIRM
+  if [ "$CONFIRM" != "yes" ]; then
+    echo ""
+    echo "❌ Aborted. Nothing was built or uploaded."
+    exit 0
+  fi
+else
+  echo "  Auto-confirm enabled (--yes). Continuing..."
 fi
 echo ""
 
@@ -126,13 +137,17 @@ if [ "$SKIP_BUILD" = false ]; then
   if [ "$BUILD_LINUX" = true ]; then
     echo ""
     echo "🐧 Packaging Linux (x64 + arm64, via Docker)..."
-    npx electron-builder --linux --x64 --arm64
+    rm -rf "${LINUX_OUT_DIR}"
+    mkdir -p "${LINUX_OUT_DIR}"
+    npx electron-builder --linux --x64 --arm64 --config.directories.output="${LINUX_OUT_DIR}"
   fi
 
   if [ "$BUILD_WIN" = true ]; then
     echo ""
     echo "🪟 Packaging Windows (x64)..."
-    npx electron-builder --win --x64
+    rm -rf "${WIN_OUT_DIR}"
+    mkdir -p "${WIN_OUT_DIR}"
+    npx electron-builder --win --x64 --config.directories.output="${WIN_OUT_DIR}"
   fi
 
   echo ""
@@ -151,24 +166,72 @@ echo ""
 R2="s3://${R2_BUCKET_NAME}"
 ENDPOINT="--endpoint-url ${R2_ENDPOINT_URL}"
 
+retry_aws_cp() {
+  local src="$1"
+  local dst="$2"
+  local max_attempts=5
+  local attempt=1
+  local backoff=5
+
+  until aws s3 cp "$src" "$dst" $ENDPOINT --no-progress; do
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      echo "❌ Upload failed after ${max_attempts} attempts: ${src}"
+      return 1
+    fi
+    echo "⚠️ Upload failed (attempt ${attempt}/${max_attempts}): ${src}"
+    echo "   Retrying in ${backoff}s..."
+    sleep "$backoff"
+    attempt=$((attempt + 1))
+    backoff=$((backoff * 2))
+  done
+}
+
+upload_artifacts() {
+  local source_dir="$1"
+  shift
+  local pattern
+  local file
+  local found=false
+
+  shopt -s nullglob
+  for pattern in "$@"; do
+    for file in "${source_dir}"/${pattern}; do
+      found=true
+      retry_aws_cp "$file" "${R2}/$(basename "$file")"
+    done
+  done
+  shopt -u nullglob
+
+  if [ "$found" = false ]; then
+    echo "⚠️ No artifacts matched in ${source_dir} for patterns: $*"
+    return 1
+  fi
+}
+
 if [ "$BUILD_LINUX" = true ] || [ "$SKIP_BUILD" = true ]; then
+  LINUX_UPLOAD_DIR="${LINUX_OUT_DIR}"
+  if [ "$SKIP_BUILD" = true ] && [ ! -d "${LINUX_UPLOAD_DIR}" ]; then
+    LINUX_UPLOAD_DIR="dist"
+  fi
+
   echo "  → Uploading Linux binaries..."
-  aws s3 cp dist/ "${R2}/" --recursive --exclude "*" \
-    --include "*.AppImage" --include "*.deb" --include "*.blockmap" --include "*.yml" \
-    $ENDPOINT
+  upload_artifacts "${LINUX_UPLOAD_DIR}" "*.AppImage" "*.deb" "*.blockmap" "latest*.yml"
 
   echo "  → Uploading install-linux.sh..."
-  aws s3 cp scripts/install-linux.sh "${R2}/install-linux.sh" $ENDPOINT
+  retry_aws_cp "scripts/install-linux.sh" "${R2}/install-linux.sh"
 fi
 
 if [ "$BUILD_WIN" = true ] || [ "$SKIP_BUILD" = true ]; then
+  WIN_UPLOAD_DIR="${WIN_OUT_DIR}"
+  if [ "$SKIP_BUILD" = true ] && [ ! -d "${WIN_UPLOAD_DIR}" ]; then
+    WIN_UPLOAD_DIR="dist"
+  fi
+
   echo "  → Uploading Windows binaries..."
-  aws s3 cp dist/ "${R2}/" --recursive --exclude "*" \
-    --include "*.exe" --include "*.blockmap" --include "*.yml" \
-    $ENDPOINT
+  upload_artifacts "${WIN_UPLOAD_DIR}" "*.exe" "*.blockmap" "latest*.yml"
 
   echo "  → Uploading install-windows.ps1..."
-  aws s3 cp scripts/install-windows.ps1 "${R2}/install-windows.ps1" $ENDPOINT
+  retry_aws_cp "scripts/install-windows.ps1" "${R2}/install-windows.ps1"
 fi
 
 echo ""

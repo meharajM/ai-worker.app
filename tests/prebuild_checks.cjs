@@ -161,9 +161,7 @@ const RUNTIME_MODULES = [
   'sharp',
   '@whiskeysockets/baileys',
   'electron-store',
-  'ws',
-  'bufferutil',
-  'utf-8-validate'
+  'ws'
 ];
 try {
   const pkg = readJSON('package.json');

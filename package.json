@@ -64,7 +64,6 @@
         "@types/react-syntax-highlighter": "^15.5.13",
         "@whiskeysockets/baileys": "^6.7.21",
         "better-sqlite3": "^12.6.2",
-        "bufferutil": "^4.1.0",
         "clsx": "^2.1.1",
         "cmdk": "^1.1.1",
         "electron-store": "10.0.0",
@@ -85,7 +84,6 @@
         "sharp": "^0.34.5",
         "tailwind-merge": "^3.4.0",
         "tree-kill": "^1.2.2",
-        "utf-8-validate": "^6.0.6",
         "vosk-browser": "^0.0.8",
         "ws": "^8.20.0",
         "yup": "^1.7.1",
@@ -138,7 +136,7 @@
                 "zip"
             ],
             "mergeASARs": false,
-            "x64ArchFiles": "Contents/Resources/app.asar.unpacked/node_modules/{@img/**,better-sqlite3/**,bufferutil/**,utf-8-validate/**,fsevents/**}",
+            "x64ArchFiles": "Contents/Resources/app.asar.unpacked/node_modules/{@img/**,better-sqlite3/**,fsevents/**}",
             "category": "public.app-category.productivity",
             "icon": "build/icon.png"
         },
@@ -154,7 +152,8 @@
                 "AppImage",
                 "deb"
             ],
-            "category": "Utility"
+            "category": "Utility",
+            "maintainer": "AI-Worker Team <team@aiworker.app>"
         }
     }
 }
