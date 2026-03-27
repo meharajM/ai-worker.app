@@ -13,21 +13,21 @@ export function registerWhatsAppHandlers(): void {
     whatsappService.init().catch(e => console.error('[whatsapp.ts] Init failed', e))
 
     // ── One-way state push: main → renderer ─────────────────────────────────
-    // When connection state changes, push it to all renderer windows.
+    // When connection state changes, push it to the primary renderer window.
     whatsappService.on('connectionChange', (state) => {
-        for (const win of BrowserWindow.getAllWindows()) {
-            if (!win.isDestroyed()) {
-                win.webContents.send('whatsapp:connection-change', state)
-            }
+        const wins = BrowserWindow.getAllWindows()
+        if (wins.length > 0 && !wins[0].isDestroyed()) {
+            // We only send to the first (primary) window to avoid duplicate event processing
+            // if DevTools or background windows are open.
+            wins[0].webContents.send('whatsapp:connection-change', state)
         }
     })
 
-    // When a new WhatsApp message arrives, push it to all renderer windows.
+    // When a new WhatsApp message arrives, push it to the primary renderer window.
     whatsappService.on('message', (message) => {
-        for (const win of BrowserWindow.getAllWindows()) {
-            if (!win.isDestroyed()) {
-                win.webContents.send('whatsapp:message', message)
-            }
+        const wins = BrowserWindow.getAllWindows()
+        if (wins.length > 0 && !wins[0].isDestroyed()) {
+            wins[0].webContents.send('whatsapp:message', message)
         }
     })
 
