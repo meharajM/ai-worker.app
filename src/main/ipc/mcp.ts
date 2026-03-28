@@ -66,6 +66,20 @@ function sanitizeArgs(args: unknown): unknown {
     return sanitized
 }
 
+/**
+ * In-process tool handlers can return objects/arrays/numbers.
+ * MCP payloads should carry a stable text representation (JSON for objects).
+ */
+function toMcpText(result: unknown): string {
+    if (typeof result === 'string') return result
+    if (result === null || result === undefined) return ''
+    try {
+        return JSON.stringify(result)
+    } catch {
+        return String(result)
+    }
+}
+
 // --- IPC Register ---
 
 export function registerMcpHandlers(): void {
@@ -234,17 +248,17 @@ export function registerMcpHandlers(): void {
         if (inProcessPlaywrightConnections.has(id)) {
             const res = await PlaywrightService.getInstance().callTool(toolName, args)
             if (res.error) return { result: null, error: res.error }
-            return { result: { content: [{ type: 'text', text: String(res.result) }] } }
+            return { result: { content: [{ type: 'text', text: toMcpText(res.result) }] } }
         }
         if (inProcessMemoryConnections.has(id)) {
             const res = await MemoryService.getInstance().callTool(toolName, args)
             if (res.error) return { result: null, error: res.error }
-            return { result: { content: [{ type: 'text', text: String(res.result) }] } }
+            return { result: { content: [{ type: 'text', text: toMcpText(res.result) }] } }
         }
         if (inProcessFilesystemConnections.has(id)) {
             const res = await FileSystemService.getInstance().callTool(toolName, args)
             if (res.error) return { result: null, error: res.error }
-            return { result: { content: [{ type: 'text', text: String(res.result) }] } }
+            return { result: { content: [{ type: 'text', text: toMcpText(res.result) }] } }
         }
 
         const client = activeConnections.get(id)

@@ -330,6 +330,12 @@ export class AgentRuntime implements IAgentClient {
   private async _runLoop(finalPrompt: string): Promise<LLMMessage> {
     let iterationCount = 0;
     let consecutiveErrors = 0;
+    let taskComplete = false;
+    let taskSuccess = true;
+    let taskSummary = "";
+    let completionNudges = 0;
+    let hasExecutedToolCalls = false;
+    let lastToolIterationAssistantContent = "";
     const recentToolCalls: string[] = [];
     // Tracks the single live UI bubble created for ALL tool-calling iterations.
     // Only one bubble is ever created per agent run; all tool calls accumulate into it.
@@ -338,6 +344,7 @@ export class AgentRuntime implements IAgentClient {
     const accumulatedToolCalls: AccumulatedToolCall[] = [];
 
     while (iterationCount < this.maxIterations) {
+      if (taskComplete) break;
       this.totalIterations++;
       if (this.options.signal?.aborted) throw new Error("Aborted by user");
 
@@ -370,6 +377,30 @@ export class AgentRuntime implements IAgentClient {
         const refusal = this._handleModelRefusal(response);
         if (refusal) continue;
 
+        if (
+          hasExecutedToolCalls &&
+          !taskComplete &&
+          completionNudges < 1 &&
+          this.totalIterations < this.ABSOLUTE_MAX_ITERATIONS
+        ) {
+          console.warn(
+            "[AgentRuntime] Tool-driven task returned no tool calls before mark_task_complete. Injecting one corrective nudge."
+          );
+          const correctiveMsg: LLMMessage = {
+            role: "user",
+            content:
+              `[AUTO-CORRECT] You stopped without calling mark_task_complete.\n\n` +
+              `If task is done: call mark_task_complete({ summary: "...", success: true }).\n` +
+              `If blocked: call mark_task_complete({ summary: "blocked: <reason>", success: false }).\n` +
+              `If not done: call the next tool now.\n\n` +
+              `Do not answer in prose only.`,
+          };
+          this.messages.push(correctiveMsg);
+          this._estimatedContextBytes += correctiveMsg.content.length + 50;
+          completionNudges++;
+          continue;
+        }
+
         const assistantMsg: LLMMessage = { role: "assistant", content: response.content };
         this._appendCheckpointReport(assistantMsg);
 
@@ -377,7 +408,7 @@ export class AgentRuntime implements IAgentClient {
           // ── Final response: update the live bubble in-place (no new bubble created) ──
           // Push to internal history without firing onMessage (which would add a new bubble).
           this.messages.push(assistantMsg);
-          const finalUpdates: any = { content: assistantMsg.content };
+          const finalUpdates: Record<string, unknown> = { content: assistantMsg.content };
           if (accumulatedToolCalls.length > 0) {
             finalUpdates.toolCalls = accumulatedToolCalls;
           }
@@ -391,10 +422,22 @@ export class AgentRuntime implements IAgentClient {
         return assistantMsg;
       }
 
+      const completionCall = response.toolCalls.find((tc) => tc.name === "mark_task_complete");
+      const toolCallsToExecute = completionCall ? [completionCall] : response.toolCalls;
+      if (completionCall && response.toolCalls.length > 1) {
+        console.warn(
+          `[AgentRuntime] Received mark_task_complete with ${response.toolCalls.length - 1} additional tool call(s). Ignoring non-completion calls.`
+        );
+      }
+
+      hasExecutedToolCalls = true;
+      if (typeof response.content === "string" && response.content.trim().length > 0) {
+        lastToolIterationAssistantContent = response.content;
+      }
       const assistantMsg: LLMMessage = {
         role: "assistant",
         content: response.content,
-        tool_calls: response.toolCalls.map((tc) => ({
+        tool_calls: toolCallsToExecute.map((tc) => ({
           id: tc.id,
           type: "function",
           function: { name: tc.name, arguments: tc.arguments },
@@ -402,7 +445,7 @@ export class AgentRuntime implements IAgentClient {
       };
 
       // Build tool call entries for this iteration (no result yet — pending)
-      const iterationToolCalls: AccumulatedToolCall[] = response.toolCalls.map(tc => ({
+      const iterationToolCalls: AccumulatedToolCall[] = toolCallsToExecute.map(tc => ({
         id: tc.id,
         name: tc.name,
         arguments: tc.arguments,
@@ -437,7 +480,7 @@ export class AgentRuntime implements IAgentClient {
       // Keep local assistantMsg.toolCalls in sync for the tool execution block below
       (assistantMsg as any).toolCalls = iterationToolCalls;
 
-      const toolPromises = response.toolCalls.map(async (call) => {
+      const toolPromises = toolCallsToExecute.map(async (call) => {
         if (this.options.signal?.aborted) return null;
 
         const toolSignature = `${call.name}:${JSON.stringify(call.arguments)}`;
@@ -454,7 +497,13 @@ export class AgentRuntime implements IAgentClient {
         console.log(`[AgentRuntime] Executing tool: ${call.name}`);
         let resultStr = "";
 
-        if (call.name === "create_execution_plan") {
+        if (call.name === "mark_task_complete") {
+          const completion = this.specialHandlers.handleMarkTaskComplete(call.arguments);
+          resultStr = completion.result;
+          taskComplete = completion.isComplete;
+          taskSuccess = completion.success;
+          taskSummary = completion.summary;
+        } else if (call.name === "create_execution_plan") {
           const { result, plan } = this.specialHandlers.handleCreateExecutionPlan(call.arguments);
           this.executionPlan = plan;
           resultStr = result;
@@ -498,12 +547,14 @@ export class AgentRuntime implements IAgentClient {
             // Strip out ASCII art boxes (often from Playwright) which look terrible on WhatsApp
             cleanError = cleanError.replace(/[╔║╚═╗╝]/g, '').trim();
 
-            const bailoutMsg: LLMMessage = {
-              role: "assistant",
-              content: `Bailing out after ${consecutiveErrors} consecutive errors. Last error: ${cleanError}`,
-            };
-            this.addMessage(bailoutMsg);
-            return bailoutMsg;
+            console.warn(
+              `[AgentRuntime] ${consecutiveErrors} consecutive tool errors. Injecting recovery guidance.`
+            );
+            consecutiveErrors = 0;
+            resultStr +=
+              `\n\n[RECOVERY] Last repeated error: ${cleanError}\n` +
+              `Do not retry the same failing step with identical arguments.\n` +
+              `Choose a different strategy or call mark_task_complete with success=false if blocked.`;
           }
         }
 
@@ -586,11 +637,40 @@ export class AgentRuntime implements IAgentClient {
       const bailout = results.find((r) => r && r.role === "assistant");
       if (bailout) return bailout as LLMMessage;
 
+      if (taskComplete) break;
       iterationCount++;
       await this._handleCheckpoints(iterationCount);
     }
 
-    return this._handleMaxIterations(finalPrompt);
+    if (taskComplete) {
+      const fallbackCompletionContent = taskSuccess
+        ? `Task complete.\n\n${taskSummary}`
+        : `Task could not be fully completed.\n\n${taskSummary}`;
+      const completionContent =
+        lastToolIterationAssistantContent.trim().length > 0
+          ? lastToolIterationAssistantContent
+          : fallbackCompletionContent;
+
+      const completionMsg: LLMMessage = {
+        role: "assistant",
+        content: completionContent,
+      };
+
+      if (activeAssistantMessageId && this.options.onMessageUpdate) {
+        this.messages.push(completionMsg);
+        this.options.onMessageUpdate(activeAssistantMessageId, {
+          content: completionContent,
+          toolCalls: accumulatedToolCalls.length > 0 ? accumulatedToolCalls : undefined,
+        } as Record<string, unknown>);
+      } else {
+        this.addMessage(completionMsg);
+      }
+
+      await cleanupState(this.agentInstanceId);
+      return completionMsg;
+    }
+
+    return await this._handleMaxIterations(finalPrompt);
   }
 
   /**
@@ -692,12 +772,14 @@ export class AgentRuntime implements IAgentClient {
       console.warn("[AgentRuntime] Model refused tool use. Auto-correcting...");
       const userQuery = this.messages.filter((m) => m.role === "user").pop();
       const query = typeof userQuery?.content === "string" ? userQuery.content : "the request";
-      this.addMessage({
+      const refusalCorrection: LLMMessage = {
         role: "user",
         content: `[AUTO-CORRECT] You refused to help. This is wrong — you HAVE browser tools.\n            \nFor "${query}", use: navigate({"url": "https://google.com/search?q=${encodeURIComponent(
           query
         )}"})`,
-      });
+      };
+      this.messages.push(refusalCorrection);
+      this._estimatedContextBytes += refusalCorrection.content.length + 50;
       return true;
     }
     return false;
@@ -714,33 +796,58 @@ export class AgentRuntime implements IAgentClient {
     if (this.options.isSubAgent) return;
     const CHECKPOINT_INTERVAL = 15;
     if (iterationCount % CHECKPOINT_INTERVAL === 0) {
-      this.addMessage({
+      const checkpointMsg: LLMMessage = {
         role: "user",
         content: `[CHECKPOINT ${iterationCount}] Please call update_progress_summary now to summarize your progress so far. This will help prevent context overflow.`,
-      });
+      };
+      this.messages.push(checkpointMsg);
+      this._estimatedContextBytes += checkpointMsg.content.length + 50;
     }
   }
 
-  private _handleMaxIterations(finalPrompt: string): LLMMessage {
+  private async _handleMaxIterations(finalPrompt: string): Promise<LLMMessage> {
     if (this.options.isSubAgent) throw new Error("Max iterations reached");
-    const handoffMsg: LLMMessage = {
+    const stepsTaken = Math.floor(this.messages.length / 2);
+    const progressContext = this.lastCheckpoint
+      ? `[Checkpoint step ${this.lastCheckpoint.step}]: ${this.lastCheckpoint.summary}`
+      : "No checkpoint recorded yet — task was in progress.";
+
+    this.addMessage({
       role: "assistant",
-      content: `I've reached the maximum number of steps (${this.maxIterations}) for this context. To ensure accuracy and prevent context issues, I've saved a checkpoint of my progress. Should I continue with a fresh context or stop here?`,
-      actions: [
-        {
-          type: "continue",
-          label: "▶️ Continue Task",
-          payload: { goal: finalPrompt },
-        },
-        {
-          type: "cancel",
-          label: "⏹️ Stop Here",
-          payload: {},
-        },
-      ],
-    };
-    this.addMessage(handoffMsg);
-    return handoffMsg;
+      content: `I've used ${this.maxIterations} steps. Saving progress and continuing automatically with a fresh context...`,
+    });
+
+    try {
+      return await continueWithSubAgent(
+        finalPrompt,
+        stepsTaken,
+        progressContext,
+        this.options,
+        this.agentInstanceId,
+        (msg) => this.addMessage(msg),
+        this._makeSubAgentFactory()
+      );
+    } catch (error) {
+      console.warn("[AgentRuntime] Auto-continuation failed. Falling back to manual handoff.", error);
+      const handoffMsg: LLMMessage = {
+        role: "assistant",
+        content: `I've reached the maximum number of steps (${this.maxIterations}) for this context. Auto-continuation failed, so I saved a checkpoint. Should I continue with a fresh context or stop here?`,
+        actions: [
+          {
+            type: "continue",
+            label: "▶️ Continue Task",
+            payload: { goal: finalPrompt },
+          },
+          {
+            type: "cancel",
+            label: "⏹️ Stop Here",
+            payload: {},
+          },
+        ],
+      };
+      this.addMessage(handoffMsg);
+      return handoffMsg;
+    }
   }
 
   private addMessage(msg: LLMMessage): string | void {

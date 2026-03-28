@@ -516,12 +516,13 @@ sequenceDiagram
 When WhatsApp Mode is enabled, the agent responds directly to the user's WhatsApp messages.
 - **Input**: `useWhatsAppBridge` detects an incoming message → dispatches `app:submit-message` event → `useAgent` triggers the agent loop.
   - *Deduplication*: A native `processedMessageIds` Set in the main process robustly deduplicates incoming payload streams from `baileys`. This prevents concurrent duplicate agent invocations while maintaining a capped 200-message memory.
-- **Output**: `useAgent` detects the message originated from WhatsApp → calls `electron.whatsapp.sendMessage` after the LLM generates a response.
+- **Output**: `useAgent` detects the message originated from WhatsApp → calls `electron.whatsapp.sendMessage` after the runtime returns the final assistant response.
+- **Compatibility Note**: Agent-loop upgrades (`mark_task_complete`, adaptive recovery, auto-continuation) do not change WhatsApp IPC contracts; outbound delivery still uses `sendMessage` / `sendMediaMessage`.
 
 #### 2. Autonomous Notifications
 The agent can use WhatsApp to send status updates or ask questions during long-running tasks.
 - **Messaging**: The agent can call the `whatsapp_send_message` tool to notify the user (e.g., "Task complete, check your dashboard").
-- **Interaction**: The agent can call the `whatsapp_ask_question` tool to wait for user input from their phone.
+- **Interaction**: There is no dedicated `whatsapp_ask_question` tool in the current client-tool set; interactive follow-ups are sent with `whatsapp_send_message`, and replies arrive through the normal inbound WhatsApp bridge path.
 
 ### Persistence & Security
 - **Authentication**: WhatsApp session credentials (`creds.json` and `phone.txt`) are stored in the application's `userData/whatsapp-auth` directory. Explicitly disconnecting via the UI clears this data.
@@ -756,6 +757,10 @@ graph TD
 - **Role**: Entry point for the UI (`useAgent.ts`).
 - **Responsibility**: Coordinates the high-level loop (Think -> Act -> Observe) and manages context limits.
 - **Interface**: Implements `IAgentClient`, ensuring the UI is decoupled from the implementation (ready for remote execution).
+- **Current Loop Semantics (March 2026)**:
+  - Tool-driven tasks can end explicitly via `mark_task_complete({ summary, success })`.
+  - After repeated tool failures, the runtime injects recovery guidance instead of hard-bailing immediately.
+  - On max-iteration for the main agent, the runtime attempts automatic continuation via sub-agent, with manual handoff fallback if continuation fails.
 
 #### 2. AgentStateService
 - **Responsibility**: Manages the agent's memory lifecycle.
@@ -770,6 +775,7 @@ graph TD
   - Coordinates multi-step execution plans (`create_execution_plan`).
   - Spawns sub-agents for isolated research (`delegate_sub_task`) and salvages partial data on failure.
   - Generates progress checkpoints for context preservation (`update_progress_summary`).
+  - Handles explicit completion signaling (`mark_task_complete`) for tool-driven loops.
   - Runs advanced browser analysis like semantic accessibility trees (`scan_page_accessibility`).
 
 #### 4. OrchestrationService
@@ -800,7 +806,7 @@ The system supports recursive task delegation through the `delegate_sub_task` to
 3.  **Recursive Runtime**: The system instantiates a *new* `AgentRuntime` (the "Sub-Agent").
 4.  **Context Inheritance**: The Sub-Agent inherits the parent's `taskCategory`, ensuring it loads the correct safety protocols (e.g., a Shopping sub-agent also knows not to buy things).
 5.  **Isolated Execution**: The Sub-Agent runs its own loop (Plan -> Act -> Verify) with a fresh context window.
-6.  **Bailout & Salvage**: If the Sub-Agent fails (e.g. consecutive errors), `SpecialToolHandlers` detects the bailout and scans the Sub-Agent's history to salvage any useful partial data found before failure.
+6.  **Adaptive Recovery & Salvage**: Repeated tool failures trigger runtime recovery guidance (instead of immediate hard bailout). If the sub-agent still exits in failure mode (explicit bailout text or max-iteration failure), `SpecialToolHandlers` scans sub-agent history to salvage useful partial data.
 7.  **Result Aggregation**: The `SpecialToolHandlers` returns the final summary (or salvaged data) string, which becomes the tool result for the Main Agent.
 
 ```mermaid
@@ -946,13 +952,10 @@ To prevent the Chromium process from holding hundreds of megabytes of RAM while 
 - **Auto-Google**: If a URL navigation fails (DNS or typo), the agent automatically converts the URL into a Google search query.
 - **Fuzzy Selector Fallback**: If a strict CSS selector (ID/Class) fails during execution, the system automatically tries "fuzzy" matching or text-based selectors.
 
-#### 4. Sub-Agent Panic Mode
-If a sub-agent enters an unproductive loop (3+ turns with no progress), it triggers **Panic Mode**:
-1. It stops searching/clicking blindly.
-2. It takes a visual snapshot of the page.
-3. It reports the visual state to the parent, allowing the main agent to adjust the plan.
-
-### Auto-Fork Task Decomposition
+#### 4. Sub-Agent Recovery Path
+If a sub-agent enters repeated tool failures, recovery is handled in two stages:
+1. The runtime injects recovery guidance into context (switch strategy, avoid identical retries, or explicitly complete as blocked).
+2. If the sub-agent still fails (e.g., max-iteration exception), orchestration and special handlers surface failure and salvage partial findings from sub-agent history when available.
 
 ### Auto-Fork Task Decomposition
 
@@ -967,6 +970,20 @@ The system now utilizes an **LLM-based analysis step** (`analyzeTaskWithLLM`) to
 | **Independent Contexts** (e.g., compare Amazon & eBay) | Parallel Sub-Agents | LLM identifies contexts + parallel safety |
 | **Complex Single Context** (4+ steps) | Sequential Sub-Agent | Protects main context history |
 | **Simple Task** | Direct Execution | Runs in main loop |
+| **Tool-Driven Task Completion** | Explicit Completion Signal | Agent calls `mark_task_complete({ summary, success })` |
+| **Main-Agent Max Iteration** | Auto-Continuation | Runtime attempts `continueWithSubAgent`, then falls back to manual continue/cancel if needed |
+
+#### Execution Type Coverage Matrix
+
+| Execution Type | Current Status | Runtime Path |
+|----------------|----------------|--------------|
+| Direct answer (no tools) | Covered | Main `AgentRuntime` loop returns assistant content |
+| Single-context tool workflow | Covered | Main loop + tool execution + optional `mark_task_complete` |
+| Parallel decomposition | Covered | `executeParallelSubAgents` in `OrchestrationService` |
+| Sequential decomposition | Covered | `executeSequentialSubAgents` in `OrchestrationService` |
+| Recursive manual delegation | Covered | `delegate_sub_task` handled by `SpecialToolHandlers` |
+| Max-iteration continuation | Covered | `_handleMaxIterations` auto-continues via sub-agent with fallback |
+| WhatsApp inbound/outbound execution | Covered | `useWhatsAppBridge` + `useAgent` + `electron.whatsapp.*` IPC wrappers |
 
 #### Implementation
 
@@ -1071,7 +1088,7 @@ The agent can generate an **Execution Plan** via tool call. This plan is tracked
 
 #### 2. Progress Checkpoints & Summaries
 During the interaction loop, the system enforces a **Mandatory Reporting Protocol**:
-- **Step Checkpoints**: At fixed intervals (steps 5, 10, 15...), the runtime pauses the agent's main loop to enforce a `update_progress_summary` call.
+- **Step Checkpoints**: At fixed intervals (steps 15, 30, 45...), the runtime injects an internal checkpoint directive to enforce an `update_progress_summary` call.
 - **LLM-Driven Summarization**: Major chunks of historical work are periodically summarized into incremental findings.
 - **Badge-Based UI**: Checkpoints are rendered as subtle "Progress saved" badges in the UI, keeping the raw tool noise hidden.
 - **Final Reporting**: If the LLM generates a response without a summary, the `AgentRuntime` automatically appends the cumulative progress report to the final message to ensure the user is never left wondering what happened.

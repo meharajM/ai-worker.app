@@ -75,6 +75,25 @@ export const PROGRESS_SUMMARY_TOOL: MCPTool = {
   }
 };
 
+export const MARK_TASK_COMPLETE_TOOL: MCPTool = {
+  name: "mark_task_complete",
+  description: "Preferred completion signal for tool-driven tasks. Call this when the task is fully done or unresolvably blocked.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      summary: {
+        type: "string",
+        description: "Brief summary of what was completed or why completion is blocked."
+      },
+      success: {
+        type: "boolean",
+        description: "True if task completed successfully, false if blocked by an external constraint."
+      }
+    },
+    required: ["summary", "success"]
+  }
+};
+
 // Tools that modify browser state and must be serialized (using browserLock)
 export const STATEFUL_BROWSER_TOOLS = [
   'navigate',
@@ -236,6 +255,7 @@ export const CLIENT_TOOLS = [
   SUB_AGENT_TOOL,
   SCAN_PAGE_TOOL,
   PROGRESS_SUMMARY_TOOL,
+  MARK_TASK_COMPLETE_TOOL,
   MEMORY_CREATE_ENTITY_TOOL,
   MEMORY_CREATE_RELATION_TOOL,
   MEMORY_SEARCH_TOOL,
@@ -243,4 +263,3 @@ export const CLIENT_TOOLS = [
   WHATSAPP_SEND_MEDIA_TOOL,
   WHATSAPP_SEND_MESSAGE_TOOL,
 ];
-

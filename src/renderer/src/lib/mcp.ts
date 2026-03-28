@@ -416,12 +416,29 @@ export function parseTabIdFromResult(toolResult: { result: unknown }): number | 
   const resAny = toolResult.result as Record<string, unknown> | null | undefined;
 
   // Primary path: standard MCP content envelope
-  if (resAny?.content && Array.isArray(resAny.content) && (resAny.content[0] as Record<string, unknown>)?.text) {
+  if (resAny?.content && Array.isArray(resAny.content) && resAny.content.length > 0) {
+    const firstContent = resAny.content[0] as Record<string, unknown>;
+    const rawJson = firstContent?.json;
+    if (typeof rawJson === "object" && rawJson !== null && typeof (rawJson as Record<string, unknown>).tabId === "number") {
+      return (rawJson as Record<string, unknown>).tabId as number;
+    }
+
+    const rawText = firstContent?.text;
+    if (rawText === undefined) {
+      // Some servers omit "text" and only return structured content.
+      // If we reached here, we already checked content[0].json above.
+      return undefined;
+    }
+    if (typeof rawText === "object" && rawText !== null && typeof (rawText as Record<string, unknown>).tabId === "number") {
+      return (rawText as Record<string, unknown>).tabId as number;
+    }
+
     try {
-      const parsed = JSON.parse((resAny.content[0] as Record<string, unknown>).text as string);
+      const textToParse = typeof rawText === "string" ? rawText : String(rawText);
+      const parsed = JSON.parse(textToParse);
       if (typeof parsed.tabId === 'number') return parsed.tabId;
     } catch {
-      console.warn('[MCP] parseTabIdFromResult: failed to JSON-parse content[0].text:', (resAny.content[0] as Record<string, unknown>).text);
+      console.warn('[MCP] parseTabIdFromResult: failed to JSON-parse content[0].text:', rawText);
     }
   }
 

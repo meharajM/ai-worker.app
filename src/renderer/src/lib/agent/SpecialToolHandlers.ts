@@ -159,6 +159,79 @@ export class SpecialToolHandlers {
     }
 
     /**
+     * Handles explicit task completion signaling from the model.
+     * This is the preferred completion path for tool-driven tasks.
+     */
+    handleMarkTaskComplete(args: Record<string, unknown>): {
+        result: string;
+        isComplete: true;
+        success: boolean;
+        summary: string;
+    } {
+        const summary = typeof args.summary === "string" && args.summary.trim().length > 0
+            ? args.summary
+            : "Task complete.";
+        const success = typeof args.success === "boolean" ? args.success : true;
+
+        console.log(
+            `[SpecialToolHandlers] mark_task_complete called. success=${success}. Summary: ${summary.substring(0, 120)}`
+        );
+
+        return {
+            result: JSON.stringify({
+                acknowledged: true,
+                success,
+                summary,
+            }),
+            isComplete: true,
+            success,
+            summary,
+        };
+    }
+
+    /**
+     * Extracts presentable summaries from a sub-agent's tool history.
+     * Used when a sub-agent exits early so parent can keep partial progress.
+     */
+    private _salvageFindingsFromHistory(history: LLMMessage[] | undefined): string[] {
+        if (!history) return [];
+        const partialFindings: string[] = [];
+        for (const m of history) {
+            if (m.role === 'tool' && m.content) {
+                const analysis = analyzeToolOutput(m.name || 'unknown', m.content);
+                if (analysis.hasPresentableData && analysis.summary) {
+                    partialFindings.push(analysis.summary);
+                }
+            }
+        }
+        return partialFindings;
+    }
+
+    /**
+     * Reads explicit completion status from tool history when present.
+     * mark_task_complete tool results include `{ acknowledged, success, summary }`.
+     */
+    private _readCompletionStatusFromHistory(history: LLMMessage[] | undefined): { success?: boolean; summary?: string } {
+        if (!history) return {};
+        for (let i = history.length - 1; i >= 0; i--) {
+            const m = history[i];
+            if (m.role !== "tool" || typeof m.content !== "string") continue;
+            try {
+                const parsed = JSON.parse(m.content) as Record<string, unknown>;
+                if (parsed.acknowledged === true && typeof parsed.success === "boolean") {
+                    return {
+                        success: parsed.success,
+                        summary: typeof parsed.summary === "string" ? parsed.summary : undefined,
+                    };
+                }
+            } catch {
+                // Ignore non-JSON tool outputs
+            }
+        }
+        return {};
+    }
+
+    /**
      * Spawns a sub-agent to perform a specific instruction with context.
      * Closes the sub-agent's temporary tab and updates the execution plan on completion.
      *
@@ -227,34 +300,28 @@ export class SpecialToolHandlers {
             const prompt = `${instruction}${context ? `\n\nContext: ${context}` : ""}\n\nReturn key findings only. End with "✓ Done".`;
             const finalRes = await subAgent.chat(prompt);
             const finalContent = typeof finalRes.content === "string" ? finalRes.content : JSON.stringify(finalRes.content);
+            const subAgentHistory = (subAgent as any).getHistory?.() as LLMMessage[] | undefined;
+            const completionStatus = this._readCompletionStatusFromHistory(subAgentHistory);
+            const completionBlocked = completionStatus.success === false;
 
             // ── Detect sub-agent bailout vs clean completion ──────────────────────
-            const isBailout = finalContent.includes("consecutive errors") ||
+            const isBailout = completionBlocked ||
+                finalContent.includes("consecutive errors") ||
                 finalContent.includes("stopping to prevent an infinite loop");
 
-            let salvagedResult = finalContent;
+            let salvagedResult = completionBlocked
+                ? `Sub-agent reported a blocker and could not complete the task.${completionStatus.summary ? ` ${completionStatus.summary}` : ""}`
+                : finalContent;
             let updatedPlan: ExecutionPlan | undefined;
 
             if (isBailout) {
                 console.warn(`[SpecialToolHandlers] Sub-agent bailout detected. Salvaging partial data for: ${instruction.substring(0, 50)}...`);
 
                 // Access history to salvage tool outputs
-                const subAgentHistory = (subAgent as any).getHistory?.() as LLMMessage[] | undefined;
-                if (subAgentHistory) {
-                    const partialFindings: string[] = [];
-                    for (const m of subAgentHistory) {
-                        if (m.role === 'tool' && m.content) {
-                            const analysis = analyzeToolOutput(m.name || 'unknown', m.content);
-                            if (analysis.hasPresentableData && analysis.summary) {
-                                partialFindings.push(analysis.summary);
-                            }
-                        }
-                    }
-
-                    if (partialFindings.length > 0) {
-                        salvagedResult = `Sub-agent encountered errors and stopped. Partial data collected before failure:\n\n${partialFindings.join('\n')}`;
-                        console.log(`[SpecialToolHandlers] Salvaged ${partialFindings.length} findings from failed sub-agent.`);
-                    }
+                const partialFindings = this._salvageFindingsFromHistory(subAgentHistory);
+                if (partialFindings.length > 0) {
+                    salvagedResult = `${salvagedResult}\n\nPartial data collected before failure:\n\n${partialFindings.join('\n')}`.trim();
+                    console.log(`[SpecialToolHandlers] Salvaged ${partialFindings.length} findings from failed sub-agent.`);
                 }
             }
 
@@ -298,6 +365,15 @@ export class SpecialToolHandlers {
                 } catch (e) {
                     console.warn(`[SpecialToolHandlers] Failed to close sub-agent tab ${subAgentTabId} after error`, e);
                 }
+            }
+            const subAgentHistory = (subAgent as any).getHistory?.() as LLMMessage[] | undefined;
+            const partialFindings = this._salvageFindingsFromHistory(subAgentHistory);
+            if (partialFindings.length > 0) {
+                return {
+                    result:
+                        `Sub-agent failed: ${err.message}\n\n` +
+                        `Partial data collected before failure:\n\n${partialFindings.join('\n')}`
+                };
             }
             return { result: `Sub-agent failed: ${err.message}` };
         }
