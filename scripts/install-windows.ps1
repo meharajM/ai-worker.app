@@ -14,56 +14,58 @@ try {
 
 $R2Base = "https://downloads.ai-worker.tech"
 $TempDir = [System.IO.Path]::GetTempPath()
-# Using a fixed but fresh manifest URL to fetch the latest info
-$ManifestUrl = "$R2Base/latest.yml?v=$([DateTime]::UtcNow.Ticks)"
 
 Write-Host "🚀 AI-Worker Installer" -ForegroundColor Cyan
 Write-Host "Fetching latest version info..."
 
-# Robust manifest fetch: Force TLS 1.2+ and use Invoke-WebRequest with explicit decoding
+# Force TLS 1.2+ for all network calls
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
-    
-    # Try reaching the manifest with a fresh query param to bypass CDN cache
-    $RawResponse = Invoke-WebRequest -Uri $ManifestUrl -UseBasicParsing -TimeoutSec 30 -Headers @{ "Cache-Control" = "no-cache" }
-    
-    if ($RawResponse.Content -is [System.String]) {
-        $ManifestContent = $RawResponse.Content
-    } else {
-        $ManifestContent = [System.Text.Encoding]::UTF8.GetString($RawResponse.Content)
+} catch {}
+
+function Fetch-Manifest {
+    param([string]$Url)
+    try {
+        # Using a fresh query param to bypass CDN cache
+        $ManifestUrl = "$Url?v=$([DateTime]::UtcNow.Ticks)"
+        $RawResponse = Invoke-WebRequest -Uri $ManifestUrl -UseBasicParsing -TimeoutSec 30 -Headers @{ "Cache-Control" = "no-cache" }
+        
+        if ($RawResponse.Content -is [System.String]) {
+            return $RawResponse.Content
+        } else {
+            return [System.Text.Encoding]::UTF8.GetString($RawResponse.Content)
+        }
+    } catch {
+        # Fallback to plain URL if query param is rejected
+        $RawResponse = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 30
+        if ($RawResponse.Content -is [System.String]) {
+            return $RawResponse.Content
+        } else {
+            return [System.Text.Encoding]::UTF8.GetString($RawResponse.Content)
+        }
     }
-} catch {
-    Write-Host "❌ Could not fetch version info. Please check your internet connection." -ForegroundColor Red
-    Write-Host "   Error: $($_.Exception.Message)" -ForegroundColor Gray
-    pause
-    exit 1
 }
 
-# Robust parsing: Line-by-line check to handle CRLF and indentation safely
+$ManifestContent = Fetch-Manifest -Url "$R2Base/latest.yml"
+
+# Robust parsing: Line-by-line check
 $ExeFile = $null
 $ExpectedSha = $null
-$ExpectedSize = 0
 
 foreach ($line in ($ManifestContent -split "\r?\n")) {
     $cleanLine = $line.Trim()
     
-    # Prioritize top-level 'path'
+    # Identify filename
     if ($line -match '^path:\s*["'']?([^"''\r\n]+\.exe)["'']?') {
         $ExeFile = $Matches[1].Trim()
     }
-    # Fallback to 'url' inside files list
     elseif (-not $ExeFile -and $line -match '^\s*-\s*url:\s*["'']?([^"''\r\n]+\.exe)["'']?') {
         $ExeFile = $Matches[1].Trim()
     }
     
-    # Extract sha512 (first one wins)
+    # Identify checksum
     if (-not $ExpectedSha -and $line -match 'sha512:\s*["'']?([A-Za-z0-9+/=]+)["'']?') {
         $ExpectedSha = $Matches[1].Trim()
-    }
-    
-    # Extract size (first one wins)
-    if ($ExpectedSize -eq 0 -and $line -match 'size:\s*(\d+)') {
-        $ExpectedSize = [int64]$Matches[1]
     }
 }
 
@@ -74,7 +76,6 @@ if (-not $ExeFile) {
 }
 
 $DownloadUrl = "$R2Base/$ExeFile"
-$DownloadUrlFallback = "$R2Base/$ExeFile?v=$([DateTime]::UtcNow.Ticks)"
 $DestPath = Join-Path $TempDir $ExeFile
 
 function Get-FileSha512Base64 {
@@ -101,10 +102,12 @@ function Validate-DownloadedFile {
 
     if (-not (Test-Path $Path)) { return $false }
 
-    # Rely primarily on SHA512 SHA check (as size matches can be misleading due to CDN compression)
     if ($ExpectedSha512) {
         $actualSha = Get-FileSha512Base64 -Path $Path
         if ($actualSha -ne $ExpectedSha512) { 
+            Write-Host "   (Verification Mismatch)" -ForegroundColor Yellow
+            Write-Host "   Expected: $ExpectedSha512" -ForegroundColor Gray
+            Write-Host "   Actual:   $actualSha" -ForegroundColor Gray
             return $false 
         }
     }
@@ -115,23 +118,36 @@ function Validate-DownloadedFile {
 function Download-File {
     param(
         [string]$Url,
-        [string]$Destination
+        [string]$Destination,
+        [bool]$UseRefresh = $false
     )
 
     $OriginalProgressPreference = $ProgressPreference
     $ProgressPreference = 'SilentlyContinue'
 
+    $targetUrl = $Url
+    if ($UseRefresh) { $targetUrl = "$Url?v=$([DateTime]::UtcNow.Ticks)" }
+
     try {
-        # Try curl.exe first if available (native in Windows 10+/11, avoids BITS service overhead)
+        # Cancel any BITS jobs blocking the file
+        try {
+            if (Get-Command Get-BitsTransfer -ErrorAction SilentlyContinue) {
+                Get-BitsTransfer | Where-Object { $_.FileList.LocalName -eq $Destination } | Stop-BitsTransfer -ErrorAction SilentlyContinue
+            }
+        } catch {}
+
+        if (Test-Path $Destination) { Remove-Item $Destination -Force }
+
+        # Try curl.exe primary
         $curl = (Get-Command "curl.exe" -ErrorAction SilentlyContinue)
         if ($curl) {
-            $curlArgs = @("-fL", "--progress-bar", $Url, "-o", $Destination, "-H", "Cache-Control: no-cache")
+            $curlArgs = @("-fL", "--progress-bar", $targetUrl, "-o", $Destination, "-H", "Cache-Control: no-cache")
             & $curl.Source @curlArgs
             if ($LASTEXITCODE -eq 0 -and (Test-Path $Destination)) { return }
         }
 
-        # Fallback to Invoke-WebRequest with explicit cache-busting headers
-        Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing -TimeoutSec 600 -Headers @{ "Cache-Control" = "no-cache" }
+        # Fallback to Invoke-WebRequest
+        Invoke-WebRequest -Uri $targetUrl -OutFile $Destination -UseBasicParsing -TimeoutSec 600 -Headers @{ "Cache-Control" = "no-cache" }
     } finally {
         $ProgressPreference = $OriginalProgressPreference
     }
@@ -139,15 +155,13 @@ function Download-File {
 
 Write-Host "📦 Downloading $ExeFile..."
 
-# Download and Validate
+# Primary Attempt
 try {
-    if (Test-Path $DestPath) { Remove-Item $DestPath -Force }
     Download-File -Url $DownloadUrl -Destination $DestPath
 } catch {
-    Write-Host "   (Retrying with refresh URL...)" -ForegroundColor Yellow
+    Write-Host "   (Primary source failed, trying refresh...)" -ForegroundColor Yellow
     try {
-        if (Test-Path $DestPath) { Remove-Item $DestPath -Force }
-        Download-File -Url $DownloadUrlFallback -Destination $DestPath
+        Download-File -Url $DownloadUrl -Destination $DestPath -UseRefresh $true
     } catch {
         Write-Host "❌ Download failed." -ForegroundColor Red
         pause
@@ -155,38 +169,53 @@ try {
     }
 }
 
-# Validation Pass
+# Validation and Retry
 if (-not (Validate-DownloadedFile -Path $DestPath -ExpectedSha512 $ExpectedSha)) {
-    Write-Host "   (Validation failed, performing critical refresh...)" -ForegroundColor Yellow
+    Write-Host "   (Validation failed, performing fresh download...)" -ForegroundColor Yellow
     try {
-        if (Test-Path $DestPath) { Remove-Item $DestPath -Force }
-        Download-File -Url $DownloadUrlFallback -Destination $DestPath
+        Download-File -Url $DownloadUrl -Destination $DestPath -UseRefresh $true
     } catch {
-        Write-Host "❌ Refresh download failed." -ForegroundColor Red
-        pause
-        exit 1
+        # If refreshing with query params fails (404), fallback to plain source one last time
+        try {
+            Download-File -Url $DownloadUrl -Destination $DestPath
+        } catch {
+            Write-Host "❌ Refresh source unavailable." -ForegroundColor Red
+            pause
+            exit 1
+        }
     }
 }
 
-# Final Check
+# Final Verification
 if (-not (Validate-DownloadedFile -Path $DestPath -ExpectedSha512 $ExpectedSha)) {
-    Write-Host "❌ Downloaded installer checksum does not match latest manifest." -ForegroundColor Red
+    Write-Host "❌ Downloaded installer checksum does not match manifest information." -ForegroundColor Red
     pause
     exit 1
 }
 
-# Unblock file
+# Unblock
 try {
     if (Get-Command Unblock-File -ErrorAction SilentlyContinue) {
         Unblock-File -Path $DestPath
     }
 } catch {}
 
-Write-Host "🔧 Starting the installer..."
-Write-Host "   (Please follow the setup instructions on your screen)"
-Start-Process -FilePath $DestPath -Wait
+Write-Host "🔧 Starting the installer..." -ForegroundColor Yellow
+Write-Host "   (File saved to: $DestPath)" -ForegroundColor Gray
+Write-Host "   (Please check your taskbar for a flashing UAC elevation prompt if nothing appears)"
 
-Write-Host ""
-Write-Host "✅ AI-Worker has been installed successfully!" -ForegroundColor Green
-Write-Host "   You can find it in your Start Menu or Desktop."
+try {
+    # Using 'RunAs' verb to force the UAC prompt to the foreground
+    # Removing -Wait to see if the process starts successfully in a separate thread
+    Start-Process -FilePath $DestPath -Verb RunAs
+    
+    Write-Host ""
+    Write-Host "✅ AI-Worker Setup has been launched!" -ForegroundColor Green
+    Write-Host "   If you still don't see the window, you can manually run it from:"
+    Write-Host "   $DestPath" -ForegroundColor Cyan
+} catch {
+    # If RunAs fails (e.g. user clicks 'No' or environment restricted), fallback to direct run
+    Start-Process -FilePath $DestPath
+}
+
 pause
