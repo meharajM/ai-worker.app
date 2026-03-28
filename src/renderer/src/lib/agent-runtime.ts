@@ -278,7 +278,12 @@ export class AgentRuntime implements IAgentClient {
             this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (ctxCount * 3))));
             return this.addMessage(msg);
           },
-          this._makeSubAgentFactory()
+          this._makeSubAgentFactory(),
+          // onPlanUpdate: Bridge orchestration plan → session.plan → SubTaskChecklist
+          (plan) => {
+            this.executionPlan = plan;
+            this._emitProgress(this._lastProgressPct);
+          }
         );
         this._emitProgress(100);
         MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
@@ -299,7 +304,14 @@ export class AgentRuntime implements IAgentClient {
             this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (stepCount * 2))));
             return this.addMessage(msg);
           },
-          this._makeSubAgentFactory()
+          this._makeSubAgentFactory(),
+          // onPlanUpdate: Bridge orchestration plan → session.plan → SubTaskChecklist
+          // WHY: Without this, this.executionPlan stays null, so _emitProgress sends
+          // plan=undefined to onProgressUpdate, and the checklist never renders.
+          (plan) => {
+            this.executionPlan = plan;
+            this._emitProgress(this._lastProgressPct);
+          }
         );
         this._emitProgress(100);
         MemoryReflector.getInstance().analyze(this.messages, this.options.settings);

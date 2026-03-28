@@ -1,5 +1,10 @@
 /**
  * MessageBubble.tsx — Slim orchestrator for chat message rendering.
+ *
+ * Supports two display modes:
+ *  - Dev:  shows everything (thinking, tool calls, checkpoints, actions)
+ *  - Prod: hides dev internals; sub-tasks are shown via SubTaskChecklist
+ *          in ProgressBanner at the session level, not per-message.
  */
 
 import React from 'react'
@@ -8,6 +13,7 @@ import { motion } from 'framer-motion'
 import { Message } from '../../stores/chatStore'
 import { FormattedText } from '../FormattedText'
 import { cn } from '../../lib/utils'
+import { useDisplayMode } from '../../hooks/useDisplayMode'
 
 import { MessageAvatar } from './MessageAvatar'
 import { MessageAttachments } from './MessageAttachments'
@@ -26,6 +32,7 @@ interface MessageBubbleProps {
 export function MessageBubble({ message, onDelete, isLast = false }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
+  const { isProdView } = useDisplayMode()
 
   const visibleToolCalls = message.toolCalls?.filter(
     tc =>
@@ -40,6 +47,48 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
       tc.name === 'memory_update_entity'
   )
 
+  // ── Prod-mode filtering ───────────────────────────────────────────────────
+  // In prod view, only show: user messages, final text-only assistant answers.
+  // Hide ALL intermediate orchestration noise — tool calls, plans, status updates.
+  if (isProdView && !isUser && !isSystem) {
+    // Any message with tool calls is orchestration plumbing → hide
+    if ((message.toolCalls?.length ?? 0) > 0) {
+      return null
+    }
+
+    // Messages that are orchestration narration (no tool calls but not user-facing)
+    // These come from OrchestrationService.executeSequentialSubAgents
+    const content = (message.content || '').trim()
+    if (content) {
+      // Strip leading emoji/whitespace for pattern matching
+      const strippingRegex = /^[\p{Emoji}\p{Emoji_Presentation}\s#*]*/u
+      const stripped = content.replace(strippingRegex, '')
+      
+      const isOrchestrationNoise =
+        stripped.toLowerCase().startsWith('auto-orchestration') ||
+        stripped.toLowerCase().startsWith('execution plan') ||
+        stripped.toLowerCase().startsWith('task complete') ||
+        stripped.toLowerCase().startsWith('results from') ||
+        /^\*\*Step \d+\*\*:/i.test(stripped) ||
+        /^Step \d+:/i.test(stripped) ||
+        /^✓\s*\*\*Step \d+/i.test(content) ||
+        /^⚡\s*Parallel Execution/i.test(content) ||
+        /^(✅|⚠️|❌)\s*\*\*.+Analysis/i.test(content) ||
+        content.toLowerCase() === 'analyzing...' ||
+        content.toLowerCase().startsWith('starting sub-agent') ||
+        stripped.toLowerCase().startsWith('starting sub-agent')
+
+      if (isOrchestrationNoise) {
+        return null
+      }
+    }
+
+    // Skip empty messages
+    if (!content || content.length < 5) {
+      return null
+    }
+  }
+
   // Progress checkpoint only message
   if (
     !isUser &&
@@ -47,6 +96,9 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
     message.toolCalls?.length === 1 &&
     progressToolCall
   ) {
+    // In prod mode, hide checkpoint badges entirely
+    if (isProdView) return null
+
     return (
       <div className="flex justify-center my-2">
         <div className="flex items-center gap-1.5 text-[var(--color-text-dim)] text-[10px] font-[var(--font-weight-medium)] px-2 py-1 rounded-[var(--radius-pill)] bg-[var(--color-surface)]">
@@ -59,6 +111,9 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
 
   // System message
   if (isSystem) {
+    // In prod mode, hide system messages
+    if (isProdView) return null
+
     return (
       <div className="flex justify-center my-2">
         <div className="bg-[var(--color-surface)] text-[var(--color-text-muted)] text-[var(--text-xs)] px-3 py-1 rounded-[var(--radius-pill)]">
@@ -103,14 +158,15 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
               : 'bg-[var(--color-card-dark)] border border-[var(--color-border)] text-[var(--color-text-primary)]'
           )}
         >
-          {/* Thinking Block */}
-          {message.content && <ThinkingBlock content={message.content} />}
+          {/* Thinking Block — hidden in prod view */}
+          {!isProdView && message.content && <ThinkingBlock content={message.content} />}
 
           {/* Message Content */}
           {message.content && <MessageContent content={message.content} />}
 
-          {/* Progress checkpoint badge */}
-          {!isUser &&
+          {/* Progress checkpoint badge — hidden in prod view */}
+          {!isProdView &&
+            !isUser &&
             progressToolCall &&
             (message.content ||
               (visibleToolCalls && visibleToolCalls.length > 0)) && (
@@ -127,8 +183,8 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
           />
         </div>
 
-        {/* Tool calls (rendered OUTSIDE the bubble as large cards) */}
-        {visibleToolCalls && visibleToolCalls.length > 0 && (
+        {/* Tool calls — hidden in prod view (replaced by SubTaskChecklist) */}
+        {!isProdView && visibleToolCalls && visibleToolCalls.length > 0 && (
           <div className="w-full mt-2">
             <ToolCallList toolCalls={visibleToolCalls} />
           </div>
