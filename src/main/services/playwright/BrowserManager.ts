@@ -84,13 +84,25 @@ export class BrowserManager {
      */
     private clearChromeLock(userDataDir: string) {
         try {
-            const lockPath = path.join(userDataDir, 'SingletonLock');
-            if (fs.existsSync(lockPath)) {
-                fs.unlinkSync(lockPath);
-                console.log(`[BrowserManager] 🔓 Cleared stale SingletonLock at ${lockPath}`);
+            const lockPaths = [
+                path.join(userDataDir, 'SingletonLock'),
+                path.join(userDataDir, 'Default', 'LOCK'),
+                path.join(userDataDir, 'LOCK'),
+            ];
+            
+            for (const lockPath of lockPaths) {
+                if (fs.existsSync(lockPath)) {
+                    try {
+                        fs.unlinkSync(lockPath);
+                        console.log(`[BrowserManager] 🔓 Cleared stale lock at ${lockPath}`);
+                    } catch (e) {
+                        fs.rmSync(lockPath, { force: true, recursive: true });
+                        console.log(`[BrowserManager] 🔨 Force removed lock at ${lockPath}`);
+                    }
+                }
             }
         } catch (e) {
-            console.warn(`[BrowserManager] Failed to clear SingletonLock:`, e);
+            console.warn(`[BrowserManager] Failed to clear locks:`, e);
         }
     }
 
@@ -467,32 +479,64 @@ export class BrowserManager {
         return this.pagesMap;
     }
 
+    private async closeWithTimeout(target: BrowserContext | Browser | null, name: string): Promise<void> {
+        if (!target) return;
+        
+        const timeoutMs = 5000;
+        try {
+            await Promise.race([
+                target.close(),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs))
+            ]);
+            console.log(`[BrowserManager] Successfully closed ${name}`);
+        } catch (e) {
+            if (e instanceof Error && e.message === 'TIMEOUT') {
+                console.warn(`[BrowserManager] Abandoning stuck ${name} after ${timeoutMs}ms timeout.`);
+            } else {
+                console.error(`[BrowserManager] Error closing ${name}:`, e);
+            }
+        }
+    }
+
     async close() {
         if (this.idleTimer) {
             clearTimeout(this.idleTimer);
             this.idleTimer = null;
         }
 
-        // Reset promises to ensure subsequent calls don't await stale ones
-        this.initializationPromise = null;
-        this.headlessInitializationPromise = null;
+        // If a launch is in progress, wait for it before closing
+        if (this.initializationPromise) {
+            try { await this.initializationPromise; } catch (e) { }
+        }
 
-        if (this.context) {
-            await this.context.close().catch(e => console.error('[BrowserManager] Error closing context:', e));
-            this.context = null;
-            this.page = null;
-            this.pagesMap.clear();
-        }
-        if (this.headlessBrowser) {
-            await this.headlessBrowser.close().catch(e => console.error('[BrowserManager] Error closing headless browser:', e));
-            this.headlessBrowser = null;
-            this.headlessContext = null;
-            this.headlessPage = null;
-        }
-        if (this.headlessContext) {
-            await this.headlessContext.close().catch(e => console.error('[BrowserManager] Error closing headless context:', e));
-            this.headlessContext = null;
-            this.headlessPage = null;
-        }
+        // Now serialize the close itself
+        const closePromise = (async () => {
+            try {
+                if (this.context) {
+                    await this.closeWithTimeout(this.context, 'main context');
+                    this.context = null;
+                    this.page = null;
+                    this.pagesMap.clear();
+                }
+                if (this.headlessBrowser) {
+                    await this.closeWithTimeout(this.headlessBrowser, 'headless browser');
+                    this.headlessBrowser = null;
+                    this.headlessContext = null;
+                    this.headlessPage = null;
+                }
+                if (this.headlessContext) {
+                    await this.closeWithTimeout(this.headlessContext, 'headless context');
+                    this.headlessContext = null;
+                    this.headlessPage = null;
+                }
+            } finally {
+                this.initializationPromise = null;
+                this.headlessInitializationPromise = null;
+            }
+        })();
+
+        this.initializationPromise = closePromise;
+        this.headlessInitializationPromise = closePromise;
+        await closePromise;
     }
 }

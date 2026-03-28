@@ -241,21 +241,6 @@ export async function executeParallelSubAgents(
                 parentOptions.onMessageUpdate(statusMessageId, { content: renderStatus() });
             }
 
-            // Close the sub-agent's tab to free resources
-            if (subAgentTabId !== undefined) {
-                try {
-                    const { browserLock } = await import("../resource-lock");
-                    await browserLock.runExclusive(async () =>
-                        executeToolCall("close_tab", { tabId: subAgentTabId })
-                    );
-                    console.log(`[OrchestrationService] Closed sub-agent tab ${subAgentTabId}`);
-                    // Clean up the execution lane to prevent memory leaks
-                    laneManager.cleanupTabLane(subAgentTabId);
-                } catch (e) {
-                    console.warn(`[OrchestrationService] Failed to close sub-agent tab ${subAgentTabId}`, e);
-                }
-            }
-
             // Show the result immediately as a distinct message
             if (isSuccess) {
                 addMessage({
@@ -285,19 +270,6 @@ export async function executeParallelSubAgents(
                 }
             } catch (e) { }
 
-            // Close the tab + clean up the lane even on crash path to prevent leaks
-            if (subAgentTabId !== undefined) {
-                try {
-                    const { browserLock } = await import("../resource-lock");
-                    await browserLock.runExclusive(async () =>
-                        executeToolCall("close_tab", { tabId: subAgentTabId })
-                    );
-                    laneManager.cleanupTabLane(subAgentTabId);
-                } catch (e) {
-                    console.warn(`[OrchestrationService] Failed to close crashed sub-agent tab ${subAgentTabId}`, e);
-                }
-            }
-
             const errorText = `Error: ${error.message}${partialsMsg}`;
             agentStatuses[index].result = errorText;
 
@@ -311,6 +283,21 @@ export async function executeParallelSubAgents(
             });
 
             return { context, success: false, result: errorText };
+        } finally {
+            // ALWAYS close the sub-agent's tab to free resources, even on crash/timeout
+            if (subAgentTabId !== undefined) {
+                try {
+                    const { browserLock } = await import("../resource-lock");
+                    await browserLock.runExclusive(async () =>
+                        executeToolCall("close_tab", { tabId: subAgentTabId })
+                    );
+                    console.log(`[OrchestrationService] Closed sub-agent tab ${subAgentTabId}`);
+                    // Clean up the execution lane to prevent memory leaks
+                    laneManager.cleanupTabLane(subAgentTabId);
+                } catch (e) {
+                    console.warn(`[OrchestrationService] Failed cleanup for tab ${subAgentTabId}`, e);
+                }
+            }
         }
 
     });
