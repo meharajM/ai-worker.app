@@ -237,8 +237,10 @@ if [ "$SKIP_BUILD" = false ]; then
     if [ "$MAC_ARCH" = "universal" ]; then
       auto_clean_native_build_outputs
       clean_mac_universal_temps "$MAC_OUT_DIR"
+      npx electron-builder --mac --${MAC_ARCH} --config.directories.output="${MAC_OUT_DIR}"
+    else
+      npx electron-builder --mac --${MAC_ARCH} --config.directories.output="${MAC_OUT_DIR}"
     fi
-    npx electron-builder --mac --${MAC_ARCH} --config.directories.output="${MAC_OUT_DIR}"
   )
   [ "$BUILD_LINUX" = true ] && (
     echo "🐧 Packaging Linux (Docker)..."
@@ -285,7 +287,7 @@ fi
 [ "$BUILD_LINUX" = true ] && UPLOAD_PIDS+=($!)
 
 [ "$BUILD_WIN" = true ] && (
-  upload_artifacts "${WIN_UPLOAD_DIR}" "*.exe" "*.blockmap"
+  upload_artifacts "${WIN_UPLOAD_DIR}" "*-Setup-*.exe" "*-Setup-*.exe.blockmap"
   retry_aws_cp "scripts/install-windows.ps1" "${R2}/install-windows.ps1"
 ) &
 [ "$BUILD_WIN" = true ] && UPLOAD_PIDS+=($!)

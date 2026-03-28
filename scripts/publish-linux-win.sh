@@ -6,6 +6,8 @@
 #
 # Usage:
 #   npm run publish:linux-win                        # Linux x64/arm64 + Windows x64
+#   npm run publish:linux                            # Linux only (wrapper)
+#   npm run publish:win                              # Windows only (wrapper)
 #   npm run publish:linux-win -- --linux-only        # Linux only
 #   npm run publish:linux-win -- --win-only          # Windows only
 #   npm run publish:linux-win -- --yes               # non-interactive confirmation
@@ -208,7 +210,7 @@ upload_artifacts() {
   fi
 }
 
-if [ "$BUILD_LINUX" = true ] || [ "$SKIP_BUILD" = true ]; then
+if [ "$BUILD_LINUX" = true ]; then
   LINUX_UPLOAD_DIR="${LINUX_OUT_DIR}"
   if [ "$SKIP_BUILD" = true ] && [ ! -d "${LINUX_UPLOAD_DIR}" ]; then
     LINUX_UPLOAD_DIR="dist"
@@ -221,14 +223,14 @@ if [ "$BUILD_LINUX" = true ] || [ "$SKIP_BUILD" = true ]; then
   retry_aws_cp "scripts/install-linux.sh" "${R2}/install-linux.sh"
 fi
 
-if [ "$BUILD_WIN" = true ] || [ "$SKIP_BUILD" = true ]; then
+if [ "$BUILD_WIN" = true ]; then
   WIN_UPLOAD_DIR="${WIN_OUT_DIR}"
   if [ "$SKIP_BUILD" = true ] && [ ! -d "${WIN_UPLOAD_DIR}" ]; then
     WIN_UPLOAD_DIR="dist"
   fi
 
   echo "  → Uploading Windows binaries..."
-  upload_artifacts "${WIN_UPLOAD_DIR}" "*.exe" "*.blockmap" "latest*.yml"
+  upload_artifacts "${WIN_UPLOAD_DIR}" "*-Setup-*.exe" "*-Setup-*.exe.blockmap" "latest*.yml"
 
   echo "  → Uploading install-windows.ps1..."
   retry_aws_cp "scripts/install-windows.ps1" "${R2}/install-windows.ps1"

@@ -3,22 +3,13 @@ name: CI/CD
 on:
   push:
     branches: [ main, prod ]
-    # tags: [ 'v*' ]  # DISABLED: Tag pushes double-fire with prod push on release day
   pull_request:
     branches: [ main, prod ]
     types: [opened, synchronize]
 
-# All platform builds are done locally and published to Cloudflare R2
-# using the scripts in /scripts/publish-*.sh.
-# Reason: GitHub Actions macOS runners cost 10x the free-tier minute rate.
-# A single macOS build exhausts the monthly free quota. All CI here is
-# Linux-only (1x rate) and limited to quality gates (lint, typecheck, tests).
-
 jobs:
-  # ── Quality Gate ─────────────────────────────────────────────────────────────
-  # Runs on all PRs and pushes to main. Skipped on prod (already tested via main).
   test:
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/prod'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +17,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install dependencies
@@ -36,15 +27,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb libgbm1
-          # Only install chromium — firefox/webkit not tested, saves ~3 min per run
           npx playwright install chromium
           npx playwright install-deps chromium
 
-      - name: Lint
-        run: npm run lint
+      - name: Lint and Typecheck
+        run: |
+          npm run lint
+          npm run typecheck
 
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Prebuild Checks
+        run: npm run check:prebuild
 
       - name: Fix libsignal package name
         run: npm run prebuild:electron
@@ -54,62 +46,3 @@ jobs:
 
       - name: Run E2E Mock Tests
         run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" npm run test:mock
-
-  # DISABLED: build-linux-win job
-  # Reason: All platform builds are now done locally via scripts/publish-*.sh.
-  # This avoids splitting the release process across CI and local, keeps it consistent,
-  # and eliminates all GitHub Actions minute usage for builds.
-  #
-  # build-linux-win:
-  #   needs: test
-  #   if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
-  #   runs-on: ubuntu-latest
-  #   permissions:
-  #     contents: write
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Setup Node.js
-  #       uses: actions/setup-node@v4
-  #       with:
-  #         node-version: 20
-  #         cache: 'npm'
-  #     - name: Install dependencies
-  #       run: npm install
-  #     - name: Build Linux & Windows
-  #       run: |
-  #         sudo dpkg --add-architecture i386
-  #         sudo apt-get update
-  #         sudo apt-get install -y wine64 wine32 nsis
-  #         npm run prebuild:electron
-  #         npm run build
-  #         npx electron-builder --linux --x64 --arm64
-  #         npm run check:wine && npx electron-builder --win --x64
-  #       env:
-  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  #     - name: Upload to Cloudflare R2
-  #       env:
-  #         AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-  #         AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-  #         AWS_EC2_METADATA_DISABLED: true
-  #       run: |
-  #         aws s3 cp dist/ s3://${{ secrets.R2_BUCKET_NAME }}/ \
-  #           --recursive --exclude "*" \
-  #           --include "*.exe" --include "*.AppImage" --include "*.deb" \
-  #           --include "*.blockmap" --include "*.yml" \
-  #           --endpoint-url ${{ secrets.R2_ACCOUNT_ID }}
-  #         aws s3 cp scripts/install-linux.sh s3://${{ secrets.R2_BUCKET_NAME }}/install-linux.sh \
-  #           --endpoint-url ${{ secrets.R2_ACCOUNT_ID }}
-  #         aws s3 cp scripts/install-windows.ps1 s3://${{ secrets.R2_BUCKET_NAME }}/install-windows.ps1 \
-  #           --endpoint-url ${{ secrets.R2_ACCOUNT_ID }}
-
-  # DISABLED: build-macos job
-  # Reason: macos-latest runner costs 10x free-tier minute rate.
-  # Mac builds are done locally via: ./scripts/publish-mac.sh
-  #
-  # build-macos: (see git history for original config)
-
-  # DISABLED: release job
-  # Reason: Redundant — all artifacts go directly to Cloudflare R2.
-  # GitHub Releases not used as a distribution channel.
-  #
-  # release: (see git history for original config)

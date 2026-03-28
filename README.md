@@ -30,7 +30,13 @@ npm run publish:mac
 # Build & Publish Mac Universal (Includes support for Intel Macs)
 npm run publish:mac:universal
 
-# Build & Publish Linux + Windows only
+# Build & Publish Linux only
+npm run publish:linux
+
+# Build & Publish Windows only
+npm run publish:win
+
+# Build & Publish Linux + Windows together
 npm run publish:linux-win
 ```
 
