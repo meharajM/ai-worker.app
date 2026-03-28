@@ -36,7 +36,7 @@ export interface PlaywrightSettings {
     blockAds?: boolean;
 }
 
-const MODERN_CHROME_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+// UserAgent gets automatically assigned and spoofed by puppeteer-extra-plugin-stealth
 
 /**
  * Manages the underlying Playwright browser, its context, and tab state.
@@ -213,7 +213,6 @@ export class BrowserManager {
                             headless,
                             args: [...launchArgs],
                             viewport: { width: 1280, height: 800 },
-                            userAgent: MODERN_CHROME_UA,
                         };
 
                         if (tryBrowser === 'firefox') {
@@ -232,12 +231,6 @@ export class BrowserManager {
                         console.log(`[BrowserManager] Trying browser: ${tryBrowser}...`);
                         this.clearChromeLock(userDataDir);
                         this.context = await launcher.launchPersistentContext(userDataDir, tryOptions);
-
-                        await this.context!.addInitScript(() => {
-                            Object.defineProperty(navigator, 'webdriver', {
-                                get: () => undefined,
-                            });
-                        });
 
                         const pages = this.context!.pages();
                         if (pages.length > 0) {
@@ -372,7 +365,6 @@ export class BrowserManager {
                         viewport: { width: 1920, height: 1080 },
                         locale: 'en-US',
                         timezoneId: 'America/New_York',
-                        userAgent: MODERN_CHROME_UA,
                         colorScheme: 'dark',
                         deviceScaleFactor: 2,
                         hasTouch: false,
@@ -381,21 +373,6 @@ export class BrowserManager {
 
                     this.clearChromeLock(userDataDirHeadless);
                     this.headlessContext = await stealthChromium.launchPersistentContext(userDataDirHeadless, contextOptions);
-
-                    await this.headlessContext!.addInitScript(() => {
-                        Object.defineProperty(navigator, 'webdriver', {
-                            get: () => undefined,
-                        });
-                        Object.defineProperty(navigator, 'languages', {
-                            get: () => ['en-US', 'en'],
-                        });
-                        Object.defineProperty(navigator, 'hardwareConcurrency', {
-                            get: () => 8,
-                        });
-                        Object.defineProperty(navigator, 'deviceMemory', {
-                            get: () => 8,
-                        });
-                    });
 
                     const pages = this.headlessContext!.pages();
                     if (pages.length > 0) {
