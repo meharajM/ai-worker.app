@@ -380,10 +380,16 @@ export function useAgent(): UseAgentReturn {
                 store.updateSessionProgress(originSessionId, undefined, undefined, existingPlan);
 
                 // Close the Playwright browser to free system resources.
-                // Fire-and-forget — we don't want to block UI cleanup on browser shutdown.
-                import('../lib/electron').then(({ default: electronLib }) => {
-                    electronLib.playwright.closeBrowser().catch(() => {});
-                });
+                // Only close if this was the last active session.
+                // WHY: Concurrent sessions share the same browser instance.
+                const currentProcessingCount = store._processingSessions.size;
+                if (currentProcessingCount === 0) {
+                    import('../lib/electron').then(({ default: electronLib }) => {
+                        electronLib.playwright.closeBrowser().catch(() => {});
+                    });
+                } else {
+                    console.log(`[useAgent] 🕒 Deferring browser shutdown. ${currentProcessingCount} sessions still active.`);
+                }
             }
         },
         // WHY settings in deps: If the user changes LLM provider mid-session,

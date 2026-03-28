@@ -9,7 +9,7 @@
 
 import React from 'react'
 import { motion } from 'framer-motion'
-import { ChatSession } from '../../stores/chatStore'
+import { ChatSession, useChatStore } from '../../stores/chatStore'
 import { AgentPlan } from '../AgentPlan'
 import { MessageAvatar } from './MessageAvatar'
 import { SubTaskChecklist } from './SubTaskChecklist'
@@ -36,6 +36,7 @@ function formatETA(etaSeconds?: number): string | null {
  * Extracted from ChatView for independent styling and experiment control.
  */
 export function ProgressBanner({ session }: ProgressBannerProps) {
+  const isProcessing = useChatStore((s) => s._processingSessions.has(session.id))
   const { isProdView } = useDisplayMode()
 
   if (
@@ -43,25 +44,21 @@ export function ProgressBanner({ session }: ProgressBannerProps) {
     session.progress <= 0 ||
     session.progress >= 100
   ) {
-    // In prod view, still show the SubTaskChecklist if plan exists
-    // (even after progress hits 100, the collapsed checklist is useful)
-    if (isProdView && session.plan) {
-      const allDone = session.plan.steps.every(
-        (s) => s.status === 'completed'
-      )
-      // Only show the collapsed checklist after completion
-      if (allDone) {
-        return (
-          <div className="flex gap-3 justify-start max-w-3xl mx-auto w-full">
-            <MessageAvatar isUser={false} />
-            <div className="flex-1">
-              <SubTaskChecklist plan={session.plan} />
-            </div>
+    // In prod view, still show the SubTaskChecklist if plan exists and we've stopped processing
+    // This ensures that even if an agent fails, the historical checklist remains visible.
+    if (isProdView && session.plan && !isProcessing) {
+      return (
+        <div className="flex gap-3 justify-start max-w-3xl mx-auto w-full">
+          <MessageAvatar isUser={false} />
+          <div className="flex-1">
+            <SubTaskChecklist plan={session.plan} />
           </div>
-        )
-      }
+        </div>
+      )
     }
-    return null
+
+    // If we're not processing and don't meet the above condition, hide the banner
+    if (!isProcessing) return null
   }
 
   return (
