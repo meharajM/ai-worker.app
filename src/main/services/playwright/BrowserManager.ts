@@ -95,7 +95,7 @@ export class BrowserManager {
                     try {
                         fs.unlinkSync(lockPath);
                         console.log(`[BrowserManager] 🔓 Cleared stale lock at ${lockPath}`);
-                    } catch (e) {
+                    } catch {
                         fs.rmSync(lockPath, { force: true, recursive: true });
                         console.log(`[BrowserManager] 🔨 Force removed lock at ${lockPath}`);
                     }
@@ -466,7 +466,7 @@ export class BrowserManager {
                 new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs))
             ]);
             console.log(`[BrowserManager] Successfully closed ${name}`);
-        } catch (e) {
+        } catch (e: any) {
             if (e instanceof Error && e.message === 'TIMEOUT') {
                 console.warn(`[BrowserManager] Abandoning stuck ${name} after ${timeoutMs}ms timeout.`);
             } else {
@@ -483,7 +483,7 @@ export class BrowserManager {
 
         // If a launch is in progress, wait for it before closing
         if (this.initializationPromise) {
-            try { await this.initializationPromise; } catch (e) { }
+            try { await this.initializationPromise; } catch { /* ignore */ }
         }
 
         // Now serialize the close itself

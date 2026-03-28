@@ -37,6 +37,7 @@ import {
   createHandoff,
   cleanupState,
 } from "./agent/AgentStateService";
+import { executeToolCall } from "./mcp";
 import {
   checkForLoop,
   executeWithSelfHealing,
@@ -123,14 +124,8 @@ export class AgentRuntime implements IAgentClient {
       console.log(`[AgentRuntime] Main agent created with ${this.messages.length} historical messages`);
     }
 
+    this.totalIterations = 0;
     this.maxIterations = options.isSubAgent ? 15 : 50;
-    if (options.taskCategory) this.taskCategory = options.taskCategory;
-
-    if (options.taskCategory) {
-      this.taskCategory = options.taskCategory;
-    }
-
-    this.agentInstanceId = options.agentInstanceId || globalThis.crypto.randomUUID();
     this.taskStartTimeMs = Date.now();
     this.specialHandlers = new SpecialToolHandlers(
       this.agentInstanceId,
@@ -264,46 +259,51 @@ export class AgentRuntime implements IAgentClient {
             }))
         );
 
-      if (decomposition.shouldFork && decomposition.type === "multi_context") {
-        // ── Emit progress for parallel orchestration path ────────────────────
-        const ctxCount = decomposition.contexts?.length || 1;
-        this._emitProgress(5);
-        const result = await executeParallelSubAgents(
-          finalPrompt,
-          decomposition,
-          this.options,
-          this.agentInstanceId,
-          (msg) => {
-            // Tick progress forward as each sub-agent message arrives
-            this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (ctxCount * 3))));
-            return this.addMessage(msg);
-          },
-          this._makeSubAgentFactory()
-        );
-        this._emitProgress(100);
-        MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
-        return result;
-      }
+      try {
+        if (decomposition.shouldFork && decomposition.type === "multi_context") {
+          // ── Emit progress for parallel orchestration path ────────────────────
+          const ctxCount = decomposition.contexts?.length || 1;
+          this._emitProgress(5);
+          const result = await executeParallelSubAgents(
+            finalPrompt,
+            decomposition,
+            this.options,
+            this.agentInstanceId,
+            (msg) => {
+              // Tick progress forward as each sub-agent message arrives
+              this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (ctxCount * 3))));
+              return this.addMessage(msg);
+            },
+            this._makeSubAgentFactory()
+          );
+          this._emitProgress(100);
+          MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+          return result;
+        }
 
-      if (decomposition.shouldFork && decomposition.type === "single_context") {
-        // ── Emit progress for sequential orchestration path ──────────────────
-        const stepCount = decomposition.contexts?.length || 3;
-        this._emitProgress(5);
-        const seqResult = await executeSequentialSubAgents(
-          finalPrompt,
-          decomposition,
-          this.options,
-          this.agentInstanceId,
-          (msg) => {
-            // Advance progress by one step slice as each step message arrives
-            this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (stepCount * 2))));
-            return this.addMessage(msg);
-          },
-          this._makeSubAgentFactory()
-        );
-        this._emitProgress(100);
-        MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
-        return seqResult;
+        if (decomposition.shouldFork && decomposition.type === "single_context") {
+          // ── Emit progress for sequential orchestration path ──────────────────
+          const stepCount = decomposition.contexts?.length || 3;
+          this._emitProgress(5);
+          const seqResult = await executeSequentialSubAgents(
+            finalPrompt,
+            decomposition,
+            this.options,
+            this.agentInstanceId,
+            (msg) => {
+              // Advance progress by one step slice as each step message arrives
+              this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (stepCount * 2))));
+              return this.addMessage(msg);
+            },
+            this._makeSubAgentFactory()
+          );
+          this._emitProgress(100);
+          MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+          return seqResult;
+        }
+      } finally {
+        // ALWAYS cleanup local state (in-memory entities) after orchestration finishes
+        await cleanupState(this.agentInstanceId);
       }
     }
 
@@ -328,6 +328,36 @@ export class AgentRuntime implements IAgentClient {
   }
 
   private async _runLoop(finalPrompt: string): Promise<LLMMessage> {
+    try {
+      return await this._executeRunLoop(finalPrompt);
+    } finally {
+      // ── Lifecycle Cleanup ──────────────────────────────────────────────────
+      // WHY here: This finally block runs whether the agent completes, crashes,
+      // or is aborted by the user.
+
+      // 1. Close the agent's dedicated browser tab
+      if (this.options.tabId !== undefined) {
+        try {
+          const { browserLock } = await import("./resource-lock");
+          await browserLock.runExclusive(async () => {
+            // executeToolCall handles routing to the correct tab.
+            await executeToolCall("close_tab", { tabId: this.options.tabId });
+          });
+          console.log(`[AgentRuntime] Closed main agent tab ${this.options.tabId}`);
+          
+          // Clean up the execution lane to prevent memory leaks
+          import("./execution-lanes").then(m => m.laneManager.cleanupTabLane(this.options.tabId!));
+        } catch (e) {
+          console.warn(`[AgentRuntime] Failed to cleanup tab ${this.options.tabId}:`, e);
+        }
+      }
+
+      // 2. Clean up in-memory state (production only)
+      await cleanupState(this.agentInstanceId);
+    }
+  }
+
+  private async _executeRunLoop(finalPrompt: string): Promise<LLMMessage> {
     let iterationCount = 0;
     let consecutiveErrors = 0;
     const recentToolCalls: string[] = [];
@@ -387,7 +417,6 @@ export class AgentRuntime implements IAgentClient {
           this.addMessage(assistantMsg);
         }
 
-        await cleanupState(this.agentInstanceId);
         return assistantMsg;
       }
 
