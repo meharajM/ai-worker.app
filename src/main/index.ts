@@ -27,6 +27,14 @@ app.commandLine.appendSwitch('allow-file-access-from-files') // Allow fetch from
 // Initialize environment (fix PATH, etc.)
 initEnv()
 
+// Force ws to use pure-JS fallbacks in packaged builds.
+// In some bundled production paths, optional native peer deps (bufferutil /
+// utf-8-validate) can resolve to interop stubs and crash at runtime
+// ("bufferUtil$1.mask is not a function"). Disabling native fast-paths keeps
+// connection logic stable across dev + installed universal builds.
+process.env.WS_NO_BUFFER_UTIL = '1'
+process.env.WS_NO_UTF_8_VALIDATE = '1'
+
 // PRODUCTION: Inject Google API Keys if available
 // These are required for Web Speech API to work in built/packaged apps
 // You must provide them via environment variables

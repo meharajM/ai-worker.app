@@ -36,6 +36,15 @@ clean_mac_universal_temps() {
   echo "✅ mac universal temp artifacts cleaned."
 }
 
+auto_clean_native_build_outputs() {
+  echo "🧹 Cleaning native module build outputs..."
+  rm -rf \
+    node_modules/better-sqlite3/build \
+    node_modules/bufferutil/build \
+    node_modules/utf-8-validate/build
+  echo "✅ Native build outputs cleaned."
+}
+
 # ── Load R2 credentials ───────────────────────────────────────────────────────
 if [ ! -f "$ENV_FILE" ]; then
   echo "❌ Missing credentials file: .env.r2"
@@ -153,6 +162,7 @@ if [ "$SKIP_BUILD" = false ]; then
   rm -rf "${MAC_OUT_DIR}"
   mkdir -p "${MAC_OUT_DIR}"
   if [ "$BUILD_TARGET" = "universal" ]; then
+    auto_clean_native_build_outputs
     clean_mac_universal_temps "$MAC_OUT_DIR"
   fi
   npx electron-builder --mac "--${BUILD_TARGET}" --config.directories.output="${MAC_OUT_DIR}"

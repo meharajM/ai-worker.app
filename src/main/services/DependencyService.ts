@@ -1,6 +1,7 @@
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import { app, shell } from 'electron'
+import * as path from 'path'
 
 const execAsync = promisify(exec)
 
@@ -37,7 +38,8 @@ export class DependencyService {
         results.push(await this.checkCommand('ffmpeg', '-version', true))
 
         // Check Python (Required for local MCPs)
-        results.push(await this.checkCommand('python3', '--version', true))
+        const pythonCmd = process.platform === 'win32' ? 'python' : 'python3'
+        results.push(await this.checkCommand(pythonCmd, '--version', true))
 
         // Check uv (Required for uvx)
         results.push(await this.checkCommand('uv', '--version', true))
@@ -148,12 +150,13 @@ export class DependencyService {
         if (process.platform === 'darwin') {
             require('child_process').exec(`open -a Terminal "${scriptPath}"`)
         } else if (process.platform === 'win32') {
-            const psScriptPath = scriptPath.replace('.sh', '.ps1')
-            require('child_process').exec(`start powershell.exe -ExecutionPolicy Bypass -File "${psScriptPath}"`)
+            const psScriptPath = scriptPath.replace(/\.sh$/, '.ps1')
+            // Use Start-Process with -Verb RunAs to request administrative elevation on Windows
+            const command = `powershell.exe -Command "Start-Process PowerShell.exe -ArgumentList '-ExecutionPolicy Bypass', '-File', \\"${psScriptPath}\\"' -Verb RunAs"`
+            require('child_process').exec(command)
         } else {
             // Linux fallback 
             shell.showItemInFolder(scriptPath)
         }
     }
 }
-import * as path from 'path'

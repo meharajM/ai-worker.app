@@ -21,6 +21,7 @@
         "test:playwright": "node tests/playwright_tools_test.cjs",
         "test:speech": "node tests/speech_e2e.cjs",
         "clean": "rm -rf out dist",
+        "clean:native:build": "rm -rf node_modules/better-sqlite3/build node_modules/bufferutil/build node_modules/utf-8-validate/build",
         "clean:state": "rm -rf ~/Library/Application\\ Support/AI-Worker",
         "dev:clean": "npm run clean && rm -rf node_modules/.vite tsconfig.tsbuildinfo && npm run clean:state && npm run dev",
         "check:prebuild": "node tests/prebuild_checks.cjs",
@@ -30,7 +31,7 @@
         "rebuild:mac": "npm run clean && npm run build && electron-builder --mac",
         "rebuild:mac:intel": "npm run prebuild:electron && npm run clean && npm run build && electron-builder --mac --x64",
         "rebuild:mac:arm": "npm run prebuild:electron && npm run clean && npm run build && electron-builder --mac --arm64",
-        "rebuild:mac:universal": "npm run prebuild:electron && npm run clean && npm run build && electron-builder --mac --universal",
+        "rebuild:mac:universal": "npm run prebuild:electron && npm run clean && npm run clean:native:build && npm run build && electron-builder --mac --universal",
         "rebuild:win": "npm run prebuild:electron && npm run check:wine && npm run clean && npm run build && electron-builder --win",
         "rebuild:win:intel": "npm run prebuild:electron && npm run check:wine && npm run clean && npm run build && electron-builder --win --x64",
         "rebuild:win:arm": "npm run prebuild:electron && npm run check:wine && npm run clean && npm run build && electron-builder --win --arm64",
@@ -41,7 +42,7 @@
         "build:mac": "npm run prebuild:electron && npm run build && electron-builder --mac",
         "build:mac:intel": "npm run prebuild:electron && npm run build && electron-builder --mac --x64",
         "build:mac:arm": "npm run prebuild:electron && npm run build && electron-builder --mac --arm64",
-        "build:mac:universal": "npm run prebuild:electron && npm run build && electron-builder --mac zip --universal",
+        "build:mac:universal": "npm run prebuild:electron && npm run clean:native:build && npm run build && electron-builder --mac zip --universal",
         "build:win": "npm run prebuild:electron && npm run check:wine && npm run build && electron-builder --win",
         "build:win:intel": "npm run prebuild:electron && npm run check:wine && npm run build && electron-builder --win --x64",
         "build:win:arm": "npm run prebuild:electron && npm run check:wine && npm run build && electron-builder --win --arm64",
@@ -140,12 +141,27 @@
             "category": "public.app-category.productivity",
             "icon": "build/icon.png"
         },
+        "extraResources": [
+          {
+            "from": "scripts",
+            "to": "scripts",
+            "filter": [
+              "setup-dependencies.sh",
+              "setup-dependencies.ps1"
+            ]
+          }
+        ],
         "win": {
             "target": [
                 "nsis",
                 "portable"
             ],
-            "icon": "build/icon.png"
+            "icon": "build/icon.png",
+            "artifactName": "${productName}-Setup-${version}.${ext}",
+            "publish": {
+                "provider": "generic",
+                "url": "https://downloads.ai-worker.tech"
+            }
         },
         "linux": {
             "target": [
@@ -153,7 +169,11 @@
                 "deb"
             ],
             "category": "Utility",
-            "maintainer": "AI-Worker Team <team@aiworker.app>"
+            "maintainer": "AI-Worker Team <team@aiworker.app>",
+            "publish": {
+                "provider": "generic",
+                "url": "https://downloads.ai-worker.tech"
+            }
         }
     }
 }

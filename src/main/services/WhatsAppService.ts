@@ -144,6 +144,11 @@ export class WhatsAppService extends EventEmitter {
         this.explicitDisconnect = false
         if (this.connectionState.status === 'connected') return
         if (this.connectionState.status === 'connecting') return
+
+        // Keep ws on pure-JS code path for packaged stability.
+        // This avoids optional native addon interop edge-cases in bundled builds.
+        process.env.WS_NO_BUFFER_UTIL = '1'
+        process.env.WS_NO_UTF_8_VALIDATE = '1'
         
         // If we have a saved phone number, use it.
         const effectivePhone: string | null = (targetPhoneNumber ?? this.connectionState.phoneNumber) ?? null
