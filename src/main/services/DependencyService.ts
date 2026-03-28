@@ -151,9 +151,21 @@ export class DependencyService {
             require('child_process').exec(`open -a Terminal "${scriptPath}"`)
         } else if (process.platform === 'win32') {
             const psScriptPath = scriptPath.replace(/\.sh$/, '.ps1')
-            // Use Start-Process with -Verb RunAs to request administrative elevation on Windows
-            const command = `powershell.exe -Command "Start-Process PowerShell.exe -ArgumentList '-ExecutionPolicy Bypass', '-File', \\"${psScriptPath}\\"' -Verb RunAs"`
-            require('child_process').exec(command)
+            // Using spawn to avoid the complex Shell-escaping issues in children processes.
+            // We launch an intermediate PowerShell to trigger Start-Process with 'RunAs' to request elevation.
+            // The inner path is wrapped in double quotes, and the argument list is wrapped in single quotes.
+            const args = [
+                '-NoProfile',
+                '-ExecutionPolicy', 'Bypass',
+                '-Command', `Start-Process PowerShell -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File "${psScriptPath}"' -Verb RunAs`
+            ]
+            
+            const { spawn } = require('child_process')
+            const child = spawn('powershell.exe', args, {
+                detached: true,
+                stdio: 'ignore'
+            })
+            child.unref()
         } else {
             // Linux fallback 
             shell.showItemInFolder(scriptPath)

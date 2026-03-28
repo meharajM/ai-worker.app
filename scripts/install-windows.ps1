@@ -201,21 +201,17 @@ try {
 } catch {}
 
 Write-Host "🔧 Starting the installer..." -ForegroundColor Yellow
-Write-Host "   (File saved to: $DestPath)" -ForegroundColor Gray
-Write-Host "   (Please check your taskbar for a flashing UAC elevation prompt if nothing appears)"
+Write-Host "   (Please check for a Windows User Account Control / UAC prompt on your screen)"
 
+# Try Start-Process with Verb RunAs to force visibility and elevation if needed
 try {
-    # Using 'RunAs' verb to force the UAC prompt to the foreground
-    # Removing -Wait to see if the process starts successfully in a separate thread
-    Start-Process -FilePath $DestPath -Verb RunAs
-    
-    Write-Host ""
-    Write-Host "✅ AI-Worker Setup has been launched!" -ForegroundColor Green
-    Write-Host "   If you still don't see the window, you can manually run it from:"
-    Write-Host "   $DestPath" -ForegroundColor Cyan
+    Start-Process -FilePath $DestPath -Verb RunAs -Wait
 } catch {
-    # If RunAs fails (e.g. user clicks 'No' or environment restricted), fallback to direct run
-    Start-Process -FilePath $DestPath
+    # If user denies UAC or it's not supported, try normal start
+    Write-Host "   (Elevation prompt bypassed, starting normally...)" -ForegroundColor Gray
+    Start-Process -FilePath $DestPath -Wait
 }
 
+Write-Host ""
+Write-Host "✅ Installation process finished!" -ForegroundColor Green
 pause
