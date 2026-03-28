@@ -95,7 +95,7 @@ export class DependencyService {
     private async checkPlaywrightBrowsers(): Promise<DependencyCheckResult> {
         try {
             // Import playwright to evaluate executable paths natively
-            const playwright = require('playwright')
+            const playwright = require('playwright-core')
             const fs = require('fs')
 
             const checks = [

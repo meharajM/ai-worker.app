@@ -9,12 +9,14 @@
  * so components remain testable without mocking Electron.
  */
 
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useRef } from 'react'
 import { useWhatsAppStore, WhatsAppConnectionState } from '../stores/whatsappStore'
 import electron from '../lib/electron'
 
 export function useWhatsAppBridge(): void {
     const setConnectionState = useWhatsAppStore((s) => s.setConnectionState)
+    // Track recently processed message IDs to prevent duplicates
+    const processedMessageIds = useRef<Set<string>>(new Set())
 
     // On mount: fetch initial state from main process
     useEffect(() => {
@@ -51,6 +53,20 @@ export function useWhatsAppBridge(): void {
     }) => {
         const { whatsappEnabled } = useWhatsAppStore.getState()
         if (!whatsappEnabled || message.isFromMe) return
+
+        // Deduplication: prevent processing the same message twice
+        if (processedMessageIds.current.has(message.id)) {
+            console.log(`[useWhatsAppBridge] Skipping duplicate message ID: ${message.id}`);
+            return;
+        }
+
+        processedMessageIds.current.add(message.id);
+        
+        // Prevent unbounded memory growth
+        if (processedMessageIds.current.size > 100) {
+            const first = processedMessageIds.current.values().next().value;
+            if (first) processedMessageIds.current.delete(first);
+        }
 
         // Read state at execution time, not render time (prevents stale closures)
         // Trigger the AI agent execution pipeline via generic window event

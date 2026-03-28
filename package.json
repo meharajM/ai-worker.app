@@ -105,7 +105,7 @@
         "autoprefixer": "^10.4.18",
         "electron": "^40.0.0",
         "electron-builder": "26.4.0",
-        "electron-vite": "^2.3.0",
+        "electron-vite": "^5.0.0",
         "eslint": "^9.21.0",
         "eslint-plugin-react": "^7.37.4",
         "eslint-plugin-react-hooks": "^5.2.0",

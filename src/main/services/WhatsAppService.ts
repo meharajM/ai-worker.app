@@ -508,7 +508,7 @@ export class WhatsAppService extends EventEmitter {
             // Send the handshake message
             // We do NOT send the code in the message. The code is shown on the computer screen.
             // This proves the person at the computer has control over the phone.
-            const intro = `🤖 *AI-Worker Verification*\n\nPlease reply to this message with the *6-digit verification code* shown on your computer screen to link this as your personal device.`
+            const intro = `📬 *AI-Worker Verification*\n\nPlease reply to this message with the *6-digit verification code* shown on your computer screen to link this as your personal device.`
             
             const jid = formatWhatsAppJid(normalized)
             console.log(`[WhatsAppService] Attempting handshake to JID: ${jid} (Input: ${normalized})`)
