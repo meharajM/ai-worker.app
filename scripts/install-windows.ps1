@@ -14,28 +14,23 @@ try {
 
 $R2Base = "https://downloads.ai-worker.tech"
 $TempDir = [System.IO.Path]::GetTempPath()
-$ManifestUrl = "$R2Base/latest.yml"
+# Using a fixed but fresh manifest URL to fetch the latest info
+$ManifestUrl = "$R2Base/latest.yml?v=$([DateTime]::UtcNow.Ticks)"
 
 Write-Host "🚀 AI-Worker Installer" -ForegroundColor Cyan
 Write-Host "Fetching latest version info..."
 
-# Robust fetch: Set SecurityProtocol and use Invoke-WebRequest with explicit decoding if needed
+# Robust manifest fetch: Force TLS 1.2+ and use Invoke-WebRequest with explicit decoding
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
     
-    # Use Invoke-RestMethod for auto-decoding text, fallback if it returns unexpected types
-    $Response = Invoke-RestMethod -Uri $ManifestUrl -UseBasicParsing -TimeoutSec 30
+    # Try reaching the manifest with a fresh query param to bypass CDN cache
+    $RawResponse = Invoke-WebRequest -Uri $ManifestUrl -UseBasicParsing -TimeoutSec 30 -Headers @{ "Cache-Control" = "no-cache" }
     
-    if ($Response -is [string]) {
-        $ManifestContent = $Response
+    if ($RawResponse.Content -is [System.String]) {
+        $ManifestContent = $RawResponse.Content
     } else {
-        # If PS returns an object (dictionary) or bytes, try to get raw content
-        $RawResponse = Invoke-WebRequest -Uri $ManifestUrl -UseBasicParsing -TimeoutSec 30
-        if ($RawResponse.Content -is [System.String]) {
-            $ManifestContent = $RawResponse.Content
-        } else {
-            $ManifestContent = [System.Text.Encoding]::UTF8.GetString($RawResponse.Content)
-        }
+        $ManifestContent = [System.Text.Encoding]::UTF8.GetString($RawResponse.Content)
     }
 } catch {
     Write-Host "❌ Could not fetch version info. Please check your internet connection." -ForegroundColor Red
@@ -44,48 +39,42 @@ try {
     exit 1
 }
 
-# Robust parsing: Look for fields anywhere in the file but prioritize top-level matches
+# Robust parsing: Line-by-line check to handle CRLF and indentation safely
 $ExeFile = $null
 $ExpectedSha = $null
 $ExpectedSize = 0
 
-# Extract fields using line-by-line check to handle CRLF and indentation safely
 foreach ($line in ($ManifestContent -split "\r?\n")) {
     $cleanLine = $line.Trim()
     
-    # Try to find 'path' (top-level preference)
+    # Prioritize top-level 'path'
     if ($line -match '^path:\s*["'']?([^"''\r\n]+\.exe)["'']?') {
         $ExeFile = $Matches[1].Trim()
     }
-    # Fallback to 'url' inside files list if path isn't found yet
+    # Fallback to 'url' inside files list
     elseif (-not $ExeFile -and $line -match '^\s*-\s*url:\s*["'']?([^"''\r\n]+\.exe)["'']?') {
         $ExeFile = $Matches[1].Trim()
     }
     
-    # Extract sha512 (takes first one found)
+    # Extract sha512 (first one wins)
     if (-not $ExpectedSha -and $line -match 'sha512:\s*["'']?([A-Za-z0-9+/=]+)["'']?') {
         $ExpectedSha = $Matches[1].Trim()
     }
     
-    # Extract size (takes first one found)
+    # Extract size (first one wins)
     if ($ExpectedSize -eq 0 -and $line -match 'size:\s*(\d+)') {
         $ExpectedSize = [int64]$Matches[1]
     }
 }
 
 if (-not $ExeFile) {
-    Write-Host "❌ Could not determine the latest build filename from manifest." -ForegroundColor Red
-    # Debug info for the user if it fails
-    Write-Host "--- Manifest Content Preview ---" -ForegroundColor Gray
-    Write-Host ($ManifestContent.SubString(0, [Math]::Min(200, $ManifestContent.Length))) -ForegroundColor Gray
+    Write-Host "❌ Failed to identify latest installer file in manifest." -ForegroundColor Red
     pause
     exit 1
 }
 
 $DownloadUrl = "$R2Base/$ExeFile"
-# Use Ticks for cache busting
-$CacheBust = (Get-Date).Ticks
-$DownloadUrlFallback = "$R2Base/$ExeFile?v=$CacheBust"
+$DownloadUrlFallback = "$R2Base/$ExeFile?v=$([DateTime]::UtcNow.Ticks)"
 $DestPath = Join-Path $TempDir $ExeFile
 
 function Get-FileSha512Base64 {
@@ -107,26 +96,15 @@ function Get-FileSha512Base64 {
 function Validate-DownloadedFile {
     param(
         [string]$Path,
-        [string]$ExpectedSha512,
-        [Int64]$ExpectedBytes
+        [string]$ExpectedSha512
     )
 
     if (-not (Test-Path $Path)) { return $false }
 
-    # Validate size first (fast)
-    if ($ExpectedBytes -gt 0) {
-        $actualBytes = (Get-Item $Path).Length
-        if ($actualBytes -ne $ExpectedBytes) { 
-            Write-Host "   (Size mismatch: expected $ExpectedBytes, got $actualBytes)" -ForegroundColor Gray
-            return $false 
-        }
-    }
-
-    # Validate checksum (slow but certain)
+    # Rely primarily on SHA512 SHA check (as size matches can be misleading due to CDN compression)
     if ($ExpectedSha512) {
         $actualSha = Get-FileSha512Base64 -Path $Path
         if ($actualSha -ne $ExpectedSha512) { 
-            Write-Host "   (Checksum mismatch)" -ForegroundColor Gray
             return $false 
         }
     }
@@ -140,19 +118,20 @@ function Download-File {
         [string]$Destination
     )
 
-    # Disable PowerShell's progress bar (which notably slows down large file downloads by 10x)
     $OriginalProgressPreference = $ProgressPreference
     $ProgressPreference = 'SilentlyContinue'
 
     try {
-        # Try BITS first - it utilizes multiple connections natively and is generally more efficient
-        try {
-            Start-BitsTransfer -Source $Url -Destination $Destination -ErrorAction Stop
-            return
-        } catch {
-            # BITS failed, fallback to Invoke-WebRequest
-            Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing -TimeoutSec 300
+        # Try curl.exe first if available (native in Windows 10+/11, avoids BITS service overhead)
+        $curl = (Get-Command "curl.exe" -ErrorAction SilentlyContinue)
+        if ($curl) {
+            $curlArgs = @("-fL", "--progress-bar", $Url, "-o", $Destination, "-H", "Cache-Control: no-cache")
+            & $curl.Source @curlArgs
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $Destination)) { return }
         }
+
+        # Fallback to Invoke-WebRequest with explicit cache-busting headers
+        Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing -TimeoutSec 600 -Headers @{ "Cache-Control" = "no-cache" }
     } finally {
         $ProgressPreference = $OriginalProgressPreference
     }
@@ -160,43 +139,43 @@ function Download-File {
 
 Write-Host "📦 Downloading $ExeFile..."
 
-# Primary download attempt
+# Download and Validate
 try {
     if (Test-Path $DestPath) { Remove-Item $DestPath -Force }
     Download-File -Url $DownloadUrl -Destination $DestPath
 } catch {
-    Write-Host "   (Primary download failed, retrying with cache-busting...)" -ForegroundColor Yellow
+    Write-Host "   (Retrying with refresh URL...)" -ForegroundColor Yellow
     try {
         if (Test-Path $DestPath) { Remove-Item $DestPath -Force }
         Download-File -Url $DownloadUrlFallback -Destination $DestPath
     } catch {
-        Write-Host "❌ Failed to download installer from all available sources." -ForegroundColor Red
+        Write-Host "❌ Download failed." -ForegroundColor Red
         pause
         exit 1
     }
 }
 
-# If the file exists but doesn't match checksum (possibly CDN cache issue), retry once with cache-busting
-if (-not (Validate-DownloadedFile -Path $DestPath -ExpectedSha512 $ExpectedSha -ExpectedBytes $ExpectedSize)) {
-    Write-Host "   (Verification failed, retrying download with refresh...)" -ForegroundColor Yellow
+# Validation Pass
+if (-not (Validate-DownloadedFile -Path $DestPath -ExpectedSha512 $ExpectedSha)) {
+    Write-Host "   (Validation failed, performing critical refresh...)" -ForegroundColor Yellow
     try {
         if (Test-Path $DestPath) { Remove-Item $DestPath -Force }
         Download-File -Url $DownloadUrlFallback -Destination $DestPath
     } catch {
-        Write-Host "❌ Retry download failed." -ForegroundColor Red
+        Write-Host "❌ Refresh download failed." -ForegroundColor Red
         pause
         exit 1
     }
 }
 
-# Final validation pass
-if (-not (Validate-DownloadedFile -Path $DestPath -ExpectedSha512 $ExpectedSha -ExpectedBytes $ExpectedSize)) {
-    Write-Host "❌ Downloaded installer is corrupt or does not match manifest information." -ForegroundColor Red
+# Final Check
+if (-not (Validate-DownloadedFile -Path $DestPath -ExpectedSha512 $ExpectedSha)) {
+    Write-Host "❌ Downloaded installer checksum does not match latest manifest." -ForegroundColor Red
     pause
     exit 1
 }
 
-# Remove the Zone.Identifier alternate data stream (Mark of the Web) to prevent security prompts
+# Unblock file
 try {
     if (Get-Command Unblock-File -ErrorAction SilentlyContinue) {
         Unblock-File -Path $DestPath
