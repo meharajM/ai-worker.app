@@ -87,13 +87,22 @@ export class BrowserManager {
      */
     private clearChromeLock(userDataDir: string) {
         try {
-            const lockPath = path.join(userDataDir, 'SingletonLock');
-            if (fs.existsSync(lockPath)) {
-                fs.unlinkSync(lockPath);
-                console.log(`[BrowserManager] 🔓 Cleared stale SingletonLock at ${lockPath}`);
-            }
+            // Aggressive lock cleanup: SingletonLock, SingletonSocket, SingletonCookie
+            // Chrome leaves these behind on crash, blocking future launches in persistent mode.
+            ['SingletonLock', 'SingletonSocket', 'SingletonCookie'].forEach(lockFile => {
+                const lockPath = path.join(userDataDir, lockFile);
+                if (fs.existsSync(lockPath)) {
+                    try {
+                        fs.unlinkSync(lockPath);
+                        console.log(`[BrowserManager] 🔓 Cleared stale ${lockFile} at ${lockPath}`);
+                    } catch (err) {
+                        // Unlink might fail if another process really is using it
+                        console.warn(`[BrowserManager] Could not delete ${lockFile} (may be in use):`, err);
+                    }
+                }
+            });
         } catch (e) {
-            console.warn(`[BrowserManager] Failed to clear SingletonLock:`, e);
+            console.warn(`[BrowserManager] Failed during aggressive lock cleanup:`, e);
         }
     }
 
@@ -225,9 +234,27 @@ export class BrowserManager {
                         this.context = await launcher.launchPersistentContext(userDataDir, tryOptions);
 
                         await this.context!.addInitScript(() => {
+                            // 1. Mask webdriver
                             Object.defineProperty(navigator, 'webdriver', {
                                 get: () => undefined,
                             });
+                            // 2. Mask languages
+                            Object.defineProperty(navigator, 'languages', {
+                                get: () => ['en-US', 'en'],
+                            });
+                            // 3. Mask Chrome runtime
+                            if (!(window as any).chrome) {
+                                (window as any).chrome = { runtime: {} };
+                            }
+                            // 4. Fix permissions
+                            const nav = navigator as any;
+                            if (nav.permissions) {
+                                const originalQuery = nav.permissions.query;
+                                nav.permissions.query = (parameters: any) =>
+                                    parameters.name === 'notifications'
+                                        ? Promise.resolve({ state: Notification.permission })
+                                        : originalQuery(parameters);
+                            }
                         });
 
                         const pages = this.context!.pages();

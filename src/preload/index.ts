@@ -14,6 +14,11 @@ const electronAPI = {
             ipcRenderer.invoke('mcp:call-tool', serverId, toolName, args),
     },
 
+    // Playwright browser lifecycle
+    playwright: {
+        closeBrowser: () => ipcRenderer.invoke('playwright:close-browser'),
+    },
+
     // LLM operations (for future main process LLM handling)
     llm: {
         chat: (messages: unknown[], tools?: unknown[]) =>

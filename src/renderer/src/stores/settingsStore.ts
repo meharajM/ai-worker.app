@@ -7,6 +7,7 @@ import { getUserProfile } from '../lib/firebase'
 export type Theme = 'dark' | 'light' | 'system'
 export type LLMProviderType = 'auto' | 'ollama' | 'openai' | 'gemini' | 'openrouter' | 'browser' | 'anthropic' | 'groq'
 export type PlaywrightBrowserType = 'auto' | 'chrome' | 'msedge' | 'firefox' | 'webkit' | 'chromium'
+export type DisplayMode = 'dev' | 'prod'
 
 interface SettingsState {
     // Voice settings
@@ -33,6 +34,11 @@ interface SettingsState {
 
     // Appearance
     theme: Theme
+
+    // Display mode: 'dev' shows all internals, 'prod' shows clean sub-task view
+    displayMode: DisplayMode
+    /** When true AND displayMode === 'dev', renders as prod to preview the user experience */
+    devPreviewProd: boolean
 
     // MCP Playwright Browser settings
     playwrightBrowser: PlaywrightBrowserType
@@ -66,6 +72,8 @@ interface SettingsState {
     setOpenrouterModel: (model: string) => void
     setBrowserModel: (model: string) => void
     setTheme: (theme: Theme) => void
+    setDisplayMode: (mode: DisplayMode) => void
+    setDevPreviewProd: (preview: boolean) => void
     setPlaywrightBrowser: (browser: PlaywrightBrowserType) => void
     setPlaywrightHeadless: (headless: boolean) => void
     setFileSystemSafeMode: (enabled: boolean) => void
@@ -107,6 +115,8 @@ const defaultSettings = {
     openrouterModel: LLM_CONFIG.OPENROUTER.DEFAULT_MODEL,
     browserModel: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', // Default small model
     theme: 'dark' as Theme,
+    displayMode: 'dev' as DisplayMode, // Default to dev; flip to 'prod' for release builds
+    devPreviewProd: false,
     playwrightBrowser: 'auto' as PlaywrightBrowserType, // Auto-detect based on OS
     playwrightHeadless: false, // Default to headed for user visibility
     fileSystemSafeMode: true, // Default to safe mode (shadow writes)
@@ -164,6 +174,8 @@ export const useSettingsStore = create<SettingsState>()(
             setOpenrouterModel: (model) => set({ openrouterModel: model }),
             setBrowserModel: (model) => set({ browserModel: model }),
             setTheme: (theme) => set({ theme }),
+            setDisplayMode: (mode) => set({ displayMode: mode }),
+            setDevPreviewProd: (preview) => set({ devPreviewProd: preview }),
             setPlaywrightBrowser: async (browser) => {
                 set({ playwrightBrowser: browser })
                 // Also save to main process store for PlaywrightService to read

@@ -26,6 +26,7 @@ import { chat } from "../llm";
 import { executeToolCall, parseTabIdFromResult } from "../mcp";
 import { generateSubAgentInstruction, type TaskDecomposition } from "../task-decomposer";
 import { type LLMMessage } from "../types";
+import { type ExecutionPlan } from "../agent-protocol";
 import { type AgentRuntimeOptions } from "./types";
 import { preSeedSubAgentMemory } from "./AgentStateService";
 import { laneManager } from "../execution-lanes";
@@ -74,9 +75,23 @@ export async function executeParallelSubAgents(
     parentOptions: AgentRuntimeOptions,
     parentAgentId: string,
     addMessage: (msg: LLMMessage) => string | void,
-    spawnSubAgent: SubAgentFactory
+    spawnSubAgent: SubAgentFactory,
+    onPlanUpdate?: (plan: ExecutionPlan) => void
 ): Promise<LLMMessage> {
     const { contexts } = decomposition;
+
+    // ── Convert parallel contexts to ExecutionPlan for the UI ──────────────
+    // WHY: Parallel tasks don't have a JSON plan yet, so we treat each context
+    // as a sub-task "Process {context}".
+    const executionPlan: ExecutionPlan = {
+        goal: originalRequest,
+        steps: contexts.map((ctx, i) => ({
+            id: i + 1,
+            description: `Process ${ctx}`,
+            status: "pending" as const,
+        })),
+    };
+    onPlanUpdate?.(executionPlan);
 
     // Helper to salvage data from a sub-agent
     const extractPartialFindings = async (subAgentInstance: any): Promise<string[]> => {
@@ -133,6 +148,13 @@ export async function executeParallelSubAgents(
     const subAgentPromises = contexts.map(async (context, index) => {
         const instruction = generateSubAgentInstruction(originalRequest, context, contexts);
         const subAgentId = globalThis.crypto.randomUUID();
+
+        // Mark step as active in the ExecutionPlan
+        const planStep = executionPlan.steps[index];
+        if (planStep) {
+            planStep.status = "active";
+            onPlanUpdate?.(executionPlan);
+        }
 
         // Pre-seed memory so the sub-agent can find its state entity on init
         await preSeedSubAgentMemory(
@@ -236,6 +258,14 @@ export async function executeParallelSubAgents(
             agentStatuses[index].isRunning = false;
             agentStatuses[index].result = finalResultStr;
             agentStatuses[index].status = finalStatus;
+
+            // Mark step as completed or failed in the ExecutionPlan
+            const finishedStep = executionPlan.steps[index];
+            if (finishedStep) {
+                finishedStep.status = isSuccess ? "completed" : "failed";
+                finishedStep.result = finalResultStr.substring(0, 200);
+            }
+            onPlanUpdate?.(executionPlan);
 
             if (statusMessageId && parentOptions.onMessageUpdate) {
                 parentOptions.onMessageUpdate(statusMessageId, { content: renderStatus() });
@@ -370,18 +400,20 @@ export async function executeSequentialSubAgents(
     parentOptions: AgentRuntimeOptions,
     parentAgentId: string,
     addMessage: (msg: LLMMessage) => string | void,
-    spawnSubAgent: SubAgentFactory
+    spawnSubAgent: SubAgentFactory,
+    onPlanUpdate?: (plan: ExecutionPlan) => void
 ): Promise<LLMMessage> {
     const { contexts, estimatedActions } = decomposition;
     const targetContext = contexts[0] || "task";
 
     // Notify user about auto-orchestration
-    const planMessage: LLMMessage = {
+    // NOTE: Only call addMessage OR onMessage — not both.
+    // addMessage (from AgentRuntime) already calls onMessage internally,
+    // so calling both results in duplicate UI messages.
+    addMessage({
         role: "assistant",
         content: `📋 **Auto-Orchestration**: This task requires ~${estimatedActions} steps. I'll break it down and execute each part efficiently to preserve context.\n\nAnalyzing...`,
-    };
-    addMessage(planMessage);
-    parentOptions.onMessage?.(planMessage);
+    });
 
     // ── Step 1: Generate plan via LLM ──────────────────────────────────────────
     console.log("[OrchestrationService] Generating execution plan...");
@@ -443,15 +475,26 @@ Format as JSON:
         const steps = planData.steps;
         console.log(`[OrchestrationService] Plan created with ${steps.length} steps`);
 
-        // Display plan to user
-        const planDisplayMsg: LLMMessage = {
+        // ── Convert to ExecutionPlan for the SubTaskChecklist UI ──────────────
+        // WHY: The SubTaskChecklist reads session.plan (ExecutionPlan type).
+        // Without this, the checklist never renders because session.plan stays undefined.
+        const executionPlan: ExecutionPlan = {
+            goal: originalRequest,
+            steps: steps.map(s => ({
+                id: s.id,
+                description: s.description,
+                status: 'pending' as const,
+            })),
+        };
+        onPlanUpdate?.(executionPlan);
+
+        // Display plan to user (addMessage only — it calls onMessage internally)
+        addMessage({
             role: "assistant",
             content: `## Execution Plan\n\n${steps
                 .map((s) => `**Step ${s.id}**: ${s.description}`)
                 .join("\n")}\n\n---\n`,
-        };
-        addMessage(planDisplayMsg);
-        parentOptions.onMessage?.(planDisplayMsg);
+        });
 
         // ── Step 2: Execute each step via sub-agent ────────────────────────────────
         const results: Array<{ step: number; description: string; result: string }> = [];
@@ -479,27 +522,54 @@ Format as JSON:
             return partials;
         };
 
-        for (const step of steps) {
-            if (parentOptions.signal?.aborted) {
-                console.log("[OrchestrationService] Sequential orchestration aborted by user");
-                throw new Error("Aborted by user");
+        // ── Provision a SINGLE shared tab for all sequential steps ────────────
+        // WHY: Without this, each sub-agent opens its own browser instance,
+        // causing the Playwright explosion visible in the task bar.
+        const useHeadless = parentOptions.isHeadless === true;
+        let sharedTabId: number | undefined;
+        if (!useHeadless) {
+            try {
+                const { browserLock } = await import("../resource-lock");
+                const tabResult = await browserLock.runExclusive(async () =>
+                    executeToolCall("new_tab", { url: "about:blank" })
+                );
+                const parsedTabId = parseTabIdFromResult(tabResult);
+                if (parsedTabId !== undefined) {
+                    sharedTabId = parsedTabId;
+                    console.log(`[OrchestrationService] Provisioned shared tab ${sharedTabId} for sequential sub-agents`);
+                }
+            } catch (e) {
+                console.warn("[OrchestrationService] Failed to provision shared tab", e);
             }
+        }
 
-            console.log(`[OrchestrationService] Executing step ${step.id}: ${step.description}`);
+        try {
+            for (const step of steps) {
+                if (parentOptions.signal?.aborted) {
+                    console.log("[OrchestrationService] Sequential orchestration aborted by user");
+                    throw new Error("Aborted by user");
+                }
 
-            // Build context from previous steps
-            const previousStepsSummary =
-                results.length > 0
-                    ? `\n\nCOMPLETED STEPS:\n${results
-                        .map(
-                            (r) =>
-                                `- Step ${r.step}: ${r.result.substring(0, 100)}${r.result.length > 100 ? "..." : ""
-                                }`
-                        )
-                        .join("\n")}`
-                    : "";
+                console.log(`[OrchestrationService] Executing step ${step.id}: ${step.description}`);
 
-            const subAgentInstruction = `GOAL: ${originalRequest}
+                // Mark step as active in the ExecutionPlan for the SubTaskChecklist
+                const planStep = executionPlan.steps.find(s => s.id === step.id);
+                if (planStep) planStep.status = 'active';
+                onPlanUpdate?.(executionPlan);
+
+                // Build context from previous steps
+                const previousStepsSummary =
+                    results.length > 0
+                        ? `\n\nCOMPLETED STEPS:\n${results
+                            .map(
+                                (r) =>
+                                    `- Step ${r.step}: ${r.result.substring(0, 100)}${r.result.length > 100 ? "..." : ""
+                                    }`
+                            )
+                            .join("\n")}`
+                        : "";
+
+                const subAgentInstruction = `GOAL: ${originalRequest}
 
 CURRENT STEP (${step.id}/${steps.length}): ${step.description}
 ${previousStepsSummary}
@@ -507,97 +577,126 @@ ${previousStepsSummary}
 Execute this step using available tools. State persists from previous steps.
 End with "✓ Done" and a brief result.`;
 
-            const subAgentId = globalThis.crypto.randomUUID();
+                const subAgentId = globalThis.crypto.randomUUID();
 
-            await preSeedSubAgentMemory(
-                subAgentId,
-                parentAgentId,
-                parentOptions.activeSessionId,
-                [
-                    `Sequential sub-agent for step ${step.id}/${steps.length}`,
-                    `Task: ${step.description}`,
-                    `Parent task: ${originalRequest}`,
-                    `Initialized at ${new Date().toISOString()}`,
-                ].join("\n"),
-                { stepId: step.id, stepDescription: step.description }
-            );
+                await preSeedSubAgentMemory(
+                    subAgentId,
+                    parentAgentId,
+                    parentOptions.activeSessionId,
+                    [
+                        `Sequential sub-agent for step ${step.id}/${steps.length}`,
+                        `Task: ${step.description}`,
+                        `Parent task: ${originalRequest}`,
+                        `Initialized at ${new Date().toISOString()}`,
+                    ].join("\n"),
+                    { stepId: step.id, stepDescription: step.description }
+                );
 
-            const subAgent = spawnSubAgent({
-                agentInstanceId: subAgentId,
-                parentAgentId,
-                isSubAgent: true,
-                isHeadless: parentOptions.isHeadless,
-                taskCategory: parentOptions.taskCategory,
-                onMessage: (msg) => {
-                    const contentStr =
-                        typeof msg.content === "string"
-                            ? msg.content
-                            : (msg.content as any[]).map((c: any) => (c.type === "text" ? c.text : "[Image]")).join(" ");
-                    console.log(`[SubAgent:Step${step.id}] ${msg.role}: ${contentStr?.substring(0, 50)}...`);
-                },
-            });
-
-            try {
-                const stepResult = await subAgent.chat(subAgentInstruction);
-                const stepContent =
-                    typeof stepResult.content === "string"
-                        ? stepResult.content
-                        : (stepResult.content as any[]).map((c: any) => (c.type === "text" ? c.text : "")).join("");
-
-                // Detect bailout
-                const isBailout = stepContent.includes("consecutive errors") ||
-                    stepContent.includes("stopping to prevent an infinite loop");
-
-                if (isBailout) {
-                    const partials = await extractPartialFindings(subAgent);
-                    let finalStepContent = stepContent;
-                    if (partials.length > 0) {
-                        finalStepContent = `Step bailed out. Partial data collected:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
-                    }
-                    console.warn(`[OrchestrationService] Sequential step ${step.id} bailed out. Salvaged ${partials.length} findings.`);
-                    results.push({ step: step.id, description: step.description, result: finalStepContent.trim() });
-                } else {
-                    results.push({ step: step.id, description: step.description, result: stepContent.trim() });
-                }
-
-                const progressMessage: LLMMessage = {
-                    role: "assistant",
-                    content: `✓ **Step ${step.id} completed**\n${stepContent.substring(0, 150)}${stepContent.length > 150 ? "..." : ""
-                        }`,
-                };
-                addMessage(progressMessage);
-                parentOptions.onMessage?.(progressMessage);
-            } catch (error: any) {
-                console.error(`[OrchestrationService] Step ${step.id} failed:`, error);
-
-                // Try to salvage partial data even on a hard crash
-                let partialsMsg = "";
-                try {
-                    const partials = await extractPartialFindings(subAgent);
-                    if (partials.length > 0) {
-                        partialsMsg = `\n\nPartial data collected before crash:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
-                        console.warn(`[OrchestrationService] Sequential step ${step.id} crashed. Salvaged ${partials.length} findings.`);
-                    }
-                } catch (e) { }
-
-                results.push({
-                    step: step.id,
-                    description: step.description,
-                    result: `Error: ${error.message}${partialsMsg}`,
+                const subAgent = spawnSubAgent({
+                    agentInstanceId: subAgentId,
+                    parentAgentId,
+                    isSubAgent: true,
+                    isHeadless: useHeadless,
+                    tabId: sharedTabId,    // Share the single provisioned tab
+                    taskCategory: parentOptions.taskCategory,
+                    onMessage: (msg) => {
+                        const contentStr =
+                            typeof msg.content === "string"
+                                ? msg.content
+                                : (msg.content as any[]).map((c: any) => (c.type === "text" ? c.text : "[Image]")).join(" ");
+                        console.log(`[SubAgent:Step${step.id}] ${msg.role}: ${contentStr?.substring(0, 50)}...`);
+                    },
                 });
+
+                try {
+                    const stepResult = await subAgent.chat(subAgentInstruction);
+                    const stepContent =
+                        typeof stepResult.content === "string"
+                            ? stepResult.content
+                            : (stepResult.content as any[]).map((c: any) => (c.type === "text" ? c.text : "")).join("");
+
+                    // Detect bailout
+                    const isBailout = stepContent.includes("consecutive errors") ||
+                        stepContent.includes("stopping to prevent an infinite loop");
+
+                    if (isBailout) {
+                        const partials = await extractPartialFindings(subAgent);
+                        let finalStepContent = stepContent;
+                        if (partials.length > 0) {
+                            finalStepContent = `Step bailed out. Partial data collected:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
+                        }
+                        console.warn(`[OrchestrationService] Sequential step ${step.id} bailed out. Salvaged ${partials.length} findings.`);
+                        results.push({ step: step.id, description: step.description, result: finalStepContent.trim() });
+                    } else {
+                        results.push({ step: step.id, description: step.description, result: stepContent.trim() });
+                    }
+
+                    // Mark step as completed in the ExecutionPlan
+                    const completedStep = executionPlan.steps.find(s => s.id === step.id);
+                    if (completedStep) {
+                        completedStep.status = 'completed';
+                        completedStep.result = stepContent.substring(0, 200);
+                    }
+                    onPlanUpdate?.(executionPlan);
+
+                    // Only addMessage — it calls onMessage internally
+                    addMessage({
+                        role: "assistant",
+                        content: `✓ **Step ${step.id} completed**\n${stepContent.substring(0, 150)}${stepContent.length > 150 ? "..." : ""
+                            }`,
+                    });
+                } catch (error: any) {
+                    console.error(`[OrchestrationService] Step ${step.id} failed:`, error);
+
+                    // Try to salvage partial data even on a hard crash
+                    let partialsMsg = "";
+                    try {
+                        const partials = await extractPartialFindings(subAgent);
+                        if (partials.length > 0) {
+                            partialsMsg = `\n\nPartial data collected before crash:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
+                            console.warn(`[OrchestrationService] Sequential step ${step.id} crashed. Salvaged ${partials.length} findings.`);
+                        }
+                    } catch (e) { }
+
+                    // Mark step as failed in the ExecutionPlan
+                    const failedStep = executionPlan.steps.find(s => s.id === step.id);
+                    if (failedStep) failedStep.status = 'failed';
+                    onPlanUpdate?.(executionPlan);
+
+                    results.push({
+                        step: step.id,
+                        description: step.description,
+                        result: `Error: ${error.message}${partialsMsg}`,
+                    });
+                }
+            }
+        } finally {
+            // ── Step 3: Clean up shared tab ──────────────────────────────────────────
+            // WHY finally: Guarantees cleanup even if the loop throws or user aborts.
+            if (sharedTabId !== undefined) {
+                try {
+                    const { browserLock } = await import("../resource-lock");
+                    await browserLock.runExclusive(async () =>
+                        executeToolCall("close_tab", { tabId: sharedTabId })
+                    );
+                    laneManager.cleanupTabLane(sharedTabId);
+                    console.log(`[OrchestrationService] Closed shared sequential tab ${sharedTabId}`);
+                } catch (e) {
+                    console.warn(`[OrchestrationService] Failed to close shared tab ${sharedTabId}`, e);
+                }
             }
         }
 
-        // ── Step 3: Compile final summary ──────────────────────────────────────────
+        // ── Step 4: Compile final summary ──────────────────────────────────────────
         let finalSummary = `## Task Complete\n\n`;
         for (const result of results) {
             finalSummary += `**${result.description}**\n${result.result}\n\n`;
         }
         finalSummary += `---\n\n*Sequential orchestration complete: ${results.length} steps executed.*`;
 
+        // Only addMessage — it calls onMessage internally
         const finalMessage: LLMMessage = { role: "assistant", content: finalSummary };
         addMessage(finalMessage);
-        parentOptions.onMessage?.(finalMessage);
 
         return finalMessage;
     } catch (error: any) {
