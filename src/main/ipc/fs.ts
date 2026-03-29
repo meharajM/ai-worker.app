@@ -37,6 +37,35 @@ export function registerFsHandlers(): void {
         }
     })
 
+    ipcMain.handle('fs:approve-token', async (_event, token: string) => {
+        try {
+            const fsService = FileSystemService.getInstance()
+            return await fsService.approveByToken(token, 'wa')
+        } catch (error) {
+            return { success: false, error: error instanceof Error ? error.message : String(error) }
+        }
+    })
+
+    ipcMain.handle('fs:reject-token', async (_event, token: string) => {
+        try {
+            const fsService = FileSystemService.getInstance()
+            return await fsService.rejectByToken(token, 'wa')
+        } catch (error) {
+            return { success: false, error: error instanceof Error ? error.message : String(error) }
+        }
+    })
+
+    if (process.env.NODE_ENV === 'test') {
+        ipcMain.handle('fs:test-force-whatsapp-approval', async (_event, changeId: string, token?: string) => {
+            try {
+                const fsService = FileSystemService.getInstance()
+                return fsService.forceRemoteApprovalForTesting(changeId, token)
+            } catch (error) {
+                return { success: false, error: error instanceof Error ? error.message : String(error) }
+            }
+        })
+    }
+
     // Secure internal file writer (Bypasses Safe Mode, restricted to .ai-worker folder)
     ipcMain.handle('fs:write-internal-file', async (_event, workspacePath: string | undefined | null, filename: string, content: string) => {
         try {

@@ -24,6 +24,7 @@ import { analyzeToolOutput } from "../result-reporter";
 import { type LLMMessage } from "../types";
 import { laneManager } from "../execution-lanes";
 import { STATEFUL_BROWSER_TOOLS } from "../client-tools";
+import { RunWorkLedger } from "./RunWorkLedger";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -155,9 +156,20 @@ export async function executeWithSelfHealing(
     tabId: number | undefined,
     workspacePath: string | undefined,
     signal: AbortSignal | undefined,
-    isHeadless?: boolean
+    isHeadless?: boolean,
+    ledger?: RunWorkLedger
 ): Promise<{ result: unknown; error?: string }> {
-    return _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, 1, Date.now());
+    const result = await _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, 1, Date.now());
+    
+    if (ledger) {
+        if (result.error) {
+            ledger.recordToolError(name, result.error);
+        } else if (result.result) {
+            ledger.recordToolResult(name, result.result);
+        }
+    }
+    
+    return result;
 }
 
 async function _executeWithRetry(

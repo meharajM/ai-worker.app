@@ -29,6 +29,7 @@ import { type LLMMessage } from "../types";
 import { type AgentRuntimeOptions } from "./types";
 import { preSeedSubAgentMemory } from "./AgentStateService";
 import { laneManager } from "../execution-lanes";
+import { RunWorkLedger } from "./RunWorkLedger";
 
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -74,7 +75,8 @@ export async function executeParallelSubAgents(
     parentOptions: AgentRuntimeOptions,
     parentAgentId: string,
     addMessage: (msg: LLMMessage) => string | void,
-    spawnSubAgent: SubAgentFactory
+    spawnSubAgent: SubAgentFactory,
+    ledger?: RunWorkLedger
 ): Promise<LLMMessage> {
     const { contexts } = decomposition;
 
@@ -255,6 +257,7 @@ export async function executeParallelSubAgents(
                     content: `**⚠️ ${context} Analysis Failed/Partial**\n\n${finalResultStr}`,
                 });
             }
+            ledger?.recordSubAgentReport(context, finalResultStr);
 
             return { context, success: isSuccess, result: finalResultStr };
         } catch (error: any) {
@@ -282,6 +285,7 @@ export async function executeParallelSubAgents(
                 role: "assistant",
                 content: `**❌ ${context} Analysis Crashed**\n\n${errorText}`,
             });
+            ledger?.recordError(`[Parallel:${context}] ${errorText}`);
 
             return { context, success: false, result: errorText };
         } finally {
@@ -358,7 +362,8 @@ export async function executeSequentialSubAgents(
     parentOptions: AgentRuntimeOptions,
     parentAgentId: string,
     addMessage: (msg: LLMMessage) => string | void,
-    spawnSubAgent: SubAgentFactory
+    spawnSubAgent: SubAgentFactory,
+    ledger?: RunWorkLedger
 ): Promise<LLMMessage> {
     const { contexts, estimatedActions } = decomposition;
     const targetContext = contexts[0] || "task";
@@ -470,6 +475,7 @@ Format as JSON:
         for (const step of steps) {
             if (parentOptions.signal?.aborted) {
                 console.log("[OrchestrationService] Sequential orchestration aborted by user");
+                ledger?.recordError('Sequential orchestration aborted by user');
                 throw new Error("Aborted by user");
             }
 
@@ -545,8 +551,10 @@ End with "✓ Done" and a brief result.`;
                     }
                     console.warn(`[OrchestrationService] Sequential step ${step.id} bailed out. Salvaged ${partials.length} findings.`);
                     results.push({ step: step.id, description: step.description, result: finalStepContent.trim() });
+                    ledger?.recordSubAgentReport(`step-${step.id}`, finalStepContent);
                 } else {
                     results.push({ step: step.id, description: step.description, result: stepContent.trim() });
+                    ledger?.recordSubAgentReport(`step-${step.id}`, stepContent);
                 }
 
                 const progressMessage: LLMMessage = {
@@ -574,6 +582,7 @@ End with "✓ Done" and a brief result.`;
                     description: step.description,
                     result: `Error: ${error.message}${partialsMsg}`,
                 });
+                ledger?.recordError(`[Sequential step ${step.id}] ${error.message}`);
             }
         }
 
@@ -591,6 +600,7 @@ End with "✓ Done" and a brief result.`;
         return finalMessage;
     } catch (error: any) {
         console.error("[OrchestrationService] Sequential orchestration failed:", error);
+        ledger?.recordError(`Sequential orchestration failed: ${error.message}`);
         return {
             role: "assistant",
             content: `Failed to orchestrate task: ${error.message}. Falling back to direct execution.`,
@@ -622,7 +632,8 @@ export async function continueWithSubAgent(
     parentOptions: AgentRuntimeOptions,
     parentAgentId: string,
     addMessage: (msg: LLMMessage) => string | void,
-    spawnSubAgent: SubAgentFactory
+    spawnSubAgent: SubAgentFactory,
+    ledger?: RunWorkLedger
 ): Promise<LLMMessage> {
     const instruction = `GOAL: ${originalRequest}
 
@@ -651,8 +662,11 @@ Use tools immediately. End with "✓ Done".`;
     addMessage({ role: "assistant", content: `Starting sub-agent to continue the task...` });
 
     try {
-        return await subAgent.chat(instruction);
+        const result = await subAgent.chat(instruction);
+        ledger?.recordSubAgentReport('continuation', typeof result.content === "string" ? result.content : JSON.stringify(result.content));
+        return result;
     } catch (error) {
+        ledger?.recordError(`Continuation sub-agent failed: ${error instanceof Error ? error.message : String(error)}`);
         throw new Error(
             `Sub-agent failed to complete task: ${error instanceof Error ? error.message : String(error)}`
         );

@@ -70,9 +70,18 @@ interface ElectronAPI {
             type: 'create' | 'modify' | 'delete'
             content?: string
             timestamp: number
+            approvalChannel: 'desktop' | 'whatsapp'
+            approvalToken?: string
+            status: 'pending' | 'approved' | 'rejected' | 'expired'
+            createdAt: number
+            resolvedAt?: number
+            resolvedBy?: 'ui' | 'wa'
         }>>
         approveChange: (changeId: string) => Promise<{ success: boolean; error?: string }>
         rejectChange: (changeId: string) => Promise<{ success: boolean; error?: string }>
+        approveChangeByToken: (token: string) => Promise<{ success: boolean; error?: string }>
+        rejectChangeByToken: (token: string) => Promise<{ success: boolean; error?: string }>
+        testForceWhatsAppApproval: (changeId: string, token?: string) => Promise<{ success: boolean; token?: string; error?: string }>
         writeInternalFile: (workspacePath: string | undefined, filename: string, content: string) =>
             Promise<{ success: boolean; path?: string; error?: string }>
         readInternalFile: (workspacePath: string | undefined, filename: string) =>

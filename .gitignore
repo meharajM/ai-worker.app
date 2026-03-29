@@ -35,6 +35,7 @@ tests/temp-storage-test/
 tests/temp-user-data/
 tests/temp-user-data-leaks/
 tests/screenshots/
+tests/live/.env.local
 test-results/
 playwright-report/
 blob-report/

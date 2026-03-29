@@ -90,6 +90,7 @@ interface AccumulatedToolCall {
  *   - Sub-agent spawning → OrchestrationService
  */
 import { SpecialToolHandlers } from "./agent/SpecialToolHandlers";
+import { RunWorkLedger } from "./agent/RunWorkLedger";
 
 export class AgentRuntime implements IAgentClient {
   private messages: LLMMessage[] = [];
@@ -111,6 +112,8 @@ export class AgentRuntime implements IAgentClient {
   private _estimatedContextBytes = 0;
   /** Counter to trigger periodic full context resync */
   private _contextResyncCounter = 0;
+  /** Ledger for salvaging work on abrupt end */
+  private ledger: RunWorkLedger | null = null;
 
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
     this.options = options;
@@ -207,6 +210,10 @@ export class AgentRuntime implements IAgentClient {
       }
     }
 
+    // Initialize ledger for every run (including orchestration/continuation paths)
+    this.ledger = new RunWorkLedger(userContent);
+    this.specialHandlers.setLedger(this.ledger);
+
 
     const lastMsg = this.messages[this.messages.length - 1];
     const isConfirmingHandoff =
@@ -229,7 +236,8 @@ export class AgentRuntime implements IAgentClient {
         this.options,
         this.agentInstanceId,
         (msg) => this.addMessage(msg),
-        this._makeSubAgentFactory()
+        this._makeSubAgentFactory(),
+        this.ledger || undefined
       );
       this._emitProgress(100);
       return continuationResult;
@@ -274,7 +282,8 @@ export class AgentRuntime implements IAgentClient {
               this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (ctxCount * 3))));
               return this.addMessage(msg);
             },
-            this._makeSubAgentFactory()
+            this._makeSubAgentFactory(),
+            this.ledger || undefined
           );
           this._emitProgress(100);
           MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
@@ -295,7 +304,8 @@ export class AgentRuntime implements IAgentClient {
               this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (stepCount * 2))));
               return this.addMessage(msg);
             },
-            this._makeSubAgentFactory()
+            this._makeSubAgentFactory(),
+            this.ledger || undefined
           );
           this._emitProgress(100);
           MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
@@ -328,14 +338,46 @@ export class AgentRuntime implements IAgentClient {
   }
 
   private async _runLoop(finalPrompt: string): Promise<LLMMessage> {
+    let runError: unknown = null;
+    let finalMessage: LLMMessage | null = null;
+
     try {
-      return await this._executeRunLoop(finalPrompt);
+      finalMessage = await this._executeRunLoop(finalPrompt);
+      return finalMessage;
+    } catch (error) {
+      runError = error;
+      this.ledger?.recordError(error instanceof Error ? error.message : String(error));
     } finally {
       // ── Lifecycle Cleanup ──────────────────────────────────────────────────
       // WHY here: This finally block runs whether the agent completes, crashes,
       // or is aborted by the user.
 
-      // 1. Close the agent's dedicated browser tab
+      // 1. Partial Progress Salvaging
+      const isAborted = this.options.signal?.aborted;
+      const lastMsg = this.messages[this.messages.length - 1];
+      const isFinished =
+        (finalMessage?.role === "assistant" && !(finalMessage as any)?.tool_calls?.length) ||
+        (lastMsg?.role === "assistant" && !(lastMsg as any)?.tool_calls?.length);
+
+      if ((!finalMessage && (isAborted || !isFinished || runError)) && this.ledger && this.ledger.getFindingsCount() > 0) {
+        console.log(`[AgentRuntime] Run ended abruptly. Generating salvage report...`);
+        const errorReason =
+          isAborted
+            ? "Task aborted by user"
+            : runError instanceof Error
+              ? runError.message
+              : "Task failed or stopped unexpectedly";
+        const report = this.ledger.generateSalvageReport(errorReason);
+        const salvageMessage: LLMMessage = {
+          role: "assistant",
+          content: report
+        };
+        this.addMessage(salvageMessage);
+        finalMessage = salvageMessage;
+        runError = null;
+      }
+
+      // 2. Close the agent's dedicated browser tab
       if (this.options.tabId !== undefined && this.options.ownsTab) {
         try {
           const { browserLock } = await import("./resource-lock");
@@ -354,7 +396,19 @@ export class AgentRuntime implements IAgentClient {
 
       // 2. Clean up in-memory state (production only)
       await cleanupState(this.agentInstanceId);
+
+      // Reset run-local ledger so it cannot leak across runs.
+      this.specialHandlers.setLedger(null);
+      this.ledger = null;
     }
+
+    if (finalMessage) {
+      return finalMessage;
+    }
+    if (runError instanceof Error) {
+      throw runError;
+    }
+    throw new Error(runError ? String(runError) : "Agent run ended without a final message.");
   }
 
   private async _executeRunLoop(finalPrompt: string): Promise<LLMMessage> {
@@ -393,7 +447,12 @@ export class AgentRuntime implements IAgentClient {
         );
       } catch (error) {
         console.error("[AgentRuntime] LLM Error:", error);
+        this.ledger?.recordError(`LLM error: ${error instanceof Error ? error.message : String(error)}`);
         throw error;
+      }
+
+      if (response.content) {
+        this.ledger?.recordInsight(response.content.toString());
       }
 
       if (!response.toolCalls || response.toolCalls.length === 0) {
@@ -505,13 +564,15 @@ export class AgentRuntime implements IAgentClient {
               this.options.tabId,
               this.options.workspacePath,
               this.options.signal,
-              this.options.isHeadless
+              this.options.isHeadless,
+              this.ledger || undefined
             );
             const { resultStr: formatted, isError } = formatToolResult(call.name, rawResult);
             resultStr = formatted;
             consecutiveErrors = isError ? consecutiveErrors + 1 : 0;
           } catch (err: any) {
             resultStr = JSON.stringify({ error: err.message || "Unknown error" });
+            this.ledger?.recordError(`Tool execution failed for ${call.name}: ${err?.message || "Unknown error"}`);
             consecutiveErrors++;
           }
 
@@ -527,12 +588,8 @@ export class AgentRuntime implements IAgentClient {
             // Strip out ASCII art boxes (often from Playwright) which look terrible on WhatsApp
             cleanError = cleanError.replace(/[╔║╚═╗╝]/g, '').trim();
 
-            const bailoutMsg: LLMMessage = {
-              role: "assistant",
-              content: `Bailing out after ${consecutiveErrors} consecutive errors. Last error: ${cleanError}`,
-            };
-            this.addMessage(bailoutMsg);
-            return bailoutMsg;
+            this.ledger?.recordError(`Consecutive-error bailout: ${cleanError}`);
+            throw new Error(`Bailing out after ${consecutiveErrors} consecutive errors. Last error: ${cleanError}`);
           }
         }
 
