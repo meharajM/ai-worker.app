@@ -15,17 +15,20 @@
  * Consumed by: PlaywrightService (PlaywrightService.ts)
  */
 
-import * as playwrightCore from 'playwright-core';
 import { addExtra } from 'playwright-extra';
 import stealth from 'puppeteer-extra-plugin-stealth';
 import { BrowserContext, Page, Browser } from 'playwright-core';
-
-const stealthChromium: any = addExtra(playwrightCore.chromium as any);
-stealthChromium.use(stealth());
 import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import Store from 'electron-store';
+
+// playwright-core is required at runtime to avoid bundler inlining its internals
+// (bundling it causes package.json relative-path crashes in the packaged app)
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const playwrightCore = require('playwright-core') as typeof import('playwright-core');
+const stealthChromium: ReturnType<typeof addExtra> = addExtra(playwrightCore.chromium as never);
+stealthChromium.use(stealth());
 
 /**
  * Configuration schema for the Playwright browser settings (persisted via electron-store).
@@ -388,7 +391,7 @@ export class BrowserManager {
                         locale: 'en-US',
                         timezoneId: 'America/New_York',
                         userAgent: MODERN_CHROME_UA,
-                        colorScheme: 'dark',
+                        colorScheme: 'dark' as const,
                         deviceScaleFactor: 2,
                         hasTouch: false,
                         isMobile: false

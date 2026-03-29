@@ -1,36 +1,42 @@
-/* eslint-disable */
-/**
- * create-libsignal-shim.cjs
- *
- * Pre-build script that ensures `node_modules/libsignal` exists with the
- * CORRECT package name ("libsignal") so electron-builder copies it into the
- * asar without renaming it to "@whiskeysockets/libsignal-node".
- *
- * Baileys does:  require('libsignal')
- * The GitHub package's inner name is "@whiskeysockets/libsignal-node", so
- * electron-builder renames the folder inside the asar, breaking the lookup.
- *
- * Fix: overwrite the package.json name field before the build runs.
- */
-
 const fs = require('fs');
 const path = require('path');
 
-const libsignalDir = path.join(__dirname, '..', 'node_modules', 'libsignal');
-const pkgFile = path.join(libsignalDir, 'package.json');
+const projectRoot = process.cwd();
 
-if (!fs.existsSync(libsignalDir)) {
-  console.error('[shim] node_modules/libsignal not found — run `npm install` first.');
-  process.exit(1);
+// Find the target depending on where npm installed it
+const topLevelDir = path.join(projectRoot, 'node_modules', 'libsignal');
+const scopedDir = path.join(projectRoot, 'node_modules', '@whiskeysockets', 'libsignal-node');
+
+function patchLibsignalName() {
+  console.log('🔧 Verifying libsignal folder structure...');
+
+  let targetDir = null;
+
+  if (fs.existsSync(scopedDir) && fs.existsSync(path.join(scopedDir, 'package.json'))) {
+    targetDir = scopedDir;
+  } else if (fs.existsSync(topLevelDir) && fs.existsSync(path.join(topLevelDir, 'package.json'))) {
+    targetDir = topLevelDir;
+  } else {
+    console.warn(`[shim] Could not find libsignal to patch.`);
+    return;
+  }
+
+  const pkgPath = path.join(targetDir, 'package.json');
+  try {
+    const pkgData = fs.readFileSync(pkgPath, 'utf8');
+    const pkg = JSON.parse(pkgData);
+
+    if (pkg.name !== 'libsignal') {
+      console.log(`[shim] Patching libsignal package name from '${pkg.name}' to 'libsignal'...`);
+      pkg.name = 'libsignal';
+      fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+      console.log('[shim] Successfully patched libsignal package.json for electron-builder.');
+    } else {
+      console.log('[shim] libsignal package name already correct — skipping.');
+    }
+  } catch (error) {
+    console.error('[shim] Failed to patch libsignal package.json:', error);
+  }
 }
 
-const pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf-8'));
-
-if (pkg.name !== 'libsignal') {
-  const original = pkg.name;
-  pkg.name = 'libsignal';
-  fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2) + '\n');
-  console.log(`[shim] Fixed libsignal package name: "${original}" → "libsignal"`);
-} else {
-  console.log('[shim] libsignal package name already correct — skipping.');
-}
+patchLibsignalName();

@@ -1,10 +1,10 @@
 {
     "name": "ai-worker",
-    "version": "0.1.0",
-    "type": "module",
+    "version": "0.1.2",
     "description": "Voice-first desktop workspace with MCP integration",
     "main": "./out/main/index.js",
     "author": "AI-Worker Team",
+    "homepage": "https://ai-worker.tech",
     "license": "MIT",
     "engines": {
         "node": ">=22.12.0"
@@ -21,13 +21,17 @@
         "test:playwright": "node tests/playwright_tools_test.cjs",
         "test:speech": "node tests/speech_e2e.cjs",
         "clean": "rm -rf out dist",
+        "clean:native:build": "rm -rf node_modules/better-sqlite3/build node_modules/bufferutil/build node_modules/utf-8-validate/build",
         "clean:state": "rm -rf ~/Library/Application\\ Support/AI-Worker",
         "dev:clean": "npm run clean && rm -rf node_modules/.vite tsconfig.tsbuildinfo && npm run clean:state && npm run dev",
+        "check:prebuild": "node tests/prebuild_checks.cjs",
+        "check:bundle": "node scripts/verify-bundle-integrity.cjs",
+        "test:build": "npm run check:prebuild && npm run build && npm run check:bundle",
         "check:wine": "command -v wine >/dev/null 2>&1 || { echo >&2 'Error: Wine is required for Windows builds on Linux. Please run ./install_build_deps.sh to install it.'; exit 1; }",
         "rebuild:mac": "npm run clean && npm run build && electron-builder --mac",
         "rebuild:mac:intel": "npm run prebuild:electron && npm run clean && npm run build && electron-builder --mac --x64",
         "rebuild:mac:arm": "npm run prebuild:electron && npm run clean && npm run build && electron-builder --mac --arm64",
-        "rebuild:mac:universal": "npm run prebuild:electron && npm run clean && npm run build && electron-builder --mac --universal",
+        "rebuild:mac:universal": "npm run prebuild:electron && npm run clean && npm run clean:native:build && npm run build && electron-builder --mac --universal",
         "rebuild:win": "npm run prebuild:electron && npm run check:wine && npm run clean && npm run build && electron-builder --win",
         "rebuild:win:intel": "npm run prebuild:electron && npm run check:wine && npm run clean && npm run build && electron-builder --win --x64",
         "rebuild:win:arm": "npm run prebuild:electron && npm run check:wine && npm run clean && npm run build && electron-builder --win --arm64",
@@ -38,15 +42,22 @@
         "build:mac": "npm run prebuild:electron && npm run build && electron-builder --mac",
         "build:mac:intel": "npm run prebuild:electron && npm run build && electron-builder --mac --x64",
         "build:mac:arm": "npm run prebuild:electron && npm run build && electron-builder --mac --arm64",
-        "build:mac:universal": "npm run prebuild:electron && npm run build && electron-builder --mac --universal",
+        "build:mac:universal": "npm run prebuild:electron && npm run clean:native:build && npm run build && electron-builder --mac zip --universal",
         "build:win": "npm run prebuild:electron && npm run check:wine && npm run build && electron-builder --win",
         "build:win:intel": "npm run prebuild:electron && npm run check:wine && npm run build && electron-builder --win --x64",
         "build:win:arm": "npm run prebuild:electron && npm run check:wine && npm run build && electron-builder --win --arm64",
         "build:linux": "npm run prebuild:electron && npm run build && electron-builder --linux",
         "build:linux:intel": "npm run prebuild:electron && npm run build && electron-builder --linux --x64",
-        "build:linux:arm": "npm run prebuild:electron && npm run build && electron-builder --linux --arm64"
+        "build:linux:arm": "npm run prebuild:electron && npm run build && electron-builder --linux --arm64",
+        "publish:mac": "bash scripts/publish-mac.sh",
+        "publish:mac:universal": "bash scripts/publish-mac.sh --universal",
+        "publish:linux": "bash scripts/publish-linux.sh",
+        "publish:win": "bash scripts/publish-win.sh",
+        "publish:linux-win": "bash scripts/publish-linux-win.sh",
+        "publish:all": "bash scripts/publish-all.sh"
     },
     "dependencies": {
+        "@electron-toolkit/preload": "^3.0.0",
         "@electron-toolkit/utils": "^3.0.0",
         "@mlc-ai/web-llm": "^0.2.80",
         "@modelcontextprotocol/sdk": "^1.0.1",
@@ -58,7 +69,7 @@
         "better-sqlite3": "^12.6.2",
         "clsx": "^2.1.1",
         "cmdk": "^1.1.1",
-        "electron-store": "^11.0.2",
+        "electron-store": "10.0.0",
         "firebase": "^12.8.0",
         "fix-path": "^5.0.0",
         "formik": "^2.4.9",
@@ -73,29 +84,35 @@
         "react-markdown": "^10.1.0",
         "react-syntax-highlighter": "^16.1.0",
         "remark-gfm": "^4.0.1",
+        "sharp": "^0.34.5",
         "tailwind-merge": "^3.4.0",
         "tree-kill": "^1.2.2",
         "vosk-browser": "^0.0.8",
+        "ws": "^8.20.0",
         "yup": "^1.7.1",
         "zustand": "^5.0.9"
     },
     "devDependencies": {
         "@electron-toolkit/tsconfig": "^1.0.1",
-        "@eslint/js": "^9.39.3",
-        "@types/node": "^20.11.10",
-        "@types/qrcode": "^1.5.6",
-        "@types/react": "^18.2.48",
-        "@types/react-dom": "^18.2.18",
-        "@vitejs/plugin-react": "^4.2.1",
-        "autoprefixer": "^10.4.17",
+        "@electron/rebuild": "^3.7.1",
+        "@playwright/test": "^1.50.1",
+        "@types/better-sqlite3": "^7.6.9",
+        "@types/node": "^22.13.1",
+        "@types/qrcode": "^1.5.5",
+        "@types/react": "^18.2.0",
+        "@types/react-dom": "^18.2.0",
+        "@vitejs/plugin-react": "^4.3.4",
+        "autoprefixer": "^10.4.18",
         "electron": "^40.0.0",
-        "electron-builder": "^26.4.0",
+        "electron-builder": "26.4.0",
         "electron-vite": "^5.0.0",
-        "eslint": "^9.39.3",
+        "eslint": "^9.21.0",
+        "eslint-plugin-react": "^7.37.4",
         "eslint-plugin-react-hooks": "^5.2.0",
         "eslint-plugin-react-refresh": "^0.4.26",
         "globals": "^16.5.0",
         "postcss": "^8.4.35",
+        "semver": "^7.7.4",
         "tailwindcss": "^3.4.1",
         "typescript": "^5.3.3",
         "typescript-eslint": "^8.56.1",
@@ -113,22 +130,44 @@
         ],
         "asarUnpack": [
             "node_modules/@whiskeysockets/baileys/**/*",
-            "node_modules/@whiskeysockets/libsignal-node/**/*"
+            "node_modules/@whiskeysockets/libsignal-node/**/*",
+            "node_modules/libsignal/**/*"
         ],
         "mac": {
             "target": [
                 "dmg",
                 "zip"
             ],
+            "mergeASARs": false,
+            "x64ArchFiles": "Contents/Resources/app.asar.unpacked/node_modules/{@img/**,better-sqlite3/**,fsevents/**}",
             "category": "public.app-category.productivity",
             "icon": "build/icon.png"
         },
+        "extraResources": [
+          {
+            "from": "scripts",
+            "to": "scripts",
+            "filter": [
+              "setup-dependencies.sh",
+              "setup-dependencies.ps1"
+            ]
+          }
+        ],
         "win": {
             "target": [
-                "nsis",
-                "portable"
+                "nsis"
             ],
-            "icon": "build/icon.png"
+            "icon": "build/icon.png",
+            "artifactName": "${productName}-Setup-${version}.${ext}",
+            "publish": {
+                "provider": "generic",
+                "url": "https://downloads.ai-worker.tech"
+            }
+        },
+        "nsis": {
+            "oneClick": false,
+            "allowToChangeInstallationDirectory": true,
+            "perMachine": false
         },
         "linux": {
             "target": [
@@ -136,12 +175,11 @@
                 "deb"
             ],
             "category": "Utility",
-            "icon": "build/icon.png",
-            "maintainer": "AI-Worker Team <team@aiworker.app>"
-        },
-        "nsis": {
-            "oneClick": false,
-            "allowToChangeInstallationDirectory": true
+            "maintainer": "AI-Worker Team <team@aiworker.app>",
+            "publish": {
+                "provider": "generic",
+                "url": "https://downloads.ai-worker.tech"
+            }
         }
     }
 }
