@@ -82,6 +82,16 @@ export const electron = {
         },
     },
 
+    // Playwright browser lifecycle
+    playwright: {
+        closeBrowser: async (): Promise<{ success: boolean; error?: string }> => {
+            if (isElectron() && window.electron?.playwright) {
+                return await window.electron.playwright.closeBrowser()
+            }
+            return { success: true }
+        },
+    },
+
     // Storage with localStorage fallback
     store: {
         get: async <T>(key: string, defaultValue?: T): Promise<T | undefined> => {

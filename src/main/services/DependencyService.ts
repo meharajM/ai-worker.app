@@ -1,6 +1,7 @@
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import { app, shell } from 'electron'
+import * as path from 'path'
 
 const execAsync = promisify(exec)
 
@@ -37,7 +38,8 @@ export class DependencyService {
         results.push(await this.checkCommand('ffmpeg', '-version', true))
 
         // Check Python (Required for local MCPs)
-        results.push(await this.checkCommand('python3', '--version', true))
+        const pythonCmd = process.platform === 'win32' ? 'python' : 'python3'
+        results.push(await this.checkCommand(pythonCmd, '--version', true))
 
         // Check uv (Required for uvx)
         results.push(await this.checkCommand('uv', '--version', true))
@@ -148,12 +150,25 @@ export class DependencyService {
         if (process.platform === 'darwin') {
             require('child_process').exec(`open -a Terminal "${scriptPath}"`)
         } else if (process.platform === 'win32') {
-            const psScriptPath = scriptPath.replace('.sh', '.ps1')
-            require('child_process').exec(`start powershell.exe -ExecutionPolicy Bypass -File "${psScriptPath}"`)
+            const psScriptPath = scriptPath.replace(/\.sh$/, '.ps1')
+            // Using spawn to avoid the complex Shell-escaping issues in children processes.
+            // We launch an intermediate PowerShell to trigger Start-Process with 'RunAs' to request elevation.
+            // The inner path is wrapped in double quotes, and the argument list is wrapped in single quotes.
+            const args = [
+                '-NoProfile',
+                '-ExecutionPolicy', 'Bypass',
+                '-Command', `Start-Process PowerShell -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File "${psScriptPath}"' -Verb RunAs`
+            ]
+            
+            const { spawn } = require('child_process')
+            const child = spawn('powershell.exe', args, {
+                detached: true,
+                stdio: 'ignore'
+            })
+            child.unref()
         } else {
             // Linux fallback 
             shell.showItemInFolder(scriptPath)
         }
     }
 }
-import * as path from 'path'

@@ -3,32 +3,34 @@
  *
  * Capabilities:
  *   1. Context Persistence: Manages Chromium's 'launchPersistentContext' for session storage.
- *   2. Stealth Tactics: Injected init scripts to bypass bot detection (removes navigator.webdriver).
- *   3. Ad-Blocking: Intercepts network routes to prevent heavy resource loads; saves bandwidth and tokens.
- *   4. Tab Tracker: Maintains an ID-to-Page map so agents can switch between tabs without losing state.
- *   5. Popup Isolation: Forces '_blank' links to open in the current tab to prevent tab-explosion.
- *   6. OS-Smart Fallback: Tries the preferred browser first, then falls back in a platform-specific order.
- *
- * Design decision: All "mechanics" of launching and configuring the browser live here.
- *   This ensures that UI settings (like ad-blocking) are applied uniformly to all tabs.
+ *   2. Stealth Tactics: Injected init scripts to bypass bot detection.
+ *   3. Ad-Blocking: Intercepts network routes to prevent heavy resource loads.
+ *   4. Tab Tracker: Maintains an ID-to-Page map.
+ *   5. Popup Isolation: Forces '_blank' links to open in the current tab.
+ *   6. OS-Smart Fallback: Platform-specific browser selection loop.
  *
  * Consumed by: PlaywrightService (PlaywrightService.ts)
  */
 
-import * as playwrightCore from 'playwright-core';
 import { addExtra } from 'playwright-extra';
 import stealth from 'puppeteer-extra-plugin-stealth';
 import { BrowserContext, Page, Browser } from 'playwright-core';
-
-const stealthChromium: any = addExtra(playwrightCore.chromium as any);
-stealthChromium.use(stealth());
 import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import Store from 'electron-store';
 
+// Modern User Agent to avoid detection on sites like LinkedIn/Google
+const MODERN_CHROME_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+
+// playwright-core is required at runtime to avoid bundler inlining its internals
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const playwrightCore = require('playwright-core') as typeof import('playwright-core');
+const stealthChromium: ReturnType<typeof addExtra> = addExtra(playwrightCore.chromium as never);
+stealthChromium.use(stealth());
+
 /**
- * Configuration schema for the Playwright browser settings (persisted via electron-store).
+ * Configuration schema for the Playwright browser settings.
  */
 export interface PlaywrightSettings {
     browser?: 'chromium' | 'firefox' | 'webkit' | 'chrome' | 'msedge';
@@ -36,13 +38,8 @@ export interface PlaywrightSettings {
     blockAds?: boolean;
 }
 
-// UserAgent gets automatically assigned and spoofed by puppeteer-extra-plugin-stealth
-
 /**
  * Manages the underlying Playwright browser, its context, and tab state.
- * Implements persistent data directories to keep cookies and session state between runs.
- * Uses an OS-smart fallback loop: if the preferred browser fails to launch,
- * it tries the next best option for the current platform before giving up.
  */
 export class BrowserManager {
     private context: BrowserContext | null = null;
@@ -50,14 +47,12 @@ export class BrowserManager {
     private pagesMap = new Map<number, Page>();
     private nextTabId = 1;
     private store: Store<Record<string, unknown>>;
-    /** Ensures concurrent callTool calls don't trigger multiple browser launches */
     private initializationPromise: Promise<void> | null = null;
 
     private headlessBrowser: Browser | null = null;
     private headlessContext: BrowserContext | null = null;
     private headlessPage: Page | null = null;
     private headlessOverride: boolean | null = null;
-    /** Ensures concurrent calls to ensureHeadlessPage don't trigger multiple launches */
     private headlessInitializationPromise: Promise<void> | null = null;
 
     private idleTimer: NodeJS.Timeout | null = null;
@@ -72,43 +67,43 @@ export class BrowserManager {
             clearTimeout(this.idleTimer);
         }
         this.idleTimer = setTimeout(() => {
-            console.log(`[BrowserManager] Closing browser after ${this.IDLE_TIMEOUT_MS / 60000} minutes of inactivity to save memory.`);
+            console.log(`[BrowserManager] Closing browser after ${this.IDLE_TIMEOUT_MS / 60000} minutes of inactivity.`);
             this.close().catch(e => console.error('[BrowserManager] Error during idle close:', e));
         }, this.IDLE_TIMEOUT_MS);
     }
 
     /**
-     * Helper to permanently fix profile locks. When the app hot-reloads or a previous instance
-     * crashes, Chrome leaves behind a 'SingletonLock' file that blocks future launches.
-     * Deleting this securely guarantees the browser can boot up on demand.
+     * Aggressively clears stale profile locks.
      */
     private clearChromeLock(userDataDir: string) {
         try {
-            const lockPaths = [
-                path.join(userDataDir, 'SingletonLock'),
-                path.join(userDataDir, 'Default', 'LOCK'),
-                path.join(userDataDir, 'LOCK'),
-            ];
-            
-            for (const lockPath of lockPaths) {
-                if (fs.existsSync(lockPath)) {
-                    try {
-                        fs.unlinkSync(lockPath);
-                        console.log(`[BrowserManager] 🔓 Cleared stale lock at ${lockPath}`);
-                    } catch {
-                        fs.rmSync(lockPath, { force: true, recursive: true });
-                        console.log(`[BrowserManager] 🔨 Force removed lock at ${lockPath}`);
+            // Aggressive lock cleanup: SingletonLock, SingletonSocket, SingletonCookie, Default/LOCK
+            const lockFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'LOCK'];
+            lockFiles.forEach(lockFile => {
+                const lockPath = path.join(userDataDir, lockFile);
+                const defaultLockPath = path.join(userDataDir, 'Default', lockFile);
+                
+                [lockPath, defaultLockPath].forEach(p => {
+                    if (fs.existsSync(p)) {
+                        try {
+                            fs.unlinkSync(p);
+                            console.log(`[BrowserManager] 🔓 Cleared stale lock at ${p}`);
+                        } catch (err) {
+                            try {
+                                fs.rmSync(p, { force: true, recursive: true });
+                                console.log(`[BrowserManager] 🔨 Force removed lock at ${p}`);
+                            } catch (e) {}
+                        }
                     }
-                }
-            }
+                });
+            });
         } catch (e) {
-            console.warn(`[BrowserManager] Failed to clear locks:`, e);
+            console.warn(`[BrowserManager] Failed during aggressive lock cleanup:`, e);
         }
     }
 
     /**
-     * Surfaces the browser from headless mode to UI mode to allow the human to intervene.
-     * Retains persistent context.
+     * Surfaces a headless session to the UI.
      */
     async surfaceBrowser(): Promise<void> {
         console.log('[BrowserManager] Surfacing browser for human intervention...');
@@ -116,22 +111,16 @@ export class BrowserManager {
         let currentUrl = this.page?.url();
         let useHeadlessData = false;
 
-        // If we have an active headless session, we want to promote its data to the headed browser
         if (this.headlessContext) {
-            console.log('[BrowserManager] Detected active headless session. Promoting headless data...');
+            console.log('[BrowserManager] Promoting headless data...');
             currentUrl = this.headlessPage?.url() || currentUrl;
             useHeadlessData = true;
         }
 
         await this.close();
-        
-        // This forces ensureBrowser to use headless: false on the next launch
         this.headlessOverride = false;
-        
-        // If we were promoted from headless, we should point the headed browser to the headless data dir
         (this as any)._useHeadlessDirForHeaded = useHeadlessData;
 
-        // Relaunch immediately
         await this.ensureBrowser();
 
         if (currentUrl && currentUrl !== 'about:blank') {
@@ -143,12 +132,11 @@ export class BrowserManager {
     }
 
     /**
-     * Lazily initializes the Playwright browser context if it doesn't exist.
+     * Lazily initializes the browser.
      */
     async ensureBrowser(): Promise<BrowserContext> {
         if (this.context && !(this as any)._isContextClosed) return this.context;
 
-        // Serialize concurrent ensureBrowser() calls behind a single promise
         if (this.initializationPromise) {
             await this.initializationPromise;
             if (!this.context || (this as any)._isContextClosed) {
@@ -232,6 +220,24 @@ export class BrowserManager {
                         this.clearChromeLock(userDataDir);
                         this.context = await launcher.launchPersistentContext(userDataDir, tryOptions);
 
+                        // Mask automation markers
+                        await this.context!.addInitScript(() => {
+                            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                            if (!(window as any).chrome) {
+                                (window as any).chrome = { runtime: {} };
+                            }
+                            const nav = navigator as any;
+                            if (nav.permissions) {
+                                const originalQuery = nav.permissions.query;
+                                nav.permissions.query = (parameters: any) =>
+                                    parameters.name === 'notifications'
+                                        ? Promise.resolve({ state: Notification.permission })
+                                        : originalQuery(parameters);
+                            }
+                        });
+
+
                         const pages = this.context!.pages();
                         if (pages.length > 0) {
                             this.page = pages[0];
@@ -257,14 +263,14 @@ export class BrowserManager {
                         return; 
                     } catch (err) {
                         lastError = err instanceof Error ? err : new Error(String(err));
-                        console.warn(`[BrowserManager] Browser '${tryBrowser}' failed: ${lastError.message}. Trying next...`);
+                        console.warn(`[BrowserManager] Browser '${tryBrowser}' failed: ${lastError.message}.`);
                         this.context = null;
                     }
                 }
 
-                throw lastError || new Error('[BrowserManager] All browser launch attempts failed.');
+                throw lastError || new Error('[BrowserManager] All attempts failed.');
             } catch (error) {
-                console.error('[BrowserManager] Failed to launch browser:', error);
+                console.error('[BrowserManager] Launch failed:', error);
                 this.initializationPromise = null;
                 throw error;
             } finally {
@@ -274,7 +280,7 @@ export class BrowserManager {
 
         await this.initializationPromise;
         if (!this.context) {
-            throw new Error('[BrowserManager] Browser initialization failed to produce a context.');
+            throw new Error('[BrowserManager] Initialization produced no context.');
         }
         return this.context;
     }
@@ -318,8 +324,7 @@ export class BrowserManager {
                 if (url && url !== 'about:blank') {
                     await page.goto(url, { waitUntil: 'domcontentloaded' }).catch(() => { });
                 }
-            } catch {
-            }
+            } catch { }
         });
 
         return id;
@@ -338,7 +343,7 @@ export class BrowserManager {
         this.headlessInitializationPromise = (async () => {
             try {
                 if (!this.headlessContext) {
-                    console.log('[BrowserManager] Launching persistent headless context with stealth...');
+                    console.log('[BrowserManager] Launching persistent headless context...');
                     const userDataDirHeadless = path.join(app.getPath('userData'), 'playwright_data_headless');
 
                     if (!fs.existsSync(userDataDirHeadless)) {
@@ -365,7 +370,8 @@ export class BrowserManager {
                         viewport: { width: 1920, height: 1080 },
                         locale: 'en-US',
                         timezoneId: 'America/New_York',
-                        colorScheme: 'dark',
+                        userAgent: MODERN_CHROME_UA,
+                        colorScheme: 'dark' as const,
                         deviceScaleFactor: 2,
                         hasTouch: false,
                         isMobile: false
@@ -384,7 +390,7 @@ export class BrowserManager {
                     this.headlessPage = await this.headlessContext!.newPage();
                 }
             } catch (error) {
-                console.error('[BrowserManager] Failed to launch headless browser:', error);
+                console.error('[BrowserManager] Failed to launch headless:', error);
                 this.headlessInitializationPromise = null;
                 throw error;
             }
@@ -401,11 +407,10 @@ export class BrowserManager {
     async getPage(args: any): Promise<Page> {
         this.resetIdleTimer();
 
-        // Handle headless mode execution request for background tools
         if (args && args._headless) {
             const page = await this.ensureHeadlessPage();
             if (!page || page.isClosed()) {
-                throw new Error('[BrowserManager] Failed to obtain valid headless page');
+                throw new Error('[BrowserManager] Failed to obtain headless page');
             }
             return page;
         }
@@ -413,7 +418,7 @@ export class BrowserManager {
         await this.ensureBrowser();
 
         if (!this.context) {
-            throw new Error('[BrowserManager] Browser context is null after initialization. This is a critical state error.');
+            throw new Error('[BrowserManager] Context is null.');
         }
 
         if (args && args.tabId !== undefined) {
@@ -425,9 +430,6 @@ export class BrowserManager {
         }
 
         if (!this.page || this.page.isClosed()) {
-            if (!this.context) {
-                throw new Error('[BrowserManager] Cannot get page: Context is null after ensureBrowser.');
-            }
             const pages = this.context.pages().filter(p => !p.isClosed());
             if (pages.length > 0) {
                 this.page = pages[pages.length - 1];
@@ -465,10 +467,10 @@ export class BrowserManager {
                 target.close(),
                 new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs))
             ]);
-            console.log(`[BrowserManager] Successfully closed ${name}`);
+            console.log(`[BrowserManager] Closed ${name}`);
         } catch (e: any) {
             if (e instanceof Error && e.message === 'TIMEOUT') {
-                console.warn(`[BrowserManager] Abandoning stuck ${name} after ${timeoutMs}ms timeout.`);
+                console.warn(`[BrowserManager] Abandoning stuck ${name}.`);
             } else {
                 console.error(`[BrowserManager] Error closing ${name}:`, e);
             }
@@ -481,12 +483,10 @@ export class BrowserManager {
             this.idleTimer = null;
         }
 
-        // If a launch is in progress, wait for it before closing
         if (this.initializationPromise) {
-            try { await this.initializationPromise; } catch { /* ignore */ }
+            try { await this.initializationPromise; } catch { }
         }
 
-        // Now serialize the close itself
         const closePromise = (async () => {
             try {
                 if (this.context) {

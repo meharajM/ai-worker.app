@@ -267,53 +267,65 @@ export class AgentRuntime implements IAgentClient {
             }))
         );
 
-      try {
-        if (decomposition.shouldFork && decomposition.type === "multi_context") {
-          // ── Emit progress for parallel orchestration path ────────────────────
-          const ctxCount = decomposition.contexts?.length || 1;
-          this._emitProgress(5);
-          const result = await executeParallelSubAgents(
-            finalPrompt,
-            decomposition,
-            this.options,
-            this.agentInstanceId,
-            (msg) => {
-              // Tick progress forward as each sub-agent message arrives
-              this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (ctxCount * 3))));
-              return this.addMessage(msg);
-            },
-            this._makeSubAgentFactory(),
-            this.ledger || undefined
-          );
-          this._emitProgress(100);
-          MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
-          return result;
-        }
+      if (decomposition.shouldFork) {
+        try {
+          if (decomposition.type === "multi_context") {
+            // ── Emit progress for parallel orchestration path ────────────────────
+            const ctxCount = decomposition.contexts?.length || 1;
+            this._emitProgress(5);
+            const result = await executeParallelSubAgents(
+              finalPrompt,
+              decomposition,
+              this.options,
+              this.agentInstanceId,
+              (msg) => {
+                // Tick progress forward as each sub-agent message arrives
+                this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (ctxCount * 3))));
+                return this.addMessage(msg);
+              },
+              this._makeSubAgentFactory(),
+              this.ledger || undefined,
+              // onPlanUpdate: Bridge orchestration plan → session.plan → SubTaskChecklist
+              (plan) => {
+                this.executionPlan = plan;
+                this._emitProgress(this._lastProgressPct);
+              }
+            );
+            this._emitProgress(100);
+            MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+            return result;
+          }
 
-        if (decomposition.shouldFork && decomposition.type === "single_context") {
-          // ── Emit progress for sequential orchestration path ──────────────────
-          const stepCount = decomposition.contexts?.length || 3;
-          this._emitProgress(5);
-          const seqResult = await executeSequentialSubAgents(
-            finalPrompt,
-            decomposition,
-            this.options,
-            this.agentInstanceId,
-            (msg) => {
-              // Advance progress by one step slice as each step message arrives
-              this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (stepCount * 2))));
-              return this.addMessage(msg);
-            },
-            this._makeSubAgentFactory(),
-            this.ledger || undefined
-          );
-          this._emitProgress(100);
-          MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
-          return seqResult;
+          if (decomposition.type === "single_context") {
+            // ── Emit progress for sequential orchestration path ──────────────────
+            const stepCount = decomposition.contexts?.length || 3;
+            this._emitProgress(5);
+            const seqResult = await executeSequentialSubAgents(
+              finalPrompt,
+              decomposition,
+              this.options,
+              this.agentInstanceId,
+              (msg) => {
+                // Advance progress by one step slice as each step message arrives
+                this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (stepCount * 2))));
+                return this.addMessage(msg);
+              },
+              this._makeSubAgentFactory(),
+              this.ledger || undefined,
+              // onPlanUpdate: Bridge orchestration plan → session.plan → SubTaskChecklist
+              (plan) => {
+                this.executionPlan = plan;
+                this._emitProgress(this._lastProgressPct);
+              }
+            );
+            this._emitProgress(100);
+            MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+            return seqResult;
+          }
+        } finally {
+          // ALWAYS cleanup local state (in-memory entities) after orchestration finishes
+          await cleanupState(this.agentInstanceId);
         }
-      } finally {
-        // ALWAYS cleanup local state (in-memory entities) after orchestration finishes
-        await cleanupState(this.agentInstanceId);
       }
     }
 
@@ -743,113 +755,66 @@ export class AgentRuntime implements IAgentClient {
   }
 
   private _getServerInfo(): ServerInfo[] {
-    return getServers()
-      .filter((s) => s.connected)
-      .map((s) => ({
-        name: s.name,
-        description: s.description.substring(0, 40),
-        toolCount: s.tools.length,
-        isReasoningServer:
-          s.name.includes("sequential") || s.description.toLowerCase().includes("reasoning"),
-      }));
+    return getServers();
   }
 
-  private async _getDynamicRules(): Promise<string | undefined> {
-    const { getComposedPrompts } = await import("./prompt-library");
-    const promptsToLoad: string[] = [];
-    if (this.taskCategory) promptsToLoad.push(this.taskCategory);
-    return promptsToLoad.length > 0 ? getComposedPrompts(promptsToLoad, this.options.isSubAgent) : undefined;
+  private async _getDynamicRules(): Promise<string[]> {
+    const rulesNames = this.options.settings?.general?.activeRules || [];
+    return rulesNames;
   }
 
   private _handleModelRefusal(response: LLMResponse): boolean {
-    const refusalPatterns = [
-      /don't have access to/i,
-      /can't (?:access|check|fetch|get)/i,
-      /I (?:am|'m) (?:just|only) a/i,
-      /unable to (?:browse|access)/i,
-      /you(?:'ll)? need to check/i,
-    ];
-    const isRefusal = refusalPatterns.some((p) => p.test(response.content || ""));
-    const alreadyCorrected = this.messages.some(
-      (m) => typeof m.content === "string" && m.content.includes("[AUTO-CORRECT]")
-    );
-
-    if (isRefusal && !alreadyCorrected) {
-      console.warn("[AgentRuntime] Model refused tool use. Auto-correcting...");
-      const userQuery = this.messages.filter((m) => m.role === "user").pop();
-      const query = typeof userQuery?.content === "string" ? userQuery.content : "the request";
+    if (response.content?.toString().toLowerCase().includes("i cannot") ||
+      response.content?.toString().toLowerCase().includes("i'm sorry")) {
+      console.warn("[AgentRuntime] Model refusal detected, retrying...");
       this.addMessage({
         role: "user",
-        content: `[AUTO-CORRECT] You refused to help. This is wrong — you HAVE browser tools.\n            \nFor "${query}", use: navigate({"url": "https://google.com/search?q=${encodeURIComponent(
-          query
-        )}"})`,
+        content: "I understand you have limitations, but please try to fulfill the request using the provided tools to the best of your ability.",
       });
       return true;
     }
     return false;
   }
 
-  private _appendCheckpointReport(msg: LLMMessage) {
-    if (!this.options.isSubAgent && this.lastCheckpoint && !msg.content?.toString().includes("Summary")) {
-      const summaryText = `\n\n## 📝 Execution Report\n[Checkpoint ${this.lastCheckpoint.step}]: ${this.lastCheckpoint.summary}`;
-      msg.content = (msg.content || "") + summaryText;
+  private _appendCheckpointReport(assistantMsg: LLMMessage) {
+    if (this.lastCheckpoint && !this.options.isSubAgent) {
+      assistantMsg.content += `\n\n---\n**Progress Record**:\n${this.lastCheckpoint.summary}`;
     }
   }
 
   private async _handleCheckpoints(iterationCount: number) {
-    if (this.options.isSubAgent) return;
-    const CHECKPOINT_INTERVAL = 15;
-    if (iterationCount % CHECKPOINT_INTERVAL === 0) {
-      this.addMessage({
-        role: "user",
-        content: `[CHECKPOINT ${iterationCount}] Please call update_progress_summary now to summarize your progress so far. This will help prevent context overflow.`,
-      });
+    if (iterationCount > 0 && iterationCount % 5 === 0 && !this.options.isSubAgent) {
+      const originalGoal = this.messages.find(m => m.role === "user")?.content?.toString() || "";
+      const { checkpoint } = await this.specialHandlers.handleUpdateProgressSummary({
+        summary: `Progress update after ${iterationCount} steps.`,
+        isComplete: false
+      }, iterationCount);
+      this.lastCheckpoint = checkpoint;
     }
   }
 
   private _handleMaxIterations(finalPrompt: string): LLMMessage {
-    if (this.options.isSubAgent) throw new Error("Max iterations reached");
-    const handoffMsg: LLMMessage = {
+    const progressContext = this.lastCheckpoint ? `Last Checkpoint: ${this.lastCheckpoint.summary}` : "Progressing through the task.";
+    const timeoutMsg: LLMMessage = {
       role: "assistant",
-      content: `I've reached the maximum number of steps (${this.maxIterations}) for this context. To ensure accuracy and prevent context issues, I've saved a checkpoint of my progress. Should I continue with a fresh context or stop here?`,
-      actions: [
-        {
-          type: "continue",
-          label: "▶️ Continue Task",
-          payload: { goal: finalPrompt },
-        },
-        {
-          type: "cancel",
-          label: "⏹️ Stop Here",
-          payload: {},
-        },
-      ],
-    };
-    this.addMessage(handoffMsg);
-    return handoffMsg;
-  }
+      content: `I've reached the maximum number of steps (${this.maxIterations}) for this segment.
+      
+**Current Progress**: ${progressContext}
 
-  private addMessage(msg: LLMMessage): string | void {
-    this.messages.push(msg);
-    // Incrementally track context size (avoid full JSON.stringify)
-    const contentLen = typeof msg.content === 'string' ? msg.content.length : JSON.stringify(msg.content ?? '').length;
-    this._estimatedContextBytes += contentLen + 50; // +50 for role, metadata overhead
-    return this.options.onMessage?.(msg);
+Would you like me to continue the task? (Reply "yes" or "continue")`,
+    };
+    this.addMessage(timeoutMsg);
+    return timeoutMsg;
   }
 
   private _makeSubAgentFactory(): SubAgentFactory {
     return (overrides) => {
-      const subAgentOptions: AgentRuntimeOptions = {
+      const subOptions: AgentRuntimeOptions = {
         ...this.options,
         ...overrides,
-        // WHY always strip onProgressUpdate for sub-agents:
-        // Sub-agents must NEVER fire global UI progress updates. Progress is
-        // managed by the parent agent only. Stripping it here is an explicit
-        // boundary, not just relying on the `!isSubAgent` guard in _runLoop.
-        onProgressUpdate: undefined,
-        onMessageUpdate: undefined,
+        isSubAgent: true,
       };
-      return new AgentRuntime(subAgentOptions);
+      return new AgentRuntime(subOptions, []);
     };
   }
 }

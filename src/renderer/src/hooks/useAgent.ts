@@ -1,4 +1,4 @@
-/**
+ /**
  * useAgent — React hook that owns all agent execution logic.
  *
  * Architecture: This is the ONLY place in the UI that knows how to run an agent.
@@ -344,9 +344,24 @@ export function useAgent(): UseAgentReturn {
                 console.error("[useAgent] Handler error:", error);
                 // Write the error to originSessionId — not whatever is currently active
                 const { addSessionMessage: addMsg } = useChatStore.getState();
+
+                // Detect 429 / rate-limit / resource-exhausted errors across all providers
+                // and surface a clean, actionable message instead of raw API error dumps.
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                const isRateLimited =
+                    /429/i.test(errorMsg) ||
+                    /rate.?limit/i.test(errorMsg) ||
+                    /resource.?exhausted/i.test(errorMsg) ||
+                    /too many requests/i.test(errorMsg) ||
+                    /quota.?exceeded/i.test(errorMsg);
+
+                const userFacingMessage = isRateLimited
+                    ? `⚠️ **Resource Exhausted**\n\nThe AI model's rate limit has been reached. This usually means too many requests were sent in a short period.\n\n**What you can do:**\n- Wait a minute and try again\n- Switch to a different LLM provider in Settings\n- If using a free API key, consider upgrading your plan`
+                    : `Error: ${errorMsg}`;
+
                 addMsg(originSessionId, {
                     role: "assistant",
-                    content: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
+                    content: userFacingMessage,
                 });
             } finally {
                 // Clear the composing state if this was a WhatsApp message.
@@ -360,8 +375,24 @@ export function useAgent(): UseAgentReturn {
                 // This does NOT affect any other session that might be running.
                 const store = useChatStore.getState();
                 store.stopProcessing(originSessionId);
-                // Clear the session-level progress bar so it never lingers
-                store.updateSessionProgress(originSessionId, undefined, undefined, undefined);
+                // Clear the session-level progress bar so it never lingers.
+                // WHY preserve plan: The SubTaskChecklist (prod mode) needs the plan
+                // to remain on the session even after the agent finishes, so users
+                // can see the collapsed "All tasks completed" checklist.
+                const existingPlan = store.sessions.find(s => s.id === originSessionId)?.plan;
+                store.updateSessionProgress(originSessionId, undefined, undefined, existingPlan);
+
+                // Close the Playwright browser to free system resources.
+                // Only close if this was the last active session.
+                // WHY: Concurrent sessions share the same browser instance.
+                const currentProcessingCount = store._processingSessions.size;
+                if (currentProcessingCount === 0) {
+                    import('../lib/electron').then(({ default: electronLib }) => {
+                        electronLib.playwright.closeBrowser().catch(() => {});
+                    });
+                } else {
+                    console.log(`[useAgent] 🕒 Deferring browser shutdown. ${currentProcessingCount} sessions still active.`);
+                }
             }
         },
         // WHY settings in deps: If the user changes LLM provider mid-session,

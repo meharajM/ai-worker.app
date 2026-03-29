@@ -12,6 +12,7 @@
 import { EventEmitter } from 'events'
 import path from 'path'
 import fs from 'fs'
+import { createRequire } from 'module'
 import { app, powerSaveBlocker } from 'electron'
 import type { WASocket } from '@whiskeysockets/baileys'
 import { formatWhatsAppJid } from '../utils/whatsapp'
@@ -44,6 +45,7 @@ class SimpleRetryCache {
 
 const sentMessagesCache = new SimpleMessageCache()
 const msgRetryCounterCache = new SimpleRetryCache()
+const runtimeRequire = createRequire(import.meta.url)
 
 // Types we expose over IPC — mirrored in the renderer's whatsappStore.ts
 export interface WhatsAppConnectionState {
@@ -146,6 +148,7 @@ export class WhatsAppService extends EventEmitter {
         if (this.connectionState.status === 'connecting') return
         
         // If we have a saved phone number, use it.
+
         const effectivePhone: string | null = (targetPhoneNumber ?? this.connectionState.phoneNumber) ?? null
 
         this._setState({
@@ -161,13 +164,15 @@ export class WhatsAppService extends EventEmitter {
         // Auth is only cleared on explicit disconnect or Stream Error
         
         try {
-            // Dynamically import Baileys to avoid bundling issues
+            // Runtime require avoids bundling optional-peer stubs for ws/bufferutil.
+            // This keeps packaged app behavior aligned with plain Node resolution.
+            const baileys = runtimeRequire('@whiskeysockets/baileys') as typeof import('@whiskeysockets/baileys')
             const {
                 default: makeWASocket,
                 useMultiFileAuthState,
                 DisconnectReason,
                 fetchLatestBaileysVersion,
-            } = await import('@whiskeysockets/baileys')
+            } = baileys
 
             // Ensure auth directory exists
             fs.mkdirSync(this.authDir, { recursive: true })
@@ -754,7 +759,7 @@ export class WhatsAppService extends EventEmitter {
 
             if (socket && (msg.imageMessage || msg.videoMessage || msg.audioMessage || msg.documentMessage)) {
                 try {
-                    const { downloadMediaMessage } = await import('@whiskeysockets/baileys')
+                    const { downloadMediaMessage } = runtimeRequire('@whiskeysockets/baileys') as typeof import('@whiskeysockets/baileys')
                     const buffer = await downloadMediaMessage(
                         raw,
                         'buffer',

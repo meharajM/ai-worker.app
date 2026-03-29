@@ -263,6 +263,19 @@ export function registerMcpHandlers(): void {
             return { result: null, error: err.message }
         }
     })
+
+    // Close the Playwright browser to free system resources.
+    // Called by the renderer when the agent finishes its work.
+    ipcMain.handle('playwright:close-browser', async () => {
+        try {
+            await PlaywrightService.getInstance().close()
+            console.log('[MCP] Playwright browser closed on agent completion')
+            return { success: true }
+        } catch (err) {
+            console.warn('[MCP] Failed to close Playwright browser:', err)
+            return { success: false, error: err instanceof Error ? err.message : String(err) }
+        }
+    })
 }
 
 function getInstallInstructions(cmd: string, args?: string[]): string {

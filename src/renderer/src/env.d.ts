@@ -26,6 +26,10 @@ interface ElectronAPI {
         callTool: (serverId: string, toolName: string, args: unknown) => Promise<{ result: unknown }>
     }
 
+    playwright?: {
+        closeBrowser: () => Promise<{ success: boolean; error?: string }>
+    }
+
     llm: {
         chat: (messages: unknown[], tools?: unknown[]) => Promise<unknown>
         getProviders: () => Promise<Record<string, { available: boolean }>>
