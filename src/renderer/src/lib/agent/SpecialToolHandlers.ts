@@ -22,6 +22,7 @@ import { parseTabIdFromResult } from "../mcp";
 import type { SubAgentFactory } from "./OrchestrationService";
 import { analyzeToolOutput } from "../result-reporter";
 import { laneManager } from "../execution-lanes";
+import { RunWorkLedger } from "./RunWorkLedger";
 
 
 /**
@@ -36,6 +37,12 @@ export class SpecialToolHandlers {
         private addMessage: (msg: LLMMessage) => void,
         private makeSubAgentFactory: () => SubAgentFactory
     ) { }
+
+    private ledger: RunWorkLedger | null = null;
+
+    setLedger(ledger: RunWorkLedger | null) {
+        this.ledger = ledger;
+    }
 
     /**
      * Initializes a structured multi-step plan for achieving a complex goal.
@@ -166,7 +173,7 @@ export class SpecialToolHandlers {
      * @param executionPlan - The current active plan to update.
      * @returns Result from sub-agent and updated plan if applicable.
      */
-    async handleDelegateSubTask(args: any, executionPlan: ExecutionPlan | null): Promise<{ result: string, planUpdate?: ExecutionPlan }> {
+    async handleDelegateSubTask(args: Record<string, any>, executionPlan: ExecutionPlan | null): Promise<{ result: string, planUpdate?: ExecutionPlan }> {
         const instruction = args.instruction || "";
         let context = args.context || "";
 
@@ -228,6 +235,10 @@ export class SpecialToolHandlers {
             const finalRes = await subAgent.chat(prompt);
             const finalContent = typeof finalRes.content === "string" ? finalRes.content : JSON.stringify(finalRes.content);
 
+            if (this.ledger) {
+                this.ledger.recordSubAgentReport(instruction.substring(0, 50), finalContent);
+            }
+
             // ── Detect sub-agent bailout vs clean completion ──────────────────────
             const isBailout = finalContent.includes("consecutive errors") ||
                 finalContent.includes("stopping to prevent an infinite loop");
@@ -287,6 +298,30 @@ export class SpecialToolHandlers {
 
             return { result: salvagedResult.trim(), planUpdate: updatedPlan };
         } catch (err: any) {
+            let partialFindings: string[] = [];
+            try {
+                const subAgentHistory = (subAgent as any).getHistory?.() as LLMMessage[] | undefined;
+                if (subAgentHistory) {
+                    partialFindings = subAgentHistory
+                        .filter((m) => m.role === "tool" && Boolean(m.content))
+                        .map((m) => analyzeToolOutput(m.name || "unknown", m.content))
+                        .filter((analysis) => analysis.hasPresentableData && Boolean(analysis.summary))
+                        .map((analysis) => analysis.summary as string)
+                        .slice(0, 6);
+                }
+            } catch (salvageError) {
+                console.warn("[SpecialToolHandlers] Failed to salvage partial findings from crashed sub-agent:", salvageError);
+            }
+
+            if (this.ledger) {
+                this.ledger.recordError(`Sub-agent failed: ${err?.message || "Unknown error"}`);
+                if (partialFindings.length > 0) {
+                    this.ledger.recordSubAgentReport(
+                        instruction.substring(0, 50),
+                        `Partial findings before crash:\n${partialFindings.join("\n")}`
+                    );
+                }
+            }
             // Best-effort tab cleanup on hard failure to prevent leaks
             if (subAgentTabId !== undefined) {
                 try {
@@ -299,7 +334,12 @@ export class SpecialToolHandlers {
                     console.warn(`[SpecialToolHandlers] Failed to close sub-agent tab ${subAgentTabId} after error`, e);
                 }
             }
-            return { result: `Sub-agent failed: ${err.message}` };
+            if (partialFindings.length > 0) {
+                return {
+                    result: `Sub-agent failed: ${err?.message || "Unknown error"}\n\nPartial findings collected before crash:\n${partialFindings.join("\n")}`
+                };
+            }
+            return { result: `Sub-agent failed: ${err?.message || "Unknown error"}` };
         }
     }
 }

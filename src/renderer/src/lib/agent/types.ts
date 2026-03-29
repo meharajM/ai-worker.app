@@ -118,6 +118,16 @@ export interface AgentRuntimeOptions {
      * instead of the visible UI context.
      */
     isHeadless?: boolean;
+
+    /**
+     * If true, this agent instance "owns" the browser tab and is responsible
+     * for its lifecycle (closing it on exit).
+     *
+     * WHY: Sequential sub-agents share the parent's tab. If Step 1 closes it
+     * in its finally block, Step 2 will crash. Only Parallel sub-agents (which
+     * get a dedicated new_tab) should own their tab.
+     */
+    ownsTab?: boolean;
 }
 
 // ── Internal State Types ───────────────────────────────────────────────────────

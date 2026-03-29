@@ -102,6 +102,10 @@ const electronAPI = {
         getPendingChanges: () => ipcRenderer.invoke('fs:get-pending-changes'),
         approveChange: (changeId: string) => ipcRenderer.invoke('fs:approve-change', changeId),
         rejectChange: (changeId: string) => ipcRenderer.invoke('fs:reject-change', changeId),
+        approveChangeByToken: (token: string) => ipcRenderer.invoke('fs:approve-token', token),
+        rejectChangeByToken: (token: string) => ipcRenderer.invoke('fs:reject-token', token),
+        testForceWhatsAppApproval: (changeId: string, token?: string) =>
+            ipcRenderer.invoke('fs:test-force-whatsapp-approval', changeId, token),
         writeInternalFile: (workspacePath: string | undefined, filename: string, content: string) =>
             ipcRenderer.invoke('fs:write-internal-file', workspacePath, filename, content),
         readInternalFile: (workspacePath: string | undefined, filename: string) =>

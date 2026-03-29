@@ -37,6 +37,7 @@ import {
   createHandoff,
   cleanupState,
 } from "./agent/AgentStateService";
+import { executeToolCall } from "./mcp";
 import {
   checkForLoop,
   executeWithSelfHealing,
@@ -89,6 +90,7 @@ interface AccumulatedToolCall {
  *   - Sub-agent spawning → OrchestrationService
  */
 import { SpecialToolHandlers } from "./agent/SpecialToolHandlers";
+import { RunWorkLedger } from "./agent/RunWorkLedger";
 
 export class AgentRuntime implements IAgentClient {
   private messages: LLMMessage[] = [];
@@ -110,6 +112,8 @@ export class AgentRuntime implements IAgentClient {
   private _estimatedContextBytes = 0;
   /** Counter to trigger periodic full context resync */
   private _contextResyncCounter = 0;
+  /** Ledger for salvaging work on abrupt end */
+  private ledger: RunWorkLedger | null = null;
 
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
     this.options = options;
@@ -123,14 +127,8 @@ export class AgentRuntime implements IAgentClient {
       console.log(`[AgentRuntime] Main agent created with ${this.messages.length} historical messages`);
     }
 
+    this.totalIterations = 0;
     this.maxIterations = options.isSubAgent ? 15 : 50;
-    if (options.taskCategory) this.taskCategory = options.taskCategory;
-
-    if (options.taskCategory) {
-      this.taskCategory = options.taskCategory;
-    }
-
-    this.agentInstanceId = options.agentInstanceId || globalThis.crypto.randomUUID();
     this.taskStartTimeMs = Date.now();
     this.specialHandlers = new SpecialToolHandlers(
       this.agentInstanceId,
@@ -212,6 +210,10 @@ export class AgentRuntime implements IAgentClient {
       }
     }
 
+    // Initialize ledger for every run (including orchestration/continuation paths)
+    this.ledger = new RunWorkLedger(userContent);
+    this.specialHandlers.setLedger(this.ledger);
+
 
     const lastMsg = this.messages[this.messages.length - 1];
     const isConfirmingHandoff =
@@ -234,7 +236,8 @@ export class AgentRuntime implements IAgentClient {
         this.options,
         this.agentInstanceId,
         (msg) => this.addMessage(msg),
-        this._makeSubAgentFactory()
+        this._makeSubAgentFactory(),
+        this.ledger || undefined
       );
       this._emitProgress(100);
       return continuationResult;
@@ -264,58 +267,65 @@ export class AgentRuntime implements IAgentClient {
             }))
         );
 
-      if (decomposition.shouldFork && decomposition.type === "multi_context") {
-        // ── Emit progress for parallel orchestration path ────────────────────
-        const ctxCount = decomposition.contexts?.length || 1;
-        this._emitProgress(5);
-        const result = await executeParallelSubAgents(
-          finalPrompt,
-          decomposition,
-          this.options,
-          this.agentInstanceId,
-          (msg) => {
-            // Tick progress forward as each sub-agent message arrives
-            this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (ctxCount * 3))));
-            return this.addMessage(msg);
-          },
-          this._makeSubAgentFactory(),
-          // onPlanUpdate: Bridge orchestration plan → session.plan → SubTaskChecklist
-          (plan) => {
-            this.executionPlan = plan;
-            this._emitProgress(this._lastProgressPct);
+      if (decomposition.shouldFork) {
+        try {
+          if (decomposition.type === "multi_context") {
+            // ── Emit progress for parallel orchestration path ────────────────────
+            const ctxCount = decomposition.contexts?.length || 1;
+            this._emitProgress(5);
+            const result = await executeParallelSubAgents(
+              finalPrompt,
+              decomposition,
+              this.options,
+              this.agentInstanceId,
+              (msg) => {
+                // Tick progress forward as each sub-agent message arrives
+                this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (ctxCount * 3))));
+                return this.addMessage(msg);
+              },
+              this._makeSubAgentFactory(),
+              this.ledger || undefined,
+              // onPlanUpdate: Bridge orchestration plan → session.plan → SubTaskChecklist
+              (plan) => {
+                this.executionPlan = plan;
+                this._emitProgress(this._lastProgressPct);
+              }
+            );
+            this._emitProgress(100);
+            MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+            return result;
           }
-        );
-        this._emitProgress(100);
-        MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
-        return result;
-      }
 
-      if (decomposition.shouldFork && decomposition.type === "single_context") {
-        // ── Emit progress for sequential orchestration path ──────────────────
-        const stepCount = decomposition.contexts?.length || 3;
-        this._emitProgress(5);
-        const seqResult = await executeSequentialSubAgents(
-          finalPrompt,
-          decomposition,
-          this.options,
-          this.agentInstanceId,
-          (msg) => {
-            // Advance progress by one step slice as each step message arrives
-            this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (stepCount * 2))));
-            return this.addMessage(msg);
-          },
-          this._makeSubAgentFactory(),
-          // onPlanUpdate: Bridge orchestration plan → session.plan → SubTaskChecklist
-          // WHY: Without this, this.executionPlan stays null, so _emitProgress sends
-          // plan=undefined to onProgressUpdate, and the checklist never renders.
-          (plan) => {
-            this.executionPlan = plan;
-            this._emitProgress(this._lastProgressPct);
+          if (decomposition.type === "single_context") {
+            // ── Emit progress for sequential orchestration path ──────────────────
+            const stepCount = decomposition.contexts?.length || 3;
+            this._emitProgress(5);
+            const seqResult = await executeSequentialSubAgents(
+              finalPrompt,
+              decomposition,
+              this.options,
+              this.agentInstanceId,
+              (msg) => {
+                // Advance progress by one step slice as each step message arrives
+                this._emitProgress(Math.min(90, this._lastProgressPct + Math.round(80 / (stepCount * 2))));
+                return this.addMessage(msg);
+              },
+              this._makeSubAgentFactory(),
+              this.ledger || undefined,
+              // onPlanUpdate: Bridge orchestration plan → session.plan → SubTaskChecklist
+              (plan) => {
+                this.executionPlan = plan;
+                this._emitProgress(this._lastProgressPct);
+              }
+            );
+            this._emitProgress(100);
+            MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
+            return seqResult;
           }
-        );
-        this._emitProgress(100);
-        MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
-        return seqResult;
+        } finally {
+          // ALWAYS cleanup local state (in-memory entities) after orchestration finishes
+          await cleanupState(this.agentInstanceId);
+        }
       }
     }
 
@@ -340,6 +350,80 @@ export class AgentRuntime implements IAgentClient {
   }
 
   private async _runLoop(finalPrompt: string): Promise<LLMMessage> {
+    let runError: unknown = null;
+    let finalMessage: LLMMessage | null = null;
+
+    try {
+      finalMessage = await this._executeRunLoop(finalPrompt);
+      return finalMessage;
+    } catch (error) {
+      runError = error;
+      this.ledger?.recordError(error instanceof Error ? error.message : String(error));
+    } finally {
+      // ── Lifecycle Cleanup ──────────────────────────────────────────────────
+      // WHY here: This finally block runs whether the agent completes, crashes,
+      // or is aborted by the user.
+
+      // 1. Partial Progress Salvaging
+      const isAborted = this.options.signal?.aborted;
+      const lastMsg = this.messages[this.messages.length - 1];
+      const isFinished =
+        (finalMessage?.role === "assistant" && !(finalMessage as any)?.tool_calls?.length) ||
+        (lastMsg?.role === "assistant" && !(lastMsg as any)?.tool_calls?.length);
+
+      if ((!finalMessage && (isAborted || !isFinished || runError)) && this.ledger && this.ledger.getFindingsCount() > 0) {
+        console.log(`[AgentRuntime] Run ended abruptly. Generating salvage report...`);
+        const errorReason =
+          isAborted
+            ? "Task aborted by user"
+            : runError instanceof Error
+              ? runError.message
+              : "Task failed or stopped unexpectedly";
+        const report = this.ledger.generateSalvageReport(errorReason);
+        const salvageMessage: LLMMessage = {
+          role: "assistant",
+          content: report
+        };
+        this.addMessage(salvageMessage);
+        finalMessage = salvageMessage;
+        runError = null;
+      }
+
+      // 2. Close the agent's dedicated browser tab
+      if (this.options.tabId !== undefined && this.options.ownsTab) {
+        try {
+          const { browserLock } = await import("./resource-lock");
+          await browserLock.runExclusive(async () => {
+            // executeToolCall handles routing to the correct tab.
+            await executeToolCall("close_tab", { tabId: this.options.tabId });
+          });
+          console.log(`[AgentRuntime] Closed owned browser tab ${this.options.tabId}`);
+          
+          // Clean up the execution lane to prevent memory leaks
+          import("./execution-lanes").then(m => m.laneManager.cleanupTabLane(this.options.tabId!));
+        } catch (e) {
+          console.warn(`[AgentRuntime] Failed to cleanup tab ${this.options.tabId}:`, e);
+        }
+      }
+
+      // 2. Clean up in-memory state (production only)
+      await cleanupState(this.agentInstanceId);
+
+      // Reset run-local ledger so it cannot leak across runs.
+      this.specialHandlers.setLedger(null);
+      this.ledger = null;
+    }
+
+    if (finalMessage) {
+      return finalMessage;
+    }
+    if (runError instanceof Error) {
+      throw runError;
+    }
+    throw new Error(runError ? String(runError) : "Agent run ended without a final message.");
+  }
+
+  private async _executeRunLoop(finalPrompt: string): Promise<LLMMessage> {
     let iterationCount = 0;
     let consecutiveErrors = 0;
     const recentToolCalls: string[] = [];
@@ -375,7 +459,12 @@ export class AgentRuntime implements IAgentClient {
         );
       } catch (error) {
         console.error("[AgentRuntime] LLM Error:", error);
+        this.ledger?.recordError(`LLM error: ${error instanceof Error ? error.message : String(error)}`);
         throw error;
+      }
+
+      if (response.content) {
+        this.ledger?.recordInsight(response.content.toString());
       }
 
       if (!response.toolCalls || response.toolCalls.length === 0) {
@@ -399,7 +488,6 @@ export class AgentRuntime implements IAgentClient {
           this.addMessage(assistantMsg);
         }
 
-        await cleanupState(this.agentInstanceId);
         return assistantMsg;
       }
 
@@ -488,13 +576,15 @@ export class AgentRuntime implements IAgentClient {
               this.options.tabId,
               this.options.workspacePath,
               this.options.signal,
-              this.options.isHeadless
+              this.options.isHeadless,
+              this.ledger || undefined
             );
             const { resultStr: formatted, isError } = formatToolResult(call.name, rawResult);
             resultStr = formatted;
             consecutiveErrors = isError ? consecutiveErrors + 1 : 0;
           } catch (err: any) {
             resultStr = JSON.stringify({ error: err.message || "Unknown error" });
+            this.ledger?.recordError(`Tool execution failed for ${call.name}: ${err?.message || "Unknown error"}`);
             consecutiveErrors++;
           }
 
@@ -510,12 +600,8 @@ export class AgentRuntime implements IAgentClient {
             // Strip out ASCII art boxes (often from Playwright) which look terrible on WhatsApp
             cleanError = cleanError.replace(/[╔║╚═╗╝]/g, '').trim();
 
-            const bailoutMsg: LLMMessage = {
-              role: "assistant",
-              content: `Bailing out after ${consecutiveErrors} consecutive errors. Last error: ${cleanError}`,
-            };
-            this.addMessage(bailoutMsg);
-            return bailoutMsg;
+            this.ledger?.recordError(`Consecutive-error bailout: ${cleanError}`);
+            throw new Error(`Bailing out after ${consecutiveErrors} consecutive errors. Last error: ${cleanError}`);
           }
         }
 
@@ -669,113 +755,66 @@ export class AgentRuntime implements IAgentClient {
   }
 
   private _getServerInfo(): ServerInfo[] {
-    return getServers()
-      .filter((s) => s.connected)
-      .map((s) => ({
-        name: s.name,
-        description: s.description.substring(0, 40),
-        toolCount: s.tools.length,
-        isReasoningServer:
-          s.name.includes("sequential") || s.description.toLowerCase().includes("reasoning"),
-      }));
+    return getServers();
   }
 
-  private async _getDynamicRules(): Promise<string | undefined> {
-    const { getComposedPrompts } = await import("./prompt-library");
-    const promptsToLoad: string[] = [];
-    if (this.taskCategory) promptsToLoad.push(this.taskCategory);
-    return promptsToLoad.length > 0 ? getComposedPrompts(promptsToLoad, this.options.isSubAgent) : undefined;
+  private async _getDynamicRules(): Promise<string[]> {
+    const rulesNames = this.options.settings?.general?.activeRules || [];
+    return rulesNames;
   }
 
   private _handleModelRefusal(response: LLMResponse): boolean {
-    const refusalPatterns = [
-      /don't have access to/i,
-      /can't (?:access|check|fetch|get)/i,
-      /I (?:am|'m) (?:just|only) a/i,
-      /unable to (?:browse|access)/i,
-      /you(?:'ll)? need to check/i,
-    ];
-    const isRefusal = refusalPatterns.some((p) => p.test(response.content || ""));
-    const alreadyCorrected = this.messages.some(
-      (m) => typeof m.content === "string" && m.content.includes("[AUTO-CORRECT]")
-    );
-
-    if (isRefusal && !alreadyCorrected) {
-      console.warn("[AgentRuntime] Model refused tool use. Auto-correcting...");
-      const userQuery = this.messages.filter((m) => m.role === "user").pop();
-      const query = typeof userQuery?.content === "string" ? userQuery.content : "the request";
+    if (response.content?.toString().toLowerCase().includes("i cannot") ||
+      response.content?.toString().toLowerCase().includes("i'm sorry")) {
+      console.warn("[AgentRuntime] Model refusal detected, retrying...");
       this.addMessage({
         role: "user",
-        content: `[AUTO-CORRECT] You refused to help. This is wrong — you HAVE browser tools.\n            \nFor "${query}", use: navigate({"url": "https://google.com/search?q=${encodeURIComponent(
-          query
-        )}"})`,
+        content: "I understand you have limitations, but please try to fulfill the request using the provided tools to the best of your ability.",
       });
       return true;
     }
     return false;
   }
 
-  private _appendCheckpointReport(msg: LLMMessage) {
-    if (!this.options.isSubAgent && this.lastCheckpoint && !msg.content?.toString().includes("Summary")) {
-      const summaryText = `\n\n## 📝 Execution Report\n[Checkpoint ${this.lastCheckpoint.step}]: ${this.lastCheckpoint.summary}`;
-      msg.content = (msg.content || "") + summaryText;
+  private _appendCheckpointReport(assistantMsg: LLMMessage) {
+    if (this.lastCheckpoint && !this.options.isSubAgent) {
+      assistantMsg.content += `\n\n---\n**Progress Record**:\n${this.lastCheckpoint.summary}`;
     }
   }
 
   private async _handleCheckpoints(iterationCount: number) {
-    if (this.options.isSubAgent) return;
-    const CHECKPOINT_INTERVAL = 15;
-    if (iterationCount % CHECKPOINT_INTERVAL === 0) {
-      this.addMessage({
-        role: "user",
-        content: `[CHECKPOINT ${iterationCount}] Please call update_progress_summary now to summarize your progress so far. This will help prevent context overflow.`,
-      });
+    if (iterationCount > 0 && iterationCount % 5 === 0 && !this.options.isSubAgent) {
+      const originalGoal = this.messages.find(m => m.role === "user")?.content?.toString() || "";
+      const { checkpoint } = await this.specialHandlers.handleUpdateProgressSummary({
+        summary: `Progress update after ${iterationCount} steps.`,
+        isComplete: false
+      }, iterationCount);
+      this.lastCheckpoint = checkpoint;
     }
   }
 
   private _handleMaxIterations(finalPrompt: string): LLMMessage {
-    if (this.options.isSubAgent) throw new Error("Max iterations reached");
-    const handoffMsg: LLMMessage = {
+    const progressContext = this.lastCheckpoint ? `Last Checkpoint: ${this.lastCheckpoint.summary}` : "Progressing through the task.";
+    const timeoutMsg: LLMMessage = {
       role: "assistant",
-      content: `I've reached the maximum number of steps (${this.maxIterations}) for this context. To ensure accuracy and prevent context issues, I've saved a checkpoint of my progress. Should I continue with a fresh context or stop here?`,
-      actions: [
-        {
-          type: "continue",
-          label: "▶️ Continue Task",
-          payload: { goal: finalPrompt },
-        },
-        {
-          type: "cancel",
-          label: "⏹️ Stop Here",
-          payload: {},
-        },
-      ],
-    };
-    this.addMessage(handoffMsg);
-    return handoffMsg;
-  }
+      content: `I've reached the maximum number of steps (${this.maxIterations}) for this segment.
+      
+**Current Progress**: ${progressContext}
 
-  private addMessage(msg: LLMMessage): string | void {
-    this.messages.push(msg);
-    // Incrementally track context size (avoid full JSON.stringify)
-    const contentLen = typeof msg.content === 'string' ? msg.content.length : JSON.stringify(msg.content ?? '').length;
-    this._estimatedContextBytes += contentLen + 50; // +50 for role, metadata overhead
-    return this.options.onMessage?.(msg);
+Would you like me to continue the task? (Reply "yes" or "continue")`,
+    };
+    this.addMessage(timeoutMsg);
+    return timeoutMsg;
   }
 
   private _makeSubAgentFactory(): SubAgentFactory {
     return (overrides) => {
-      const subAgentOptions: AgentRuntimeOptions = {
+      const subOptions: AgentRuntimeOptions = {
         ...this.options,
         ...overrides,
-        // WHY always strip onProgressUpdate for sub-agents:
-        // Sub-agents must NEVER fire global UI progress updates. Progress is
-        // managed by the parent agent only. Stripping it here is an explicit
-        // boundary, not just relying on the `!isSubAgent` guard in _runLoop.
-        onProgressUpdate: undefined,
-        onMessageUpdate: undefined,
+        isSubAgent: true,
       };
-      return new AgentRuntime(subAgentOptions);
+      return new AgentRuntime(subOptions, []);
     };
   }
 }

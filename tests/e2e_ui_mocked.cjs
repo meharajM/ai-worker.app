@@ -601,7 +601,41 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             throw e;
         }
 
+        // --- TEST 14: BROWSER LEAK DETECTION ---
+        console.log('\n--- Test 14: Browser Process Leak Detection ---');
+        try {
+            // Give time for finally blocks and any pending asynchronous cleanup to happen
+            await window.waitForTimeout(5000);
+            
+            // Check OS processes for trailing Chromium instances launched by Playwright (macOS/Linux compatible test)
+            const { execSync } = require('child_process');
+            let chromiumCount = 0;
+            try {
+                // We check the electron app's subprocess tree or just raw Chromium instances
+                const output = execSync('ps aux | grep "[c]hromium"').toString();
+                chromiumCount = output.split('\n').filter(line => line.trim().length > 0).length;
+            } catch (e) {
+                // If grep finds no processes, it exits with code 1. That means 0 leaks!
+                chromiumCount = 0;
+            }
+
+            console.log(`   - Active Chromium processes remaining: ${chromiumCount}`);
+            
+            // Note: If Playwright is running headless or persistent, there might be at least 1 browser manager process running.
+            // But we can flag an explosive leak (like 5+ tabs)
+            if (chromiumCount > 15) {
+                console.error(`❌ Leak detected! Found ${chromiumCount} chromium processes after crash test!`);
+                throw new Error("Playwright processes leaked out of bounds.");
+            } else {
+                console.log('✅ Tab cleanup successful / No catastrophic leaks detected.');
+            }
+        } catch(e) {
+            console.error('❌ Leak detection failed:', e);
+            throw e;
+        }
+
         console.log('\n🎉 ALL SCENARIOS PASSED (with handled warnings)');
+
 
     } catch (e) {
         console.error('❌ TEST FAILED:', e);

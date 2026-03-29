@@ -187,7 +187,12 @@ export class FillFormTool extends PlaywrightTool {
             await page.waitForSelector(selector, { timeout: 5000 }).catch(() => null);
             if (fillType === 'type') {
                 await page.click(selector).catch(() => null);
-                await page.type(selector, value, { delay: 30 });
+                // Clear the field safely before human-typing
+                await page.fill(selector, '');
+                for (const char of value) {
+                    // Inject randomized human jitter between 30ms and 80ms per keystroke
+                    await page.keyboard.type(char, { delay: 30 + Math.random() * 50 });
+                }
             } else if (fillType === 'select') {
                 await page.selectOption(selector, value);
             } else {

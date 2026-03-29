@@ -30,16 +30,13 @@ import { type ExecutionPlan } from "../agent-protocol";
 import { type AgentRuntimeOptions } from "./types";
 import { preSeedSubAgentMemory } from "./AgentStateService";
 import { laneManager } from "../execution-lanes";
+import { RunWorkLedger } from "./RunWorkLedger";
 
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 /**
  * Factory function for creating sub-agent instances.
- *
- * WHY a factory instead of direct import: Avoids the circular dependency
- * AgentRuntime → OrchestrationService → AgentRuntime. The factory is provided
- * by AgentRuntime at call time.
  *
  * @param overrides - Options to override on the parent's options (e.g., isSubAgent, tabId).
  * @returns A new agent instance with a `chat()` method.
@@ -54,19 +51,14 @@ export type SubAgentFactory = (overrides: Partial<AgentRuntimeOptions> & {
 /**
  * Executes sub-agents in parallel for multi-context tasks.
  *
- * Each context (e.g., website, app, data source) gets its own isolated sub-agent
- * with a dedicated browser tab. Results are aggregated into a single summary.
- *
- * Live status updates: A single "status card" message is created upfront and
- * updated in-place as each sub-agent completes. This gives the user real-time
- * feedback without flooding the chat with intermediate messages.
- *
- * @param originalRequest - The user's original request (for context in sub-agent prompts).
- * @param decomposition - The task decomposition result (contexts, estimatedActions).
- * @param parentOptions - The parent agent's options (settings, signal, callbacks, etc.).
- * @param parentAgentId - The parent agent's instance ID (for memory linking).
+ * @param originalRequest - The user's original request.
+ * @param decomposition - The task decomposition result.
+ * @param parentOptions - The parent agent's options.
+ * @param parentAgentId - The parent agent's instance ID.
  * @param addMessage - Callback to add a message to the parent's history + UI.
  * @param spawnSubAgent - Factory function to create sub-agent instances.
+ * @param ledger - Optional ledger for salvaging data.
+ * @param onPlanUpdate - Callback for ExecutionPlan updates (checklist UI).
  * @returns The final aggregated result message.
  */
 export async function executeParallelSubAgents(
@@ -76,13 +68,12 @@ export async function executeParallelSubAgents(
     parentAgentId: string,
     addMessage: (msg: LLMMessage) => string | void,
     spawnSubAgent: SubAgentFactory,
+    ledger?: RunWorkLedger,
     onPlanUpdate?: (plan: ExecutionPlan) => void
 ): Promise<LLMMessage> {
     const { contexts } = decomposition;
 
     // ── Convert parallel contexts to ExecutionPlan for the UI ──────────────
-    // WHY: Parallel tasks don't have a JSON plan yet, so we treat each context
-    // as a sub-task "Process {context}".
     const executionPlan: ExecutionPlan = {
         goal: originalRequest,
         steps: contexts.map((ctx, i) => ({
@@ -116,7 +107,6 @@ export async function executeParallelSubAgents(
         return partials;
     };
 
-    // Track live status for each sub-agent
     const agentStatuses = contexts.map((ctx) => ({
         context: ctx,
         status: "Starting...",
@@ -124,7 +114,6 @@ export async function executeParallelSubAgents(
         result: null as string | null,
     }));
 
-    // Helper to render the live status card content
     const renderStatus = () => {
         let content = `## ⚡ Parallel Execution\n\n`;
         for (const s of agentStatuses) {
@@ -137,26 +126,21 @@ export async function executeParallelSubAgents(
         return content;
     };
 
-    // Create the initial status card message
     const statusMessage: LLMMessage = { role: "assistant", content: renderStatus() };
     const statusMessageId = addMessage(statusMessage) as string | undefined;
 
-    // Spawn all sub-agents concurrently
-    // Determine if sub-agents should run headless (inherit from parent)
     const useHeadless = parentOptions.isHeadless === true;
 
     const subAgentPromises = contexts.map(async (context, index) => {
         const instruction = generateSubAgentInstruction(originalRequest, context, contexts);
         const subAgentId = globalThis.crypto.randomUUID();
 
-        // Mark step as active in the ExecutionPlan
         const planStep = executionPlan.steps[index];
         if (planStep) {
             planStep.status = "active";
             onPlanUpdate?.(executionPlan);
         }
 
-        // Pre-seed memory so the sub-agent can find its state entity on init
         await preSeedSubAgentMemory(
             subAgentId,
             parentAgentId,
@@ -169,8 +153,6 @@ export async function executeParallelSubAgents(
             { context }
         );
 
-        // Skip visible-browser tab provisioning in headless mode — the headless
-        // browser is used directly via the _headless flag on tool args.
         let subAgentTabId: number | undefined;
         if (!useHeadless) {
             try {
@@ -179,19 +161,14 @@ export async function executeParallelSubAgents(
                     executeToolCall("new_tab", { url: "about:blank" })
                 );
 
-                // Extract tabId from the MCP content envelope (or raw fallback)
                 const parsedTabId = parseTabIdFromResult(tabResult);
                 if (parsedTabId !== undefined) {
                     subAgentTabId = parsedTabId;
                     console.log(`[OrchestrationService] Provisioned tab ${subAgentTabId} for sub-agent`);
-                } else {
-                    console.warn("[OrchestrationService] new_tab result did not contain a tabId:", tabResult.result);
                 }
             } catch (e) {
                 console.warn("[OrchestrationService] Failed to provision tab for sub-agent", e);
             }
-        } else {
-            console.log(`[OrchestrationService] Headless mode — skipping visible tab for sub-agent ${context}`);
         }
 
         const subAgent = spawnSubAgent({
@@ -200,9 +177,9 @@ export async function executeParallelSubAgents(
             isSubAgent: true,
             isHeadless: useHeadless,
             tabId: subAgentTabId,
+            ownsTab: subAgentTabId !== undefined,
             taskCategory: parentOptions.taskCategory,
             onMessage: (msg: LLMMessage) => {
-                // Update the live status card as the sub-agent works
                 let newStatus = "";
                 if (msg.role === "assistant" && msg.content) {
                     const content = typeof msg.content === "string" ? msg.content : "";
@@ -221,12 +198,6 @@ export async function executeParallelSubAgents(
                         parentOptions.onMessageUpdate(statusMessageId, { content: renderStatus() });
                     }
                 }
-
-                const contentStr =
-                    typeof msg.content === "string"
-                        ? msg.content
-                        : (msg.content as any[]).map((c: any) => (c.type === "text" ? c.text : "[Image]")).join(" ");
-                console.log(`[SubAgent:${context}] ${msg.role}: ${contentStr?.substring(0, 50)}...`);
             },
         });
 
@@ -237,7 +208,6 @@ export async function executeParallelSubAgents(
                     ? result.content
                     : (result?.content as any[])?.map((c: any) => (c.type === "text" ? c.text : "")).join("") ?? "";
 
-            // Detect sub-agent bailout (max consecutive errors)
             const isBailout = resultContent.includes("consecutive errors") ||
                 resultContent.includes("stopping to prevent an infinite loop");
 
@@ -249,8 +219,6 @@ export async function executeParallelSubAgents(
                 const partials = await extractPartialFindings(subAgent);
                 if (partials.length > 0) {
                     finalResultStr = `Sub-agent bailed out. Partial data collected:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
-                } else {
-                    finalResultStr = `Sub-agent bailed out with errors. No partial data salvaged.\n\nOriginal result: ${resultContent.substring(0, 100)}...`;
                 }
                 console.warn(`[OrchestrationService] Parallel sub-agent ${context} bailed out. Salvaged ${partials.length} partial findings.`);
             }
@@ -259,7 +227,6 @@ export async function executeParallelSubAgents(
             agentStatuses[index].result = finalResultStr;
             agentStatuses[index].status = finalStatus;
 
-            // Mark step as completed or failed in the ExecutionPlan
             const finishedStep = executionPlan.steps[index];
             if (finishedStep) {
                 finishedStep.status = isSuccess ? "completed" : "failed";
@@ -271,22 +238,6 @@ export async function executeParallelSubAgents(
                 parentOptions.onMessageUpdate(statusMessageId, { content: renderStatus() });
             }
 
-            // Close the sub-agent's tab to free resources
-            if (subAgentTabId !== undefined) {
-                try {
-                    const { browserLock } = await import("../resource-lock");
-                    await browserLock.runExclusive(async () =>
-                        executeToolCall("close_tab", { tabId: subAgentTabId })
-                    );
-                    console.log(`[OrchestrationService] Closed sub-agent tab ${subAgentTabId}`);
-                    // Clean up the execution lane to prevent memory leaks
-                    laneManager.cleanupTabLane(subAgentTabId);
-                } catch (e) {
-                    console.warn(`[OrchestrationService] Failed to close sub-agent tab ${subAgentTabId}`, e);
-                }
-            }
-
-            // Show the result immediately as a distinct message
             if (isSuccess) {
                 addMessage({
                     role: "assistant",
@@ -299,34 +250,20 @@ export async function executeParallelSubAgents(
                     content: `**⚠️ ${context} Analysis Failed/Partial**\n\n${finalResultStr}`,
                 });
             }
+            ledger?.recordSubAgentReport(context, finalResultStr);
 
             return { context, success: isSuccess, result: finalResultStr };
         } catch (error: any) {
             agentStatuses[index].isRunning = false;
             agentStatuses[index].status = "Failed";
 
-            // Try to salvage partial data even on a hard crash
             let partialsMsg = "";
             try {
                 const partials = await extractPartialFindings(subAgent);
                 if (partials.length > 0) {
                     partialsMsg = `\n\nPartial data collected before crash:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
-                    console.warn(`[OrchestrationService] Parallel sub-agent ${context} threw exception. Salvaged ${partials.length} partial findings.`);
                 }
             } catch (e) { }
-
-            // Close the tab + clean up the lane even on crash path to prevent leaks
-            if (subAgentTabId !== undefined) {
-                try {
-                    const { browserLock } = await import("../resource-lock");
-                    await browserLock.runExclusive(async () =>
-                        executeToolCall("close_tab", { tabId: subAgentTabId })
-                    );
-                    laneManager.cleanupTabLane(subAgentTabId);
-                } catch (e) {
-                    console.warn(`[OrchestrationService] Failed to close crashed sub-agent tab ${subAgentTabId}`, e);
-                }
-            }
 
             const errorText = `Error: ${error.message}${partialsMsg}`;
             agentStatuses[index].result = errorText;
@@ -339,15 +276,25 @@ export async function executeParallelSubAgents(
                 role: "assistant",
                 content: `**❌ ${context} Analysis Crashed**\n\n${errorText}`,
             });
+            ledger?.recordError(`[Parallel:${context}] ${errorText}`);
 
             return { context, success: false, result: errorText };
+        } finally {
+            if (subAgentTabId !== undefined) {
+                try {
+                    const { browserLock } = await import("../resource-lock");
+                    await browserLock.runExclusive(async () =>
+                        executeToolCall("close_tab", { tabId: subAgentTabId })
+                    );
+                    laneManager.cleanupTabLane(subAgentTabId);
+                } catch (e) {
+                    console.warn(`[OrchestrationService] Failed cleanup for tab ${subAgentTabId}`, e);
+                }
+            }
         }
-
     });
 
     const results = await Promise.all(subAgentPromises);
-
-    // Aggregate results into a final summary
     const successfulResults = results.filter((r) => r.success);
     const failedResults = results.filter((r) => !r.success);
 
@@ -364,7 +311,6 @@ export async function executeParallelSubAgents(
     }
     summary += `---\n\n*Parallel execution complete: ${successfulResults.length}/${contexts.length} sources succeeded.*`;
 
-    // Update the status card one final time with the aggregated result
     if (statusMessageId && parentOptions.onMessageUpdate) {
         parentOptions.onMessageUpdate(statusMessageId, { content: summary });
     }
@@ -375,16 +321,7 @@ export async function executeParallelSubAgents(
 // ── Sequential Orchestration ───────────────────────────────────────────────────
 
 /**
- * Executes sub-agents sequentially for complex single-context tasks.
- *
- * Flow:
- * 1. Generate a 3-5 step plan via LLM
- * 2. Display the plan to the user
- * 3. Execute each step with a fresh sub-agent (passing previous step results as context)
- * 4. Compile a final summary
- *
- * WHY sequential (not parallel): Single-context tasks often have dependencies
- * between steps (e.g., "navigate to page" must complete before "click button").
+ * Executes sub-agents sequentially.
  *
  * @param originalRequest - The user's original request.
  * @param decomposition - The task decomposition result.
@@ -392,6 +329,8 @@ export async function executeParallelSubAgents(
  * @param parentAgentId - The parent agent's instance ID.
  * @param addMessage - Callback to add a message to the parent's history + UI.
  * @param spawnSubAgent - Factory function to create sub-agent instances.
+ * @param ledger - Optional ledger for salvaging data.
+ * @param onPlanUpdate - Callback for ExecutionPlan updates.
  * @returns The final summary message.
  */
 export async function executeSequentialSubAgents(
@@ -401,43 +340,36 @@ export async function executeSequentialSubAgents(
     parentAgentId: string,
     addMessage: (msg: LLMMessage) => string | void,
     spawnSubAgent: SubAgentFactory,
+    ledger?: RunWorkLedger,
     onPlanUpdate?: (plan: ExecutionPlan) => void
 ): Promise<LLMMessage> {
     const { contexts, estimatedActions } = decomposition;
     const targetContext = contexts[0] || "task";
 
-    // Notify user about auto-orchestration
-    // NOTE: Only call addMessage OR onMessage — not both.
-    // addMessage (from AgentRuntime) already calls onMessage internally,
-    // so calling both results in duplicate UI messages.
     addMessage({
         role: "assistant",
         content: `📋 **Auto-Orchestration**: This task requires ~${estimatedActions} steps. I'll break it down and execute each part efficiently to preserve context.\n\nAnalyzing...`,
     });
 
-    // ── Step 1: Generate plan via LLM ──────────────────────────────────────────
-    console.log("[OrchestrationService] Generating execution plan...");
-    const planPrompt = `Break this task into 3-5 CONCRETE steps for an automation agent:
+    try {
+        const planPrompt = `Break this task into 3-5 CONCRETE steps for an automation agent:
 
 TASK: ${originalRequest}
 TARGET: ${targetContext}
 
 Rules:
-- Each step = 1-3 tool calls (could be browser, file, API, database, messaging, etc.)
-- Be specific: include URLs, filenames, endpoints, or identifiers when known
-- NO vague steps like "gather information" or "clarify requirements"
-- Each step should produce a clear, verifiable result
+- Each step = 1-3 tool calls
+- Be specific
+- Each step should produce a clear result
 
 Format as JSON:
 {
   "steps": [
-    {"id": 1, "description": "Navigate to example.com OR Open file X OR Call API Y"},
-    {"id": 2, "description": "Perform the main action"},
-    {"id": 3, "description": "Extract/save results"}
+    {"id": 1, "description": "Description 1"},
+    {"id": 2, "description": "Description 2"}
   ]
 }`;
 
-    try {
         const planResponse = await chat(
             [{ role: "user", content: planPrompt }],
             [],
@@ -450,34 +382,19 @@ Format as JSON:
         try {
             const jsonMatch = planResponse.content.match(/\{[\s\S]*"steps"[\s\S]*\}/);
             if (jsonMatch) planData = JSON.parse(jsonMatch[0]);
-        } catch {
-            // JSON parse failed — use fallback plan
-        }
+        } catch { }
 
-        // Fallback if LLM didn't produce a valid plan
         if (!planData || !planData.steps || planData.steps.length === 0) {
             planData = {
                 steps: [
-                    {
-                        id: 1,
-                        description: `Navigate to ${targetContext === "current_page" ? "the target website" : targetContext
-                            }`,
-                    },
-                    {
-                        id: 2,
-                        description: `Complete the main action: ${originalRequest.substring(0, 80)}`,
-                    },
-                    { id: 3, description: "Verify results and extract relevant information" },
+                    { id: 1, description: `Navigate to ${targetContext}` },
+                    { id: 2, description: `Complete main action: ${originalRequest.substring(0, 80)}` },
+                    { id: 3, description: "Verify results" },
                 ],
             };
         }
 
         const steps = planData.steps;
-        console.log(`[OrchestrationService] Plan created with ${steps.length} steps`);
-
-        // ── Convert to ExecutionPlan for the SubTaskChecklist UI ──────────────
-        // WHY: The SubTaskChecklist reads session.plan (ExecutionPlan type).
-        // Without this, the checklist never renders because session.plan stays undefined.
         const executionPlan: ExecutionPlan = {
             goal: originalRequest,
             steps: steps.map(s => ({
@@ -488,7 +405,6 @@ Format as JSON:
         };
         onPlanUpdate?.(executionPlan);
 
-        // Display plan to user (addMessage only — it calls onMessage internally)
         addMessage({
             role: "assistant",
             content: `## Execution Plan\n\n${steps
@@ -496,8 +412,26 @@ Format as JSON:
                 .join("\n")}\n\n---\n`,
         });
 
-        // ── Step 2: Execute each step via sub-agent ────────────────────────────────
         const results: Array<{ step: number; description: string; result: string }> = [];
+
+        // ── Provision a SINGLE shared tab for all sequential steps ────────────
+        const useHeadless = parentOptions.isHeadless === true;
+        let sharedTabId: number | undefined;
+        if (!useHeadless) {
+            try {
+                const { browserLock } = await import("../resource-lock");
+                const tabResult = await browserLock.runExclusive(async () =>
+                    executeToolCall("new_tab", { url: "about:blank" })
+                );
+                const parsedTabId = parseTabIdFromResult(tabResult);
+                if (parsedTabId !== undefined) {
+                    sharedTabId = parsedTabId;
+                    console.log(`[OrchestrationService] Provisioned shared tab ${sharedTabId} for sequential sub-agents`);
+                }
+            } catch (e) {
+                console.warn("[OrchestrationService] Failed to provision shared tab", e);
+            }
+        }
 
         // Helper to salvage data from a sub-agent
         const extractPartialFindings = async (subAgentInstance: any): Promise<string[]> => {
@@ -522,60 +456,24 @@ Format as JSON:
             return partials;
         };
 
-        // ── Provision a SINGLE shared tab for all sequential steps ────────────
-        // WHY: Without this, each sub-agent opens its own browser instance,
-        // causing the Playwright explosion visible in the task bar.
-        const useHeadless = parentOptions.isHeadless === true;
-        let sharedTabId: number | undefined;
-        if (!useHeadless) {
-            try {
-                const { browserLock } = await import("../resource-lock");
-                const tabResult = await browserLock.runExclusive(async () =>
-                    executeToolCall("new_tab", { url: "about:blank" })
-                );
-                const parsedTabId = parseTabIdFromResult(tabResult);
-                if (parsedTabId !== undefined) {
-                    sharedTabId = parsedTabId;
-                    console.log(`[OrchestrationService] Provisioned shared tab ${sharedTabId} for sequential sub-agents`);
-                }
-            } catch (e) {
-                console.warn("[OrchestrationService] Failed to provision shared tab", e);
-            }
-        }
-
         try {
             for (const step of steps) {
                 if (parentOptions.signal?.aborted) {
-                    console.log("[OrchestrationService] Sequential orchestration aborted by user");
                     throw new Error("Aborted by user");
                 }
 
-                console.log(`[OrchestrationService] Executing step ${step.id}: ${step.description}`);
-
-                // Mark step as active in the ExecutionPlan for the SubTaskChecklist
                 const planStep = executionPlan.steps.find(s => s.id === step.id);
                 if (planStep) planStep.status = 'active';
                 onPlanUpdate?.(executionPlan);
 
-                // Build context from previous steps
                 const previousStepsSummary =
                     results.length > 0
                         ? `\n\nCOMPLETED STEPS:\n${results
-                            .map(
-                                (r) =>
-                                    `- Step ${r.step}: ${r.result.substring(0, 100)}${r.result.length > 100 ? "..." : ""
-                                    }`
-                            )
+                            .map((r) => `- Step ${r.step}: ${r.result.substring(0, 100)}...`)
                             .join("\n")}`
                         : "";
 
-                const subAgentInstruction = `GOAL: ${originalRequest}
-
-CURRENT STEP (${step.id}/${steps.length}): ${step.description}
-${previousStepsSummary}
-
-Execute this step using available tools. State persists from previous steps.
-End with "✓ Done" and a brief result.`;
+                const subAgentInstruction = `GOAL: ${originalRequest}\n\nCURRENT STEP (${step.id}/${steps.length}): ${step.description}${previousStepsSummary}\n\nEnd with "✓ Done" and a brief result.`;
 
                 const subAgentId = globalThis.crypto.randomUUID();
 
@@ -583,13 +481,8 @@ End with "✓ Done" and a brief result.`;
                     subAgentId,
                     parentAgentId,
                     parentOptions.activeSessionId,
-                    [
-                        `Sequential sub-agent for step ${step.id}/${steps.length}`,
-                        `Task: ${step.description}`,
-                        `Parent task: ${originalRequest}`,
-                        `Initialized at ${new Date().toISOString()}`,
-                    ].join("\n"),
-                    { stepId: step.id, stepDescription: step.description }
+                    `Sequential sub-agent for step ${step.id}/${steps.length}`,
+                    { stepId: step.id }
                 );
 
                 const subAgent = spawnSubAgent({
@@ -597,14 +490,10 @@ End with "✓ Done" and a brief result.`;
                     parentAgentId,
                     isSubAgent: true,
                     isHeadless: useHeadless,
-                    tabId: sharedTabId,    // Share the single provisioned tab
+                    tabId: sharedTabId,
                     taskCategory: parentOptions.taskCategory,
-                    onMessage: (msg) => {
-                        const contentStr =
-                            typeof msg.content === "string"
-                                ? msg.content
-                                : (msg.content as any[]).map((c: any) => (c.type === "text" ? c.text : "[Image]")).join(" ");
-                        console.log(`[SubAgent:Step${step.id}] ${msg.role}: ${contentStr?.substring(0, 50)}...`);
+                    onMessage: (msg: LLMMessage) => {
+                        console.log(`[SubAgent:Step${step.id}] ${msg.role}: ${typeof msg.content === 'string' ? msg.content.substring(0, 50) : '...'}...`);
                     },
                 });
 
@@ -615,7 +504,6 @@ End with "✓ Done" and a brief result.`;
                             ? stepResult.content
                             : (stepResult.content as any[]).map((c: any) => (c.type === "text" ? c.text : "")).join("");
 
-                    // Detect bailout
                     const isBailout = stepContent.includes("consecutive errors") ||
                         stepContent.includes("stopping to prevent an infinite loop");
 
@@ -623,15 +511,15 @@ End with "✓ Done" and a brief result.`;
                         const partials = await extractPartialFindings(subAgent);
                         let finalStepContent = stepContent;
                         if (partials.length > 0) {
-                            finalStepContent = `Step bailed out. Partial data collected:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
+                            finalStepContent = `Step bailed out. Partial data:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
                         }
-                        console.warn(`[OrchestrationService] Sequential step ${step.id} bailed out. Salvaged ${partials.length} findings.`);
                         results.push({ step: step.id, description: step.description, result: finalStepContent.trim() });
+                        ledger?.recordSubAgentReport(`step-${step.id}`, finalStepContent);
                     } else {
                         results.push({ step: step.id, description: step.description, result: stepContent.trim() });
+                        ledger?.recordSubAgentReport(`step-${step.id}`, stepContent);
                     }
 
-                    // Mark step as completed in the ExecutionPlan
                     const completedStep = executionPlan.steps.find(s => s.id === step.id);
                     if (completedStep) {
                         completedStep.status = 'completed';
@@ -639,26 +527,20 @@ End with "✓ Done" and a brief result.`;
                     }
                     onPlanUpdate?.(executionPlan);
 
-                    // Only addMessage — it calls onMessage internally
                     addMessage({
                         role: "assistant",
-                        content: `✓ **Step ${step.id} completed**\n${stepContent.substring(0, 150)}${stepContent.length > 150 ? "..." : ""
-                            }`,
+                        content: `✓ **Step ${step.id} completed**\n${stepContent.substring(0, 150)}...`,
                     });
                 } catch (error: any) {
                     console.error(`[OrchestrationService] Step ${step.id} failed:`, error);
-
-                    // Try to salvage partial data even on a hard crash
                     let partialsMsg = "";
                     try {
                         const partials = await extractPartialFindings(subAgent);
                         if (partials.length > 0) {
-                            partialsMsg = `\n\nPartial data collected before crash:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
-                            console.warn(`[OrchestrationService] Sequential step ${step.id} crashed. Salvaged ${partials.length} findings.`);
+                            partialsMsg = `\n\nPartial findings:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
                         }
                     } catch (e) { }
 
-                    // Mark step as failed in the ExecutionPlan
                     const failedStep = executionPlan.steps.find(s => s.id === step.id);
                     if (failedStep) failedStep.status = 'failed';
                     onPlanUpdate?.(executionPlan);
@@ -668,11 +550,10 @@ End with "✓ Done" and a brief result.`;
                         description: step.description,
                         result: `Error: ${error.message}${partialsMsg}`,
                     });
+                    ledger?.recordError(`[Sequential step ${step.id}] ${error.message}`);
                 }
             }
         } finally {
-            // ── Step 3: Clean up shared tab ──────────────────────────────────────────
-            // WHY finally: Guarantees cleanup even if the loop throws or user aborts.
             if (sharedTabId !== undefined) {
                 try {
                     const { browserLock } = await import("../resource-lock");
@@ -680,30 +561,23 @@ End with "✓ Done" and a brief result.`;
                         executeToolCall("close_tab", { tabId: sharedTabId })
                     );
                     laneManager.cleanupTabLane(sharedTabId);
-                    console.log(`[OrchestrationService] Closed shared sequential tab ${sharedTabId}`);
-                } catch (e) {
-                    console.warn(`[OrchestrationService] Failed to close shared tab ${sharedTabId}`, e);
-                }
+                } catch (e) { }
             }
         }
 
-        // ── Step 4: Compile final summary ──────────────────────────────────────────
         let finalSummary = `## Task Complete\n\n`;
         for (const result of results) {
             finalSummary += `**${result.description}**\n${result.result}\n\n`;
         }
-        finalSummary += `---\n\n*Sequential orchestration complete: ${results.length} steps executed.*`;
+        addMessage({ role: "assistant", content: finalSummary });
 
-        // Only addMessage — it calls onMessage internally
-        const finalMessage: LLMMessage = { role: "assistant", content: finalSummary };
-        addMessage(finalMessage);
-
-        return finalMessage;
+        return { role: "assistant", content: finalSummary };
     } catch (error: any) {
         console.error("[OrchestrationService] Sequential orchestration failed:", error);
+        ledger?.recordError(`Sequential orchestration failed: ${error.message}`);
         return {
             role: "assistant",
-            content: `Failed to orchestrate task: ${error.message}. Falling back to direct execution.`,
+            content: `Failed: ${error.message}.`,
         };
     }
 }
@@ -711,19 +585,17 @@ End with "✓ Done" and a brief result.`;
 // ── Continuation Handoff ───────────────────────────────────────────────────────
 
 /**
- * Spawns a single sub-agent to continue a task that hit the max iteration limit.
- *
- * The continuation agent receives the original goal + a progress summary from
- * the last checkpoint, giving it enough context to pick up where the parent left off.
+ * Spawns a single sub-agent to continue a task.
  *
  * @param originalRequest - The original user goal.
- * @param stepsTaken - How many steps the parent agent took (for context).
- * @param progressContext - A summary of progress so far (from the last checkpoint).
+ * @param stepsTaken - How many steps the parent agent took.
+ * @param progressContext - A summary of progress so far.
  * @param parentOptions - The parent agent's options.
  * @param parentAgentId - The parent agent's instance ID.
- * @param addMessage - Callback to add a message to the parent's history + UI.
- * @param spawnSubAgent - Factory function to create sub-agent instances.
- * @returns The continuation agent's final result.
+ * @param addMessage - Callback to add a message to history.
+ * @param spawnSubAgent - Factory function.
+ * @param ledger - Optional ledger.
+ * @returns The final result message.
  */
 export async function continueWithSubAgent(
     originalRequest: string,
@@ -732,38 +604,40 @@ export async function continueWithSubAgent(
     parentOptions: AgentRuntimeOptions,
     parentAgentId: string,
     addMessage: (msg: LLMMessage) => string | void,
-    spawnSubAgent: SubAgentFactory
+    spawnSubAgent: SubAgentFactory,
+    ledger?: RunWorkLedger
 ): Promise<LLMMessage> {
-    const instruction = `GOAL: ${originalRequest}
+    const subAgentId = globalThis.crypto.randomUUID();
 
-CONTEXT: I have already taken ${stepsTaken} steps but haven't finished.
-Progress so far:
-${progressContext}
+    addMessage({
+        role: "assistant",
+        content: `🔄 **Task Continuation**: Segment limit reached (${stepsTaken} steps). Handing off to a fresh agent with progress summary to continue toward the final goal...`,
+    });
 
-INSTRUCTION: Continue the task from here. You have a fresh context window.
-Focus on the next logical steps to complete the goal.
-Use tools immediately. End with "✓ Done".`;
+    await preSeedSubAgentMemory(
+        subAgentId,
+        parentAgentId,
+        parentOptions.activeSessionId,
+        `Continuation sub-agent\nOriginal goal: ${originalRequest}\nProgress so far: ${progressContext}`,
+        {}
+    );
 
     const subAgent = spawnSubAgent({
-        agentInstanceId: globalThis.crypto.randomUUID(),
+        agentInstanceId: subAgentId,
         parentAgentId,
         isSubAgent: true,
         isHeadless: parentOptions.isHeadless,
         taskCategory: parentOptions.taskCategory,
-        onMessage: (msg) => {
-            if (msg.role === "assistant" && msg.content) {
-                // Pass through partial updates if needed
-            }
-        },
     });
 
-    addMessage({ role: "assistant", content: `Starting sub-agent to continue the task...` });
+    const instruction = `ORIGINAL GOAL: ${originalRequest}\n\nPROGRESS SO FAR:\n${progressContext}\n\nPlease continue and complete the remaining work. Pick up exactly where the last agent left off.`;
 
     try {
-        return await subAgent.chat(instruction);
-    } catch (error) {
-        throw new Error(
-            `Sub-agent failed to complete task: ${error instanceof Error ? error.message : String(error)}`
-        );
+        const result = await subAgent.chat(instruction);
+        ledger?.recordSubAgentReport("continuation", typeof result.content === 'string' ? result.content : "Completed");
+        return result;
+    } catch (error: any) {
+        ledger?.recordError(`Continuation failed: ${error.message}`);
+        throw error;
     }
 }

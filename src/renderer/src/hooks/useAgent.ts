@@ -219,6 +219,9 @@ export function useAgent(): UseAgentReturn {
                         workspacePath: activeSession?.workspacePath,
                         settings: settingsForLLM,
                         isHeadless,
+                        // The main agent instance owns its browser tab and is responsible
+                        // for closing it in its finally block.
+                        ownsTab: true,
                         // The abort signal is scoped to THIS session only.
                         signal: abortSignal,
 

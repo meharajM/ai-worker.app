@@ -80,6 +80,49 @@ interface ElectronAPI {
     utils: {
         getPathForFile: (file: File) => string
     }
+
+    fs: {
+        getPendingChanges: () => Promise<Array<{
+            id: string
+            originalPath: string
+            shadowPath: string
+            type: 'create' | 'modify' | 'delete'
+            content?: string
+            timestamp: number
+            approvalChannel: 'desktop' | 'whatsapp'
+            approvalToken?: string
+            status: 'pending' | 'approved' | 'rejected' | 'expired'
+            createdAt: number
+            resolvedAt?: number
+            resolvedBy?: 'ui' | 'wa'
+        }>>
+        approveChange: (changeId: string) => Promise<{ success: boolean; error?: string }>
+        rejectChange: (changeId: string) => Promise<{ success: boolean; error?: string }>
+        approveChangeByToken: (token: string) => Promise<{ success: boolean; error?: string }>
+        rejectChangeByToken: (token: string) => Promise<{ success: boolean; error?: string }>
+        testForceWhatsAppApproval: (changeId: string, token?: string) => Promise<{ success: boolean; token?: string; error?: string }>
+        writeInternalFile: (workspacePath: string | undefined, filename: string, content: string) => Promise<{ success: boolean; path?: string; error?: string }>
+        readInternalFile: (workspacePath: string | undefined, filename: string) => Promise<{ success: boolean; content?: string; error?: string }>
+        readFileBase64: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>
+    }
+
+    whatsapp: {
+        getState: () => Promise<{
+            status: 'disconnected' | 'connecting' | 'connected' | 'error'
+            qrCode: string | null
+            error: string | null
+            phoneNumber: string | null
+            workerNumber: string | null
+        }>
+        connect: (phoneNumber?: string) => Promise<{ success: boolean; error?: string }>
+        setTargetNumber: (phoneNumber: string) => Promise<{ success: boolean; error?: string }>
+        disconnect: (clearAuth?: boolean) => Promise<{ success: boolean; error?: string }>
+        sendMessage: (to: string, content: string) => Promise<{ success: boolean; error?: string }>
+        sendPresence: (to: string, state: string) => Promise<{ success: boolean; error?: string }>
+        sendMediaMessage: (to: string, filePath: string, caption?: string, type?: string) => Promise<{ success: boolean; error?: string }>
+        onConnectionChange: (callback: (state: unknown) => void) => () => void
+        onMessage: (callback: (message: unknown) => void) => () => void
+    }
 }
 
 // Extend the Window interface globally
