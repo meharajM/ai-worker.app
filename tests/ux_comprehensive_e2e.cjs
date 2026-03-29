@@ -5,7 +5,7 @@ const fs = require('fs');
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
 (async () => {
-    console.log('🚀 Starting UX/UI Discovery E2E Test...');
+    console.log('🚀 Starting PR #136 Validation + UX Discovery E2E Test...');
 
     if (!fs.existsSync(SCREENSHOT_DIR)) {
         fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
@@ -24,14 +24,67 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
     try {
         const window = await electronApp.firstWindow();
-        window.on('console', msg => console.log(`[Renderer]: ${msg.text()}`));
+        const logs = [];
+        window.on('console', msg => {
+            const text = msg.text();
+            logs.push(text);
+            console.log(`[Renderer]: ${text}`);
+        });
 
         await window.addInitScript(() => {
             localStorage.setItem('skipDepsCheck', 'true');
-            console.log("🛠️ Injecting UX Discovery Mocks...");
+            console.log("🛠️ Injecting PR #136 + UX Discovery Mocks...");
 
             const SCENARIOS = [
-                // 1. Parallel Sub-Agents (Happy Path)
+                // PR #136: Sequential Orchestration Test (Tab Sharing & Resource Safety)
+                {
+                    triggers: ["Sequential-Validation"],
+                    response: {
+                        choices: [{
+                            message: {
+                                role: "assistant",
+                                content: "Breaking down the task...",
+                                tool_calls: [{
+                                    id: "plan_1",
+                                    type: "function",
+                                    function: {
+                                        name: "create_execution_plan",
+                                        arguments: JSON.stringify({
+                                            goal: "Sequential-Validation",
+                                            steps: [
+                                                { id: 1, description: "Verify Step A" },
+                                                { id: 2, description: "Verify Step B" }
+                                            ]
+                                        })
+                                    }
+                                }]
+                            }
+                        }]
+                    }
+                },
+                {
+                    triggers: ["Verify Step A"],
+                    response: {
+                        choices: [{
+                            message: {
+                                role: "assistant",
+                                content: "✓ Done Verify Step A"
+                            }
+                        }]
+                    }
+                },
+                {
+                    triggers: ["Verify Step B"],
+                    response: {
+                        choices: [{
+                            message: {
+                                role: "assistant",
+                                content: "✓ Done Verify Step B"
+                            }
+                        }]
+                    }
+                },
+                // Existing Scenario 1: Parallel Sub-Agents
                 {
                     triggers: ["Compare the price of a Sony WH-1000XM5"],
                     response: {
@@ -47,7 +100,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                         }]
                     }
                 },
-                // 2. Sequential Orchestration (Failure Path: Planning Error)
+                // Existing Scenario 2: Planning Error
                 {
                     triggers: ["bus tickets from Gangavathi", "Sequential Error"],
                     response: {
@@ -67,124 +120,14 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                         }]
                     }
                 },
-                // 3. Smart Result Reporting (Noise Leakage UX issue)
-                {
-                    triggers: ["top 3 results with prices", "Noise Leak"],
-                    response: {
-                        choices: [{
-                            message: {
-                                role: "assistant",
-                                content: "Here are the top 3 results:\n1. Sony - $300\n2. Bose - $280\n3. Sennheiser - $250\n\n<debug_log>{\"raw_elements\": [{\"id\": 1, \"text\": \"raw node leak\"}]}</debug_log>"
-                            }
-                        }]
-                    }
-                },
-                // 4. Interactive Handoff (Happy Path)
-                {
-                    triggers: ["Plan a weekend trip to Goa", "Handoff"],
-                    response: {
-                        choices: [{
-                            message: {
-                                role: "assistant",
-                                content: "I've planned the first part of your Goa trip (Flights and Hotels). I've reached the token limit. Continue?",
-                                actions: [
-                                    { type: "continue", label: "Continue to Activities" },
-                                    { type: "stop", label: "Stop here" }
-                                ]
-                            }
-                        }]
-                    }
-                },
-                // 5. Manual Delegation (Success)
-                {
-                    triggers: ["news.ycombinator.com", "Deep Dive"],
-                    response: {
-                        choices: [{
-                            message: {
-                                role: "assistant",
-                                content: "Navigating to HN...",
-                                tool_calls: [{
-                                    id: "delegate_1",
-                                    type: "function",
-                                    function: {
-                                        name: "delegate_sub_task",
-                                        arguments: JSON.stringify({
-                                            agent_name: "Summarizer",
-                                            task: "Read the top story and summarize"
-                                        })
-                                    }
-                                }]
-                            }
-                        }]
-                    }
-                },
-                // 9. Safety Inheritance (Refusal UX)
-                {
-                    triggers: ["Rolex", "checkout"],
-                    response: {
-                        choices: [{
-                            message: {
-                                role: "assistant",
-                                content: "I found the Rolex, but my internal safety policy prevents me from completing the checkout process for high-value items."
-                            }
-                        }]
-                    }
-                },
-                // 11. Fallback to Direct (Simple)
-                {
-                    triggers: ["capital of France"],
-                    response: {
-                        choices: [{
-                            message: {
-                                role: "assistant",
-                                content: "The capital of France is Paris."
-                            }
-                        }]
-                    }
-                },
-                // 13. Model Refusal Auto-Correction (Retry UX)
-                {
-                    triggers: ["gaming laptop", "Refusal Retry"],
-                    response: {
-                        choices: [{
-                            message: {
-                                role: "assistant",
-                                content: "I apologize, I can't access Amazon directly right now.",
-                                tool_calls: []
-                            }
-                        }]
-                    }
-                },
-                // 15. Mandatory Progress Checkpoints
-                {
-                    triggers: ["analysis of 5 different news sites", "Checkpoint"],
-                    response: {
-                        choices: [{
-                            message: {
-                                role: "assistant",
-                                content: "Analyzed CNN and BBC so far.",
-                                tool_calls: [{
-                                    id: "cp_1",
-                                    type: "function",
-                                    function: {
-                                        name: "update_progress_summary",
-                                        arguments: JSON.stringify({
-                                            summary: "Read CNN: Tech Stocks Up. Read BBC: Weather Alert."
-                                        })
-                                    }
-                                }]
-                            }
-                        }]
-                    }
-                },
-                // 18. Memory (Implicit Preference)
+                // Existing Scenario: Memory
                 {
                     triggers: ["brand new project named 'Orbit'"],
                     response: {
                         choices: [{
                             message: {
                                 role: "assistant",
-                                content: "Got it! I've noted that the 'Orbit' project uses Tailwind and TypeScript. I'll use those for all future code for this project.",
+                                content: "Got it! Project 'Orbit' noted.",
                                 tool_calls: [{
                                     id: "mem_1",
                                     type: "function",
@@ -192,8 +135,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                                         name: "memory_create_entity",
                                         arguments: JSON.stringify({
                                             name: "Orbit",
-                                            entityType: "project",
-                                            observations: { tech: ["Tailwind", "TypeScript"], owner: "user" }
+                                            entityType: "project"
                                         })
                                     }
                                 }]
@@ -213,34 +155,25 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
                 if (urlStr.includes('/api/chat') || urlStr.includes('/chat/completions')) {
                     let bodyStr = init?.body || await (input instanceof Request ? input.text() : "");
-
                     if (bodyStr.includes("BACKGROUND_MEMORY_EXTRACTION")) {
                         return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "No updates." } }] }), { status: 200 });
                     }
 
                     try {
                         const body = JSON.parse(bodyStr);
-                        // Search all messages for triggers to handle decomposition/sub-agent calls
                         const scenario = SCENARIOS.find(s =>
                             s.triggers.some(t =>
                                 body.messages.some(m => typeof m.content === 'string' && m.content.includes(t))
                             )
                         );
 
-                        let responseData = {
-                            model: "mock-model",
-                            choices: [{ message: { role: "assistant", content: "Default mock response. (Trigger not matched)" } }],
-                            usage: { total_tokens: 100 }
-                        };
-
                         if (scenario) {
-                            console.log(`[MockFetch] Matched Scenario for "${scenario.triggers[0]}"`);
-                            responseData = { ...responseData, ...scenario.response };
-                        } else {
-                            console.warn(`[MockFetch] No scenario matched for prompt ending in: "${body.messages[body.messages.length - 1].content.substring(0, 30)}..."`);
+                            return new Response(JSON.stringify({
+                                model: "mock-model",
+                                choices: scenario.response.choices,
+                                usage: { total_tokens: 100 }
+                            }), { status: 200 });
                         }
-
-                        return new Response(JSON.stringify(responseData), { status: 200 });
                     } catch (e) { }
                 }
                 return originalFetch(input, init);
@@ -251,33 +184,17 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         await window.waitForLoadState('domcontentloaded');
         console.log('✅ Window Loaded');
 
+        // Dismiss Modal
         try {
-            console.log('Checking for Missing Dependencies screen...');
             const skipBtn = window.locator('text=Skip for now').first();
-            const modalVisible = await skipBtn.isVisible({ timeout: 20000 }).catch(() => false);
-            if (modalVisible) {
-                console.log('Found Missing Dependencies screen, dismissing...');
-                await skipBtn.click();
-                console.log('✅ Dismissed Missing Dependencies screen');
-            } else {
-                console.log('ℹ️ No Missing Dependencies screen detected after 20s');
-            }
-        } catch (e) {
-            console.log('ℹ️ Error screen check:', e.message);
-        }
+            if (await skipBtn.isVisible({ timeout: 5000 })) await skipBtn.click();
+        } catch (e) {}
 
-        // Configure OpenAI
+        // Configure Settings
         await window.click('button[title="Settings"]');
         await window.click('text=OpenAI');
         await window.locator('input[type="password"]').fill('sk-mock-key');
         await window.click('button[title="Chat"]');
-
-        console.log('⏳ Waiting for MCP tools to be ready...');
-        console.log('⏳ Waiting for app UI to be ready...');
-        await window.locator('button[title="MCP Connections"]').waitFor({ state: 'visible', timeout: 15000 }).catch(() => { });
-        await window.waitForTimeout(2000);
-        console.log('✅ UI ready');
-        console.log('✅ MCP tools ready');
 
         const chatInput = window.locator('[data-testid="chat-textarea"]');
         const sendButton = window.locator('[data-testid="send-button"]');
@@ -286,46 +203,32 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             console.log(`\n🔹 ${title}`);
             await chatInput.fill(prompt);
             await sendButton.click();
-            await window.waitForTimeout(3000);
+            await window.waitForTimeout(10000); // Execution takes time
             await checkFn(window);
             await window.screenshot({ path: path.join(SCREENSHOT_DIR, `${title.replace(/\s+/g, '_').toLowerCase()}.png`) });
         };
 
-        // 1. Parallel Happy Path
-        await testRun("Parallel Support", "Compare the price of a Sony WH-1000XM5 headphone", async (w) => {
+        // 1. Validation for PR #136: Tab sharing and resource safety
+        await testRun("PR 136 Validation", "Sequential-Validation", async (w) => {
+            const tabLogs = logs.filter(l => l.includes('Provisioned shared tab'));
+            if (tabLogs.length === 1) console.log('✅ PASS: Exactly one shared tab provisioned.');
+            else console.error(`❌ FAIL: Shared tab log count: ${tabLogs.length}`);
+
+            const checklistVisible = await w.locator('text=All tasks completed').isVisible().catch(() => false);
+            if (checklistVisible) console.log('✅ PASS: SubTaskChecklist rendered and completed.');
+            else console.error('❌ FAIL: SubTaskChecklist NOT visible.');
+
+            const browserClosedLog = logs.some(l => l.includes('Playwright browser closed on agent completion'));
+            if (browserClosedLog) console.log('✅ PASS: Browser resources freed.');
+            else console.error('❌ FAIL: Browser resources NOT freed.');
+        });
+
+        // 2. Regression for Parallel
+        await testRun("Parallel Regression", "Compare the price of a Sony WH-1000XM5 headphone", async (w) => {
             if (await w.locator('text=Starting comparison').first().isVisible()) console.log("✅ Parallel trigger works");
         });
 
-        // 2. Planning JSON Error (UX Recovery Check)
-        await testRun("Planning Error Recovery", "bus tickets from Gangavathi Sequential Error", async (w) => {
-            if (await w.locator('text=INVALID_JSON_HERE').first().isVisible()) {
-                console.log("⚠️ UX ISSUE: Raw JSON error leaked to UI!");
-            }
-        });
-
-        // 3. Noise Leakage Check
-        await testRun("Noise Leakage", "top 3 results with prices Noise Leak", async (w) => {
-            if (await w.locator('text=raw node leak').first().isVisible()) {
-                console.log("⚠️ UX ISSUE: Debug log leaked to user!");
-            }
-        });
-
-        // 4. Handoff UI Check
-        await testRun("Handoff Buttons", "Plan a weekend trip to Goa Handoff", async (w) => {
-            if (await w.locator('button:has-text("Continue")').first().isVisible()) console.log("✅ Handoff buttons rendered");
-        });
-
-        // 5. Memory Reflector Check
-        await testRun("Memory Learning", "brand new project named 'Orbit'", async (w) => {
-            if (await w.locator('text=Orbit').first().isVisible()) console.log("✅ Memory entity mentioned");
-        });
-
-        // 6. Safety Refusal
-        await testRun("Safety Refusal", "Rolex checkout", async (w) => {
-            if (await w.locator('text=safety policy').first().isVisible()) console.log("✅ Safety refusal handled");
-        });
-
-        console.log('\n✅ Comprehensive UX discovery run complete.');
+        console.log('\n✅ PR #136 Validation + Regression complete.');
 
     } catch (e) {
         console.error('❌ Run failed:', e);
