@@ -178,6 +178,7 @@ export async function executeParallelSubAgents(
             isSubAgent: true,
             isHeadless: useHeadless,
             tabId: subAgentTabId,
+            ownsTab: subAgentTabId !== undefined,
             taskCategory: parentOptions.taskCategory,
             onMessage: (msg: LLMMessage) => {
                 // Update the live status card as the sub-agent works
@@ -514,6 +515,7 @@ End with "✓ Done" and a brief result.`;
                 parentAgentId,
                 isSubAgent: true,
                 isHeadless: parentOptions.isHeadless,
+                ownsTab: false,
                 taskCategory: parentOptions.taskCategory,
                 onMessage: (msg) => {
                     const contentStr =
@@ -637,6 +639,7 @@ Use tools immediately. End with "✓ Done".`;
         parentAgentId,
         isSubAgent: true,
         isHeadless: parentOptions.isHeadless,
+        ownsTab: false,
         taskCategory: parentOptions.taskCategory,
         onMessage: (msg) => {
             if (msg.role === "assistant" && msg.content) {

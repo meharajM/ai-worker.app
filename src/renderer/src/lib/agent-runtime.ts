@@ -336,14 +336,14 @@ export class AgentRuntime implements IAgentClient {
       // or is aborted by the user.
 
       // 1. Close the agent's dedicated browser tab
-      if (this.options.tabId !== undefined) {
+      if (this.options.tabId !== undefined && this.options.ownsTab) {
         try {
           const { browserLock } = await import("./resource-lock");
           await browserLock.runExclusive(async () => {
             // executeToolCall handles routing to the correct tab.
             await executeToolCall("close_tab", { tabId: this.options.tabId });
           });
-          console.log(`[AgentRuntime] Closed main agent tab ${this.options.tabId}`);
+          console.log(`[AgentRuntime] Closed owned browser tab ${this.options.tabId}`);
           
           // Clean up the execution lane to prevent memory leaks
           import("./execution-lanes").then(m => m.laneManager.cleanupTabLane(this.options.tabId!));
