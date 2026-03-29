@@ -137,11 +137,13 @@ export class FileSystemService {
     private shadowDir: string
     private pendingChanges: Map<string, FileChange> = new Map()
     private sessionChanges: Map<string, string[]> = new Map()
+    private pendingResolvers: Map<string, { resolve: (status: 'approved' | 'rejected') => void }> = new Map()
 
     private constructor() {
         // Shadow directory in app user data
         this.shadowDir = path.join(app.getPath('userData'), 'fs-staging')
         this.initialize()
+        this.setupWhatsAppListener()
     }
 
     /**
@@ -163,6 +165,48 @@ export class FileSystemService {
             await fs.mkdir(this.shadowDir, { recursive: true })
         } catch (error) {
             console.error('[FileSystemService] Failed to create shadow dir:', error)
+        }
+    }
+
+    private setupWhatsAppListener() {
+        try {
+            // Import dynamically or lazily to avoid circular dependencies if any
+            const { whatsappService } = require('./WhatsAppService')
+            
+            whatsappService.on('message', async (msg: any) => {
+                if (msg.isFromMe) return; // Ignore outgoing messages
+
+                const text = (msg.content || '').trim().toLowerCase();
+                if (text === 'yes' || text === 'y' || text === 'approve') {
+                    // Approve all pending changes
+                    const pendingIds = Array.from(this.pendingChanges.keys());
+                    if (pendingIds.length > 0) {
+                        console.log(`[FileSystemService] Remote approval received via WhatsApp for ${pendingIds.length} changes.`);
+                        for (const changeId of pendingIds) {
+                            try {
+                                await this.commitChange(changeId);
+                            } catch (e: any) {
+                                console.error(`[FileSystemService] Failed remote approval for ${changeId}:`, e);
+                            }
+                        }
+                        const count = pendingIds.length;
+                        whatsappService.sendMessage(msg.from, `✅ Approved ${count} pending file write${count > 1 ? 's' : ''}.`);
+                    }
+                } else if (text === 'no' || text === 'n' || text === 'reject') {
+                    // Reject all pending changes
+                    const pendingIds = Array.from(this.pendingChanges.keys());
+                    if (pendingIds.length > 0) {
+                        console.log(`[FileSystemService] Remote rejection received via WhatsApp for ${pendingIds.length} changes.`);
+                        for (const changeId of pendingIds) {
+                            await this.discardChange(changeId);
+                        }
+                        const count = pendingIds.length;
+                        whatsappService.sendMessage(msg.from, `❌ Rejected ${count} pending file write${count > 1 ? 's' : ''}.`);
+                    }
+                }
+            })
+        } catch (error) {
+            console.error('[FileSystemService] Failed to setup WhatsApp listener:', error)
         }
     }
 
@@ -258,8 +302,23 @@ export class FileSystemService {
             // Cleanup
             await fs.rm(change.shadowPath)
             this.pendingChanges.delete(changeId)
+            
+            // Cleanup session tracking
+            for (const [, ids] of this.sessionChanges.entries()) {
+                const index = ids.indexOf(changeId)
+                if (index !== -1) {
+                    ids.splice(index, 1)
+                }
+            }
 
             console.log(`[FileSystemService] ✓ Committed ${change.type} to ${change.originalPath}`)
+
+            // Notify pendings API so tool call unblocks
+            const resolver = this.pendingResolvers.get(changeId)
+            if (resolver) {
+                resolver.resolve('approved')
+                this.pendingResolvers.delete(changeId)
+            }
         } catch (error) {
             console.error(`[FileSystemService] ✗ Failed to commit ${changeId}:`, error)
             throw error
@@ -277,7 +336,23 @@ export class FileSystemService {
         try {
             await fs.rm(change.shadowPath)
             this.pendingChanges.delete(changeId)
+            
+            // Cleanup session tracking
+            for (const [, ids] of this.sessionChanges.entries()) {
+                const index = ids.indexOf(changeId)
+                if (index !== -1) {
+                    ids.splice(index, 1)
+                }
+            }
+
             console.log(`[FileSystemService] ✗ Discarded ${change.type} for ${change.originalPath}`)
+
+            // Notify pendings API so tool call unblocks
+            const resolver = this.pendingResolvers.get(changeId)
+            if (resolver) {
+                resolver.resolve('rejected')
+                this.pendingResolvers.delete(changeId)
+            }
         } catch (error) {
             console.error(`[FileSystemService] Failed to discard ${changeId}:`, error)
         }
@@ -315,15 +390,43 @@ export class FileSystemService {
                     const isSafeMode = await this.isSafeModeEnabled()
 
                     if (isSafeMode) {
-                        // Safe Mode: Stage for user review
+                        // Safe Mode: Stage for user review and block tool call
                         const change = await this.stageWrite(args.path, args.content)
-                        return {
-                            result: {
-                                status: 'staged',
-                                changeId: change.id,
-                                message: `File write STAGED for review. Change ID: ${change.id}. User must approve before changes are applied.`
+                        
+                        // Notify via WhatsApp if connected
+                        try {
+                            const { whatsappService } = require('./WhatsAppService')
+                            const state = whatsappService.getConnectionState()
+                            if (state.status === 'connected' && state.phoneNumber) {
+                                const fileName = path.basename(args.path)
+                                const msg = `⚠️ *Agent wants to modify a file:*\n📄 \`${fileName}\`\n\nReply *yes* to approve or *no* to reject.`
+                                whatsappService.sendMessage(state.phoneNumber, msg).catch((e: any) => console.log('WA send error:', e))
                             }
+                        } catch (waError) {
+                            console.error('[FileSystemService] WhatsApp notification skipped', waError)
                         }
+
+                        // Block until Approved or Rejected
+                        return new Promise((resolve) => {
+                            this.pendingResolvers.set(change.id, {
+                                resolve: (status: 'approved' | 'rejected') => {
+                                    if (status === 'approved') {
+                                         resolve({
+                                            result: {
+                                                status: 'written',
+                                                path: args.path,
+                                                message: `File successfully written to ${args.path} (Approved via Safe Mode)`
+                                            }
+                                        })
+                                    } else {
+                                         resolve({
+                                            result: null,
+                                            error: `User REJECTED the file write to ${args.path}. Abort your attempt to modify this file.`
+                                         })
+                                    }
+                                }
+                            })
+                        })
                     } else {
                         // Direct write (Safe Mode disabled)
                         await fs.mkdir(path.dirname(args.path), { recursive: true })
