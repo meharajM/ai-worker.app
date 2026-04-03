@@ -24,6 +24,8 @@ import { EmptyState } from './EmptyState'
 import { TypingIndicator } from './TypingIndicator'
 import { ProgressBanner } from './ProgressBanner'
 
+
+
 interface ChatViewProps {
   onClearChat?: () => void
 }
@@ -35,6 +37,8 @@ export function ChatView({ onClearChat }: ChatViewProps) {
     removeMessage,
     clearMessages,
   } = useChatStore()
+
+
 
   const activeSession = sessions.find(s => s.id === activeSessionId)
   const messages = activeSession?.messages || []
@@ -67,32 +71,34 @@ export function ChatView({ onClearChat }: ChatViewProps) {
     <div className="flex-1 flex flex-col overflow-hidden min-w-0">
       {/* Header with clear button + dev toggle */}
       {messages.length > 0 && (
-        <div className="flex justify-between items-center px-4 py-2 border-b border-[var(--color-border)]">
-          {/* Left side — dev-only prod preview toggle */}
-          <div className="flex items-center">
+        <div className="flex justify-between items-center px-4 py-2 border-b border-[var(--color-border)] bg-[var(--color-surface)]/50 backdrop-blur-md sticky top-0 z-10">
+          {/* Left side — dev-only prod preview toggle + Perf toggle */}
+          <div className="flex items-center gap-2">
             {isDevMode && (
               <button
                 onClick={() => setDevPreviewProd(!isPreviewingProd)}
                 className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full transition-all ${
-                  isPreviewingProd
+                  !isPreviewingProd
                     ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/30'
                     : 'text-[var(--color-text-dim)] hover:text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]'
                 }`}
-                title={isPreviewingProd ? 'Switch back to dev view' : 'Preview how this looks in prod mode'}
+                title={!isPreviewingProd ? 'Detailed visibility mode enables (shows orchestration internals)' : 'Switch back to detailed visibility view'}
               >
-                {isPreviewingProd ? (
+                {!isPreviewingProd ? (
                   <>
                     <Eye size={12} />
-                    Prod Preview ON
+                    Detailed Visibility ON
                   </>
                 ) : (
                   <>
                     <EyeOff size={12} />
-                    Prod Preview
+                    Detailed Visibility OFF
                   </>
                 )}
               </button>
             )}
+
+
           </div>
 
           {/* Right side — clear chat */}
@@ -146,6 +152,8 @@ export function ChatView({ onClearChat }: ChatViewProps) {
         hasUnread={hasUnread}
         onScrollToBottom={scrollToBottom}
       />
+
+
     </div>
   )
 }

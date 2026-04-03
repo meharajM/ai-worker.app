@@ -93,15 +93,14 @@ function StepRow({ step }: { step: ExecutionPlan['steps'][number] }) {
 }
 
 export function SubTaskChecklist({ plan, className = '' }: SubTaskChecklistProps) {
-  if (!plan?.steps || plan.steps.length === 0) return null
-
-  const allCompleted = plan.steps.every(
-    (s) => s.status === 'completed'
-  )
-  const completedCount = plan.steps.filter(
-    (s) => s.status === 'completed'
-  ).length
-  const hasFailure = plan.steps.some((s) => s.status === 'failed')
+  const steps = plan?.steps || []
+  
+  const allCompleted = steps.length > 0 && steps.every((s) => s.status === 'completed')
+  const completedCount = steps.filter((s) => s.status === 'completed').length
+  const hasFailure = steps.some((s) => s.status === 'failed')
+  const hasActive = steps.some((s) => s.status === 'active')
+  const isTerminal = steps.length > 0 && !hasActive && steps.every((s) => s.status === 'completed' || s.status === 'failed')
+  const completedWithIssues = isTerminal && hasFailure && completedCount > 0
 
   // Auto-collapse when all steps complete
   const [expanded, setExpanded] = useState(!allCompleted)
@@ -114,6 +113,8 @@ export function SubTaskChecklist({ plan, className = '' }: SubTaskChecklistProps
       setExpanded(true)
     }
   }, [allCompleted])
+
+  if (steps.length === 0) return null
 
   return (
     <div
@@ -142,6 +143,8 @@ export function SubTaskChecklist({ plan, className = '' }: SubTaskChecklistProps
               >
                 <Sparkles size={16} className="text-[var(--color-success)]" />
               </motion.div>
+            ) : completedWithIssues ? (
+              <Sparkles size={16} className="text-[var(--color-primary)]" />
             ) : hasFailure ? (
               <XCircle size={16} className="text-[var(--color-error)]" />
             ) : (
@@ -151,6 +154,8 @@ export function SubTaskChecklist({ plan, className = '' }: SubTaskChecklistProps
           <span className="text-[13px] font-semibold tracking-tight text-[var(--color-text-primary)]">
             {allCompleted
               ? 'All tasks completed'
+              : completedWithIssues
+                ? `Completed with some issues (${completedCount}/${plan.steps.length})`
               : hasFailure
                 ? 'Execution failed'
                 : `Working... ${completedCount}/${plan.steps.length}`}

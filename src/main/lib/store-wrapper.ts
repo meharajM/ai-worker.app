@@ -7,3 +7,4 @@ import StoreRaw from 'electron-store';
  */
 // @ts-ignore - StoreRaw has a default property at runtime in CJS
 export const Store = (StoreRaw.default || StoreRaw) as typeof StoreRaw;
+export type Store<T extends Record<string, any> = Record<string, any>> = StoreRaw<T>;

@@ -53,6 +53,7 @@ import {
 import { analyzeTaskForDecomposition } from "./task-decomposer";
 import { MemoryReflector } from "./memory-reflector";
 
+
 // Re-export types for backward compatibility.
 // Files that import AgentRuntimeOptions from this module continue to work.
 export type { AgentRuntimeOptions, AgentStatusCallback } from "./agent/types";
@@ -94,7 +95,7 @@ export class AgentRuntime implements IAgentClient {
   private messages: LLMMessage[] = [];
   private options: AgentRuntimeOptions;
   private maxIterations: number;
-  private maxConsecutiveErrors = 3;
+  private maxConsecutiveErrors = 5;
   private executionPlan: ExecutionPlan | null = null;
   private taskCategory?: string;
   private totalIterations = 0;
@@ -146,6 +147,8 @@ export class AgentRuntime implements IAgentClient {
     attachments?: { name: string; path: string; type: string }[]
   ): Promise<LLMMessage> {
     let finalPrompt = userContent;
+
+
 
     if (attachments && attachments.length > 0) {
       // Filter out files that have no native path (non-Electron environments or
@@ -328,7 +331,9 @@ export class AgentRuntime implements IAgentClient {
       this.addMessage({ role: "user", content: finalPrompt });
     }
 
-    return this._runLoop(finalPrompt);
+    const loopResult = await this._runLoop(finalPrompt);
+
+    return loopResult;
   }
 
   getHistory(): LLMMessage[] {
@@ -362,7 +367,10 @@ export class AgentRuntime implements IAgentClient {
 
       console.log(`[AgentRuntime] Iteration ${iterationCount + 1}: Calling LLM...`);
       let response: LLMResponse;
+
       try {
+
+
         response = await chat(
           this.messages,
           allTools,
@@ -373,7 +381,10 @@ export class AgentRuntime implements IAgentClient {
           this.options.isSubAgent,
           this.options.workspacePath
         );
+
+
       } catch (error) {
+
         console.error("[AgentRuntime] LLM Error:", error);
         throw error;
       }
@@ -389,17 +400,25 @@ export class AgentRuntime implements IAgentClient {
           // ── Final response: update the live bubble in-place (no new bubble created) ──
           // Push to internal history without firing onMessage (which would add a new bubble).
           this.messages.push(assistantMsg);
-          const finalUpdates: any = { content: assistantMsg.content };
+          // NOTE: onMessageUpdate casts to Partial<Message> (chatStore) — use that shape here.
+          // toolCalls here is the camelCase store shape (AccumulatedToolCall[]), not LLMMessage tool_calls.
+          const finalUpdates: { content: string; isFinalResult: boolean; toolCalls?: AccumulatedToolCall[] } = {
+            content: assistantMsg.content as string,
+            isFinalResult: true, // Always show in prod/clean view — this is the user-facing answer
+          };
           if (accumulatedToolCalls.length > 0) {
             finalUpdates.toolCalls = accumulatedToolCalls;
           }
-          this.options.onMessageUpdate(activeAssistantMessageId, finalUpdates);
+          this.options.onMessageUpdate(activeAssistantMessageId, finalUpdates as Parameters<typeof this.options.onMessageUpdate>[1]);
         } else {
-          // No live bubble yet (agent answered immediately without tools) — create one normally.
+          // No live bubble yet (agent answered immediately without tools) — create one.
+          // Mark it final so it renders in prod view.
+          (assistantMsg as LLMMessage & { isFinalResult?: boolean }).isFinalResult = true;
           this.addMessage(assistantMsg);
         }
 
         await cleanupState(this.agentInstanceId);
+
         return assistantMsg;
       }
 
@@ -425,7 +444,7 @@ export class AgentRuntime implements IAgentClient {
         // ── First tool-calling iteration: create the single live UI bubble ──
         // assistantMsg carries this iteration's tool_calls so the LLM history is correct.
         // We also attach the store-format toolCalls so onMessage can persist them.
-        (assistantMsg as any).toolCalls = iterationToolCalls;
+        assistantMsg.toolCalls = iterationToolCalls;
         const messageIdResult = this.addMessage(assistantMsg);
         if (typeof messageIdResult === "string") {
           activeAssistantMessageId = messageIdResult;
@@ -442,14 +461,14 @@ export class AgentRuntime implements IAgentClient {
         if (this.options.onMessageUpdate) {
           this.options.onMessageUpdate(activeAssistantMessageId, {
             toolCalls: [...accumulatedToolCalls]
-          } as any);
+          });
         }
       }
 
       // Keep local assistantMsg.toolCalls in sync for the tool execution block below
-      (assistantMsg as any).toolCalls = iterationToolCalls;
+      assistantMsg.toolCalls = iterationToolCalls;
 
-      const toolPromises = response.toolCalls.map(async (call) => {
+      const executeToolCall = async (call: (typeof response.toolCalls)[number]) => {
         if (this.options.signal?.aborted) return null;
 
         const toolSignature = `${call.name}:${JSON.stringify(call.arguments)}`;
@@ -465,6 +484,8 @@ export class AgentRuntime implements IAgentClient {
 
         console.log(`[AgentRuntime] Executing tool: ${call.name}`);
         let resultStr = "";
+
+
 
         if (call.name === "create_execution_plan") {
           const { result, plan } = this.specialHandlers.handleCreateExecutionPlan(call.arguments);
@@ -493,8 +514,8 @@ export class AgentRuntime implements IAgentClient {
             const { resultStr: formatted, isError } = formatToolResult(call.name, rawResult);
             resultStr = formatted;
             consecutiveErrors = isError ? consecutiveErrors + 1 : 0;
-          } catch (err: any) {
-            resultStr = JSON.stringify({ error: err.message || "Unknown error" });
+          } catch (err: unknown) {
+            resultStr = JSON.stringify({ error: (err instanceof Error ? err.message : String(err)) || "Unknown error" });
             consecutiveErrors++;
           }
 
@@ -519,6 +540,8 @@ export class AgentRuntime implements IAgentClient {
           }
         }
 
+
+
         const truncated = truncateToolOutput(call.name, resultStr);
         this.addMessage({ role: "tool", content: truncated, tool_call_id: call.id });
 
@@ -530,14 +553,14 @@ export class AgentRuntime implements IAgentClient {
             accumulatedToolCalls[tcIndex] = { ...accumulatedToolCalls[tcIndex], result: truncated, completedAt: Date.now() };
           }
           // Also update the local assistantMsg for finding reporting below
-          const currentToolCalls = (assistantMsg as any).toolCalls as AccumulatedToolCall[] || [];
+          const currentToolCalls = assistantMsg.toolCalls || [];
           const updatedLocal = currentToolCalls.map(t =>
             t.id === call.id ? { ...t, result: truncated } : t
           );
-          (assistantMsg as any).toolCalls = updatedLocal;
+          assistantMsg.toolCalls = updatedLocal;
           this.options.onMessageUpdate(activeAssistantMessageId, {
             toolCalls: [...accumulatedToolCalls]
-          } as any);
+          });
         }
 
         // ── Progress calculation (Gap 2 fix) ──────────────────────────────
@@ -581,22 +604,39 @@ export class AgentRuntime implements IAgentClient {
               accumulatedToolCalls[tcIdx] = { ...accumulatedToolCalls[tcIdx], isPresentable: true, finding: findingSummary.summary };
             }
             // Also keep local assistantMsg in sync for any downstream use
-            const currentToolCalls = (assistantMsg as any).toolCalls as AccumulatedToolCall[] || [];
+            const currentToolCalls = assistantMsg.toolCalls || [];
             const updatedLocal = currentToolCalls.map(t =>
               t.id === call.id ? { ...t, isPresentable: true, finding: findingSummary.summary } : t
             );
-            (assistantMsg as any).toolCalls = updatedLocal;
+            assistantMsg.toolCalls = updatedLocal;
             this.options.onMessageUpdate(activeAssistantMessageId, {
               toolCalls: [...accumulatedToolCalls]
-            } as any);
+            });
           }
         }
         return undefined;
-      });
+      };
 
-      const results = await Promise.all(toolPromises);
-      const bailout = results.find((r) => r && r.role === "assistant");
-      if (bailout) return bailout as LLMMessage;
+      const parallelDelegateBatch =
+        response.toolCalls.length > 1 &&
+        response.toolCalls.every((call) => call.name === "delegate_sub_task");
+
+      if (parallelDelegateBatch) {
+        // Keep same-turn delegate_sub_task calls parallel for multi-site workflows.
+        // This restores expected behavior while preserving sequential execution for
+        // all other tool categories.
+        const results = await Promise.all(response.toolCalls.map((call) => executeToolCall(call)));
+        const bailout = results.find((r) => r && r.role === "assistant");
+        if (bailout) return bailout as LLMMessage;
+      } else {
+        // Execute non-delegation calls sequentially in emission order.
+        for (const call of response.toolCalls) {
+          const maybeBailout = await executeToolCall(call);
+          if (maybeBailout && maybeBailout.role === "assistant") {
+            return maybeBailout as LLMMessage;
+          }
+        }
+      }
 
       iterationCount++;
       await this._handleCheckpoints(iterationCount);

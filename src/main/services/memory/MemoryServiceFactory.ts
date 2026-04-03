@@ -1,5 +1,6 @@
 import { app } from 'electron'
-import Store from 'electron-store'
+import type StoreType from 'electron-store'
+import { Store } from '../../lib/store-wrapper'
 import { UnifiedMemoryBackend } from './UnifiedMemoryBackend'
 import { ServerMemoryAdapter } from './adapters/ServerMemoryAdapter'
 import { MementoMCPAdapter } from './adapters/MementoMCPAdapter'
@@ -67,7 +68,7 @@ const DEFAULT_CONFIG: MemoryConfig = {
  */
 export class MemoryServiceFactory {
   // Use same type assertion as store.ts for consistent API
-  private static store = new Store<Record<string, any>>() as Store<Record<string, any>> & {
+  private static store = new Store<Record<string, any>>() as InstanceType<typeof StoreType<Record<string, any>>> & {
     get: (key: string, defaultValue?: any) => any;
     set: (key: string, value: any) => void;
   }

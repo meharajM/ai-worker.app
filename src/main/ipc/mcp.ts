@@ -234,17 +234,20 @@ export function registerMcpHandlers(): void {
         if (inProcessPlaywrightConnections.has(id)) {
             const res = await PlaywrightService.getInstance().callTool(toolName, args)
             if (res.error) return { result: null, error: res.error }
-            return { result: { content: [{ type: 'text', text: String(res.result) }] } }
+            const textValue = typeof res.result === 'object' ? JSON.stringify(res.result) : String(res.result)
+            return { result: { content: [{ type: 'text', text: textValue }] } }
         }
         if (inProcessMemoryConnections.has(id)) {
             const res = await MemoryService.getInstance().callTool(toolName, args)
             if (res.error) return { result: null, error: res.error }
-            return { result: { content: [{ type: 'text', text: String(res.result) }] } }
+            const textValue = typeof res.result === 'object' ? JSON.stringify(res.result) : String(res.result)
+            return { result: { content: [{ type: 'text', text: textValue }] } }
         }
         if (inProcessFilesystemConnections.has(id)) {
             const res = await FileSystemService.getInstance().callTool(toolName, args)
             if (res.error) return { result: null, error: res.error }
-            return { result: { content: [{ type: 'text', text: String(res.result) }] } }
+            const textValue = typeof res.result === 'object' ? JSON.stringify(res.result) : String(res.result)
+            return { result: { content: [{ type: 'text', text: textValue }] } }
         }
 
         const client = activeConnections.get(id)
@@ -280,21 +283,21 @@ function getInstallInstructions(cmd: string, args?: string[]): string {
     const isWin = process.platform === 'win32'
 
     const header = "### 🛠️ Environment Setup Needed\n\nIt looks like the command `" + cmd + "` isn't available on your system yet. Don't worry, you can fix this in a few steps:"
-    const internalNodeTip = "\n\n💡 **Pro Tip:** This app has a built-in Node.js runtime. If you have a local script, you can simply use \`node\` as the command and it will work immediately!"
+    const internalNodeTip = "\n\n💡 **Pro Tip:** This app has a built-in Node.js runtime. If you have a local script, you can simply use `node` as the command and it will work immediately!"
 
     if (cmd.includes('node') || cmd.includes('npx') || cmd.includes('npm')) {
         let steps = ""
-        if (isMac) steps = "1. Open your **Terminal** app.\n2. Type \`brew install node\` and press Enter.\n3. *If you don't have Homebrew, download Node.js from [nodejs.org](https://nodejs.org).* "
+        if (isMac) steps = "1. Open your **Terminal** app.\n2. Type `brew install node` and press Enter.\n3. *If you don't have Homebrew, download Node.js from [nodejs.org](https://nodejs.org).* "
         else if (isWin) steps = "1. Download and run the installer from [nodejs.org](https://nodejs.org).\n2. Follow the setup wizard and make sure 'Add to PATH' is checked.\n3. Restart the AI-Worker app once finished."
-        else steps = "1. Install Node.js using your system's package manager (e.g., \`sudo apt install nodejs\`)."
+        else steps = "1. Install Node.js using your system's package manager (e.g., `sudo apt install nodejs`)."
 
         return header + "\n\n" + steps + internalNodeTip
     }
     if (cmd.includes('python') || cmd.includes('pip')) {
         let steps = ""
-        if (isMac) steps = "1. Open your **Terminal** app.\n2. Type \`brew install python\` and press Enter.\n3. **Note:** Try using \`python3\` as the command in settings if \`python\` fails."
+        if (isMac) steps = "1. Open your **Terminal** app.\n2. Type `brew install python` and press Enter.\n3. **Note:** Try using `python3` as the command in settings if `python` fails."
         else if (isWin) steps = "1. Download Python from [python.org](https://www.python.org/downloads/).\n2. **Important:** Check the box that says 'Add Python to PATH' during installation."
-        else steps = "1. Install Python 3 using your system's package manager (e.g., \`sudo apt install python3\`)."
+        else steps = "1. Install Python 3 using your system's package manager (e.g., `sudo apt install python3`)."
 
         if (args?.some(a => a.includes('mcp-server-git') || a.includes('mcp_server_git'))) {
             steps += `\n\n4. Finally, install the Git tool by running: \`pip install mcp-server-git\``

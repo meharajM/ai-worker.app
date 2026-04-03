@@ -145,39 +145,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                 }
             ];
 
-            const originalFetch = window.fetch;
-            window.fetch = async (input, init) => {
-                let urlStr = (typeof input === 'object' && input !== null && 'url' in input) ? input.url : input.toString();
-
-                if (urlStr.includes('/api/tags')) {
-                    return new Response(JSON.stringify({ models: [{ name: "mock-model" }] }), { status: 200 });
-                }
-
-                if (urlStr.includes('/api/chat') || urlStr.includes('/chat/completions')) {
-                    let bodyStr = init?.body || await (input instanceof Request ? input.text() : "");
-                    if (bodyStr.includes("BACKGROUND_MEMORY_EXTRACTION")) {
-                        return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "No updates." } }] }), { status: 200 });
-                    }
-
-                    try {
-                        const body = JSON.parse(bodyStr);
-                        const scenario = SCENARIOS.find(s =>
-                            s.triggers.some(t =>
-                                body.messages.some(m => typeof m.content === 'string' && m.content.includes(t))
-                            )
-                        );
-
-                        if (scenario) {
-                            return new Response(JSON.stringify({
-                                model: "mock-model",
-                                choices: scenario.response.choices,
-                                usage: { total_tokens: 100 }
-                            }), { status: 200 });
-                        }
-                    } catch (e) { }
-                }
-                return originalFetch(input, init);
-            };
+            // Removed mock for real LLM calls
         });
 
         await window.reload();
@@ -192,8 +160,9 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
         // Configure Settings
         await window.click('button[title="Settings"]');
-        await window.click('text=OpenAI');
-        await window.locator('input[type="password"]').fill('sk-mock-key');
+        await window.click('text=OpenRouter');
+        await window.locator('input[type="password"]').fill(process.env.VITE_OPENROUTER_API_KEY || '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');
+        await window.selectOption('select', 'nvidia/nemotron-3-super-120b-a12b:free');
         await window.click('button[title="Chat"]');
 
         const chatInput = window.locator('[data-testid="chat-textarea"]');

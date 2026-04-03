@@ -241,6 +241,7 @@ export function useAgent(): UseAgentReturn {
                                         : Array.isArray(msg.content)
                                             ? (msg.content as Array<{ text?: string }>).map((c) => c.text ?? "").join("")
                                             : "",
+                                isFinalResult: Boolean((msg as LLMMessage & { isFinalResult?: boolean }).isFinalResult),
                             };
 
                             if (msg.tool_calls) {

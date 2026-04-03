@@ -1,8 +1,20 @@
 const { _electron: electron } = require('playwright');
-delete process.env.ELECTRON_RUN_AS_NODE;const path = require('path');
+const path = require('path');
 const fs = require('fs');
 
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
+
+function loadEnv() {
+    const envPath = path.join(__dirname, '../.env');
+    if (!fs.existsSync(envPath)) return {};
+    const content = fs.readFileSync(envPath, 'utf8');
+    const env = {};
+    content.split('\n').forEach(line => {
+        const match = line.match(/^([^#\s]+)=(.+)$/);
+        if (match) env[match[1].trim()] = match[2].trim();
+    });
+    return env;
+}
 
 (async () => {
     console.log('🚀 Starting E2E Test (Production Mode Debug)...');
@@ -30,14 +42,12 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         electronApp = await electron.launch({
             executablePath: execPath,
             args: [
-                path.join(__dirname, '../out/main/index.js'),
-                '--no-sandbox',
-                '--disable-gpu',
-                '--disable-dev-shm-usage'
+                path.join(__dirname, '../out/main/index.js')
             ],
             timeout: 120000,
             env: {
                 ...process.env,
+                ...loadEnv(),
                 NODE_ENV: 'production'
             }
         });

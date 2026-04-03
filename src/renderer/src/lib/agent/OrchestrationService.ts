@@ -25,9 +25,9 @@
 import { chat } from "../llm";
 import { executeToolCall, parseTabIdFromResult } from "../mcp";
 import { generateSubAgentInstruction, type TaskDecomposition } from "../task-decomposer";
-import { type LLMMessage } from "../types";
+import { type LLMMessage, type LLMContentPart } from "../types";
 import { type ExecutionPlan } from "../agent-protocol";
-import { type AgentRuntimeOptions } from "./types";
+import { type AgentRuntimeOptions, type IAgentClient } from "./types";
 import { preSeedSubAgentMemory } from "./AgentStateService";
 import { laneManager } from "../execution-lanes";
 
@@ -94,7 +94,7 @@ export async function executeParallelSubAgents(
     onPlanUpdate?.(executionPlan);
 
     // Helper to salvage data from a sub-agent
-    const extractPartialFindings = async (subAgentInstance: any): Promise<string[]> => {
+    const extractPartialFindings = async (subAgentInstance: IAgentClient): Promise<string[]> => {
         const history = subAgentInstance.getHistory?.() as LLMMessage[] | undefined;
         const partials: string[] = [];
         if (!history) return partials;
@@ -109,7 +109,7 @@ export async function executeParallelSubAgents(
                         if (analysis.hasPresentableData && analysis.summary) {
                             partials.push(analysis.summary.substring(0, 300));
                         }
-                    } catch (e) { }
+                    } catch { /* ignored */ }
                 }
             }
         }
@@ -145,7 +145,7 @@ export async function executeParallelSubAgents(
     // Determine if sub-agents should run headless (inherit from parent)
     const useHeadless = parentOptions.isHeadless === true;
 
-    const subAgentPromises = contexts.map(async (context, index) => {
+    const subAgentTasks = contexts.map((context, index) => async () => {
         const instruction = generateSubAgentInstruction(originalRequest, context, contexts);
         const subAgentId = globalThis.crypto.randomUUID();
 
@@ -174,10 +174,11 @@ export async function executeParallelSubAgents(
         let subAgentTabId: number | undefined;
         if (!useHeadless) {
             try {
-                const { browserLock } = await import("../resource-lock");
-                const tabResult = await browserLock.runExclusive(async () =>
-                    executeToolCall("new_tab", { url: "about:blank" })
-                );
+                // Call executeToolCall directly — do NOT wrap in browserLock.runExclusive().
+                // WHY: browserLock routes to the BROWSER_SERIAL lane (concurrency=1),
+                // and executeToolCall internally also routes through the same lane via
+                // laneManager. Wrapping causes a re-entrant deadlock.
+                const tabResult = await executeToolCall("new_tab", { url: "about:blank" });
 
                 // Extract tabId from the MCP content envelope (or raw fallback)
                 const parsedTabId = parseTabIdFromResult(tabResult);
@@ -225,7 +226,7 @@ export async function executeParallelSubAgents(
                 const contentStr =
                     typeof msg.content === "string"
                         ? msg.content
-                        : (msg.content as any[]).map((c: any) => (c.type === "text" ? c.text : "[Image]")).join(" ");
+                        : (msg.content as LLMContentPart[]).map((c) => (c.type === "text" ? c.text : "[Image]")).join(" ");
                 console.log(`[SubAgent:${context}] ${msg.role}: ${contentStr?.substring(0, 50)}...`);
             },
         });
@@ -235,7 +236,7 @@ export async function executeParallelSubAgents(
             const resultContent =
                 typeof result?.content === "string"
                     ? result.content
-                    : (result?.content as any[])?.map((c: any) => (c.type === "text" ? c.text : "")).join("") ?? "";
+                    : (result?.content as LLMContentPart[])?.map((c) => (c.type === "text" ? c.text : "")).join("") ?? "";
 
             // Detect sub-agent bailout (max consecutive errors)
             const isBailout = resultContent.includes("consecutive errors") ||
@@ -274,10 +275,8 @@ export async function executeParallelSubAgents(
             // Close the sub-agent's tab to free resources
             if (subAgentTabId !== undefined) {
                 try {
-                    const { browserLock } = await import("../resource-lock");
-                    await browserLock.runExclusive(async () =>
-                        executeToolCall("close_tab", { tabId: subAgentTabId })
-                    );
+                    // Direct call — no browserLock wrapper (avoids re-entrant deadlock)
+                    await executeToolCall("close_tab", { tabId: subAgentTabId });
                     console.log(`[OrchestrationService] Closed sub-agent tab ${subAgentTabId}`);
                     // Clean up the execution lane to prevent memory leaks
                     laneManager.cleanupTabLane(subAgentTabId);
@@ -301,7 +300,7 @@ export async function executeParallelSubAgents(
             }
 
             return { context, success: isSuccess, result: finalResultStr };
-        } catch (error: any) {
+        } catch (error: unknown) {
             agentStatuses[index].isRunning = false;
             agentStatuses[index].status = "Failed";
 
@@ -313,22 +312,20 @@ export async function executeParallelSubAgents(
                     partialsMsg = `\n\nPartial data collected before crash:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
                     console.warn(`[OrchestrationService] Parallel sub-agent ${context} threw exception. Salvaged ${partials.length} partial findings.`);
                 }
-            } catch (e) { }
+            } catch { /* ignored */ }
 
             // Close the tab + clean up the lane even on crash path to prevent leaks
             if (subAgentTabId !== undefined) {
                 try {
-                    const { browserLock } = await import("../resource-lock");
-                    await browserLock.runExclusive(async () =>
-                        executeToolCall("close_tab", { tabId: subAgentTabId })
-                    );
+                    // Direct call — no browserLock wrapper (avoids re-entrant deadlock)
+                    await executeToolCall("close_tab", { tabId: subAgentTabId });
                     laneManager.cleanupTabLane(subAgentTabId);
                 } catch (e) {
                     console.warn(`[OrchestrationService] Failed to close crashed sub-agent tab ${subAgentTabId}`, e);
                 }
             }
 
-            const errorText = `Error: ${error.message}${partialsMsg}`;
+            const errorText = `Error: ${error instanceof Error ? error.message : String(error)}${partialsMsg}`;
             agentStatuses[index].result = errorText;
 
             if (statusMessageId && parentOptions.onMessageUpdate) {
@@ -345,7 +342,30 @@ export async function executeParallelSubAgents(
 
     });
 
-    const results = await Promise.all(subAgentPromises);
+    const configuredModel = (
+        parentOptions.settings?.openrouterModel ||
+        parentOptions.settings?.openaiModel ||
+        ""
+    ).toLowerCase();
+    const maxParallelWorkers = Math.min(contexts.length, 3);
+    if (maxParallelWorkers < contexts.length) {
+        console.warn(
+            `[OrchestrationService] Throttling parallel sub-agents to ${maxParallelWorkers}/${contexts.length} workers for model "${configuredModel || "unknown"}".`
+        );
+    }
+
+    const results: Array<{ context: string; success: boolean; result: string }> = new Array(subAgentTasks.length);
+    let nextTaskIndex = 0;
+    const workerCount = Math.max(1, Math.min(maxParallelWorkers, subAgentTasks.length));
+    await Promise.all(
+        Array.from({ length: workerCount }, async () => {
+            while (true) {
+                const taskIndex = nextTaskIndex++;
+                if (taskIndex >= subAgentTasks.length) break;
+                results[taskIndex] = await subAgentTasks[taskIndex]();
+            }
+        })
+    );
 
     // Aggregate results into a final summary
     const successfulResults = results.filter((r) => r.success);
@@ -364,12 +384,13 @@ export async function executeParallelSubAgents(
     }
     summary += `---\n\n*Parallel execution complete: ${successfulResults.length}/${contexts.length} sources succeeded.*`;
 
-    // Update the status card one final time with the aggregated result
+    // Update the status card one final time with the aggregated result.
+    // isFinalResult: true ensures this message is always shown in clean/prod view
     if (statusMessageId && parentOptions.onMessageUpdate) {
-        parentOptions.onMessageUpdate(statusMessageId, { content: summary });
+        parentOptions.onMessageUpdate(statusMessageId, { content: summary, isFinalResult: true });
     }
 
-    return { role: "assistant", content: summary };
+    return { role: "assistant", content: summary, isFinalResult: true };
 }
 
 // ── Sequential Orchestration ───────────────────────────────────────────────────
@@ -500,7 +521,7 @@ Format as JSON:
         const results: Array<{ step: number; description: string; result: string }> = [];
 
         // Helper to salvage data from a sub-agent
-        const extractPartialFindings = async (subAgentInstance: any): Promise<string[]> => {
+        const extractPartialFindings = async (subAgentInstance: IAgentClient): Promise<string[]> => {
             const history = subAgentInstance.getHistory?.() as LLMMessage[] | undefined;
             const partials: string[] = [];
             if (!history) return partials;
@@ -515,7 +536,7 @@ Format as JSON:
                             if (analysis.hasPresentableData && analysis.summary) {
                                 partials.push(analysis.summary.substring(0, 300));
                             }
-                        } catch (e) { }
+                        } catch { /* ignored */ }
                     }
                 }
             }
@@ -529,10 +550,9 @@ Format as JSON:
         let sharedTabId: number | undefined;
         if (!useHeadless) {
             try {
-                const { browserLock } = await import("../resource-lock");
-                const tabResult = await browserLock.runExclusive(async () =>
-                    executeToolCall("new_tab", { url: "about:blank" })
-                );
+                // Direct call — no browserLock wrapper (avoids re-entrant deadlock).
+                // executeToolCall already routes through laneManager internally.
+                const tabResult = await executeToolCall("new_tab", { url: "about:blank" });
                 const parsedTabId = parseTabIdFromResult(tabResult);
                 if (parsedTabId !== undefined) {
                     sharedTabId = parsedTabId;
@@ -603,7 +623,7 @@ End with "✓ Done" and a brief result.`;
                         const contentStr =
                             typeof msg.content === "string"
                                 ? msg.content
-                                : (msg.content as any[]).map((c: any) => (c.type === "text" ? c.text : "[Image]")).join(" ");
+                                : (msg.content as LLMContentPart[]).map((c) => (c.type === "text" ? c.text : "[Image]")).join(" ");
                         console.log(`[SubAgent:Step${step.id}] ${msg.role}: ${contentStr?.substring(0, 50)}...`);
                     },
                 });
@@ -613,7 +633,7 @@ End with "✓ Done" and a brief result.`;
                     const stepContent =
                         typeof stepResult.content === "string"
                             ? stepResult.content
-                            : (stepResult.content as any[]).map((c: any) => (c.type === "text" ? c.text : "")).join("");
+                            : (stepResult.content as LLMContentPart[]).map((c) => (c.type === "text" ? c.text : "")).join("");
 
                     // Detect bailout
                     const isBailout = stepContent.includes("consecutive errors") ||
@@ -645,7 +665,7 @@ End with "✓ Done" and a brief result.`;
                         content: `✓ **Step ${step.id} completed**\n${stepContent.substring(0, 150)}${stepContent.length > 150 ? "..." : ""
                             }`,
                     });
-                } catch (error: any) {
+                } catch (error: unknown) {
                     console.error(`[OrchestrationService] Step ${step.id} failed:`, error);
 
                     // Try to salvage partial data even on a hard crash
@@ -656,7 +676,7 @@ End with "✓ Done" and a brief result.`;
                             partialsMsg = `\n\nPartial data collected before crash:\n${partials.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
                             console.warn(`[OrchestrationService] Sequential step ${step.id} crashed. Salvaged ${partials.length} findings.`);
                         }
-                    } catch (e) { }
+                    } catch { /* ignored */ }
 
                     // Mark step as failed in the ExecutionPlan
                     const failedStep = executionPlan.steps.find(s => s.id === step.id);
@@ -666,7 +686,7 @@ End with "✓ Done" and a brief result.`;
                     results.push({
                         step: step.id,
                         description: step.description,
-                        result: `Error: ${error.message}${partialsMsg}`,
+                        result: `Error: ${error instanceof Error ? error.message : String(error)}${partialsMsg}`,
                     });
                 }
             }
@@ -675,14 +695,12 @@ End with "✓ Done" and a brief result.`;
             // WHY finally: Guarantees cleanup even if the loop throws or user aborts.
             if (sharedTabId !== undefined) {
                 try {
-                    const { browserLock } = await import("../resource-lock");
-                    await browserLock.runExclusive(async () =>
-                        executeToolCall("close_tab", { tabId: sharedTabId })
-                    );
+                    // Direct call — no browserLock wrapper (avoids re-entrant deadlock)
+                    await executeToolCall("close_tab", { tabId: sharedTabId });
                     laneManager.cleanupTabLane(sharedTabId);
                     console.log(`[OrchestrationService] Closed shared sequential tab ${sharedTabId}`);
-                } catch (e) {
-                    console.warn(`[OrchestrationService] Failed to close shared tab ${sharedTabId}`, e);
+                } catch {
+                    console.warn(`[OrchestrationService] Failed to close shared tab ${sharedTabId}`);
                 }
             }
         }
@@ -695,15 +713,16 @@ End with "✓ Done" and a brief result.`;
         finalSummary += `---\n\n*Sequential orchestration complete: ${results.length} steps executed.*`;
 
         // Only addMessage — it calls onMessage internally
-        const finalMessage: LLMMessage = { role: "assistant", content: finalSummary };
+        // isFinalResult: true ensures this is always shown in clean/prod view
+        const finalMessage: LLMMessage = { role: "assistant", content: finalSummary, isFinalResult: true };
         addMessage(finalMessage);
 
         return finalMessage;
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("[OrchestrationService] Sequential orchestration failed:", error);
         return {
             role: "assistant",
-            content: `Failed to orchestrate task: ${error.message}. Falling back to direct execution.`,
+            content: `Failed to orchestrate task: ${error instanceof Error ? error.message : String(error)}. Falling back to direct execution.`,
         };
     }
 }

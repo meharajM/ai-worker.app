@@ -22,6 +22,7 @@ export interface Message {
     eta?: number             // Estimated time remaining in seconds
     plan?: ExecutionPlan     // Current ExecutionPlan state for the UI
     findings?: string[]      // Summarised findings to show in the UI bubble
+    isFinalResult?: boolean  // When true, always shown in prod/clean view (never suppressed)
 }
 
 export interface ToolCall {

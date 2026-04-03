@@ -22,7 +22,7 @@ export class TypeTool extends PlaywrightTool {
         };
     }
 
-    async execute(page: Page, args: any): Promise<ToolResult> {
+    async execute(page: Page, args: Record<string, unknown>): Promise<ToolResult> {
         const selectorError = this.requireParam(args, 'selector');
         if (selectorError) return { result: null, error: selectorError };
 
@@ -30,15 +30,16 @@ export class TypeTool extends PlaywrightTool {
         if (textError) return { result: null, error: textError };
 
         try {
-            await page.waitForSelector(args.selector, { state: 'attached', timeout: 5000 });
-            await humanizedClick(page, args.selector);
-        } catch (e) {
+            await page.waitForSelector(args.selector as string, { state: 'attached', timeout: 15000 });
+            await humanizedClick(page, args.selector as string);
+        } catch {
             // fallback if humanized click fails
-            await page.click(args.selector);
+            await page.click(args.selector as string);
         }
 
-        const baseDelay = args.delay || 50;
-        for (const char of args.text) {
+        const baseDelay = typeof args.delay === 'number' ? args.delay : 50;
+        const textToType = args.text as string;
+        for (const char of textToType) {
             // Adds variable human delay up to +50ms per keystroke
             await page.keyboard.type(char, { delay: baseDelay + Math.random() * 50 });
         }

@@ -6,7 +6,7 @@
  */
 
 import { ipcMain, safeStorage } from 'electron'
-import Store from 'electron-store'
+import { Store } from '../lib/store-wrapper'
 import { AntigravityAuthService } from '../services/AntigravityAuthService'
 
 // Dedicated store for Antigravity auth tokens (same pattern as secure.ts)

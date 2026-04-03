@@ -21,7 +21,7 @@ import { BrowserContext, Page, Browser } from 'playwright-core';
 import { app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import Store from 'electron-store';
+import { Store } from '../../lib/store-wrapper';
 
 // playwright-core is required at runtime to avoid bundler inlining its internals
 // (bundling it causes package.json relative-path crashes in the packaged app)

@@ -2,11 +2,11 @@ import { LLMMessage, LLMSettings, LLMTool, LLMResponse } from "../types";
 import type { AntigravityCredentials } from "../antigravity-gateway";
 import { ProviderStatus } from "./types";
 import { LLM_CONFIG } from "../constants";
-import { extractTextForLegacyProviders, ensureRecord } from "./utils";
+import { extractTextForLegacyProviders, ensureRecord, getEnvFallback } from "./utils";
 
 /**
  * Resolves Gemini credentials from settings / secure store / Antigravity OAuth.
- * Priority: settings object → electron secure store → Antigravity (no-key path).
+ * Priority: settings object → electron secure store → env variables → Antigravity (no-key path).
  */
 export async function getGeminiSettings(settings?: LLMSettings): Promise<{
   apiKey: string;
@@ -17,12 +17,16 @@ export async function getGeminiSettings(settings?: LLMSettings): Promise<{
   const electron = (await import("../electron")).default;
   const { getAntigravityCredentials } = await import("../antigravity-gateway");
 
+  const envKey = getEnvFallback('gemini', 'api_key');
+  const envModel = getEnvFallback('gemini', 'model');
+
   const apiKey =
     settings?.geminiApiKey ||
     (await electron.secure.get("gemini_api_key")).value ||
+    envKey ||
     "";
   const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
-  const model = settings?.geminiModel || LLM_CONFIG.GEMINI.DEFAULT_MODEL;
+  const model = settings?.geminiModel || envModel || LLM_CONFIG.GEMINI.DEFAULT_MODEL;
   const antigravity = await getAntigravityCredentials();
 
   return { apiKey, baseUrl, model, antigravity };

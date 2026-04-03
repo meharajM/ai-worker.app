@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "[pre-commit] Running typecheck..."
+npm run -s typecheck
+
+echo "[pre-commit] Running critical regression checks..."
+npm run -s test:regression:critical
+
+echo "[pre-commit] OK"

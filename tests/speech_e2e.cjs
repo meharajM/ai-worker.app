@@ -63,6 +63,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
     try {
         const window = await electronApp.firstWindow();
+        await window.setViewportSize({ width: 1400, height: 900 });
         
         await window.addInitScript(() => {
             localStorage.setItem('skipDepsCheck', 'true');
@@ -99,7 +100,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         }
 
         // Ensure we are in Chat view
-        const chatNav = window.locator('button[title="Chat"]').first();
+        const chatNav = window.locator('button[title="Chat"]:visible, button[title="Hub Chat"]:visible').first();
         await chatNav.click();
         await window.waitForTimeout(2000);
 
@@ -243,7 +244,8 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         console.log('\n--- Test 4: Manual Model Selection ---');
 
         // 1. Open Settings
-        const settingsButton = window.locator('button[title="Settings"]');
+        const settingsButton = window.locator('button[title="Settings"]:visible, button[title="Hub Settings"]:visible').first();
+        await settingsButton.waitFor({ state: 'visible', timeout: 15000 });
         await settingsButton.click();
         console.log('✅ Clicked Settings button');
         await window.waitForTimeout(500);
@@ -273,7 +275,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         }
 
         // 5. Return to Chat
-        const chatButton = window.locator('button[title="Chat"]');
+        const chatButton = window.locator('button[title="Chat"]:visible, button[title="Hub Chat"]:visible').first();
         await chatButton.click();
         console.log('✅ Navigated back to Chat view');
         await window.waitForTimeout(1000);

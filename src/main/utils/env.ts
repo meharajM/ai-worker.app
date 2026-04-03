@@ -1,6 +1,10 @@
 import { dirname } from "path";
 import { fileURLToPath } from "url";
-import fixPath from "fix-path";
+import fixPathRaw from "fix-path";
+
+// ESM/CJS interop: fix-path is ESM-only, bundler may wrap it
+// @ts-expect-error - fixPathRaw has a default property at runtime in CJS
+const fixPath = (fixPathRaw.default || fixPathRaw) as typeof fixPathRaw;
 
 /**
  * Handle ESM shims and environment fixing

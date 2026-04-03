@@ -1,12 +1,13 @@
 import { LLMMessage, LLMSettings, LLMTool, LLMResponse } from "../types";
 import { ProviderStatus } from "./types";
 import { LLM_CONFIG, FEATURE_FLAGS } from "../constants";
-import { extractTextForLegacyProviders } from "./utils";
+import { extractTextForLegacyProviders, getEnvFallback } from "./utils";
 
 export // Get Ollama settings from store or use defaults
   function getOllamaSettings(settings?: LLMSettings) {
+  const envModel = getEnvFallback('ollama', 'model');
   const baseUrl = settings?.ollamaBaseUrl || LLM_CONFIG.OLLAMA.BASE_URL;
-  const model = settings?.ollamaModel || LLM_CONFIG.OLLAMA.DEFAULT_MODEL;
+  const model = settings?.ollamaModel || envModel || LLM_CONFIG.OLLAMA.DEFAULT_MODEL;
   return { baseUrl, model };
 }
 

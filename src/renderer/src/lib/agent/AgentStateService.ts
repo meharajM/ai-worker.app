@@ -21,6 +21,29 @@ import { executeToolCall } from "../mcp";
 import { type LLMMessage } from "../types";
 import { type AgentCheckpoint } from "./types";
 
+const MEMORY_CREATE_COOLDOWN_MS = 5 * 60 * 1000;
+const memoryCreateDisabledUntilByContext = new Map<string, number>();
+
+function getRemainingCooldownMs(context: string): number {
+    const until = memoryCreateDisabledUntilByContext.get(context) ?? 0;
+    return Math.max(0, until - Date.now());
+}
+
+function canCreateStateEntity(context: string): boolean {
+    return getRemainingCooldownMs(context) === 0;
+}
+
+function clearMemoryCreateFailure(context: string): void {
+    memoryCreateDisabledUntilByContext.delete(context);
+}
+
+function markMemoryCreateFailure(context: string, err: unknown): void {
+    memoryCreateDisabledUntilByContext.set(context, Date.now() + MEMORY_CREATE_COOLDOWN_MS);
+    console.warn(
+        `[AgentStateService] Disabled memory_create_entity for ${MEMORY_CREATE_COOLDOWN_MS / 1000}s in ${context} after failure: ${err}`
+    );
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 /**
@@ -80,20 +103,36 @@ export async function initializeSessionState(
             }
         } else {
             // Create new state entity
-            await executeToolCall("memory_create_entity", {
-                name: entityName,
-                type: "agent_execution_state",
-                description: `Agent initialized at ${new Date().toISOString()}`,
-                metadata: {
-                    agentInstanceId,
-                    sessionId: sessionId || "unknown",
-                    status: "active",
-                    iterationCount: 0,
-                    isInternal: true,
-                    parentAgentId,
-                },
-            });
-            console.log(`[AgentStateService] Created new ExecutionState: ${entityName}`);
+            const createContext = "initializeSessionState";
+            if (canCreateStateEntity(createContext)) {
+                try {
+                    const createResult = await executeToolCall("memory_create_entity", {
+                        name: entityName,
+                        type: "agent_execution_state",
+                        description: `Agent initialized at ${new Date().toISOString()}`,
+                        metadata: {
+                            agentInstanceId,
+                            sessionId: sessionId || "unknown",
+                            status: "active",
+                            iterationCount: 0,
+                            isInternal: true,
+                            parentAgentId,
+                        },
+                    });
+                    if (createResult?.error) {
+                        throw new Error(createResult.error);
+                    }
+                    clearMemoryCreateFailure(createContext);
+                    console.log(`[AgentStateService] Created new ExecutionState: ${entityName}`);
+                } catch (createErr) {
+                    markMemoryCreateFailure(createContext, createErr);
+                }
+            } else {
+                const remainingMs = getRemainingCooldownMs(createContext);
+                console.warn(
+                    `[AgentStateService] Skipping memory_create_entity in ${createContext} (${Math.ceil(remainingMs / 1000)}s cooldown remaining).`
+                );
+            }
         }
     } catch (err) {
         console.warn(`[AgentStateService] Failed to initialize session state: ${err}`);
@@ -232,27 +271,35 @@ export async function createHandoff(
 ): Promise<void> {
     const handoffId = `Handoff_${sessionId}_${Date.now()}`;
 
-    await executeToolCall("memory_create_entity", {
-        name: handoffId,
-        type: "agent_handoff",
-        description: [
-            `Agent ${agentInstanceId} approaching context limit (${estimatedTokens} tokens)`,
-            `Handing off at checkpoint: ${checkpoint?.summary || "No checkpoint"}`,
-            `Original goal: ${originalGoal.substring(0, 200)}`,
-        ].join("\n"),
-        metadata: {
-            fromAgentId: agentInstanceId,
-            sessionId,
-            reason: "context_limit",
-            originalGoal,
-            lastCheckpoint: checkpoint,
-            timestamp: Date.now(),
-            estimatedTokens,
-            isInternal: true,
-        },
-    });
-
-    console.log(`[AgentStateService] Created handoff entity: ${handoffId}`);
+    try {
+        const createContext = "createHandoff";
+        const createResult = await executeToolCall("memory_create_entity", {
+            name: handoffId,
+            type: "agent_handoff",
+            description: [
+                `Agent ${agentInstanceId} approaching context limit (${estimatedTokens} tokens)`,
+                `Handing off at checkpoint: ${checkpoint?.summary || "No checkpoint"}`,
+                `Original goal: ${originalGoal.substring(0, 200)}`,
+            ].join("\n"),
+            metadata: {
+                fromAgentId: agentInstanceId,
+                sessionId,
+                reason: "context_limit",
+                originalGoal,
+                lastCheckpoint: checkpoint,
+                timestamp: Date.now(),
+                estimatedTokens,
+                isInternal: true,
+            },
+        });
+        if (createResult?.error) {
+            throw new Error(createResult.error);
+        }
+        clearMemoryCreateFailure(createContext);
+        console.log(`[AgentStateService] Created handoff entity: ${handoffId}`);
+    } catch (err) {
+        markMemoryCreateFailure("createHandoff", err);
+    }
 }
 
 /**
@@ -296,7 +343,9 @@ export async function preSeedSubAgentMemory(
     extraMetadata: Record<string, unknown> = {}
 ): Promise<void> {
     try {
-        await executeToolCall("memory_create_entity", {
+        const createContext = "preSeedSubAgentMemory";
+
+        const createResult = await executeToolCall("memory_create_entity", {
             name: `AgentState_${subAgentId}`,
             type: "agent_execution_state",
             description,
@@ -310,8 +359,12 @@ export async function preSeedSubAgentMemory(
                 ...extraMetadata,
             },
         });
+        if (createResult?.error) {
+            throw new Error(createResult.error);
+        }
+        clearMemoryCreateFailure(createContext);
         console.log(`[AgentStateService] Pre-seeded memory for sub-agent ${subAgentId}`);
     } catch (err) {
-        console.warn(`[AgentStateService] Failed to pre-seed sub-agent memory: ${err}`);
+        markMemoryCreateFailure("preSeedSubAgentMemory", err);
     }
 }

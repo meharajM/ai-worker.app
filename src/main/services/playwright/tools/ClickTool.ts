@@ -20,26 +20,27 @@ export class ClickTool extends PlaywrightTool {
         };
     }
 
-    async execute(page: Page, args: any): Promise<ToolResult> {
+    async execute(page: Page, args: Record<string, unknown>): Promise<ToolResult> {
         const clickError = this.requireParam(args, 'selector');
         if (clickError) return { result: null, error: clickError };
 
         try {
-            await page.waitForSelector(args.selector, { state: 'attached', timeout: 5000 });
-            await humanizedClick(page, args.selector);
+            await page.waitForSelector(args.selector as string, { state: 'attached', timeout: 15000 });
+            await humanizedClick(page, args.selector as string);
             return { result: `Clicked ${args.selector} with humanized cursor` };
         } catch (error) {
             const errorStr = String(error);
-            const isSimpleText = !args.selector.includes('#') && !args.selector.includes('.') && args.selector.includes(' ');
+            const selectorStr = args.selector as string;
+            const isSimpleText = !selectorStr.includes('#') && !selectorStr.includes('.') && selectorStr.includes(' ');
 
             if (isSimpleText || errorStr.includes('Timeout') || errorStr.includes('Waiting for selector')) {
                 console.log(`[PlaywrightService] Click failed. Trying fallback click_text("${args.selector}")`);
                 try {
                     const textWithQuotes = `text="${args.selector}"`;
-                    await page.waitForSelector(textWithQuotes, { state: 'attached', timeout: 5000 });
+                    await page.waitForSelector(textWithQuotes, { state: 'attached', timeout: 15000 });
                     await humanizedClick(page, textWithQuotes);
                     return { result: `Clicked by Text "${args.selector}" (Fallback from failed selector)` };
-                } catch (e2) {
+                } catch {
                     // Fallback failed
                 }
             }

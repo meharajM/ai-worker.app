@@ -5,6 +5,7 @@
 import React, { useState } from 'react'
 import { useSettingsStore } from '../../../stores/settingsStore'
 import { testOpenAIConnection } from '../../../lib/llm'
+import { LLM_CONFIG } from '../../../lib/constants'
 import { ModelSelect } from '../../ModelSelect'
 import { ProviderCard } from './ProviderCard'
 
@@ -46,7 +47,7 @@ export function OpenAISettings({
         setTesting(true)
         setTestResult(undefined)
         try {
-            const result = await testOpenAIConnection(baseUrl, apiKey, model || (isOpenRouter ? 'anthropic/claude-3-haiku' : 'gpt-4o-mini'))
+            const result = await testOpenAIConnection(baseUrl, apiKey, model || (isOpenRouter ? LLM_CONFIG.OPENROUTER.DEFAULT_MODEL : 'gpt-4o-mini'))
             if (result.success) {
                 let msg = 'Connection successful!'
                 if (result.models && result.models.length > 0) msg += ` Found ${result.models.length} model(s).`
@@ -65,7 +66,7 @@ export function OpenAISettings({
 
     const title = isOpenRouter ? 'OpenRouter' : 'OpenAI / Compatible API'
     const apiKeyUrl = isOpenRouter ? 'https://openrouter.ai/keys' : 'https://platform.openai.com/api-keys'
-    const modelPlaceholder = isOpenRouter ? 'anthropic/claude-3-haiku' : 'gpt-4o-mini'
+    const modelPlaceholder = isOpenRouter ? LLM_CONFIG.OPENROUTER.DEFAULT_MODEL : 'gpt-4o-mini'
 
     return (
         <ProviderCard

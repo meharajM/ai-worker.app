@@ -1,12 +1,13 @@
 import { ipcMain } from "electron";
-import Store from "electron-store";
+import type StoreType from "electron-store";
+import { Store } from "../lib/store-wrapper";
 
 // Initialize electron-store with proper configuration
 // Using type assertion since electron-store extends Conf which has get/set/delete methods
 const store = new Store<Record<string, unknown>>({
   name: "ai-worker-store",
   defaults: {},
-}) as Store<Record<string, unknown>> & {
+}) as InstanceType<typeof StoreType<Record<string, unknown>>> & {
   get: (key: string) => unknown;
   set: (key: string, value: unknown) => void;
   delete: (key: string) => void;

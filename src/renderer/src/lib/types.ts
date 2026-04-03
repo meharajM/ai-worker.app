@@ -25,6 +25,8 @@ export interface LLMMessage {
   attachments?: { name: string; path: string; type: string }[]; // User-uploaded files
   thought?: string; // Gemini 2.0 reasoning — must be echoed back in subsequent turns
   thought_signature?: string; // Gemini tool-call integrity token — required to avoid 400 errors
+  isFinalResult?: boolean; // When true, always surfaced in clean/prod view regardless of content shape
+  toolCalls?: { id: string; name?: string; type?: string; function?: { name?: string; arguments: Record<string, unknown> } }[];
 }
 
 export interface LLMTool {

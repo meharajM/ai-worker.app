@@ -20,6 +20,7 @@
         "test:mock": "node tests/e2e_ui_mocked.cjs",
         "test:playwright": "node tests/playwright_tools_test.cjs",
         "test:speech": "node tests/speech_e2e.cjs",
+        "test:regression:critical": "node tests/regression_critical_checks.cjs",
         "clean": "rm -rf out dist",
         "clean:native:build": "rm -rf node_modules/better-sqlite3/build node_modules/bufferutil/build node_modules/utf-8-validate/build",
         "clean:state": "rm -rf ~/Library/Application\\ Support/AI-Worker",
@@ -54,7 +55,8 @@
         "publish:linux": "bash scripts/publish-linux.sh",
         "publish:win": "bash scripts/publish-win.sh",
         "publish:linux-win": "bash scripts/publish-linux-win.sh",
-        "publish:all": "bash scripts/publish-all.sh"
+        "publish:all": "bash scripts/publish-all.sh",
+        "hooks:install": "git config core.hooksPath .githooks && chmod +x .githooks/pre-commit"
     },
     "dependencies": {
         "@electron-toolkit/preload": "^3.0.0",

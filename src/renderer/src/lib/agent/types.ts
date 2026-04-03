@@ -171,3 +171,8 @@ export interface SubAgentConfig {
     /** Dedicated browser tab ID for isolation. */
     tabId?: number;
 }
+
+export interface IAgentClient {
+    getHistory?(): LLMMessage[];
+    run(task: string): Promise<string>;
+}

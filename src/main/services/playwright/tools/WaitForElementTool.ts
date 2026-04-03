@@ -12,16 +12,16 @@ export class WaitForElementTool extends PlaywrightTool {
                 type: 'object',
                 properties: {
                     selector: { type: 'string', description: 'CSS selector to wait for' },
-                    timeout: { type: 'number', description: 'Max wait time in ms (default: 5000)' }
+                    timeout: { type: 'number', description: 'Max wait time in ms (default: 15000)' }
                 },
                 required: ['selector']
             }
         };
     }
 
-    async execute(page: Page, args: any): Promise<ToolResult> {
-        const originalSelector = args.selector;
-        const timeout = args.timeout || 5000;
+    async execute(page: Page, args: Record<string, unknown>): Promise<ToolResult> {
+        const originalSelector = args.selector as string;
+        const timeout = typeof args.timeout === 'number' ? args.timeout : 15000;
 
         try {
             await page.waitForSelector(originalSelector, { timeout });
@@ -47,7 +47,7 @@ export class WaitForElementTool extends PlaywrightTool {
                 try {
                     await page.waitForSelector(fallback, { timeout: 2000 });
                     return { result: `Element appeared (auto-recovered using fallback: ${fallback})` };
-                } catch (e) {
+                } catch {
                     // Fallback failed
                 }
             }

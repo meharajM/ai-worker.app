@@ -51,6 +51,22 @@ const MULTI_STEP_INDICATORS = [
   'compare', 'multiple', 'several', 'all', 'each',
 ];
 
+const DOMAIN_PATTERN = /\b(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+\.(?:com|org|net|io|in|co|ai|gov|edu|us|uk|de|fr|ca|au|jp|es|it|nl|se|no|fi|pl|biz|info|me))\b/gi;
+const PARALLEL_INTENT_PATTERN = /\b(compare|across|between|both|each|vs|versus|in parallel|simultaneously)\b/i;
+const SEQUENTIAL_INTENT_PATTERN = /\b(and then|then|after that|next|finally|first|second|third|before|once)\b/i;
+const CONDITIONAL_SEQUENTIAL_INTENT_PATTERN = /\b(if|unless)\b[\s\S]{0,80}\b(then|else|otherwise)\b/i;
+const OPTIONAL_CONDITIONAL_PATTERN = /\bif\s+(possible|available|you can|feasible)\b/i;
+const DEPENDENCY_CHAIN_PATTERN = /\b(then|after that|use (the )?(result|output|data) (from|of)|based on)\b/i;
+
+function extractExplicitWebsiteContexts(text: string): string[] {
+  const normalized = new Set<string>();
+  for (const match of text.matchAll(DOMAIN_PATTERN)) {
+    const domain = (match[1] || match[0]).toLowerCase().replace(/^www\./, '').trim();
+    if (domain) normalized.add(domain);
+  }
+  return Array.from(normalized);
+}
+
 // Simple cache for LLM analysis results (avoid redundant calls)
 const analysisCache = new Map<string, {
   result: { shouldParallelize: boolean; contexts: string[]; reasoning: string };
@@ -286,6 +302,37 @@ export async function analyzeTaskForDecomposition(
   conversationHistory?: Array<{ role: string; content: string }>
 ): Promise<TaskDecomposition> {
   const estimatedActions = countActions(userRequest);
+  const requestLower = userRequest.toLowerCase();
+  const explicitContexts = extractExplicitWebsiteContexts(userRequest);
+  const hasActionKeyword = ACTION_KEYWORDS.some((keyword) => requestLower.includes(keyword));
+  const hasWebsiteReference = explicitContexts.length > 0;
+
+  // Fast path: avoid an extra decomposer LLM call for simple non-automation prompts.
+  if (!hasWebsiteReference && !hasActionKeyword && userRequest.trim().length <= 220) {
+    return {
+      type: 'single_context',
+      contexts: ['current_page'],
+      estimatedActions: 1,
+      shouldFork: false,
+      forkReason: 'Simple direct request — skipping decomposition analysis'
+    };
+  }
+
+  // Fast path: single explicit site workflows rarely need decomposition analysis.
+  if (
+    explicitContexts.length === 1 &&
+    !PARALLEL_INTENT_PATTERN.test(userRequest) &&
+    !SEQUENTIAL_INTENT_PATTERN.test(userRequest) &&
+    estimatedActions <= 4
+  ) {
+    return {
+      type: 'single_context',
+      contexts: explicitContexts,
+      estimatedActions,
+      shouldFork: false,
+      forkReason: `Single-site task (${explicitContexts[0]}) — direct execution`
+    };
+  }
 
   // ── Follow-up detection guard ──────────────────────────────────────────────
   // If there's existing conversation context AND the user prompt is short/vague
@@ -306,6 +353,38 @@ export async function analyzeTaskForDecomposition(
         estimatedActions: 1,
         shouldFork: false,
         forkReason: 'Follow-up question — using existing conversation context'
+      };
+    }
+  }
+
+  // Fast path: clear multi-site orchestration intent without needing decomposer LLM.
+  if (explicitContexts.length > 1) {
+    const hasParallelIntent = PARALLEL_INTENT_PATTERN.test(userRequest);
+    const hasOptionalConditional = OPTIONAL_CONDITIONAL_PATTERN.test(userRequest);
+    const hasDependencyChain = DEPENDENCY_CHAIN_PATTERN.test(userRequest);
+    const hasSequentialIntent =
+      SEQUENTIAL_INTENT_PATTERN.test(userRequest) ||
+      (CONDITIONAL_SEQUENTIAL_INTENT_PATTERN.test(userRequest) && !hasOptionalConditional) ||
+      hasDependencyChain;
+    if (hasParallelIntent && !hasSequentialIntent) {
+      return {
+        type: 'multi_context',
+        contexts: explicitContexts,
+        estimatedActions: Math.max(estimatedActions, explicitContexts.length * 2),
+        shouldFork: true,
+        forkStrategy: 'parallel',
+        forkReason: `Heuristic: independent multi-site comparison (${explicitContexts.join(', ')})`
+      };
+    }
+
+    if (hasSequentialIntent) {
+      return {
+        type: 'single_context',
+        contexts: ['current_page'],
+        estimatedActions: Math.max(estimatedActions, explicitContexts.length * 2),
+        shouldFork: true,
+        forkStrategy: 'sequential',
+        forkReason: `Heuristic: sequential multi-site workflow (${explicitContexts.join(', ')})`
       };
     }
   }

@@ -1,5 +1,5 @@
 import { ipcMain, safeStorage } from 'electron'
-import Store from 'electron-store'
+import { Store } from '../lib/store-wrapper'
 
 // Dedicated store for encrypted secrets
 const secretStore = new Store<Record<string, string>>({

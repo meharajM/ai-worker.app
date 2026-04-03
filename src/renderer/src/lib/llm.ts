@@ -30,7 +30,7 @@ import { checkBrowserLLM, testWebLLMConnection, callBrowserLLM, downloadBrowserM
 import { checkOpenAI, checkOpenRouter, testOpenAIConnection, callOpenAI } from "./llm/openai";
 import { checkGemini, testGeminiConnection, callGemini } from "./llm/gemini";
 import { buildSystemPrompt } from "./llm/prompts";
-import { ensureRecord, safeParseJSON } from "./llm/utils";
+import { ensureRecord, safeParseJSON, getEnvFallback } from "./llm/utils";
 
 export {
   getWebLLMStatus,
@@ -114,7 +114,12 @@ export async function chat(
 
   // Determine which provider to use
   let provider: LLMProvider | null = null;
-  const preferredProvider = settings?.preferredProvider;
+  let preferredProvider = settings?.preferredProvider;
+  const envProvider = getEnvFallback('default', 'provider');
+
+  if (preferredProvider === "auto" && envProvider) {
+    preferredProvider = envProvider as any;
+  }
 
   if (preferredProvider === "auto" || !preferredProvider) {
     // Auto-select: browser ONLY IF already loaded, then ollama, then openai, then gemini, then openrouter

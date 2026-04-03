@@ -23,6 +23,96 @@ import type {
  * - Zero setup required
  * - Automatic context filtering
  */
+
+function extractJsonFromText(text: string): string {
+  const stripped = text
+    .replace(/```json/gi, '')
+    .replace(/```/g, '')
+    .trim()
+
+  // Fast path for pure JSON payloads.
+  try {
+    JSON.parse(stripped)
+    return stripped
+  } catch {
+    // continue with bounded extraction
+  }
+
+  const start = stripped.search(/[{[]/)
+  if (start === -1) return stripped
+
+  const stack: string[] = []
+  let inString = false
+  let escaping = false
+
+  for (let i = start; i < stripped.length; i++) {
+    const ch = stripped[i]
+
+    if (inString) {
+      if (escaping) {
+        escaping = false
+        continue
+      }
+      if (ch === '\\') {
+        escaping = true
+        continue
+      }
+      if (ch === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (ch === '"') {
+      inString = true
+      continue
+    }
+
+    if (ch === '{' || ch === '[') {
+      stack.push(ch)
+      continue
+    }
+
+    if (ch === '}' || ch === ']') {
+      const top = stack[stack.length - 1]
+      if ((ch === '}' && top === '{') || (ch === ']' && top === '[')) {
+        stack.pop()
+        if (stack.length === 0) {
+          return stripped.slice(start, i + 1)
+        }
+      }
+    }
+  }
+
+  // Fallback to prior behavior if payload is malformed but bracketed.
+  const lastBrace = stripped.lastIndexOf('}')
+  const lastBracket = stripped.lastIndexOf(']')
+  const end = Math.max(lastBrace, lastBracket)
+  if (end > start) {
+    const bounded = stripped.substring(start, end + 1)
+    try {
+      JSON.parse(bounded)
+      return bounded
+    } catch {
+      // continue
+    }
+  }
+
+  // Last resort: walk backward and return the longest valid JSON prefix.
+  for (let i = stripped.length; i > start; i--) {
+    const candidate = stripped.slice(start, i).trim()
+    if (!candidate) continue
+    try {
+      JSON.parse(candidate)
+      return candidate
+    } catch {
+      // keep shrinking
+    }
+  }
+
+  return stripped
+}
+
 export class ServerMemoryAdapter implements UnifiedMemoryBackend {
   private client: Client | null = null
   private storagePath: string
@@ -136,29 +226,47 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
          throw new Error('No content returned from create_entities')
     }
 
-    const textContent = content[0].text
+    const textContent = content
+      .map((c: Record<string, unknown>) => (typeof c?.text === 'string' ? c.text : ''))
+      .filter(Boolean)
+      .join('\n')
+      .trim()
     if (!textContent) {
         throw new Error('No text content in create_entities response')
     }
 
-    let createdEntities: any[]
+    let entityData: Record<string, unknown> | null = null
     try {
-        createdEntities = JSON.parse(textContent)
-    } catch (e) {
-        throw new Error(`Failed to parse create_entities response: ${textContent}`)
-    }
-
-    const entityData = createdEntities?.[0]
-    if (!entityData) {
-      throw new Error('No entity data returned from create_entities')
+      const pureJson = extractJsonFromText(textContent)
+      const parsed = JSON.parse(pureJson)
+      if (Array.isArray(parsed)) {
+        entityData = parsed[0] ?? null
+      } else if (parsed && typeof parsed === 'object') {
+        if (Array.isArray((parsed as { entities?: unknown[] }).entities)) {
+          entityData = ((parsed as { entities?: Record<string, unknown>[] }).entities?.[0]) ?? null
+        } else {
+          entityData = parsed as Record<string, unknown>
+        }
+      }
+    } catch (error) {
+      // Do not fail entity creation just because the MCP response format drifted.
+      // The tool call itself already succeeded (no result.error); we can safely
+      // return the requested entity shape and keep memory writes available.
+      console.warn(
+        `[ServerMemoryAdapter] Failed to parse create_entities response, using fallback entity: ${error instanceof Error ? error.message : String(error)}`
+      )
     }
 
     const entity: Entity = {
-      id: entityData.name, // server-memory uses name as ID
+      id: (typeof entityData?.name === 'string' && entityData.name.trim().length > 0
+        ? entityData.name
+        : input.name), // server-memory typically uses name as ID
       name: input.name,
       type: input.type,
       description: input.description,
-      observations: input.observations || [],
+      observations: (Array.isArray(entityData?.observations)
+        ? entityData.observations.filter((o): o is string => typeof o === 'string')
+        : input.observations) || [],
       metadata: input.metadata || {},
       createdAt: new Date().toISOString()
     }
@@ -258,33 +366,38 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
          return []
     }
 
-    const textContent = content[0].text // Assuming first content block is the result text
+    const textContent = content
+      .map((c: Record<string, unknown>) => (typeof c?.text === 'string' ? c.text : ''))
+      .filter(Boolean)
+      .join('\n')
+      .trim()
     if (!textContent) {
         return []
     }
 
-    let nodes: any[] = []
+    let nodes: Record<string, unknown>[] = []
     try {
-        const parsed = JSON.parse(textContent)
+        const pureJson = extractJsonFromText(textContent)
+        const parsed = JSON.parse(pureJson);
         // Handle both direct array and { nodes: [...] } object
         if (Array.isArray(parsed)) {
             nodes = parsed
         } else if (parsed && typeof parsed === 'object') {
             if (Array.isArray(parsed.nodes)) {
-                nodes = parsed.nodes
+                nodes = parsed.nodes;
             } else if (Array.isArray(parsed.entities)) {
-                nodes = parsed.entities
+                nodes = parsed.entities;
             } else {
                 console.warn(`[ServerMemoryAdapter] Unexpected search response structure:`, parsed)
             }
         }
-    } catch (e) {
+    } catch {
         // If content isn't JSON, it might be an issue or just empty
         console.warn(`[ServerMemoryAdapter] Failed to parse search response: ${textContent}`)
         return []
     }
 
-    let entities = nodes.map((node: any) =>
+    let entities = nodes.map((node: Record<string, unknown>) =>
       this.mapNodeToEntity(node)
     )
 
@@ -430,7 +543,7 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
   /**
    * List available MCP tools
    */
-  listTools(): { tools: any[] } {
+  listTools(): { tools: Record<string, unknown>[] } {
     return {
       tools: [
         {

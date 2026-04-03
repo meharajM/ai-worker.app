@@ -50,7 +50,7 @@ export const LLM_CONFIG = {
     },
     OPENROUTER: {
         BASE_URL: 'https://openrouter.ai/api/v1',
-        DEFAULT_MODEL: 'anthropic/claude-3.5-sonnet',
+        DEFAULT_MODEL: 'nvidia/nemotron-3-super-120b-a12b:free',
     },
     GEMINI: {
         BASE_URL: 'https://generativelanguage.googleapis.com/v1beta',

@@ -52,6 +52,11 @@ const CUMULATIVE_TIMEOUT_MS = 120_000;
  */
 const MIN_REMAINING_FOR_RETRY_MS = 5_000;
 
+function signatureToToolName(signature: string): string {
+    const idx = signature.indexOf(":");
+    return idx === -1 ? signature : signature.slice(0, idx);
+}
+
 // ── Loop Detection ─────────────────────────────────────────────────────────────
 
 /**
@@ -77,6 +82,35 @@ export function checkForLoop(
     if (recentToolCalls.length < MAX_IDENTICAL_CALLS) return null;
 
     const lastN = recentToolCalls.slice(-MAX_IDENTICAL_CALLS);
+    const lastToolNames = lastN.map(signatureToToolName);
+    const sameToolName = lastToolNames.every((name) => name === callName);
+
+    // Special guard for file write loops: arguments can vary (different temp filenames,
+    // regenerated content), but repeated write attempts after "staged/approval required"
+    // indicate the agent is stuck waiting for user approval/workspace selection.
+    if (sameToolName && callName.startsWith("fs_write")) {
+        const recentResults = messages
+            .filter((m) => m.role === "tool")
+            .slice(-5)
+            .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)));
+        const awaitingApproval = recentResults.some((content) =>
+            /"status"\s*:\s*"staged"|approval\s+required|workspace\s+folder/i.test(content)
+        );
+        if (awaitingApproval) {
+            console.error(
+                `[ToolExecutionService] Infinite loop detected: ${callName} repeated while awaiting approval/workspace selection`
+            );
+            return {
+                role: "assistant",
+                content: `## ⚠️ File Write Paused
+
+I attempted \`${callName}\` repeatedly, but the write is still in a staged/pending-approval state.
+
+Please select a workspace folder or approve the staged write, then ask me to continue.`,
+            };
+        }
+    }
+
     const allSame = lastN.every((sig) => sig === lastN[0]);
 
     if (!allSame) return null;
@@ -186,7 +220,7 @@ async function _executeWithRetry(
         // ── Tab isolation: inject tabId for browser tools ─────────────────────────
         // WHY: Parallel sub-agents each get a dedicated tab. Injecting tabId here
         // ensures all browser tool calls from this agent stay in their own tab.
-        if (tabId !== undefined && STATEFUL_BROWSER_TOOLS.includes(name)) {
+        if (tabId !== undefined && (STATEFUL_BROWSER_TOOLS.includes(name) || name.startsWith('playwright_') || name.startsWith('browser_'))) {
             args = { ...args, tabId };
         }
 
@@ -214,7 +248,7 @@ async function _executeWithRetry(
         );
 
         return result as { result: unknown; error?: string };
-    } catch (error: any) {
+    } catch (error: unknown) {
         const errorStr = String(error);
 
         // Abort errors: exit immediately, no retry

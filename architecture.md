@@ -293,6 +293,10 @@ The chat store manages multiple independent sessions concurrently. The key desig
 - Each session has its own `AbortSignal` — aborting Session A does not affect Session B
 - `_processingSessions` is excluded from `partialize` and always resets on page load
 
+**Debounced Storage Adapter:**
+
+The chat store uses a custom **1-second debounced storage adapter** to prevent UI thread blocking. During agent tool loops, `addMessage`/`updateMessage` fire rapidly (every tool call), and each would ordinarily trigger `JSON.stringify` + `localStorage.setItem` of ALL sessions. The adapter coalesces writes to at most once per second, dramatically reducing main-thread jank during heavy tool execution.
+
 > [!NOTE]
 > Storage key bumped from `ai-worker-chat-v2` → `ai-worker-chat-v3`.
 > Old persisted flat fields (`isProcessing`, `abortController`) no longer exist in the state shape.
@@ -534,7 +538,7 @@ The agent can use WhatsApp to send status updates or ask questions during long-r
 
 ### Default MCP Servers
 
-AI-Worker comes with two pre-configured MCP servers that are automatically initialized on first run:
+AI-Worker comes with **four** pre-configured MCP servers that are automatically initialized on first run (defined in `mcpStore.ts` → `DEFAULT_MCP_SERVERS`):
 
 1. **Playwright Server** (`playwright`)
 
@@ -547,18 +551,32 @@ AI-Worker comes with two pre-configured MCP servers that are automatically initi
      - **Headless-to-Headed State Promotion**: Active headless contexts can be "promoted" to visible windows via `surfaceBrowser()`. The `BrowserManager` dynamically re-routes persistent data directories to ensure cookies and session state are preserved during the transition.
      - **Human-Like Inputs**: Utilizes `ghost-cursor` for Bezier-curve mouse movements and variable typing delays to bypass behavioral biometrics (e.g., Turnstile).
 
-2. **Sequential Thinking Server** (`sequential-thinking`)
-   - Purpose: Step-by-step reasoning for complex tasks
-   - Configuration:
-     - Type: `stdio`
-     - Command: `npx`
-     - Args: `-y @modelcontextprotocol/server-sequential-thinking`
-   - Tools: Sequential reasoning, task decomposition
+2. **Memory Server** (`memory`)
+   - Purpose: Knowledge graph storage and retrieval
+   - Mode: **Internal Service** (In-process, backed by `MemoryService`)
+   - Configuration: `command: 'internal-memory'`
+   - Auto-Connect: Enabled by default
+
+3. **Filesystem Server** (`filesystem`)
+   - Purpose: Safe file read/write operations with safety checks
+   - Mode: **Internal Service** (In-process)
+   - Configuration: `command: 'internal-filesystem'`
+   - Auto-Connect: Enabled by default
+
+4. **MarkItDown** (`markitdown`)
+   - Purpose: Convert documents (PDF, Word, Excel, images, audio) to Markdown
+   - Configuration: `command: 'uvx'`, args: `markitdown-mcp[all]`
+   - Auto-Connect: Enabled by default (requires `uv`/Python)
+   - Note: The `[all]` extras flag ensures PDF, DOCX, XLSX, PPTX, and audio conversion are included
+
+> [!NOTE]
+> **Sequential Thinking** (`sequential-thinking`) is NOT an auto-added default. It is the **pre-filled template** in the `McpServerForm` component (`DEFAULT_SEQUENTIAL_THINKING`), making it easy for users to add with one click. It uses `npx -y @modelcontextprotocol/server-sequential-thinking`.
 
 **Initialization Behavior:**
 
-- Default servers are created automatically when localStorage is empty (first run)
-- Missing default servers are automatically added on app load
+- Default servers are created automatically when `electron-store` is empty (first run)
+- Missing default servers are automatically added on app load (migration logic)
+- Old WhatsApp MCP entries are automatically pruned (superseded by direct integration)
 - Users can edit, remove, or customize default servers
 - Form pre-fills with Sequential Thinking configuration for quick setup
 
@@ -612,10 +630,11 @@ stateDiagram-v2
 
 **Initialization Flow:**
 
-1. App loads → Check localStorage for existing servers
-2. If empty → Create default servers (Playwright, Sequential Thinking)
-3. If servers exist → Load them and ensure defaults are present
+1. App loads → Check `electron-store` for existing servers (keyed by user ID)
+2. If empty → Create 4 default servers (Playwright, Memory, Filesystem, MarkItDown)
+3. If servers exist → Load them, run migration logic (fix internal commands, upgrade MarkItDown args, prune old WhatsApp entries), and ensure defaults are present
 4. Missing defaults → Automatically add them
+5. Auto-connect servers that have `autoConnect: true` and no cached tool schemas (lazy-connect optimization)
 
 ### MCP Server Configuration
 
@@ -634,8 +653,14 @@ graph LR
         URL[URL<br/>http://...]
     end
 
-    subgraph "Default Servers"
-        Playwright[Playwright<br/>Browser Automation]
+    subgraph "Default Servers (Auto-Added)"
+        PlaywrightSrv[Playwright<br/>Browser Automation]
+        MemorySrv[Memory<br/>Knowledge Graph]
+        FilesystemSrv[Filesystem<br/>File Operations]
+        MarkItDownSrv[MarkItDown<br/>Doc Conversion]
+    end
+
+    subgraph "Suggested (Form Pre-fill)"
         SequentialThinking[Sequential Thinking<br/>Step-by-step Reasoning]
     end
 
@@ -643,36 +668,29 @@ graph LR
     Stdio --> Args
     SSE --> URL
     Name --> Type
-    Playwright --> Stdio
-    SequentialThinking --> Stdio
+    PlaywrightSrv --> Stdio
+    MemorySrv --> Stdio
+    FilesystemSrv --> Stdio
+    MarkItDownSrv --> Stdio
+    SequentialThinking -.-> Stdio
 ```
 
-**Default MCP Servers:**
+**Default MCP Servers (Auto-Added):**
 
-- **Playwright** (`playwright`)
+- **Playwright** (`playwright`) — `command: 'internal'` — In-process browser automation with stealth evasion.
+- **Memory** (`memory`) — `command: 'internal-memory'` — In-process knowledge graph.
+- **Filesystem** (`filesystem`) — `command: 'internal-filesystem'` — Safe file operations.
+- **MarkItDown** (`markitdown`) — `command: 'uvx'`, args: `markitdown-mcp[all]` — Document-to-Markdown converter.
 
-  - Type: `stdio`
-  - Command: `npx`
-  - Args: `-y @modelcontextprotocol/server-playwright`
-  - Description: Browser automation and web interaction tools (includes headless `background_scrape` for background extraction). Now reinforced with advanced headless evasion natively in the `BrowserManager`.
-  
-- **Sequential Thinking** (`sequential-thinking`)
-  - Type: `stdio`
-  - Command: `npx`
-  - Args: `-y @modelcontextprotocol/server-sequential-thinking`
-  - Description: Enables step-by-step reasoning for complex tasks
+**Suggested (Form Pre-fill):**
 
-- **MarkItDown** (`markitdown`)
-  - Type: `stdio`
-  - Command: `uvx`
-  - Args: `markitdown-mcp`
-  - Description: Convert documents (PDF, Word, Excel, Images) to Markdown
-  - **Auto-Connect**: Enabled by default
+- **Sequential Thinking** — `npx -y @modelcontextprotocol/server-sequential-thinking` — Pre-filled in `McpServerForm` for one-click setup.
 
 **Initialization Logic:**
 
-- Default servers are automatically created on first run (when localStorage is empty)
-- Missing default servers are automatically added on app load
+- Default servers are automatically created on first run (when `electron-store` is empty)
+- Missing default servers are automatically added on app load via migration logic
+- Old WhatsApp MCP entries are auto-pruned (replaced by native integration)
 - Users can edit, remove, or customize default servers
 - Form pre-fills with Sequential Thinking configuration for quick setup
 
@@ -1919,30 +1937,52 @@ ai-worker-app/
 
 ## Performance Considerations
 
-### Optimization Strategies
+> **Full Plan**: See [performance-analysis.md](file:///Users/meharaj/Downloads/ai-worker-whatsapp-integration/performance-analysis.md) for the complete optimization roadmap, benchmark suite, and `@ai-worker/perf-tracer` npm library design.
 
-1. **Code Splitting**
+### Agent Execution Hot Path
 
-   - Component-based lazy loading
-   - Route-based code splitting
-   - Dynamic imports for heavy modules
+The primary performance-critical path is the agent tool loop in `_runLoop()`:
 
-2. **State Management**
+```
+User Input → Task Decomposition (2-5s) → [LLM Call (1-8s) → Tool Exec (5ms-120s) → Output Processing → Store Update] × N iterations
+```
 
-   - Selective re-renders with Zustand
-   - Memoization of expensive computations
-   - Efficient persistence strategies
+| Stage | Typical | Worst Case | Optimization |
+|-------|---------|------------|--------------|
+| LLM round-trip (Gemini Flash) | 1-3s | 8s | Batch tool calls, skip decomposition for short prompts |
+| LLM round-trip (Ollama) | 2-8s | 30s | Model warm pool, context pruning |
+| Tool execution (browser) | 100ms-5s | 120s | Lane-based routing, self-healing retries (max 2) |
+| Tool execution (filesystem) | 5-50ms | 30s | Parallel lane (5 concurrent) |
+| Tool execution (memory) | 10-100ms | 500ms | In-process, zero IPC |
+| IPC bridge round-trip | 1-5ms | 50ms | Batching planned |
+| Storage write (chatStore) | 5-50ms | 200ms | **1-second debounced** adapter |
+| Context pruning (DCP) | 1-10ms | 100ms | Incremental `_estimatedContextBytes` tracking |
 
-3. **IPC Communication**
+### Implemented Optimizations
 
-   - Batch operations where possible
-   - Async/await for non-blocking calls
-   - Error handling and retries
+1. **Debounced Storage Adapter** — `chatStore` coalesces `localStorage.setItem` to max 1/second, preventing main-thread jank during rapid tool-call updates.
 
-4. **MCP Connections**
-   - Connection pooling
-   - Lazy connection establishment
-   - Automatic reconnection logic
+2. **Incremental Context Tracking** — `_estimatedContextBytes` avoids `JSON.stringify(messages)` on every iteration. Full resync only every 10 iterations.
+
+3. **Lane-Based Concurrency** — `LaneManager` routes tool calls to typed queues:
+   - `BROWSER_SERIAL` (concurrency: 1) — prevents DOM race conditions
+   - `TAB_{id}` (concurrency: 1) — per-tab isolation for sub-agents
+   - `FILESYSTEM` (concurrency: 5) — parallel file operations
+   - `API_PARALLEL` (concurrency: 10) — stateless tools (memory, thinking, search)
+
+4. **Lazy Tool Schema Caching** — MCP servers cache tool schemas in `electron-store`. Auto-connect only fires for servers without cached schemas.
+
+5. **Trivial Prompt Guard** — Prompts ≤ 20 chars skip the decomposition LLM call entirely.
+
+6. **Tool Output Truncation** — Caps tool output at 5,000 chars to prevent context window exhaustion.
+
+### Planned Optimizations
+
+See [performance-analysis.md](file:///Users/meharaj/Downloads/ai-worker-whatsapp-integration/performance-analysis.md) for:
+- **`@ai-worker/perf-tracer`** — Exportable npm library for agent performance telemetry
+- **10 Benchmarks** (B1-B10) — From simple Q&A to concurrent multi-session stress tests
+- **25+ Optimizations** — Categorized by impact (🟢 High / 🟡 Medium / 🔴 Low)
+- **5-Phase Roadmap** — Instrument → Baseline → Quick Wins → Structural → Continuous
 
 ---
 
@@ -1974,9 +2014,9 @@ ai-worker-app/
 
 ---
 
-**Last Updated:** 2026-03-18  
-**Version:** 0.2.0  
-**Architecture Version:** 1.3
+**Last Updated:** 2026-04-02  
+**Version:** 0.2.1  
+**Architecture Version:** 1.4
 
 - **WhatsApp Integration**: Implemented a comprehensive bridge for WhatsApp communication.
   - `WhatsAppService.ts`: Main-process service using Baileys for socket management and auth.
@@ -2011,10 +2051,6 @@ ai-worker-app/
 - **Universal Reasoning Filter**: Added `thinkBlockFilter` to strip internal thinking blocks from all LLM outputs.
 - **Self-Healing Tool Loop**: Enhanced `ToolExecutionService` with 8 context-aware recovery strategies for browser automation.
 - **Secure Storage**: Implemented user-scoped, OS-level encrypted storage for all LLM API keys and OAuth tokens.
-
----
-
-## Known Challenges & Solutions
 
 ---
 

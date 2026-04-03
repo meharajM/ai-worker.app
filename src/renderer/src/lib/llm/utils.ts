@@ -5,6 +5,35 @@ function extractTextForLegacyProviders(content: string | LLMContentPart[]): stri
   if (typeof content === 'string') return content;
   return content.map(p => p.type === 'text' ? p.text : '').join('\n');
 }
+
+/**
+ * Modularly gets standard environment fallbacks for LLM Configuration.
+ * Uses hardcoded `import.meta.env` references since Vite requires static analysis.
+ */
+export function getEnvFallback(provider: 'openai' | 'gemini' | 'openrouter' | 'ollama' | 'browser' | 'default', keyType: 'api_key' | 'model' | 'provider'): string | undefined {
+  if (keyType === 'provider') {
+    return import.meta.env.VITE_LLM_PROVIDER;
+  }
+  
+  if (keyType === 'api_key') {
+    switch (provider) {
+      case 'openai': return import.meta.env.VITE_OPENAI_API_KEY || import.meta.env.VITE_LLM_API_KEY;
+      case 'gemini': return import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_LLM_API_KEY;
+      case 'openrouter': return import.meta.env.VITE_OPENROUTER_API_KEY || import.meta.env.VITE_LLM_API_KEY;
+      default: return import.meta.env.VITE_LLM_API_KEY;
+    }
+  } else if (keyType === 'model') {
+    switch (provider) {
+      case 'openai': return import.meta.env.VITE_OPENAI_MODEL || import.meta.env.VITE_LLM_MODEL;
+      case 'gemini': return import.meta.env.VITE_GEMINI_MODEL || import.meta.env.VITE_LLM_MODEL;
+      case 'openrouter': return import.meta.env.VITE_OPENROUTER_MODEL || import.meta.env.VITE_LLM_MODEL;
+      case 'ollama': return import.meta.env.VITE_OLLAMA_MODEL || import.meta.env.VITE_LLM_MODEL;
+      default: return import.meta.env.VITE_LLM_MODEL;
+    }
+  }
+  return undefined;
+}
+
 export { extractTextForLegacyProviders };
 
 /**

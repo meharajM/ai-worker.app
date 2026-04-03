@@ -51,41 +51,48 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
   // In prod view, only show: user messages, final text-only assistant answers.
   // Hide ALL intermediate orchestration noise — tool calls, plans, status updates.
   if (isProdView && !isUser && !isSystem) {
-    // Any message with tool calls is orchestration plumbing → hide
-    if ((message.toolCalls?.length ?? 0) > 0) {
-      return null
-    }
-
-    // Messages that are orchestration narration (no tool calls but not user-facing)
-    // These come from OrchestrationService.executeSequentialSubAgents
-    const content = (message.content || '').trim()
-    if (content) {
-      // Strip leading emoji/whitespace for pattern matching
-      const strippingRegex = /^[\p{Emoji}\p{Emoji_Presentation}\s#*]*/u
-      const stripped = content.replace(strippingRegex, '')
-      
-      const isOrchestrationNoise =
-        stripped.toLowerCase().startsWith('auto-orchestration') ||
-        stripped.toLowerCase().startsWith('execution plan') ||
-        stripped.toLowerCase().startsWith('task complete') ||
-        stripped.toLowerCase().startsWith('results from') ||
-        /^\*\*Step \d+\*\*:/i.test(stripped) ||
-        /^Step \d+:/i.test(stripped) ||
-        /^✓\s*\*\*Step \d+/i.test(content) ||
-        /^⚡\s*Parallel Execution/i.test(content) ||
-        /^(✅|⚠️|❌)\s*\*\*.+Analysis/i.test(content) ||
-        content.toLowerCase() === 'analyzing...' ||
-        content.toLowerCase().startsWith('starting sub-agent') ||
-        stripped.toLowerCase().startsWith('starting sub-agent')
-
-      if (isOrchestrationNoise) {
+    // ── Always show messages explicitly marked as the final user-facing result ──
+    // OrchestrationService sets isFinalResult: true on the terminal summary
+    // messages from both sequential and parallel execution flows.
+    // This MUST be checked before any other filter so the final answer is
+    // never accidentally suppressed by the tool-call or noise filters below.
+    if (!message.isFinalResult) {
+      // Any message with tool calls is orchestration plumbing → hide
+      if ((message.toolCalls?.length ?? 0) > 0) {
         return null
       }
-    }
 
-    // Skip empty messages
-    if (!content || content.length < 5) {
-      return null
+      // Messages that are orchestration narration (no tool calls but not user-facing)
+      // These come from OrchestrationService.executeSequentialSubAgents
+      const content = (message.content || '').trim()
+      if (content) {
+        // Strip leading emoji/whitespace for pattern matching
+        const strippingRegex = /^[\p{Emoji}\p{Emoji_Presentation}\s#*]*/u
+        const stripped = content.replace(strippingRegex, '')
+
+        const isOrchestrationNoise =
+          stripped.toLowerCase().startsWith('auto-orchestration') ||
+          stripped.toLowerCase().startsWith('execution plan') ||
+          stripped.toLowerCase().startsWith('task complete') ||
+          stripped.toLowerCase().startsWith('results from') ||
+          /^\*\*Step \d+\*\*:/i.test(stripped) ||
+          /^Step \d+:/i.test(stripped) ||
+          /^✓\s*\*\*Step \d+/i.test(content) ||
+          /^⚡\s*Parallel Execution/i.test(content) ||
+          /^(✅|⚠️|❌)\s*\*\*.+Analysis/i.test(content) ||
+          content.toLowerCase() === 'analyzing...' ||
+          content.toLowerCase().startsWith('starting sub-agent') ||
+          stripped.toLowerCase().startsWith('starting sub-agent')
+
+        if (isOrchestrationNoise) {
+          return null
+        }
+      }
+
+      // Skip empty messages
+      if (!content || content.length < 5) {
+        return null
+      }
     }
   }
 
@@ -125,6 +132,9 @@ export function MessageBubble({ message, onDelete, isLast = false }: MessageBubb
 
   return (
     <motion.div
+      data-testid="message-bubble"
+      data-role={message.role}
+      data-message-id={message.id}
       initial={{ opacity: 0, y: 20, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}

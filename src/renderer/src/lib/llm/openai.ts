@@ -1,8 +1,75 @@
 import { LLMMessage, LLMSettings, LLMTool, LLMResponse, ServerInfo } from "../types";
 import { ProviderStatus } from "./types";
 import { LLM_CONFIG, FEATURE_FLAGS } from "../constants";
-import { ensureRecord, parseToolCallsFromJson } from "./utils";
+import { ensureRecord, parseToolCallsFromJson, getEnvFallback } from "./utils";
 import { buildSystemPrompt } from "./prompts";
+
+const openRouterBackoffUntilByKey = new Map<string, number>();
+
+function parseRateLimitReset(raw?: string): number | undefined {
+  if (!raw) return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return undefined;
+  // Providers may return seconds or milliseconds.
+  return parsed > 1_000_000_000_000 ? parsed : parsed * 1000;
+}
+
+function getOpenRouterBackoffKey(baseUrl: string, model: string): string {
+  return `${baseUrl}::${model.toLowerCase()}`;
+}
+
+function getOpenRouterBackoffUntil(key: string): number {
+  return openRouterBackoffUntilByKey.get(key) ?? 0;
+}
+
+async function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return;
+  if (signal?.aborted) {
+    throw new Error("Aborted by user");
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+
+    const onAbort = () => {
+      cleanup();
+      reject(new Error("Aborted by user"));
+    };
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function waitForOpenRouterBackoff(
+  isOpenRouter: boolean,
+  model: string,
+  backoffKey: string,
+  signal?: AbortSignal
+): Promise<void> {
+  if (!isOpenRouter) return;
+  if (!model.toLowerCase().includes(":free")) return;
+  const waitMs = getOpenRouterBackoffUntil(backoffKey) - Date.now();
+  if (waitMs > 0) {
+    console.warn(`[LLM Chat] Waiting ${waitMs}ms for OpenRouter free-tier reset window.`);
+    await sleepWithAbort(waitMs, signal);
+  }
+}
+
+function updateOpenRouterBackoff(backoffKey: string, resetAt?: number): void {
+  if (!resetAt || !Number.isFinite(resetAt)) return;
+  const current = getOpenRouterBackoffUntil(backoffKey);
+  if (resetAt > current) {
+    openRouterBackoffUntilByKey.set(backoffKey, resetAt);
+  }
+}
 
 // Get OpenAI settings from store or use defaults
 async function getOpenAISettings(
@@ -11,16 +78,20 @@ async function getOpenAISettings(
   // Import electron here to avoid circular dependencies
   const electron = (await import("../electron")).default;
 
+  const envKey = getEnvFallback('openai', 'api_key');
+  const envModel = getEnvFallback('openai', 'model');
+
   const apiKey =
     settings?.openaiApiKey ||
     (await electron.secure.get("openai_api_key")).value ||
+    envKey ||
     "";
   const baseUrl =
     settings?.openaiBaseUrl ||
     (await electron.store.get<string>("openai_base_url")) ||
     "https://api.openai.com/v1";
   const model =
-    settings?.openaiModel || LLM_CONFIG.OPENAI_COMPATIBLE.DEFAULT_MODEL;
+    settings?.openaiModel || envModel || LLM_CONFIG.OPENAI_COMPATIBLE.DEFAULT_MODEL;
   return { apiKey, baseUrl, model };
 }
 
@@ -29,12 +100,17 @@ async function getOpenRouterSettings(
   settings?: LLMSettings
 ): Promise<{ apiKey: string; baseUrl: string; model: string }> {
   const electron = (await import("../electron")).default;
+  
+  const envKey = getEnvFallback('openrouter', 'api_key');
+  const envModel = getEnvFallback('openrouter', 'model');
+
   const apiKey =
     settings?.openrouterApiKey ||
     (await electron.secure.get("openrouter_api_key")).value ||
+    envKey ||
     "";
   const baseUrl = LLM_CONFIG.OPENROUTER.BASE_URL;
-  const model = settings?.openrouterModel || LLM_CONFIG.OPENROUTER.DEFAULT_MODEL;
+  const model = settings?.openrouterModel || envModel || LLM_CONFIG.OPENROUTER.DEFAULT_MODEL;
   return { apiKey, baseUrl, model };
 }
 
@@ -336,11 +412,13 @@ export // Call OpenAI-compatible API
     abortSignal?: AbortSignal,
     _dynamicRules?: string,
     _isSubAgent?: boolean,
-    _workspacePath?: string // New parameter
+    _workspacePath?: string, // New parameter
+    retryCount: number = 0
   ): Promise<LLMResponse> {
   const { apiKey, baseUrl, model } = isOpenRouter
     ? await getOpenRouterSettings(settings)
     : await getOpenAISettings(settings);
+  const openRouterBackoffKey = getOpenRouterBackoffKey(baseUrl, model);
 
   if (!apiKey) {
     throw new Error("OpenAI API key not configured");
@@ -381,17 +459,12 @@ export // Call OpenAI-compatible API
   console.log(`[LLM Chat] Calling OpenAI-compatible API at: ${baseUrl}/chat/completions`);
   const formattedMessages = await formatMessagesForOpenAI(useJsonFallback ? requestMessages : messages, model);
   
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers,
-    signal: abortSignal,
-    body: JSON.stringify({
-      model: model,
-      messages: formattedMessages,
-      ...(useJsonFallback
-        ? {}
-        : {
-          tools: tools?.map((t) => ({
+  const body = JSON.stringify({
+    model: model,
+    messages: formattedMessages,
+    ...(tools && tools.length > 0 && !useJsonFallback
+      ? {
+          tools: tools.map((t) => ({
             type: "function",
             function: {
               name: t.name,
@@ -399,8 +472,25 @@ export // Call OpenAI-compatible API
               parameters: t.parameters,
             },
           })),
-        }),
-    }),
+        }
+      : {}),
+  });
+
+  console.log(`[LLM Chat] URL: ${baseUrl}/chat/completions`);
+  console.log(`[LLM Chat] Headers:`, JSON.stringify(headers, null, 2));
+  if (import.meta.env.DEV) {
+    console.log(`[LLM Chat] Request Body for ${model}:`, body);
+  } else {
+    console.log(`[LLM Chat] Request Body for ${model}: <${body.length} chars>`);
+  }
+  
+  await waitForOpenRouterBackoff(isOpenRouter, model, openRouterBackoffKey, abortSignal);
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers,
+    signal: abortSignal,
+    body: body,
   });
 
   if (!response || !response.ok) {
@@ -408,8 +498,46 @@ export // Call OpenAI-compatible API
       console.error(`[LLM Chat] 404 Error: OpenAI-compatible endpoint not found at ${baseUrl}/chat/completions`);
     }
     const error = response ? await response.json().catch(() => ({})) : { error: "Fetch failed" };
-    const errorMessage =
-      error.error?.message || `OpenAI error: ${response?.statusText || "Unknown"}`;
+    const bodyPreview =
+      body.length > 1500
+        ? `${body.slice(0, 1500)}... <truncated ${body.length - 1500} chars>`
+        : body;
+    const errorMessage = `OpenAI error (${response?.status}): ${JSON.stringify(error)} | Body: ${bodyPreview}`;
+
+    // Retry a few times on provider throttling to reduce flaky delegate_sub_task failures.
+    if (response?.status === 429 && retryCount < 2) {
+      const headerReset = parseRateLimitReset(response.headers?.get("x-ratelimit-reset") || undefined);
+      const metadataHeaders = (error?.error?.metadata?.headers ?? {}) as Record<string, string | undefined>;
+      const metadataReset = parseRateLimitReset(
+        metadataHeaders["x-ratelimit-reset"] || metadataHeaders["X-RateLimit-Reset"]
+      );
+      updateOpenRouterBackoff(openRouterBackoffKey, headerReset ?? metadataReset);
+
+      const retryAfterRaw = response.headers?.get("retry-after");
+      const retryAfterSeconds = retryAfterRaw ? Number.parseInt(retryAfterRaw, 10) : NaN;
+      const fallbackDelayMs = 2500 * (retryCount + 1);
+      const resetDelayMs = Math.max(0, getOpenRouterBackoffUntil(openRouterBackoffKey) - Date.now());
+      const baseDelayMs = Number.isFinite(retryAfterSeconds)
+        ? Math.max(1000, Math.min(retryAfterSeconds * 1000, 12000))
+        : fallbackDelayMs;
+      const delayMs = Math.max(baseDelayMs, resetDelayMs);
+
+      console.warn(`[LLM Chat] 429 rate limited. Retrying in ${delayMs}ms (attempt ${retryCount + 1}/2).`);
+      await sleepWithAbort(delayMs, abortSignal);
+      return callOpenAI(
+        messages,
+        tools,
+        settings,
+        useJsonFallback,
+        servers,
+        isOpenRouter,
+        abortSignal,
+        _dynamicRules,
+        _isSubAgent,
+        _workspacePath,
+        retryCount + 1
+      );
+    }
 
     // Check if it's a tool calling not supported error
     if (
@@ -438,7 +566,7 @@ export // Call OpenAI-compatible API
           content: systemPrompt,
         });
       }
-      return callOpenAI(retryMessages, tools, settings, true, servers);
+      return callOpenAI(retryMessages, tools, settings, true, servers, isOpenRouter, abortSignal, _dynamicRules, _isSubAgent, _workspacePath, retryCount);
     }
 
     throw new Error(errorMessage);
@@ -496,11 +624,17 @@ export // Call OpenAI-compatible API
   // Attempting JSON recovery here is safe — it only fires when toolCalls is empty.
   if (!toolCalls || toolCalls.length === 0) {
     if (content) {
-      console.log('[LLM] No native tool calls found. Attempting to parse JSON from content...');
-      const recovered = parseToolCallsFromJson(content);
-      if (recovered && recovered.length > 0) {
-        toolCalls = recovered;
-        console.log(`[LLM] Successfully recovered ${toolCalls.length} tool calls from content body.`);
+      const mayContainStructuredToolPayload =
+        /```json/i.test(content) ||
+        /"tool_calls"\s*:|"tool"\s*:|"commands"\s*:|"goal"\s*:/i.test(content) ||
+        /^[\s]*[\[{]/.test(content);
+      if (mayContainStructuredToolPayload) {
+        console.log('[LLM] No native tool calls found. Attempting to parse JSON from content...');
+        const recovered = parseToolCallsFromJson(content);
+        if (recovered && recovered.length > 0) {
+          toolCalls = recovered;
+          console.log(`[LLM] Successfully recovered ${toolCalls.length} tool calls from content body.`);
+        }
       }
     }
 
