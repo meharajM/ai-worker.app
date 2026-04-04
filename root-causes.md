@@ -20,7 +20,7 @@ This file tracks technical root cause, current status, and latest verification s
 ## #4 LLM analysis / orchestration timeouts
 - Root cause: long tool/LLM chains under decomposition paths and dynamic pages exceed scenario timeout budgets.
 - Status: Mitigated, needs re-test.
-- Finding: focused `S05` now passes (~55.7s); decomposer now maps common site aliases (e.g., `amazon`, `ebay`, `bestbuy`) to explicit contexts to avoid unnecessary LLM decomposition calls. Full-suite decomposition stress still needs confirmation.
+- Finding: decomposer now maps common site aliases (e.g., `amazon`, `ebay`, `bestbuy`) to explicit contexts to avoid unnecessary LLM decomposition calls; runtime now also bypasses decomposition for direct-answer prompts (`skipping_decomposition_for_direct_answer`). Full-suite decomposition stress still needs confirmation.
 
 ## #5 MarkItDown sidecar startup noise (`uvx` missing)
 - Root cause: eager sidecar init without validating runtime dependency availability.
@@ -135,11 +135,11 @@ This file tracks technical root cause, current status, and latest verification s
 ## #27 Pass criteria too lax for degraded UX signals
 - Root cause: scenario assertions focus on timeout/completion but underweight action-card/progress/checkpoint quality signals.
 - Status: Open (partially mitigated).
-- Finding: immediate-reply and mocked-plan/handoff gates are tightened and passing; real-E2E now also blocks early keyword completion while run is active. Full-suite action-card/progress/checkpoint signal quality still needs complete re-validation.
+- Finding: immediate-reply and mocked-plan/handoff gates are tightened and passing; real-E2E now also blocks early keyword completion while run is active, and direct-answer prompts skip decomposition preflight. Full-suite action-card/progress/checkpoint signal quality still needs complete re-validation.
 
 ## Recent Validation Notes
 - Added focused live runner: `tests/real_e2e_focus.cjs` (`npm run -s test:e2e:real:focus`).
-- Focused live result (latest): `S05` pass (~80.3s), `S21G` pass (~20.1s, no tools) with deterministic chat-state reset for true first-turn behavior.
+- Focused live result (latest): `S05` pass (~107.2s), `S21G` pass (~20.6s, no tools) with deterministic chat-state reset for true first-turn behavior.
 - Added regression guard for immediate no-tool direct-answer mode in `tests/regression_critical_checks.cjs`.
 - Latest critical-only live run: `node tests/real_e2e_test.cjs --critical-only` passed all 5 critical checks after stabilizing Critical 4 completion criteria.
 - Latest speech rerun: `npm run -s test:speech` passed with recognizer flood suppressed; placeholder check now classifies active voice controls as info-level timing instead of warning.

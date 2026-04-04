@@ -289,8 +289,9 @@ export class AgentRuntime implements IAgentClient {
       // prompts with conversation history, but this fires even with empty history.
       const TRIVIAL_PROMPT_LENGTH = 20;
       const isTrivialPrompt = finalPrompt.trim().length <= TRIVIAL_PROMPT_LENGTH;
+      const shouldDirectAnswer = shouldPreferDirectAnswer(finalPrompt);
 
-      const decomposition = isTrivialPrompt
+      const decomposition = (isTrivialPrompt || shouldDirectAnswer)
         ? { shouldFork: false, type: 'single_context' as const, contexts: ['current_page'], estimatedActions: 1 }
         : await analyzeTaskForDecomposition(
           finalPrompt,
@@ -303,6 +304,12 @@ export class AgentRuntime implements IAgentClient {
               content: typeof m.content === 'string' ? m.content : ''
             }))
         );
+
+      if (shouldDirectAnswer) {
+        console.info(
+          `[AgentRuntime][Issue #4/#27] skipping_decomposition_for_direct_answer agent=${this.agentInstanceId} session=${this.options.activeSessionId}`
+        );
+      }
 
       if (decomposition.shouldFork && decomposition.type === "multi_context") {
         // ── Emit progress for parallel orchestration path ────────────────────

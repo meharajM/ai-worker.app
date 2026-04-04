@@ -116,6 +116,16 @@ function testImmediateReplyNoToolMode() {
     'const disableToolsThisIteration = directAnswerFirstTurn && iterationCount === 0;',
     'agent-runtime'
   );
+  assertIncludes(
+    runtimeSrc,
+    'const shouldDirectAnswer = shouldPreferDirectAnswer(finalPrompt);',
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    'if (shouldDirectAnswer) {',
+    'agent-runtime'
+  );
 
   const llmSrc = read('src/renderer/src/lib/llm.ts');
   assertIncludes(

@@ -17,8 +17,9 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 - Notable: `Critical 4` now passes without false failure when no `fs_write` call is attempted and no loop signal is observed.
 
 ### Latest Focused Real-E2E Validation (Apr 4, 2026)
-- `S05: Manual Delegation` ✅ passed (`Timed out: false`, sub-agent detected, ~80.3s).
-- `S21G: Immediate Reply (no tools)` ✅ passed (`no tools: true`, ~20.1s) after hard-resetting chat state to guarantee first-turn behavior.
+- `S05: Manual Delegation` ✅ passed (`Timed out: false`, sub-agent detected, ~107.2s).
+- `S21G: Immediate Reply (no tools)` ✅ passed (`no tools: true`, ~20.6s) after hard-resetting chat state to guarantee first-turn behavior.
+- New runtime signal: direct-answer prompts now skip decomposition (`skipping_decomposition_for_direct_answer`), reducing first-turn request payload for `S21G` from ~14k+ decomposition call to direct-chat payload (~331 chars request body).
 - Validation command: `npm run -s test:e2e:real:focus`.
 
 ### Marked Fixed in Current Validation
