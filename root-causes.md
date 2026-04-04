@@ -75,7 +75,7 @@ This file tracks technical root cause, current status, and latest verification s
 ## #15 OpenRouter free-tier rate-limit instability
 - Root cause: provider minute limits and retry windows dominate long live runs.
 - Status: Open (intentionally not prioritized now).
-- Finding: repeated 429/backoff patterns in real runs.
+- Finding: repeated 429/backoff patterns in real runs (also observed as transient retry in latest focused run startup).
 
 ## #16 Residual sub-agent activity across prompt boundaries
 - Root cause: asynchronous/background completion overlap and shared log stream visibility.
@@ -139,7 +139,7 @@ This file tracks technical root cause, current status, and latest verification s
 
 ## Recent Validation Notes
 - Added focused live runner: `tests/real_e2e_focus.cjs` (`npm run -s test:e2e:real:focus`).
-- Focused live result: `S05` pass, `S21G` pass (`S21G` now runs after deterministic chat-state reset for true first-turn behavior).
+- Focused live result (latest): `S05` pass (~80.3s), `S21G` pass (~20.1s, no tools) with deterministic chat-state reset for true first-turn behavior.
 - Added regression guard for immediate no-tool direct-answer mode in `tests/regression_critical_checks.cjs`.
 - Latest critical-only live run: `node tests/real_e2e_test.cjs --critical-only` passed all 5 critical checks after stabilizing Critical 4 completion criteria.
 - Latest speech rerun: `npm run -s test:speech` passed with recognizer flood suppressed; placeholder check now classifies active voice controls as info-level timing instead of warning.

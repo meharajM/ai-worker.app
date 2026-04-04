@@ -17,8 +17,8 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 - Notable: `Critical 4` now passes without false failure when no `fs_write` call is attempted and no loop signal is observed.
 
 ### Latest Focused Real-E2E Validation (Apr 4, 2026)
-- `S05: Manual Delegation` ✅ passed (`Timed out: false`, sub-agent detected, ~65.2s).
-- `S21G: Immediate Reply (no tools)` ✅ passed (`no tools: true`, ~25.1s) after hard-resetting chat state to guarantee first-turn behavior.
+- `S05: Manual Delegation` ✅ passed (`Timed out: false`, sub-agent detected, ~80.3s).
+- `S21G: Immediate Reply (no tools)` ✅ passed (`no tools: true`, ~20.1s) after hard-resetting chat state to guarantee first-turn behavior.
 - Validation command: `npm run -s test:e2e:real:focus`.
 
 ### Marked Fixed in Current Validation
@@ -49,7 +49,7 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 - **#12** Fixed (validated).
 - **#13** Fixed (validated).
 - **#14** Mitigated / needs full-suite re-test (passes in latest critical-only run).
-- **#15** Open (validated by repeated 429/backoff in live runs).
+- **#15** Open (validated by repeated 429/backoff in live runs; still observed transiently in focused run startup).
 - **#16** Mitigated in harness / runtime revalidation pending (real E2E now blocks scenario handoff until active run is idle).
 - **#17** Fixed (cache API guard added; no startup crash signal in recent runs).
 - **#18** Likely fixed (CSP duplication signal not seen in latest startup logs).
