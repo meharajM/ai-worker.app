@@ -17,9 +17,11 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 - Notable: `Critical 4` now passes without false failure when no `fs_write` call is attempted and no loop signal is observed.
 
 ### Latest Focused Real-E2E Validation (Apr 4, 2026)
-- `S05: Manual Delegation` ✅ passed (`Timed out: false`, sub-agent detected, ~107.2s).
-- `S21G: Immediate Reply (no tools)` ✅ passed (`no tools: true`, ~20.6s) after hard-resetting chat state to guarantee first-turn behavior.
-- New runtime signal: direct-answer prompts now skip decomposition (`skipping_decomposition_for_direct_answer`), reducing first-turn request payload for `S21G` from ~14k+ decomposition call to direct-chat payload (~331 chars request body).
+- `S05: Manual Delegation` ✅ passed (`Timed out: false`, sub-agent detected, ~84.8s in latest run).
+- `S21G: Immediate Reply (no tools)` ✅ passed (`no tools: true`, ~11.6s in latest run) after hard-resetting chat state to guarantee first-turn behavior.
+- New runtime signals:
+  - direct-answer prompts now skip decomposition (`skipping_decomposition_for_direct_answer`), reducing first-turn request payload for `S21G` to direct-chat payload (~331 chars request body).
+  - low-signal direct prompts now skip post-response memory reflection (`skipping MemoryReflector for low-signal direct prompt`), reducing residual background activity.
 - Validation command: `npm run -s test:e2e:real:focus`.
 
 ### Marked Fixed in Current Validation
@@ -51,7 +53,7 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 - **#13** Fixed (validated).
 - **#14** Mitigated / needs full-suite re-test (passes in latest critical-only run).
 - **#15** Open (validated by repeated 429/backoff in live runs; still observed transiently in focused run startup).
-- **#16** Mitigated in harness / runtime revalidation pending (real E2E now blocks scenario handoff until active run is idle).
+- **#16** Mitigated (real E2E blocks scenario handoff until active run is idle, and low-signal direct prompts now skip memory reflection).
 - **#17** Fixed (cache API guard added; no startup crash signal in recent runs).
 - **#18** Likely fixed (CSP duplication signal not seen in latest startup logs).
 - **#19** Open (recovery visibility warnings still present in mocked E2E).

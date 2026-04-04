@@ -79,8 +79,8 @@ This file tracks technical root cause, current status, and latest verification s
 
 ## #16 Residual sub-agent activity across prompt boundaries
 - Root cause: asynchronous/background completion overlap and shared log stream visibility.
-- Status: Mitigated in harness, runtime revalidation pending.
-- Finding: nested delegation is blocked and a reflector cancel hook aborts active runs on prompt restart. Real-E2E now enforces run-idle before scenario handoff, reducing cross-scenario bleed from early keyword exits.
+- Status: Mitigated.
+- Finding: nested delegation is blocked, reflector cancellation aborts active runs on prompt restart, real-E2E enforces run-idle before scenario handoff, and low-signal direct prompts now skip memory reflection to reduce post-response background noise.
 
 ## #17 WebLLM `caches` startup error
 - Root cause: cache API access without runtime capability guard.
@@ -139,7 +139,7 @@ This file tracks technical root cause, current status, and latest verification s
 
 ## Recent Validation Notes
 - Added focused live runner: `tests/real_e2e_focus.cjs` (`npm run -s test:e2e:real:focus`).
-- Focused live result (latest): `S05` pass (~107.2s), `S21G` pass (~20.6s, no tools) with deterministic chat-state reset for true first-turn behavior.
+- Focused live result (latest): `S05` pass (~84.8s), `S21G` pass (~11.6s, no tools) with deterministic chat-state reset for true first-turn behavior and direct-answer decomposition bypass active.
 - Added regression guard for immediate no-tool direct-answer mode in `tests/regression_critical_checks.cjs`.
 - Latest critical-only live run: `node tests/real_e2e_test.cjs --critical-only` passed all 5 critical checks after stabilizing Critical 4 completion criteria.
 - Latest speech rerun: `npm run -s test:speech` passed with recognizer flood suppressed; placeholder check now classifies active voice controls as info-level timing instead of warning.

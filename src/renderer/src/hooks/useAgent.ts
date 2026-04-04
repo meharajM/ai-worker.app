@@ -347,7 +347,21 @@ export function useAgent(): UseAgentReturn {
                     role: m.role as "user" | "assistant" | "system",
                     content: m.content,
                 }));
-                MemoryReflector.getInstance().analyze(historyForReflector, settingsForLLM);
+                const normalizedPrompt = (content || '').toLowerCase();
+                const hasMemoryIntent = /\b(remember|preference|prefer|always|never|from now on|for future|my project|my name)\b/.test(normalizedPrompt);
+                const hasRecentToolCalls = sessionMessages
+                    .slice(-6)
+                    .some((m) => (m.toolCalls?.length ?? 0) > 0);
+                const shouldRunReflector =
+                    hasMemoryIntent ||
+                    hasRecentToolCalls ||
+                    normalizedPrompt.length >= 80;
+
+                if (shouldRunReflector) {
+                    MemoryReflector.getInstance().analyze(historyForReflector, settingsForLLM);
+                } else {
+                    console.info('[useAgent][Issue #16] skipping MemoryReflector for low-signal direct prompt');
+                }
 
             } catch (error) {
                 console.error("[useAgent] Handler error:", error);

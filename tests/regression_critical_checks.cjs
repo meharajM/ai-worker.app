@@ -158,6 +158,16 @@ function testMemoryReflectorCancellationHook() {
     "MemoryReflector.getInstance().cancel('prompt-restart');",
     'useAgent'
   );
+  assertIncludes(
+    useAgentSrc,
+    "const shouldRunReflector =",
+    'useAgent'
+  );
+  assertIncludes(
+    useAgentSrc,
+    "skipping MemoryReflector for low-signal direct prompt",
+    'useAgent'
+  );
 }
 
 function testE2EAssertionsAreStrict() {
