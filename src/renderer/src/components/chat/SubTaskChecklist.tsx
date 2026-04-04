@@ -97,10 +97,11 @@ export function SubTaskChecklist({ plan, className = '' }: SubTaskChecklistProps
   
   const allCompleted = steps.length > 0 && steps.every((s) => s.status === 'completed')
   const completedCount = steps.filter((s) => s.status === 'completed').length
+  const failedCount = steps.filter((s) => s.status === 'failed').length
   const hasFailure = steps.some((s) => s.status === 'failed')
   const hasActive = steps.some((s) => s.status === 'active')
   const isTerminal = steps.length > 0 && !hasActive && steps.every((s) => s.status === 'completed' || s.status === 'failed')
-  const completedWithIssues = isTerminal && hasFailure && completedCount > 0
+  const completedWithIssues = isTerminal && hasFailure
 
   // Auto-collapse when all steps complete
   const [expanded, setExpanded] = useState(!allCompleted)
@@ -122,6 +123,8 @@ export function SubTaskChecklist({ plan, className = '' }: SubTaskChecklistProps
         'rounded-xl border backdrop-blur-sm transition-all duration-500 shadow-sm overflow-hidden',
         allCompleted
           ? 'bg-[var(--color-success)]/5 border-[var(--color-success)]/30'
+          : completedWithIssues
+            ? 'bg-[var(--color-primary)]/5 border-[var(--color-primary)]/30'
           : hasFailure
             ? 'bg-[var(--color-error)]/5 border-[var(--color-error)]/30'
             : 'bg-[var(--color-surface)]/80 border-[var(--color-border)] shadow-sm',
@@ -155,7 +158,7 @@ export function SubTaskChecklist({ plan, className = '' }: SubTaskChecklistProps
             {allCompleted
               ? 'All tasks completed'
               : completedWithIssues
-                ? `Completed with some issues (${completedCount}/${plan.steps.length})`
+                ? `Completed with issues (${completedCount}/${plan.steps.length}, ${failedCount} failed)`
               : hasFailure
                 ? 'Execution failed'
                 : `Working... ${completedCount}/${plan.steps.length}`}

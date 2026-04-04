@@ -11,6 +11,7 @@
 #   npm run publish:mac -- --yes               # non-interactive confirmation
 #   npm run publish:mac -- --skip-checks       # Skip lint + typecheck
 #   npm run publish:mac -- --skip-build        # Upload existing dist/ only
+#   npm run publish:mac -- --strict-mac-dmg    # Require DMG generation (fail if missing)
 # =============================================================================
 
 set -euo pipefail
@@ -70,6 +71,7 @@ BUILD_TARGET="arm64"
 SKIP_CHECKS=false
 SKIP_BUILD=false
 STRICT_UNIVERSAL=false
+STRICT_MAC_DMG=false
 AUTO_CONFIRM=false
 
 for arg in "$@"; do
@@ -77,11 +79,36 @@ for arg in "$@"; do
     --universal)   BUILD_TARGET="universal" ;;
     --intel)       BUILD_TARGET="x64" ;;
     --strict-universal) STRICT_UNIVERSAL=true ;;
+    --strict-mac-dmg) STRICT_MAC_DMG=true ;;
     --yes|-y|--non-interactive) AUTO_CONFIRM=true ;;
     --skip-checks) SKIP_CHECKS=true ;;
     --skip-build)  SKIP_BUILD=true; SKIP_CHECKS=true ;;
   esac
 done
+
+validate_mac_artifacts() {
+  local dir="$1"
+  local strict_dmg="$2"
+  local zip_count dmg_count
+  zip_count=$(find "$dir" -maxdepth 1 -type f -name "*.zip" | wc -l | tr -d ' ')
+  dmg_count=$(find "$dir" -maxdepth 1 -type f -name "*.dmg" | wc -l | tr -d ' ')
+
+  if [ "$zip_count" -eq 0 ]; then
+    echo "❌ No macOS ZIP artifact found in ${dir}. ZIP is required."
+    return 1
+  fi
+  echo "✅ ZIP artifact present (${zip_count})."
+
+  if [ "$dmg_count" -eq 0 ]; then
+    if [ "$strict_dmg" = true ]; then
+      echo "❌ No DMG artifact found in ${dir} and --strict-mac-dmg is enabled."
+      return 1
+    fi
+    echo "⚠️  No DMG artifact found. Continuing (DMG is optional by policy)."
+  else
+    echo "✅ DMG artifact present (${dmg_count})."
+  fi
+}
 
 if [ "$BUILD_TARGET" = "universal" ] && [ "$(uname -m)" = "arm64" ]; then
   if ! ensure_x64_node_runtime "$ROOT_DIR"; then
@@ -165,7 +192,22 @@ if [ "$SKIP_BUILD" = false ]; then
     auto_clean_native_build_outputs
     clean_mac_universal_temps "$MAC_OUT_DIR"
   fi
-  npx electron-builder --mac "--${BUILD_TARGET}" --config.directories.output="${MAC_OUT_DIR}"
+
+  echo "  → Building required ZIP artifact..."
+  npx electron-builder --mac zip "--${BUILD_TARGET}" --config.directories.output="${MAC_OUT_DIR}"
+
+  echo "  → Attempting optional DMG artifact..."
+  if npx electron-builder --mac dmg "--${BUILD_TARGET}" --config.directories.output="${MAC_OUT_DIR}"; then
+    echo "✅ DMG build succeeded."
+  else
+    if [ "$STRICT_MAC_DMG" = true ]; then
+      echo "❌ DMG build failed and --strict-mac-dmg is enabled."
+      exit 1
+    fi
+    echo "⚠️  DMG build failed. Continuing with ZIP-only release (DMG optional)."
+  fi
+
+  validate_mac_artifacts "${MAC_OUT_DIR}" "${STRICT_MAC_DMG}"
 
   echo ""
   echo "✅ macOS build complete."

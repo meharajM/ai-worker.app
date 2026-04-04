@@ -18,13 +18,10 @@
     - img-src: Allow images from any source
   -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self';
-             script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval';
+             script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://apis.google.com https://*.gstatic.com https://*.googleapis.com https://www.googletagmanager.com;
              style-src 'self' 'unsafe-inline';
              worker-src 'self' blob:;
              connect-src 'self' ws://localhost:* http://localhost:* http://127.0.0.1:* https://* wss://* data: blob: file:;
-             script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://*.gstatic.com https://*.googleapis.com;
-             style-src 'self' 'unsafe-inline';
-             connect-src 'self' ws://localhost:* http://localhost:* https://* wss://*;
              frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://*.google.com;
              media-src 'self' blob: data:;
              img-src 'self' data: blob: https: https://*.googleusercontent.com;" />

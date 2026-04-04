@@ -105,6 +105,13 @@ if [ "$SKIP_BUILD" = false ] && [ "$BUILD_LINUX" = true ]; then
   fi
 fi
 
+# ── Pre-flight: Windows build host/tooling checks ────────────────────────────
+if [ "$SKIP_BUILD" = false ] && [ "$BUILD_WIN" = true ]; then
+  echo "🪟 Running Windows packaging preflight..."
+  bash "$SCRIPT_DIR/check-win-build-prereqs.sh"
+  bash "$SCRIPT_DIR/check-wine.sh"
+fi
+
 # ── Step 1: Quality checks ────────────────────────────────────────────────────
 if [ "$SKIP_CHECKS" = false ]; then
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

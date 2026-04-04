@@ -237,6 +237,69 @@ try {
 }
 
 // ---------------------------------------------------------------------------
+// Check 8 — Windows build scripts must run explicit preflight first
+// ---------------------------------------------------------------------------
+console.log('\n🪟 Check 8: Windows build scripts must include check:win:preflight');
+try {
+  const pkg = readJSON('package.json');
+  const scripts = pkg.scripts || {};
+  const winScripts = [
+    'build:win',
+    'build:win:intel',
+    'build:win:arm',
+    'rebuild:win',
+    'rebuild:win:intel',
+    'rebuild:win:arm'
+  ];
+  assert(
+    scripts['check:win:preflight'] === 'bash scripts/check-win-build-prereqs.sh',
+    'check:win:preflight script is defined.'
+  );
+  assert(
+    scripts['check:wine'] === 'bash scripts/check-wine.sh',
+    'check:wine script uses host-aware check-wine.sh wrapper.'
+  );
+  for (const name of winScripts) {
+    const value = scripts[name] || '';
+    assert(
+      value.includes('npm run check:win:preflight'),
+      `"${name}" includes check:win:preflight before packaging.`
+    );
+  }
+} catch (e) {
+  console.error(`  ${FAIL} ERROR checking Windows preflight wiring: ${e.message}`);
+  failures++;
+}
+
+// ---------------------------------------------------------------------------
+// Check 9 — mac build scripts default to ZIP artifact generation
+// ---------------------------------------------------------------------------
+console.log('\n🍎 Check 9: mac build scripts should target ZIP by default');
+try {
+  const pkg = readJSON('package.json');
+  const scripts = pkg.scripts || {};
+  const macScripts = [
+    'build:mac',
+    'build:mac:intel',
+    'build:mac:arm',
+    'rebuild:mac',
+    'rebuild:mac:intel',
+    'rebuild:mac:arm',
+    'rebuild:mac:universal'
+  ];
+  for (const name of macScripts) {
+    const value = scripts[name] || '';
+    assert(
+      value.includes('electron-builder --mac zip'),
+      `"${name}" uses zip target (DMG optional policy).`
+    );
+  }
+} catch (e) {
+  console.error(`  ${FAIL} ERROR checking mac ZIP target policy: ${e.message}`);
+  failures++;
+}
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 console.log('\n' + '─'.repeat(60));

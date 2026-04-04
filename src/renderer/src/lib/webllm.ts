@@ -136,6 +136,13 @@ class WebLLMManager {
 
     public async checkDownloadedModels(): Promise<void> {
         try {
+            // In some Electron renderer contexts, Cache API is not exposed.
+            // webllm.hasModelInCache relies on it and throws hard.
+            if (typeof caches === 'undefined') {
+                this.status.downloadedModels = [];
+                this.notifyStatusChange();
+                return;
+            }
             const downloaded: string[] = [];
             for (const model of WEBLLM_MODELS) {
                 const isInCache = await webllm.hasModelInCache(model.id);

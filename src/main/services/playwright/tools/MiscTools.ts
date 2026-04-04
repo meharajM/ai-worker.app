@@ -60,9 +60,29 @@ export class WaitForNavigationTool extends PlaywrightTool {
     }
 
     async execute(page: Page | Frame, args: any): Promise<ToolResult> {
-        await page.waitForLoadState('networkidle', {
-            timeout: args.timeout || 10000
-        });
-        return { result: 'Navigation/Load complete' };
+        const timeout = typeof args.timeout === 'number' ? args.timeout : 30000;
+        const loadStates: Array<'domcontentloaded' | 'load' | 'networkidle'> = ['domcontentloaded', 'load', 'networkidle'];
+
+        for (const state of loadStates) {
+            try {
+                await page.waitForLoadState(state, { timeout });
+                return { result: `Navigation/Load complete (${state})` };
+            } catch (error) {
+                const msg = String(error);
+                // Keep trying progressively stricter states; dynamic pages often
+                // never reach networkidle even though interaction is possible.
+                if (!msg.includes('Timeout')) {
+                    throw error;
+                }
+            }
+        }
+
+        return {
+            result: null,
+            error:
+                `Timeout waiting for navigation after ${timeout}ms.\n\n` +
+                `💡 RECOVERY HINT: The page may be interactive even without network idle. ` +
+                `Try get_state(), wait_for_element(), or interact with visible elements.`
+        };
     }
 }

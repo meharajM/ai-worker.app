@@ -13,6 +13,7 @@
 #   npm run publish:all -- --mac-only --arm64   # Mac arm64 only
 #   npm run publish:all -- --mac-only --intel   # Mac x64 only
 #   npm run publish:all -- --mac-only --universal --strict-universal  # force true universal
+#   npm run publish:all -- --strict-mac-dmg      # Require DMG generation (fail if missing)
 #   npm run publish:all -- --allow-mac-fallback # allow universal -> arm64 fallback
 #   npm run publish:all -- --yes                # non-interactive confirmation
 #   npm run publish:all -- --linux-only         # Linux only
@@ -60,6 +61,30 @@ reset_output_dir() {
   local out_dir="$1"
   rm -rf "${out_dir}"
   mkdir -p "${out_dir}"
+}
+
+validate_mac_artifacts() {
+  local dir="$1"
+  local strict_dmg="$2"
+  local zip_count dmg_count
+  zip_count=$(find "$dir" -maxdepth 1 -type f -name "*.zip" | wc -l | tr -d ' ')
+  dmg_count=$(find "$dir" -maxdepth 1 -type f -name "*.dmg" | wc -l | tr -d ' ')
+
+  if [ "$zip_count" -eq 0 ]; then
+    echo "❌ No macOS ZIP artifact found in ${dir}. ZIP is required."
+    return 1
+  fi
+  echo "✅ ZIP artifact present (${zip_count})."
+
+  if [ "$dmg_count" -eq 0 ]; then
+    if [ "$strict_dmg" = true ]; then
+      echo "❌ No DMG artifact found in ${dir} and --strict-mac-dmg is enabled."
+      return 1
+    fi
+    echo "⚠️  No DMG artifact found. Continuing (DMG is optional by policy)."
+  else
+    echo "✅ DMG artifact present (${dmg_count})."
+  fi
 }
 
 retry_aws_cp() {
@@ -132,7 +157,7 @@ set -a; source "$ENV_FILE"; set +a
 
 # ── Parse args ────────────────────────────────────────────────────────────────
 BUILD_MAC=true; BUILD_LINUX=true; BUILD_WIN=true
-SKIP_CHECKS=false; SKIP_BUILD=false; MAC_ARCH="universal"; STRICT_UNIVERSAL=false; AUTO_CONFIRM=false
+SKIP_CHECKS=false; SKIP_BUILD=false; MAC_ARCH="universal"; STRICT_UNIVERSAL=false; STRICT_MAC_DMG=false; AUTO_CONFIRM=false
 
 for arg in "$@"; do
   case $arg in
@@ -143,6 +168,7 @@ for arg in "$@"; do
     --intel)      MAC_ARCH="x64" ;;
     --universal)  MAC_ARCH="universal" ;;
     --strict-universal) STRICT_UNIVERSAL=true ;;
+    --strict-mac-dmg) STRICT_MAC_DMG=true ;;
     --allow-mac-fallback) STRICT_UNIVERSAL=false ;;
     --yes|-y|--non-interactive) AUTO_CONFIRM=true ;;
     --skip-checks) SKIP_CHECKS=true ;;
@@ -185,6 +211,12 @@ fi
 # ── Run Environment Bootstrapping ───────────────────────────────────────────
 if [ "$SKIP_BUILD" = false ]; then
   check_dependencies "$BUILD_LINUX" "$BUILD_WIN"
+fi
+
+if [ "$SKIP_BUILD" = false ] && [ "$BUILD_WIN" = true ]; then
+  echo "🪟 Running Windows packaging preflight..."
+  bash "$SCRIPT_DIR/check-win-build-prereqs.sh"
+  bash "$SCRIPT_DIR/check-wine.sh"
 fi
 
 # ── Confirmation prompt ───────────────────────────────────────────────────────
@@ -237,10 +269,20 @@ if [ "$SKIP_BUILD" = false ]; then
     if [ "$MAC_ARCH" = "universal" ]; then
       auto_clean_native_build_outputs
       clean_mac_universal_temps "$MAC_OUT_DIR"
-      npx electron-builder --mac --${MAC_ARCH} --config.directories.output="${MAC_OUT_DIR}"
-    else
-      npx electron-builder --mac --${MAC_ARCH} --config.directories.output="${MAC_OUT_DIR}"
     fi
+    echo "  → Building required ZIP artifact..."
+    npx electron-builder --mac zip --${MAC_ARCH} --config.directories.output="${MAC_OUT_DIR}"
+    echo "  → Attempting optional DMG artifact..."
+    if npx electron-builder --mac dmg --${MAC_ARCH} --config.directories.output="${MAC_OUT_DIR}"; then
+      echo "✅ DMG build succeeded."
+    else
+      if [ "$STRICT_MAC_DMG" = true ]; then
+        echo "❌ DMG build failed and --strict-mac-dmg is enabled."
+        exit 1
+      fi
+      echo "⚠️  DMG build failed. Continuing with ZIP-only release (DMG optional)."
+    fi
+    validate_mac_artifacts "${MAC_OUT_DIR}" "${STRICT_MAC_DMG}"
   )
   [ "$BUILD_LINUX" = true ] && (
     echo "🐧 Packaging Linux (Docker)..."
