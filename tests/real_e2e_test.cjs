@@ -21,6 +21,8 @@ const CRITICAL_ONLY = process.argv.includes('--critical-only') || process.env.CR
 const SCENARIO_COOLDOWN_MS = Number(process.env.E2E_SCENARIO_COOLDOWN_MS || 5000);
 const QUIET_PERIOD_MS = Number(process.env.E2E_QUIET_PERIOD_MS || 2500);
 const QUIET_MAX_WAIT_MS = Number(process.env.E2E_QUIET_MAX_WAIT_MS || 20000);
+const RUN_IDLE_MAX_WAIT_MS = Number(process.env.E2E_RUN_IDLE_MAX_WAIT_MS || 45000);
+const RUN_IDLE_STABLE_MS = Number(process.env.E2E_RUN_IDLE_STABLE_MS || 2000);
 
 // ─── ENV Loader ───────────────────────────────────────────────────────
 function loadEnv() {
@@ -76,6 +78,28 @@ function logsMatching(pattern) {
 }
 function logsCount(pattern) {
     return logsMatching(pattern).length;
+}
+
+async function isRunActive(window) {
+    const stopBtn = window.locator('button[title="Stop Generation"]');
+    return (await stopBtn.count().catch(() => 0)) > 0;
+}
+
+async function waitForRunIdle(window, maxWaitMs = RUN_IDLE_MAX_WAIT_MS, stableMs = RUN_IDLE_STABLE_MS) {
+    const pollMs = 250;
+    let stableForMs = 0;
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < maxWaitMs) {
+        const active = await isRunActive(window);
+        if (!active) {
+            stableForMs += pollMs;
+            if (stableForMs >= stableMs) return true;
+        } else {
+            stableForMs = 0;
+        }
+        await window.waitForTimeout(pollMs);
+    }
+    return false;
 }
 
 async function waitForLogQuietPeriod(window, quietMs = QUIET_PERIOD_MS, maxWaitMs = QUIET_MAX_WAIT_MS) {
@@ -142,6 +166,12 @@ async function sendPromptAndWait(window, prompt, opts = {}) {
             // Check if agent is done (keyword match anywhere in assistant output)
             if (keywords.length > 0) {
                 if (keywords.some(kw => combinedAssistantText.includes(kw.toLowerCase()))) {
+                    // Prevent cross-scenario bleed: only mark done after run is idle.
+                    const runIdle = await waitForRunIdle(window);
+                    if (!runIdle) {
+                        console.warn('[E2E] Keyword matched but run still active; continuing to wait.');
+                        continue;
+                    }
                     const durationS = ((Date.now() - start) / 1000).toFixed(1);
                     console.log(`\n⏱️  Response in ${durationS}s`);
                     return { text: lastText, timedOut: false, durationS: parseFloat(durationS) };
@@ -161,7 +191,16 @@ async function sendPromptAndWait(window, prompt, opts = {}) {
  */
 async function startNewChat(window) {
     // Allow background tool/LLM activity from the previous scenario to settle.
-    await waitForLogQuietPeriod(window);
+    let idle = await waitForRunIdle(window, Math.max(RUN_IDLE_MAX_WAIT_MS, 60000));
+    if (!idle) {
+        const stopBtn = window.locator('button[title="Stop Generation"]');
+        if ((await stopBtn.count().catch(() => 0)) > 0) {
+            console.warn('[E2E] Previous run still active before new scenario; stopping it for isolation.');
+            await stopBtn.first().click().catch(() => {});
+            idle = await waitForRunIdle(window, 15000, 1000);
+        }
+    }
+    await waitForLogQuietPeriod(window, QUIET_PERIOD_MS, Math.max(QUIET_MAX_WAIT_MS, 30000));
     if (SCENARIO_COOLDOWN_MS > 0) {
         await window.waitForTimeout(SCENARIO_COOLDOWN_MS);
     }

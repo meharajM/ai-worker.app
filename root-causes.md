@@ -20,7 +20,7 @@ This file tracks technical root cause, current status, and latest verification s
 ## #4 LLM analysis / orchestration timeouts
 - Root cause: long tool/LLM chains under decomposition paths and dynamic pages exceed scenario timeout budgets.
 - Status: Mitigated, needs re-test.
-- Finding: focused `S05` now passes (~55.7s), but full-suite decomposition stress still needs confirmation.
+- Finding: focused `S05` now passes (~55.7s); decomposer now maps common site aliases (e.g., `amazon`, `ebay`, `bestbuy`) to explicit contexts to avoid unnecessary LLM decomposition calls. Full-suite decomposition stress still needs confirmation.
 
 ## #5 MarkItDown sidecar startup noise (`uvx` missing)
 - Root cause: eager sidecar init without validating runtime dependency availability.
@@ -79,8 +79,8 @@ This file tracks technical root cause, current status, and latest verification s
 
 ## #16 Residual sub-agent activity across prompt boundaries
 - Root cause: asynchronous/background completion overlap and shared log stream visibility.
-- Status: Open (partially improved).
-- Finding: nested delegation is blocked and a reflector cancel hook now aborts active runs on prompt restart, but some background starts can still appear near prompt boundaries.
+- Status: Mitigated in harness, runtime revalidation pending.
+- Finding: nested delegation is blocked and a reflector cancel hook aborts active runs on prompt restart. Real-E2E now enforces run-idle before scenario handoff, reducing cross-scenario bleed from early keyword exits.
 
 ## #17 WebLLM `caches` startup error
 - Root cause: cache API access without runtime capability guard.
@@ -135,7 +135,7 @@ This file tracks technical root cause, current status, and latest verification s
 ## #27 Pass criteria too lax for degraded UX signals
 - Root cause: scenario assertions focus on timeout/completion but underweight action-card/progress/checkpoint quality signals.
 - Status: Open (partially mitigated).
-- Finding: immediate-reply and mocked-plan/handoff gates are tightened and passing; full-suite action-card/progress/checkpoint signal quality still needs complete re-validation.
+- Finding: immediate-reply and mocked-plan/handoff gates are tightened and passing; real-E2E now also blocks early keyword completion while run is active. Full-suite action-card/progress/checkpoint signal quality still needs complete re-validation.
 
 ## Recent Validation Notes
 - Added focused live runner: `tests/real_e2e_focus.cjs` (`npm run -s test:e2e:real:focus`).

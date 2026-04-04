@@ -53,6 +53,15 @@ function testTaskDecomposerConditionalHeuristic() {
   );
 }
 
+function testTaskDecomposerWebsiteAliasExtraction() {
+  const src = read('src/renderer/src/lib/task-decomposer.ts');
+  assertIncludes(src, 'const WEBSITE_ALIAS_TO_DOMAIN:', 'task-decomposer');
+  assertIncludes(src, "amazon: 'amazon.com'", 'task-decomposer');
+  assertIncludes(src, "ebay: 'ebay.com'", 'task-decomposer');
+  assertIncludes(src, "bestbuy: 'bestbuy.com'", 'task-decomposer');
+  assertIncludes(src, 'for (const [alias, domain] of Object.entries(WEBSITE_ALIAS_TO_DOMAIN)) {', 'task-decomposer');
+}
+
 function testOpenRouterBackoffIsolationAndAbortability() {
   const src = read('src/renderer/src/lib/llm/openai.ts');
   assertIncludes(src, 'const openRouterBackoffUntilByKey = new Map<string, number>();', 'openai');
@@ -141,10 +150,31 @@ function testMemoryReflectorCancellationHook() {
   );
 }
 
+function testE2EAssertionsAreStrict() {
+  const realSrc = read('tests/real_e2e_test.cjs');
+  assertIncludes(realSrc, '!result.timedOut && actionCards === 1', 'real-e2e');
+  assertIncludes(realSrc, '!result.timedOut && hasProgress && hasParallel', 'real-e2e');
+  assertIncludes(realSrc, '!result.timedOut && checkpointLogs.length > 0', 'real-e2e');
+
+  const mockedSrc = read('tests/e2e_ui_mocked.cjs');
+  assertIncludes(mockedSrc, "console.error('⚠️ Handoff test failed');", 'mocked-e2e');
+  assertIncludes(mockedSrc, "console.error('❌ Plan Response missing');", 'mocked-e2e');
+  assertIncludes(mockedSrc, "console.log('\\n🎉 ALL SCENARIOS PASSED');", 'mocked-e2e');
+  assertNotIncludes(mockedSrc, 'ALL SCENARIOS PASSED (with handled warnings)', 'mocked-e2e');
+}
+
+function testRealE2EIdleGating() {
+  const realSrc = read('tests/real_e2e_test.cjs');
+  assertIncludes(realSrc, 'async function waitForRunIdle(', 'real-e2e');
+  assertIncludes(realSrc, 'button[title="Stop Generation"]', 'real-e2e');
+  assertIncludes(realSrc, 'Keyword matched but run still active; continuing to wait.', 'real-e2e');
+}
+
 function run() {
   console.log('Running critical regression checks...');
   testAgentRuntimeDelegateParallelism();
   testTaskDecomposerConditionalHeuristic();
+  testTaskDecomposerWebsiteAliasExtraction();
   testOpenRouterBackoffIsolationAndAbortability();
   testAgentStateServiceNoGlobalSuppressor();
   testPhaseARuntimeWritePauseAndSessionIsolation();
@@ -152,6 +182,8 @@ function run() {
   testPhaseACompactChecklistSemantics();
   testImmediateReplyNoToolMode();
   testMemoryReflectorCancellationHook();
+  testE2EAssertionsAreStrict();
+  testRealE2EIdleGating();
   console.log('All critical regression checks passed.');
 }
 

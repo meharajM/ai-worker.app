@@ -57,12 +57,36 @@ const SEQUENTIAL_INTENT_PATTERN = /\b(and then|then|after that|next|finally|firs
 const CONDITIONAL_SEQUENTIAL_INTENT_PATTERN = /\b(if|unless)\b[\s\S]{0,80}\b(then|else|otherwise)\b/i;
 const OPTIONAL_CONDITIONAL_PATTERN = /\bif\s+(possible|available|you can|feasible)\b/i;
 const DEPENDENCY_CHAIN_PATTERN = /\b(then|after that|use (the )?(result|output|data) (from|of)|based on)\b/i;
+const WEBSITE_ALIAS_TO_DOMAIN: Record<string, string> = {
+  amazon: 'amazon.com',
+  ebay: 'ebay.com',
+  bestbuy: 'bestbuy.com',
+  flipkart: 'flipkart.com',
+  reuters: 'reuters.com',
+  bbc: 'bbc.com',
+  cnn: 'cnn.com',
+  redbus: 'redbus.in',
+  ajio: 'ajio.com',
+  'hacker news': 'news.ycombinator.com',
+  ycombinator: 'news.ycombinator.com',
+};
+
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function extractExplicitWebsiteContexts(text: string): string[] {
   const normalized = new Set<string>();
   for (const match of text.matchAll(DOMAIN_PATTERN)) {
     const domain = (match[1] || match[0]).toLowerCase().replace(/^www\./, '').trim();
     if (domain) normalized.add(domain);
+  }
+  const lower = text.toLowerCase();
+  for (const [alias, domain] of Object.entries(WEBSITE_ALIAS_TO_DOMAIN)) {
+    const aliasPattern = new RegExp(`\\b${escapeRegex(alias)}\\b`, 'i');
+    if (aliasPattern.test(lower)) {
+      normalized.add(domain);
+    }
   }
   return Array.from(normalized);
 }

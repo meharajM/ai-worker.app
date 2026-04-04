@@ -4,6 +4,13 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 
 ## Status Snapshot (Apr 4, 2026)
 
+### Latest Runtime + Harness Validation Update (Apr 4, 2026)
+- Real-E2E harness now enforces run-idle before scenario handoff (`Stop Generation` clear + idle gate), preventing early keyword-hit exits from contaminating the next scenario.
+- Partial live re-run evidence after this change:
+  - `Critical 1: delegate_sub_task Parallelism` ✅ passed in `93.5s` with `Delegate signals: 3` and no max-iteration failure.
+  - Harness emitted `Keyword matched but run still active; continuing to wait.` confirming premature-completion protection is active.
+- Earlier full-suite failures (`S11`, `S08`, `S06`) were captured before the idle-gate fix and now require clean revalidation.
+
 ### Latest Critical-Only Real-E2E Validation (Apr 4, 2026)
 - Command: `node tests/real_e2e_test.cjs --critical-only`
 - Result: `5/5 passed` (Critical 1-5 all green).
@@ -43,7 +50,7 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 - **#13** Fixed (validated).
 - **#14** Mitigated / needs full-suite re-test (passes in latest critical-only run).
 - **#15** Open (validated by repeated 429/backoff in live runs).
-- **#16** Open (partially mitigated: reflector cancellation hook added, but residual background activity can still appear around prompt boundaries).
+- **#16** Mitigated in harness / runtime revalidation pending (real E2E now blocks scenario handoff until active run is idle).
 - **#17** Fixed (cache API guard added; no startup crash signal in recent runs).
 - **#18** Likely fixed (CSP duplication signal not seen in latest startup logs).
 - **#19** Open (recovery visibility warnings still present in mocked E2E).
