@@ -501,7 +501,6 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         console.log('\n--- Test 6: JSON Recovery ---');
         await sendMessage("Simulate JSON fallback recovery");
         await waitForAnyLog([
-            /\[LLM\]\[Issue #19\] recovery_json_success/i,
             /Successfully recovered .* tool calls from content body/i,
             /Native Tool Call Identified:\s*fs_list_directory/i
         ], 15000);
@@ -511,7 +510,6 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         console.log('\n--- Test 7: XML Recovery ---');
         await sendMessage("Simulate XML fallback recovery");
         await waitForAnyLog([
-            /\[LLM\]\[Issue #19\] recovery_xml_success/i,
             /Detected XML plan in content, converting to tool call/i,
             /Native Tool Call Identified:\s*create_execution_plan/i
         ], 15000);

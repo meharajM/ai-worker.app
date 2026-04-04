@@ -91,9 +91,6 @@ export class WaitForNavigationTool extends PlaywrightTool {
         const probe: ReadinessResult = await probeReadiness(page);
 
         if (progressedState || probe.isUsable) {
-            console.info(
-                `[WaitForNavigationTool][Issue #7] heuristic_success readyState=${probe.readyState} interactive=${probe.interactiveCount} lastState=${progressedState ?? 'none'} reason=${probe.reason}`
-            );
             return {
                 result:
                     `Navigation likely complete (heuristic).\n` +
@@ -104,9 +101,6 @@ export class WaitForNavigationTool extends PlaywrightTool {
             };
         }
 
-        console.warn(
-            `[WaitForNavigationTool][Issue #7] timeout_not_usable readyState=${probe.readyState} interactive=${probe.interactiveCount} reason=${probe.reason}`
-        );
         return {
             result: null,
             error:

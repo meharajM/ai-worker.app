@@ -219,3 +219,55 @@ export // Parse tool calls from JSON in response content
   }
   return undefined;
 }
+
+// Parse tool calls from XML-wrapped JSON payloads in response content.
+// Example supported payload: <tools>{"name":"fs_list_directory","params":{"path":"."}}</tools>
+export function parseToolCallsFromXml(content: string): LLMResponse["toolCalls"] | undefined {
+  try {
+    const tagMatch = content.match(/<tools?>([\s\S]*?)<\/tools?>/i);
+    if (!tagMatch) return undefined;
+
+    const payload = (tagMatch[1] || '').trim();
+    if (!payload) return undefined;
+
+    const parsed = JSON.parse(payload) as unknown;
+    const entries = Array.isArray(parsed) ? parsed : [parsed];
+    const now = Date.now();
+
+    const calls = entries
+      .map((entry, idx) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+
+        const candidate = entry as Record<string, unknown>;
+        const name =
+          (typeof candidate.name === 'string' && candidate.name) ||
+          (typeof candidate.tool === 'string' && candidate.tool) ||
+          '';
+
+        if (!name) return null;
+
+        const args =
+          candidate.arguments ??
+          candidate.params ??
+          candidate.parameters ??
+          candidate.args ??
+          {};
+
+        return {
+          id: `xml_call_${now}_${idx}`,
+          name,
+          arguments: ensureRecord(args),
+        };
+      })
+      .filter((call): call is NonNullable<typeof call> => Boolean(call));
+
+    if (calls.length > 0) {
+      console.log(`[LLM] Identified XML Tool Call Format (${calls.length})`);
+      return calls;
+    }
+  } catch (error) {
+    console.warn('Failed to parse tool calls from XML:', error);
+  }
+
+  return undefined;
+}

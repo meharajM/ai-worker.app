@@ -248,12 +248,6 @@ export function useAgent(): UseAgentReturn {
                                 isFinalResult: Boolean((msg as LLMMessage & { isFinalResult?: boolean }).isFinalResult),
                             };
 
-                            if (storeMsg.role === "assistant") {
-                                console.info(
-                                    `[useAgent][Issue #12/#27] onMessage session=${originSessionId} isFinalResult=${storeMsg.isFinalResult} toolCalls=${msg.tool_calls?.length ?? 0}`
-                                );
-                            }
-
                             if (msg.tool_calls) {
                                 storeMsg.toolCalls = msg.tool_calls.map((tc) => ({
                                     id: tc.id,
@@ -294,12 +288,6 @@ export function useAgent(): UseAgentReturn {
                                 delete (storeUpdates as { role?: string }).role;
                             }
 
-                            if (Object.prototype.hasOwnProperty.call(storeUpdates, "isFinalResult")) {
-                                console.info(
-                                    `[useAgent][Issue #12/#27] onMessageUpdate session=${originSessionId} message=${id} isFinalResult=${String((storeUpdates as { isFinalResult?: boolean }).isFinalResult)}`
-                                );
-                            }
-
                             updateSessionMessage(originSessionId, id, storeUpdates);
                         },
 
@@ -308,15 +296,6 @@ export function useAgent(): UseAgentReturn {
                          * Always targets `originSessionId`.
                          */
                         onProgressUpdate: (progress?: number, eta?: number, plan?: unknown) => {
-                            const planSteps =
-                                plan &&
-                                typeof plan === 'object' &&
-                                Array.isArray((plan as { steps?: unknown[] }).steps)
-                                    ? (plan as { steps: unknown[] }).steps.length
-                                    : 0;
-                            console.info(
-                                `[useAgent][Issue #27] progress_update session=${originSessionId} progress=${progress === undefined ? 'cleared' : progress} eta=${eta ?? 'n/a'} planSteps=${planSteps}`
-                            );
                             useChatStore.getState().updateSessionProgress(
                                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                                 originSessionId, progress, eta, plan as any
@@ -358,18 +337,27 @@ export function useAgent(): UseAgentReturn {
                 }));
                 const normalizedPrompt = (content || '').toLowerCase();
                 const hasMemoryIntent = /\b(remember|preference|prefer|always|never|from now on|for future|my project|my name)\b/.test(normalizedPrompt);
+                const looksLikeQuestion =
+                    /\?\s*$/.test(normalizedPrompt) ||
+                    /^(what|why|how|when|where|who|is|are|can|could|should|do|does|did|will|would)\b/.test(normalizedPrompt);
+                const hasShortPreferenceCue =
+                    /\b(?:call me\s+\w+|my name is\s+\w+|i(?:'m| am)\s+\w+|i\s+(?:prefer|like|want|need)\b|please use\b|use\s+[a-z0-9._-]+(?:\s+for\b|$)|budget(?:\s+is|\s*[:=])\s*\$?\s*\d+)\b/.test(normalizedPrompt);
                 const hasRecentToolCalls = sessionMessages
                     .slice(-6)
                     .some((m) => (m.toolCalls?.length ?? 0) > 0);
+                const isShortButStablePreference =
+                    normalizedPrompt.length > 0 &&
+                    normalizedPrompt.length < 80 &&
+                    hasShortPreferenceCue &&
+                    !looksLikeQuestion;
                 const shouldRunReflector =
                     hasMemoryIntent ||
                     hasRecentToolCalls ||
+                    isShortButStablePreference ||
                     normalizedPrompt.length >= 80;
 
                 if (shouldRunReflector) {
                     MemoryReflector.getInstance().analyze(historyForReflector, settingsForLLM);
-                } else {
-                    console.info('[useAgent][Issue #16] skipping MemoryReflector for low-signal direct prompt');
                 }
 
             } catch (error) {

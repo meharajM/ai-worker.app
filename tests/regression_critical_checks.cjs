@@ -55,11 +55,12 @@ function testTaskDecomposerConditionalHeuristic() {
 
 function testTaskDecomposerWebsiteAliasExtraction() {
   const src = read('src/renderer/src/lib/task-decomposer.ts');
-  assertIncludes(src, 'const WEBSITE_ALIAS_TO_DOMAIN:', 'task-decomposer');
-  assertIncludes(src, "amazon: 'amazon.com'", 'task-decomposer');
-  assertIncludes(src, "ebay: 'ebay.com'", 'task-decomposer');
-  assertIncludes(src, "bestbuy: 'bestbuy.com'", 'task-decomposer');
-  assertIncludes(src, 'for (const [alias, domain] of Object.entries(WEBSITE_ALIAS_TO_DOMAIN)) {', 'task-decomposer');
+  assertIncludes(src, 'const WEBSITE_CONTEXT_ALIASES:', 'task-decomposer');
+  assertIncludes(src, "amazon: 'amazon'", 'task-decomposer');
+  assertIncludes(src, "ebay: 'ebay'", 'task-decomposer');
+  assertIncludes(src, "bestbuy: 'bestbuy'", 'task-decomposer');
+  assertNotIncludes(src, "amazon: 'amazon.com'", 'task-decomposer');
+  assertIncludes(src, 'for (const [alias, label] of Object.entries(WEBSITE_CONTEXT_ALIASES)) {', 'task-decomposer');
 }
 
 function testOpenRouterBackoffIsolationAndAbortability() {
@@ -129,11 +130,6 @@ function testImmediateReplyNoToolMode() {
     'const shouldDirectAnswer = shouldPreferDirectAnswer(finalPrompt);',
     'agent-runtime'
   );
-  assertIncludes(
-    runtimeSrc,
-    'if (shouldDirectAnswer) {',
-    'agent-runtime'
-  );
 
   const llmSrc = read('src/renderer/src/lib/llm.ts');
   assertIncludes(
@@ -173,24 +169,33 @@ function testMemoryReflectorCancellationHook() {
   );
   assertIncludes(
     useAgentSrc,
-    "skipping MemoryReflector for low-signal direct prompt",
+    'const hasShortPreferenceCue =',
+    'useAgent'
+  );
+  assertIncludes(
+    useAgentSrc,
+    'const isShortButStablePreference =',
+    'useAgent'
+  );
+  assertIncludes(
+    useAgentSrc,
+    'isShortButStablePreference ||',
     'useAgent'
   );
 }
 
 function testE2EAssertionsAreStrict() {
   const realSrc = read('tests/real_e2e_test.cjs');
-  assertIncludes(realSrc, '!result.timedOut && finalResultSignals >= 1 && assistantDelta >= 1 && terminalSummarySeen', 'real-e2e');
+  assertIncludes(realSrc, '!result.timedOut && actionCardsDelta <= 1 && assistantDelta >= 1', 'real-e2e');
   assertIncludes(realSrc, '!result.timedOut && (orchestratedPath || directSingleSite)', 'real-e2e');
-  assertIncludes(realSrc, '!result.timedOut && hasProgress && hasParallel', 'real-e2e');
-  assertIncludes(realSrc, 'logsContain(/progress_update session=/i) || logsContain(/parallel_start run=/i) || logsContain(/parallel_done run=/i)', 'real-e2e');
+  assertIncludes(realSrc, '!result.timedOut && hasParallelSummary', 'real-e2e');
   assertIncludes(realSrc, '!result.timedOut && checkpointLogs.length > 0', 'real-e2e');
 
   const mockedSrc = read('tests/e2e_ui_mocked.cjs');
   assertIncludes(mockedSrc, "console.error('⚠️ Handoff test failed');", 'mocked-e2e');
   assertIncludes(mockedSrc, "console.error('❌ Plan Response missing');", 'mocked-e2e');
-  assertIncludes(mockedSrc, '\\[LLM\\]\\[Issue #19\\] recovery_json_success', 'mocked-e2e');
-  assertIncludes(mockedSrc, '\\[LLM\\]\\[Issue #19\\] recovery_xml_success', 'mocked-e2e');
+  assertIncludes(mockedSrc, 'Successfully recovered .* tool calls from content body', 'mocked-e2e');
+  assertIncludes(mockedSrc, 'Detected XML plan in content, converting to tool call', 'mocked-e2e');
   assertNotIncludes(mockedSrc, 'JSON recovery signal not visible in UI; continuing (non-blocking)', 'mocked-e2e');
   assertNotIncludes(mockedSrc, 'XML recovery signal not visible in UI; continuing (non-blocking)', 'mocked-e2e');
   assertIncludes(mockedSrc, "console.log('\\n🎉 ALL SCENARIOS PASSED');", 'mocked-e2e');
@@ -206,7 +211,7 @@ function testEvaluateToolTopLevelReturnRecovery() {
   assertIncludes(advancedSrc, 'const hasSyntaxLikeFailure =', 'advanced-tools');
   assertIncludes(advancedSrc, 'const genericEvaluateFailureWithReturn =', 'advanced-tools');
   assertIncludes(advancedSrc, 'const alreadyIifeWrapped =', 'advanced-tools');
-  assertIncludes(advancedSrc, 'recovered script by wrapping top-level return in IIFE', 'advanced-tools');
+  assertIncludes(advancedSrc, 'const wrappedScript = `(() => {\\n${script}\\n})()`;', 'advanced-tools');
 }
 
 function testLaneTimeoutsForPerceptionTools() {
@@ -226,7 +231,6 @@ function testCloseTabLastTabNoop() {
 
 function testNavigationTimeoutRecovery() {
   const navigateSrc = read('src/main/services/playwright/tools/NavigateTool.ts');
-  assertIncludes(navigateSrc, 'interactive_timeout — page usable', 'navigate-tool');
   assertIncludes(navigateSrc, 'Navigation timed out but page appears interactive.', 'navigate-tool');
   assertIncludes(navigateSrc, 'const probe = await probeReadiness(page);', 'navigate-tool');
   assertIncludes(navigateSrc, 'const outcome = classifyNavigationError(errorStr, probe);', 'navigate-tool');
@@ -246,7 +250,7 @@ function testGetStateNavigationRaceResilience() {
   assertIncludes(getStateSrc, 'const safeArgs = args ?? {};', 'get-state');
   assertIncludes(getStateSrc, 'for (let attempt = 1; attempt <= 3; attempt++) {', 'get-state');
   assertIncludes(getStateSrc, 'const readinessProbe = await probeReadinessWithRetry(page, 2, 1200);', 'get-state');
-  assertIncludes(getStateSrc, '[GetStateTool][Issue #10] page not usable before extraction', 'get-state');
+  assertIncludes(getStateSrc, '[GetStateTool] page not usable before extraction', 'get-state');
   assertIncludes(getStateSrc, "Target page, context or browser has been closed", 'get-state');
   assertIncludes(getStateSrc, "await withNavigationRecovery(() => page.evaluate(() => {", 'get-state');
 }
@@ -273,14 +277,14 @@ function testClickTextBoundedTimeoutAndFallbacks() {
   assertIncludes(clickTextSrc, "timeout: { type: 'number', description: 'Max wait in ms (default: 8000, capped to 15000)' }", 'click-text');
   assertIncludes(clickTextSrc, 'const rawTimeout = typeof safeArgs.timeout === \'number\' ? safeArgs.timeout : 8000;', 'click-text');
   assertIncludes(clickTextSrc, 'const timeout = Math.max(1500, Math.min(15000, rawTimeout));', 'click-text');
-  assertIncludes(clickTextSrc, 'recovered exact click_text via compact partial match', 'click-text');
-  assertIncludes(clickTextSrc, 'recovered click_text via keyword fallback', 'click-text');
+  assertIncludes(clickTextSrc, 'const compactFallback = normalized.length > 52 ? normalized.slice(0, 52) : normalized;', 'click-text');
+  assertIncludes(clickTextSrc, 'const keywordFallback = normalized', 'click-text');
 }
 
 function testRecoverySignalLogging() {
   const openaiSrc = read('src/renderer/src/lib/llm/openai.ts');
-  assertIncludes(openaiSrc, '[LLM][Issue #19] recovery_json_success', 'openai');
-  assertIncludes(openaiSrc, '[LLM][Issue #19] recovery_xml_success', 'openai');
+  assertIncludes(openaiSrc, "console.log('[LLM] No native tool calls found. Attempting to parse JSON from content...');", 'openai');
+  assertIncludes(openaiSrc, "console.log('[LLM] Detected XML plan in content, converting to tool call');", 'openai');
 }
 
 function testRealE2EIdleGating() {

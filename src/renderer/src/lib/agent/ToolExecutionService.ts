@@ -294,7 +294,6 @@ async function _executeWithRetry(
                 errorStr.includes("ERR_CERT_") ||
                 errorStr.includes("ERR_BLOCKED_BY")
             ) {
-                console.log(`[ToolExecutionService][Issue #2] Protocol error in ${name} — returning to agent for structured handling.`);
                 return { result: null, error: errorStr };
             }
 

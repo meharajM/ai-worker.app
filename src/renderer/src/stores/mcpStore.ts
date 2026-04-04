@@ -189,9 +189,6 @@ export const useMcpStore = create<McpState>()((set, get) => ({
             // Lazy connect: Only auto-connect on startup if we don't have cached tool schemas.
             // This prevents spawning expensive Node/Python child processes for unused servers.
             const autoConnectServers = initialServers.filter(s => s.autoConnect && s.tools.length === 0)
-            if (autoConnectServers.length > 0) {
-                console.info(`[mcpStore][Issue #5] auto_connect_start servers=${autoConnectServers.map(s => s.name).join(',')}`)
-            }
             for (const server of autoConnectServers) {
                 // Connect sequentially to avoid overwhelming
                 get().connectServer(server.id).catch(console.error)
@@ -344,7 +341,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
             }))
 
             if (server.name === 'markitdown' && isMissingRuntimeTool) {
-                console.warn('[mcpStore][Issue #5] markitdown runtime missing. autoConnect disabled to stop startup loop noise.')
+                console.warn('[mcpStore] markitdown runtime missing. autoConnect disabled.')
                 const uid = get().activeUserId
                 const storageKey = getPersistenceKey(uid)
                 const updatedServers = get().servers.map(s =>

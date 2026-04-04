@@ -56,11 +56,11 @@ export class GetStateTool extends PlaywrightTool {
                             return fallback
                         }
                         if (navigationRace) {
-                            console.warn(`[GetStateTool][Issue #10] navigation race unresolved after attempt ${attempt}, returning fallback.`);
+                            console.warn(`[GetStateTool] navigation race unresolved after attempt ${attempt}, returning fallback.`);
                         }
                         return fallback
                     }
-                    console.warn(`[GetStateTool][Issue #10] navigation race detected. retrying attempt=${attempt + 1}`);
+                    console.warn(`[GetStateTool] navigation race detected. retrying attempt=${attempt + 1}`);
                     await page.waitForLoadState('domcontentloaded', { timeout: 2000 }).catch(() => {});
                 }
             }
@@ -68,7 +68,6 @@ export class GetStateTool extends PlaywrightTool {
         }
 
         const mode = safeArgs.mode || 'fast';
-        console.info(`[GetStateTool][Issue #10/#7] start mode=${mode} includeScreenshot=${Boolean(safeArgs.screenshot)} includeTree=${Boolean(safeArgs.tree)} url=${page.url()}`);
         const includeScreenshot = safeArgs.screenshot ?? (mode === 'vision');
         const includeTree = safeArgs.tree ?? (mode === 'full');
         const useHighlighting = safeArgs.highlight ?? includeScreenshot;
@@ -79,7 +78,7 @@ export class GetStateTool extends PlaywrightTool {
         const readinessProbe = await probeReadinessWithRetry(page, 2, 1200);
         if (!readinessProbe.isUsable) {
             console.warn(
-                `[GetStateTool][Issue #10] page not usable before extraction: ${readinessProbe.reason}. Proceeding with best-effort extraction.`
+                `[GetStateTool] page not usable before extraction: ${readinessProbe.reason}. Proceeding with best-effort extraction.`
             );
         }
 

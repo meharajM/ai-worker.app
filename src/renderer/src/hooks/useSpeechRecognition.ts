@@ -229,14 +229,14 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
                     recognizerNotReadyCountRef.current += 1
                     if (now - lastRecognizerNotReadyLogAtRef.current > 30000) {
                         console.warn(
-                            `[Speech][Issue #20] Recognizer not ready; skipping capture cycle. misses=${recognizerNotReadyCountRef.current}`
+                            `[Speech] Recognizer not ready; skipping capture cycle. misses=${recognizerNotReadyCountRef.current}`
                         )
                         lastRecognizerNotReadyLogAtRef.current = now
                     }
                     return
                 }
                 if (recognizerNotReadyCountRef.current > 0) {
-                    console.info(`[Speech][Issue #20] Recognizer recovered after misses=${recognizerNotReadyCountRef.current}`)
+                    console.info(`[Speech] Recognizer recovered after misses=${recognizerNotReadyCountRef.current}`)
                     recognizerNotReadyCountRef.current = 0
                 }
 
@@ -264,7 +264,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
                         if (buffer.numberOfChannels > 0) {
                             recognizer.acceptWaveform(event.inputBuffer)
                             if (waveformNotReadyCountRef.current > 0) {
-                                console.info(`[Speech][Issue #20] Waveform processing recovered after drops=${waveformNotReadyCountRef.current}`)
+                                console.info(`[Speech] Waveform processing recovered after drops=${waveformNotReadyCountRef.current}`)
                                 waveformNotReadyCountRef.current = 0
                             }
                         }
@@ -275,7 +275,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
                             waveformNotReadyCountRef.current += 1
                             if (now - lastWaveformNotReadyLogAtRef.current > 30000) {
                                 console.warn(
-                                    `[Speech][Issue #20] Recognizer not ready in audio loop; suppressing repeats. drops=${waveformNotReadyCountRef.current}`
+                                    `[Speech] Recognizer not ready in audio loop; suppressing repeats. drops=${waveformNotReadyCountRef.current}`
                                 )
                                 lastWaveformNotReadyLogAtRef.current = now
                             }
@@ -355,7 +355,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
             component: 'useSpeechRecognition',
             details: { metadata: { state: 'initializing', useNativeSpeech, model: currentModel?.name } }
         })
-        console.info(`[Speech][Issue #20] startListening requested. native=${useNativeSpeech} model=${currentModel?.id || 'unknown'}`)
+        console.info(`[Speech] startListening requested. native=${useNativeSpeech} model=${currentModel?.id || 'unknown'}`)
 
         if (useNativeSpeech) {
             setIsInitializing(true)
@@ -469,7 +469,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     const stopListening = useCallback(async () => {
         const sessionId = useChatStore.getState().activeSessionId || 'unknown'
         addLog({ eventType: 'STATE_CHANGE', sessionId, component: 'useSpeechRecognition', details: { metadata: { state: 'listening_stopped' } } })
-        console.info('[Speech][Issue #20] stopListening requested')
+        console.info('[Speech] stopListening requested')
 
         shouldListenRef.current = false
         if (useNativeSpeech) {

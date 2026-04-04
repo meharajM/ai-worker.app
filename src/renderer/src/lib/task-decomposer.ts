@@ -63,19 +63,20 @@ const SEQUENTIAL_INTENT_PATTERN = /\b(and then|then|after that|next|finally|firs
 const CONDITIONAL_SEQUENTIAL_INTENT_PATTERN = /\b(if|unless)\b[\s\S]{0,80}\b(then|else|otherwise)\b/i;
 const OPTIONAL_CONDITIONAL_PATTERN = /\bif\s+(possible|available|you can|feasible)\b/i;
 const DEPENDENCY_CHAIN_PATTERN = /\b(then|after that|use (the )?(result|output|data) (from|of)|based on)\b/i;
-const WEBSITE_ALIAS_TO_DOMAIN: Record<string, string> = {
-  amazon: 'amazon.com',
-  ebay: 'ebay.com',
-  bestbuy: 'bestbuy.com',
-  flipkart: 'flipkart.com',
-  reuters: 'reuters.com',
-  bbc: 'bbc.com',
-  cnn: 'cnn.com',
-  redbus: 'redbus.in',
-  ajio: 'ajio.com',
-  'hacker news': 'news.ycombinator.com',
-  ycombinator: 'news.ycombinator.com',
+const WEBSITE_CONTEXT_ALIASES: Record<string, string> = {
+  amazon: 'amazon',
+  ebay: 'ebay',
+  bestbuy: 'bestbuy',
+  flipkart: 'flipkart',
+  reuters: 'reuters',
+  bbc: 'bbc',
+  cnn: 'cnn',
+  redbus: 'redbus',
+  ajio: 'ajio',
+  'hacker news': 'hacker news',
+  ycombinator: 'ycombinator',
 };
+const REGION_HINT_PATTERN = /\b(india|uk|us|usa|canada|australia|germany|france|japan|europe|global|international|intl)\b/i;
 
 function escapeRegex(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -88,10 +89,11 @@ function extractExplicitWebsiteContexts(text: string): string[] {
     if (domain) normalized.add(domain);
   }
   const lower = text.toLowerCase();
-  for (const [alias, domain] of Object.entries(WEBSITE_ALIAS_TO_DOMAIN)) {
-    const aliasPattern = new RegExp(`\\b${escapeRegex(alias)}\\b`, 'i');
-    if (aliasPattern.test(lower)) {
-      normalized.add(domain);
+  for (const [alias, label] of Object.entries(WEBSITE_CONTEXT_ALIASES)) {
+    const aliasPattern = new RegExp(`\\b${escapeRegex(alias)}(?:\\s+(india|uk|us|usa|canada|australia|germany|france|japan|europe|global|international|intl))?\\b`, 'gi');
+    for (const match of lower.matchAll(aliasPattern)) {
+      const regionHint = typeof match[1] === 'string' && REGION_HINT_PATTERN.test(match[1]) ? ` ${match[1]}` : '';
+      normalized.add(`${label}${regionHint}`.trim());
     }
   }
   return Array.from(normalized);
@@ -187,7 +189,6 @@ async function analyzeTaskWithLLM(
   // Check cache first to avoid redundant LLM calls
   const cached = getCachedAnalysis(userRequest, conversationSummary);
   if (cached) {
-    console.info(`[TaskDecomposer][Issue #4/#14/#26] Cache hit. parallel=${cached.shouldParallelize} contexts=${cached.contexts.join(',')}`);
     return cached;
   }
 
@@ -309,10 +310,6 @@ Return ONLY valid JSON, do not include any markdown formatting or conversational
       reasoning: result.reasoning || 'LLM analysis completed'
     };
 
-    console.info(
-      `[TaskDecomposer][Issue #4/#14/#26] LLM analysis completed in ${Date.now() - startedAt}ms. parallel=${analysisResult.shouldParallelize} contexts=${analysisResult.contexts.join(',')} reason="${analysisResult.reasoning}"`
-    );
-
     // Cache the result for future use
     setCachedAnalysis(userRequest, analysisResult, conversationSummary);
 
@@ -320,8 +317,6 @@ Return ONLY valid JSON, do not include any markdown formatting or conversational
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : 'Unknown error';
     const isTimeout = errorMsg.includes('timeout') || errorMsg.includes('Timeout');
-    console.error(`[TaskDecomposer][Issue #4/#14/#26] LLM analysis failed: ${errorMsg} isTimeout=${isTimeout}`);
-
     // ── Deadline-aware fallback (Issue #4) ─────────────────────────────
     // When the timeout fires, fall back to heuristic-based multi-site
     // detection instead of collapsing to single_context. This preserves
@@ -329,9 +324,6 @@ Return ONLY valid JSON, do not include any markdown formatting or conversational
     if (isTimeout) {
       const heuristicContexts = extractExplicitWebsiteContexts(userRequest);
       if (heuristicContexts.length > 1 && PARALLEL_INTENT_PATTERN.test(userRequest)) {
-        console.info(
-          `[TaskDecomposer][Issue #4] timeout_heuristic_fallback contexts=${heuristicContexts.join(',')}`
-        );
         return {
           shouldParallelize: true,
           contexts: heuristicContexts,
@@ -368,7 +360,6 @@ export async function analyzeTaskForDecomposition(
 
   // Fast path: avoid an extra decomposer LLM call for simple non-automation prompts.
   if (!hasWebsiteReference && !hasActionKeyword && userRequest.trim().length <= 220) {
-    console.info(`[TaskDecomposer][Issue #4/#14/#26] direct-short-circuit: no website/action keywords (elapsed=${Date.now() - startedAt}ms)`);
     return {
       type: 'single_context',
       contexts: ['current_page'],
@@ -387,7 +378,6 @@ export async function analyzeTaskForDecomposition(
     !SEQUENTIAL_INTENT_PATTERN.test(userRequest) &&
     estimatedActions <= 4
   ) {
-    console.info(`[TaskDecomposer][Issue #4/#14/#26] direct-single-site short-circuit: ${explicitContexts[0]} (elapsed=${Date.now() - startedAt}ms)`);
     return {
       type: 'single_context',
       contexts: explicitContexts,
@@ -411,7 +401,6 @@ export async function analyzeTaskForDecomposition(
     const containsExplicitUrls = /https?:\/\/|\b\w+\.(com|org|net|io)\b/i.test(userRequest);
 
     if (hasAssistantResults && isShortPrompt && !containsExplicitUrls) {
-      console.log('[TaskDecomposer][Issue #14/#26] short follow-up detected, keeping single-context execution.');
       return {
         type: 'single_context',
         contexts: ['current_page'],
@@ -440,9 +429,6 @@ export async function analyzeTaskForDecomposition(
     // conditional wording should remain multi-context unless EXPLICIT
     // dependency chain is present.
     if (hasParallelIntent && !hasSequentialIntent) {
-      console.info(
-        `[TaskDecomposer][Issue #14/#26] heuristic parallel decision contexts=${explicitContexts.join(',')} optionalConditional=${hasOptionalConditional} dependencyChain=${hasDependencyChain}`
-      );
       return {
         type: 'multi_context',
         contexts: explicitContexts,
@@ -459,9 +445,6 @@ export async function analyzeTaskForDecomposition(
     // default to parallel (not sequential) since the contexts are independent
     // and the conditional is advisory, not a dependency chain.
     if (!hasSequentialIntent && hasOptionalConditional && explicitContexts.length > 1) {
-      console.info(
-        `[TaskDecomposer][Issue #14] optional_conditional_parallel contexts=${explicitContexts.join(',')} — treating as independent`
-      );
       return {
         type: 'multi_context',
         contexts: explicitContexts,
@@ -475,9 +458,6 @@ export async function analyzeTaskForDecomposition(
     }
 
     if (hasSequentialIntent) {
-      console.info(
-        `[TaskDecomposer][Issue #14/#26] heuristic sequential decision contexts=${explicitContexts.join(',')} optionalConditional=${hasOptionalConditional} dependencyChain=${hasDependencyChain}`
-      );
       return {
         type: 'single_context',
         contexts: ['current_page'],
@@ -508,7 +488,6 @@ export async function analyzeTaskForDecomposition(
 
   // If LLM recommends parallel execution
   if (analysis.shouldParallelize && analysis.contexts.length > 1) {
-    console.log(`[TaskDecomposer][Issue #14/#26] LLM detected ${analysis.contexts.length} independent contexts: ${analysis.contexts.join(', ')} (elapsed=${Date.now() - startedAt}ms)`);
     return {
       type: 'multi_context',
       contexts: analysis.contexts,
@@ -520,8 +499,6 @@ export async function analyzeTaskForDecomposition(
       decisionSource: 'llm',
     };
   }
-
-  console.log(`[TaskDecomposer][Issue #14/#26] Sequential execution: ${analysis.reasoning} (elapsed=${Date.now() - startedAt}ms)`);
 
   // For backward compatibility, still check if this is a complex single-context task
   // that might benefit from a sequential sub-agent

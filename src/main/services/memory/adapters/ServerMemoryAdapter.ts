@@ -257,21 +257,18 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
         .trim()
 
       if (textContent) {
-        console.info(
-          `[ServerMemoryAdapter][Issue #1/#6] create_entities payload received (chars=${textContent.length}) preview="${previewText(textContent)}"`
-        )
         try {
           entityData = parseEntityLikePayload(textContent)
         } catch (error) {
           console.warn(
-            `[ServerMemoryAdapter][Issue #1/#6] Failed to parse create_entities response, using fallback entity: ${error instanceof Error ? error.message : String(error)}`
+            `[ServerMemoryAdapter] Failed to parse create_entities response, using fallback entity: ${error instanceof Error ? error.message : String(error)}`
           )
         }
       } else {
-        console.warn('[ServerMemoryAdapter][Issue #1/#6] create_entities returned no text content, using fallback entity')
+        console.warn('[ServerMemoryAdapter] create_entities returned no text content, using fallback entity')
       }
     } else {
-      console.warn('[ServerMemoryAdapter][Issue #1/#6] create_entities returned empty content envelope, using fallback entity')
+      console.warn('[ServerMemoryAdapter] create_entities returned empty content envelope, using fallback entity')
     }
 
     const entity: Entity = {
@@ -366,9 +363,6 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
    */
   async search(query: string, options?: SearchOptions): Promise<Entity[]> {
     this.ensureInitialized()
-    console.info(
-      `[ServerMemoryAdapter][Issue #1/#6] search_nodes start query="${query}" limit=${options?.limit ?? 'default'}`
-    )
 
     const result = await this.callTool('search_nodes', {
       query,
@@ -392,7 +386,7 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
       .join('\n')
       .trim()
     if (!textContent) {
-        console.warn('[ServerMemoryAdapter][Issue #1/#6] search_nodes returned empty text payload')
+        console.warn('[ServerMemoryAdapter] search_nodes returned empty text payload')
         return []
     }
 
@@ -409,7 +403,7 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
             } else if (Array.isArray(parsed.entities)) {
                 nodes = parsed.entities;
             } else {
-                console.warn(`[ServerMemoryAdapter][Issue #1/#6] Unexpected search response structure:`, parsed)
+                console.warn('[ServerMemoryAdapter] Unexpected search response structure:', parsed)
             }
         }
     } catch (error) {
@@ -441,13 +435,11 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
         }
         if (nodes.length === 0) {
           console.warn(
-            `[ServerMemoryAdapter][Issue #1/#6] Failed to parse search response, returning empty result set: ${error instanceof Error ? error.message : String(error)}; preview="${previewText(textContent)}"`
+            `[ServerMemoryAdapter] Failed to parse search response, returning empty result set: ${error instanceof Error ? error.message : String(error)}; preview="${previewText(textContent)}"`
           )
           return []
         }
     }
-
-    console.info(`[ServerMemoryAdapter][Issue #1/#6] search_nodes parsed nodes=${nodes.length}`)
 
     let entities = nodes.map((node: Record<string, unknown>) =>
       this.mapNodeToEntity(node)

@@ -112,6 +112,12 @@ function shouldPreferDirectAnswer(prompt: string): boolean {
     );
   if (actionOrEnvironmentIntent) return false;
 
+  const contextBoundIntent =
+    /\b(page|screen|document|attachment|image|screenshot|pr|pull request|diff|commit|branch|code snippet)\b/.test(
+      p
+    );
+  if (contextBoundIntent) return false;
+
   // Current/live data should remain tool-grounded.
   const realtimeIntent =
     /\b(today|latest|current|now|weather|temperature|stock|price|news|score|live|exchange rate|market)\b/.test(
@@ -180,9 +186,6 @@ export class AgentRuntime implements IAgentClient {
     userContent: string,
     attachments?: { name: string; path: string; type: string }[]
   ): Promise<LLMMessage> {
-    console.info(
-      `[AgentRuntime][Issue #11/#12/#16/#27] run_start agent=${this.agentInstanceId} session=${this.options.activeSessionId} isSubAgent=${Boolean(this.options.isSubAgent)} promptChars=${userContent.length}`
-    );
     let finalPrompt = userContent;
 
 
@@ -305,12 +308,6 @@ export class AgentRuntime implements IAgentClient {
             }))
         );
 
-      if (shouldDirectAnswer) {
-        console.info(
-          `[AgentRuntime][Issue #4/#27] skipping_decomposition_for_direct_answer agent=${this.agentInstanceId} session=${this.options.activeSessionId}`
-        );
-      }
-
       if (decomposition.shouldFork && decomposition.type === "multi_context") {
         // ── Emit progress for parallel orchestration path ────────────────────
         const ctxCount = decomposition.contexts?.length || 1;
@@ -409,11 +406,6 @@ export class AgentRuntime implements IAgentClient {
       const serverInfo = this._getServerInfo();
       const dynamicRules = await this._getDynamicRules();
 
-      if (disableToolsThisIteration) {
-        console.info(
-          `[AgentRuntime][Issue #27] direct_answer_mode agent=${this.agentInstanceId} session=${this.options.activeSessionId}`
-        );
-      }
       console.log(`[AgentRuntime] Iteration ${iterationCount + 1}: Calling LLM...`);
       let response: LLMResponse;
 
@@ -549,9 +541,6 @@ export class AgentRuntime implements IAgentClient {
           resultStr = result;
         } else if (call.name === "delegate_sub_task") {
           if (this.options.isSubAgent) {
-            console.warn(
-              `[AgentRuntime][Issue #16] nested_delegate_blocked agent=${this.agentInstanceId} session=${this.options.activeSessionId}`
-            );
             resultStr = "Nested delegation is disabled inside sub-agents. Complete the current sub-task directly.";
           } else {
             const { result, planUpdate } = await this.specialHandlers.handleDelegateSubTask(call.arguments, this.executionPlan);
@@ -624,9 +613,6 @@ export class AgentRuntime implements IAgentClient {
         // blocked by workspace selection, stop issuing new write attempts and
         // explicitly hand control back to the user.
         if (isWriteAwaitingApproval(call.name, truncated)) {
-          console.warn(
-            `[AgentRuntime][Issue #11] staged_write_pause agent=${this.agentInstanceId} session=${this.options.activeSessionId} tool=${call.name} callId=${call.id}`
-          );
           const pauseMsg: LLMMessage = {
             role: "assistant",
             content:
@@ -697,9 +683,6 @@ export class AgentRuntime implements IAgentClient {
         response.toolCalls.every((call) => call.name === "delegate_sub_task");
 
       if (parallelDelegateBatch) {
-        console.info(
-          `[AgentRuntime][Issue #13/#14/#26] parallel_delegate_batch size=${response.toolCalls.length} agent=${this.agentInstanceId}`
-        );
         // Keep same-turn delegate_sub_task calls parallel for multi-site workflows.
         // This restores expected behavior while preserving sequential execution for
         // all other tool categories.
@@ -707,11 +690,6 @@ export class AgentRuntime implements IAgentClient {
         const bailout = results.find((r) => r && r.role === "assistant");
         if (bailout) return bailout as LLMMessage;
       } else {
-        if (response.toolCalls.some((call) => call.name === "delegate_sub_task")) {
-          console.info(
-            `[AgentRuntime][Issue #13/#14/#26] non_parallel_delegate_path size=${response.toolCalls.length} names=${response.toolCalls.map((c) => c.name).join(',')}`
-          );
-        }
         // Execute non-delegation calls sequentially in emission order.
         for (const call of response.toolCalls) {
           const maybeBailout = await executeToolCall(call);
@@ -861,9 +839,6 @@ export class AgentRuntime implements IAgentClient {
 
   private _handleMaxIterations(finalPrompt: string): LLMMessage {
     if (this.options.isSubAgent) throw new Error("Max iterations reached");
-    console.warn(
-      `[AgentRuntime][Issue #27] max_iterations_reached agent=${this.agentInstanceId} session=${this.options.activeSessionId} max=${this.maxIterations} promptPreview="${finalPrompt.slice(0, 120)}"`
-    );
     const handoffMsg: LLMMessage = {
       role: "assistant",
       content: `I've reached the maximum number of steps (${this.maxIterations}) for this context. To ensure accuracy and prevent context issues, I've saved a checkpoint of my progress. Should I continue with a fresh context or stop here?`,
@@ -889,11 +864,6 @@ export class AgentRuntime implements IAgentClient {
     // Incrementally track context size (avoid full JSON.stringify)
     const contentLen = typeof msg.content === 'string' ? msg.content.length : JSON.stringify(msg.content ?? '').length;
     this._estimatedContextBytes += contentLen + 50; // +50 for role, metadata overhead
-    if (msg.role === "assistant" && (msg as LLMMessage & { isFinalResult?: boolean }).isFinalResult) {
-      console.info(
-        `[AgentRuntime][Issue #12/#27] final_result_emitted agent=${this.agentInstanceId} session=${this.options.activeSessionId} contentChars=${contentLen}`
-      );
-    }
     return this.options.onMessage?.(msg);
   }
 

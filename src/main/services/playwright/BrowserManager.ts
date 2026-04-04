@@ -159,10 +159,8 @@ export class BrowserManager {
 
         // Serialize concurrent ensureBrowser() calls behind a single promise
         if (this.initializationPromise) {
-            console.info('[BrowserManager][Issue #8] Reusing in-flight browser initialization promise.');
             await this.initializationPromise;
             if (!this.context || (this as any)._isContextClosed) {
-                console.warn('[BrowserManager][Issue #8] In-flight initialization finished without active context. Retrying launch.');
                 this.initializationPromise = null;
                 (this as any)._isContextClosed = false;
                 return this.ensureBrowser();
@@ -176,12 +174,10 @@ export class BrowserManager {
                 const msSinceClose = Date.now() - this._lastCloseTimestamp;
                 if (this._lastCloseTimestamp > 0 && msSinceClose < this.LAUNCH_COOLDOWN_MS) {
                     const waitMs = this.LAUNCH_COOLDOWN_MS - msSinceClose;
-                    console.info(`[BrowserManager][Issue #8] launch cooldown: waiting ${waitMs}ms to avoid thrash.`);
                     await new Promise(resolve => setTimeout(resolve, waitMs));
                 }
 
                 console.log('[BrowserManager] Launching browser...');
-                const launchStartedAt = Date.now();
                 const dataDirName = (this as any)._useHeadlessDirForHeaded ? 'playwright_data_headless' : 'playwright_data';
                 const userDataDir = path.join(app.getPath('userData'), dataDirName);
 
@@ -219,7 +215,6 @@ export class BrowserManager {
 
                 const fallbackOrder = getFallbackOrder();
                 const browserAttempts = [browserType, ...fallbackOrder.filter(b => b !== browserType)];
-                console.info(`[BrowserManager][Issue #8] launch_attempts=${browserAttempts.join(' -> ')} headless=${headless}`);
 
                 let lastError: Error | null = null;
 
@@ -294,14 +289,12 @@ export class BrowserManager {
                         }
 
                         console.log(`[BrowserManager] ✅ Browser launched: ${tryBrowser}`);
-                        console.info(`[BrowserManager][Issue #8] launch_success browser=${tryBrowser} elapsedMs=${Date.now() - launchStartedAt}`);
                         this.context!.on('close', () => {
                             (this as any)._isContextClosed = true;
                             this.context = null;
                             this.page = null;
                             this.initializationPromise = null;
                             this._lastCloseTimestamp = Date.now();
-                            console.warn('[BrowserManager][Issue #8] context closed; future tool calls will trigger re-launch (cooldown active).');
                         });
                         return; 
                     } catch (err) {

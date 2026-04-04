@@ -45,7 +45,6 @@ export class EvaluateTool extends PlaywrightTool {
                 const wrappedScript = `(() => {\n${script}\n})()`;
                 try {
                     const recoveredResult = await page.evaluate(wrappedScript);
-                    console.info('[EvaluateTool][Issue #26] recovered script by wrapping top-level return in IIFE');
                     return { result: recoveredResult };
                 } catch (wrappedError) {
                     return {

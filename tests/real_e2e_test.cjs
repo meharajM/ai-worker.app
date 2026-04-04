@@ -711,12 +711,10 @@ async function setDetailedVisibility(window, enabled) {
                     .catch(() => -1);
                 const actionCardsDelta = Math.max(0, actionCardsAfter - actionCardsBefore);
                 const assistantDelta = Math.max(0, assistantAfter - assistantBefore);
-                const finalResultSignals = logsCount(/\[useAgent\]\[Issue #12\/#27\] onMessage(?:Update)? session=.*isFinalResult=true/i);
-                const terminalSummarySeen = logsContain(/sequential_done|parallel_done|final_result_emitted/i);
                 recordResult(
                     'S21A: Single Bubble (all tools in one card)',
-                    !result.timedOut && finalResultSignals >= 1 && assistantDelta >= 1 && terminalSummarySeen,
-                    `Action-card delta: ${actionCardsDelta}. Assistant-bubble delta: ${assistantDelta}. Final-result signals: ${finalResultSignals}. Terminal summary: ${terminalSummarySeen}. Completed in ${result.durationS}s`
+                    !result.timedOut && actionCardsDelta <= 1 && assistantDelta >= 1,
+                    `Action-card delta: ${actionCardsDelta}. Assistant-bubble delta: ${assistantDelta}. Completed in ${result.durationS}s`
                 );
             }
 
@@ -797,12 +795,15 @@ async function setDetailedVisibility(window, enabled) {
                 });
                 await screenshot(window, 's21c-progress-parallel');
 
-                const hasProgress = logsContain(/progress_update session=/i) || logsContain(/parallel_start run=/i) || logsContain(/parallel_done run=/i);
-                const hasParallel = logsContain('parallel') || logsContain('Parallel') || logsContain('3 contexts');
+                const hasParallelSummary = await window
+                    .locator('text=/Results from 3 sources|Parallel Execution/i')
+                    .first()
+                    .isVisible()
+                    .catch(() => false);
                 recordResult(
                     'S21C: Progress Bar — Parallel',
-                    !result.timedOut && hasProgress && hasParallel,
-                    `Progress signals: ${hasProgress}. Parallel detected: ${hasParallel}. Completed in ${result.durationS}s`
+                    !result.timedOut && hasParallelSummary,
+                    `Parallel summary visible: ${hasParallelSummary}. Completed in ${result.durationS}s`
                 );
             }
         }

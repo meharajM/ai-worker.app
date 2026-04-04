@@ -53,7 +53,6 @@ export class ClickTextTool extends PlaywrightTool {
         // hidden punctuation/line breaks; try compact partial matching before failing.
         const compactFallback = normalized.length > 52 ? normalized.slice(0, 52) : normalized;
         if (exactMatch && compactFallback.length >= 8 && await clickUsingText(compactFallback, false)) {
-            console.warn(`[ClickTextTool][Issue #27/#7] recovered exact click_text via compact partial match: "${compactFallback}"`);
             return { result: `Clicked element with partial text fallback "${compactFallback}" (from exact request)` };
         }
 
@@ -63,7 +62,6 @@ export class ClickTextTool extends PlaywrightTool {
             .slice(0, 4)
             .join(' ');
         if (keywordFallback.length >= 8 && await clickUsingText(keywordFallback, false)) {
-            console.warn(`[ClickTextTool][Issue #27/#7] recovered click_text via keyword fallback: "${keywordFallback}"`);
             return { result: `Clicked element with keyword fallback "${keywordFallback}"` };
         }
 

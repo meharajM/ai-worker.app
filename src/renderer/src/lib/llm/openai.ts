@@ -1,7 +1,7 @@
 import { LLMMessage, LLMSettings, LLMTool, LLMResponse, ServerInfo } from "../types";
 import { ProviderStatus } from "./types";
 import { LLM_CONFIG, FEATURE_FLAGS } from "../constants";
-import { ensureRecord, parseToolCallsFromJson, getEnvFallback } from "./utils";
+import { ensureRecord, parseToolCallsFromJson, parseToolCallsFromXml, getEnvFallback } from "./utils";
 import { buildSystemPrompt } from "./prompts";
 
 const openRouterBackoffUntilByKey = new Map<string, number>();
@@ -21,15 +21,6 @@ function getOpenRouterBackoffKey(baseUrl: string, model: string): string {
 
 function getOpenRouterBackoffUntil(key: string): number {
   return openRouterBackoffUntilByKey.get(key) ?? 0;
-}
-
-function redactHeadersForLogs(headers: Record<string, string>): Record<string, string> {
-  const copy = { ...headers };
-  if (copy.Authorization?.startsWith("Bearer ")) {
-    const token = copy.Authorization.slice("Bearer ".length);
-    copy.Authorization = `Bearer ${token.slice(0, 6)}...${token.slice(-4)}`;
-  }
-  return copy;
 }
 
 async function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
@@ -493,14 +484,6 @@ export // Call OpenAI-compatible API
       : {}),
   });
 
-  console.log(`[LLM Chat] URL: ${baseUrl}/chat/completions`);
-  console.log(`[LLM Chat] Headers:`, JSON.stringify(redactHeadersForLogs(headers), null, 2));
-  if (import.meta.env.DEV) {
-    console.log(`[LLM Chat] Request Body for ${model}:`, body);
-  } else {
-    console.log(`[LLM Chat] Request Body for ${model}: <${body.length} chars>`);
-  }
-  
   await waitForOpenRouterBackoff(isOpenRouter, model, openRouterBackoffKey, abortSignal);
 
   const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -515,11 +498,9 @@ export // Call OpenAI-compatible API
       console.error(`[LLM Chat] 404 Error: OpenAI-compatible endpoint not found at ${baseUrl}/chat/completions`);
     }
     const error = response ? await response.json().catch(() => ({})) : { error: "Fetch failed" };
-    const bodyPreview =
-      body.length > 1500
-        ? `${body.slice(0, 1500)}... <truncated ${body.length - 1500} chars>`
-        : body;
-    const errorMessage = `OpenAI error (${response?.status}): ${JSON.stringify(error)} | Body: ${bodyPreview}`;
+    const errorMessage =
+      error?.error?.message ||
+      `OpenAI error (${response?.status ?? "unknown"}): ${response?.statusText || "Unknown error"}`;
 
     // Retry a few times on provider throttling to reduce flaky delegate_sub_task failures.
     if (response?.status === 429 && retryCount < 2) {
@@ -652,15 +633,23 @@ export // Call OpenAI-compatible API
         if (recovered && recovered.length > 0) {
           toolCalls = recovered;
           console.log(`[LLM] Successfully recovered ${toolCalls.length} tool calls from content body.`);
-          console.log(`[LLM][Issue #19] recovery_json_success count=${toolCalls.length}`);
         }
+      }
+    }
+
+    // Recover XML-wrapped tool payloads when JSON recovery did not produce calls.
+    // Common model shape: <tools>{"name":"tool_name","params":{...}}</tools>
+    if ((!toolCalls || toolCalls.length === 0) && content && /<tools?>/i.test(content)) {
+      const recovered = parseToolCallsFromXml(content);
+      if (recovered && recovered.length > 0) {
+        toolCalls = recovered;
+        console.log(`[LLM] Successfully recovered ${toolCalls.length} tool calls from XML content.`);
       }
     }
 
     // Check for XML Plan (Legacy/Model Hallucination Fallback) — only if JSON didn't match
     if ((!toolCalls || toolCalls.length === 0) && content && content.includes('<agent_plan>')) {
       console.log('[LLM] Detected XML plan in content, converting to tool call');
-      console.log('[LLM][Issue #19] recovery_xml_success tool=create_execution_plan');
       toolCalls = [{
         id: `auto_plan_${Date.now()}`,
         name: 'create_execution_plan',
