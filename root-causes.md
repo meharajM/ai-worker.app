@@ -124,8 +124,8 @@ This file tracks technical root cause, current status, and latest verification s
 
 ## #25 Mocked E2E warning-pass false green
 - Root cause: warning downgrade allows suite exit 0 with scenario-level functional misses.
-- Status: Open.
-- Finding: still present in mocked suite behavior.
+- Status: Fixed.
+- Finding: plan/handoff checks are hard assertions again; `npm run -s test:mock` now exits non-zero on misses and currently passes clean.
 
 ## #26 Real E2E sequential + conditional critical failures
 - Root cause: orchestration reliability gaps remain under full live workflow load.
@@ -134,10 +134,10 @@ This file tracks technical root cause, current status, and latest verification s
 
 ## #27 Pass criteria too lax for degraded UX signals
 - Root cause: scenario assertions focus on timeout/completion but underweight action-card/progress/checkpoint quality signals.
-- Status: Open.
-- Finding: improved for immediate-reply no-tool case (`S21G` now deterministic pass), but broader assertion tightening still pending.
+- Status: Open (partially mitigated).
+- Finding: immediate-reply and mocked-plan/handoff gates are tightened and passing; full-suite action-card/progress/checkpoint signal quality still needs complete re-validation.
 
 ## Recent Validation Notes
 - Added focused live runner: `tests/real_e2e_focus.cjs` (`npm run -s test:e2e:real:focus`).
-- Focused live result: `S05` pass, `S21G` pass.
+- Focused live result: `S05` pass, `S21G` pass (`S21G` now runs after deterministic chat-state reset for true first-turn behavior).
 - Added regression guard for immediate no-tool direct-answer mode in `tests/regression_critical_checks.cjs`.

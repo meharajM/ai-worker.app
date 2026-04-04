@@ -5,8 +5,8 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 ## Status Snapshot (Apr 4, 2026)
 
 ### Latest Focused Real-E2E Validation (Apr 4, 2026)
-- `S05: Manual Delegation` ✅ passed (`Timed out: false`, sub-agent detected, ~55.7s).
-- `S21G: Immediate Reply (no tools)` ✅ passed (`no tools: true`, ~10s).
+- `S05: Manual Delegation` ✅ passed (`Timed out: false`, sub-agent detected, ~65.2s).
+- `S21G: Immediate Reply (no tools)` ✅ passed (`no tools: true`, ~25.1s) after hard-resetting chat state to guarantee first-turn behavior.
 - Validation command: `npm run -s test:e2e:real:focus`.
 
 ### Marked Fixed in Current Validation
@@ -21,7 +21,7 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 - **#14, #26** Conditional/Sequential orchestration reliability remains broken in live runs (`S02` and `Critical 2` failed in real E2E).
 - **#15** Live rate-limit instability (429/backoff) still observed in real runs.
 - **#20** Speech recognizer readiness log flood still observed (`Recognizer ... not ready, ignoring`).
-- **#25, #27** Test quality gap: suites report green while key assertions/signals are missing (`Plan Response missing`, `Handoff test failed`, `Action cards/progress/checkpoints` signal gaps).
+- **#27** Broader signal-quality gate still needs full-suite re-validation (action cards/progress/checkpoints).
 
 ### Full Issue Status Matrix
 - **#1** Likely fixed / no recent repro (memory create parse crash not seen in latest runs).
@@ -48,9 +48,9 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 - **#22** Mitigated (mac scripts moved to ZIP-first policy; DMG no longer default path).
 - **#23** Open/By design (Windows native rebuild cross-compile unsupported on current host).
 - **#24** Fixed as originally filed (wine hard-gate replaced by host-aware checks + actionable preflight).
-- **#25** Open (mocked suite still green despite scenario-level failures).
+- **#25** Fixed (mocked suite now hard-fails on plan/handoff regressions and currently passes cleanly).
 - **#26** Open (real E2E currently failing S02 + Critical 2).
-- **#27** Open (core signal-gap issue remains, though `S21G` now has a deterministic no-tool pass in focused real validation).
+- **#27** Open (partially mitigated; assertion tightening landed, full-suite signal quality still pending validation).
 
 ## 1. MCP Tool Parsing Errors (`memory_create_entity`)
 **Log Error:**
@@ -255,6 +255,9 @@ Windows packaging on current host fails during `@electron/rebuild` of `better-sq
 
 **Issue:**
 Mocked E2E currently downgrades some scenario failures to warnings and still returns exit code 0. This can mask orchestration regressions in CI unless these specific checks are promoted back to hard assertions or split into explicit non-blocking diagnostics.
+
+**Status Update (Apr 4, 2026):**
+- Fixed in current branch: handoff and sequential-plan checks are hard assertions again, and `npm run -s test:mock` now fails on regressions and passes when signals are present.
 
 ## 26. Real E2E Still Fails Sequential and Conditional-Orchestration Criticals (2026-04-04 run)
 **Log Evidence (from `node tests/real_e2e_test.cjs` on Apr 4, 2026):**

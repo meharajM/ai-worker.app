@@ -79,6 +79,16 @@ async function startNewChat(window) {
   clearLogs();
 }
 
+async function resetChatState(window) {
+  await window.evaluate(() => {
+    localStorage.removeItem('ai-worker-chat-v3');
+  });
+  await window.reload();
+  await window.waitForLoadState('domcontentloaded');
+  await window.locator('button[title="Start Voice Mode"]').waitFor({ state: 'visible', timeout: 15000 });
+  clearLogs();
+}
+
 async function screenshot(window, name) {
   if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
   await window.screenshot({ path: path.join(SCREENSHOT_DIR, `${name}.png`) });
@@ -185,7 +195,8 @@ async function screenshot(window, name) {
   push('S05: Manual Delegation', !s05.timedOut && s05HasSubAgent, `Timed out: ${s05.timedOut}, sub-agent seen: ${s05HasSubAgent}, duration: ${s05.durationS}s`);
 
   console.log('\n📋 Focus Scenario: S21G Immediate Reply');
-  await startNewChat(window);
+  // Hard reset chat store to guarantee first-turn behavior for this scenario.
+  await resetChatState(window);
   const s21g = await sendPromptAndWait(
     window,
     'What is the difference between TCP and UDP?',
