@@ -105,7 +105,8 @@ export async function chat(
   abortSignal?: AbortSignal,
   dynamicRules?: string,
   isSubAgent = false,
-  workspacePath?: string
+  workspacePath?: string,
+  includePlanTool = true
 ): Promise<LLMResponse> {
   // Apply Dynamic Context Pruning (DCP)
   const prunedMessages = pruneContext(messages);
@@ -166,9 +167,13 @@ export async function chat(
   const messagesWithSystem = [...prunedMessages];
   const systemMsgIndex = messagesWithSystem.findIndex((m) => m.role === "system");
 
-  // MERGE default tools with the new CREATE_PLAN_TOOL (and deduplicate)
+  // MERGE default tools with CREATE_PLAN_TOOL (and deduplicate)
+  // `includePlanTool=false` is used for direct-answer turns where NO tool
+  // execution should occur (e.g., pure knowledge Q&A).
   const toolMap = new Map<string, LLMTool>();
-  toolMap.set(CREATE_PLAN_TOOL.name, CREATE_PLAN_TOOL);
+  if (includePlanTool) {
+    toolMap.set(CREATE_PLAN_TOOL.name, CREATE_PLAN_TOOL);
+  }
   if (tools) {
     tools.forEach(t => toolMap.set(t.name, t));
   }

@@ -27,6 +27,8 @@ import { LLMMessage } from "./types";
 export class MemoryReflector {
     private static instance: MemoryReflector;
     private isAnalyzing = false;
+    private activeRunId = 0;
+    private currentAbortController: AbortController | null = null;
 
     private constructor() { }
 
@@ -37,18 +39,29 @@ export class MemoryReflector {
         return MemoryReflector.instance;
     }
 
+    cancel(reason = 'new prompt'): void {
+        if (!this.isAnalyzing) return;
+        console.log(`[MemoryReflector] Cancelling active analysis (${reason})`);
+        this.currentAbortController?.abort();
+        this.isAnalyzing = false;
+        this.currentAbortController = null;
+    }
+
     /**
      * Fire-and-forget analysis of recent conversation history.
      */
     async analyze(recentHistory: LLMMessage[], settings: Record<string, unknown> | null | undefined) {
-        if (this.isAnalyzing) {
-            console.log('[MemoryReflector] Skipping analysis - already busy');
-            return;
-        }
-
         // Only analyze if there's substantial new content
         if (recentHistory.length < 2) return;
 
+        if (this.isAnalyzing) {
+            console.log('[MemoryReflector] Cancelling previous analysis in favor of latest context');
+            this.currentAbortController?.abort();
+        }
+
+        const runId = ++this.activeRunId;
+        const abortController = new AbortController();
+        this.currentAbortController = abortController;
         this.isAnalyzing = true;
         console.log('[MemoryReflector] Starting background analysis...');
 
@@ -62,6 +75,7 @@ export class MemoryReflector {
             const reflectorAgent: IAgentClient = new AgentRuntime({
                 settings,
                 isSubAgent: true,
+                signal: abortController.signal,
                 // We don't listen to messages, just results
                 onMessage: (_msg: LLMMessage) => {
                     // console.log('[MemoryReflector] Internal thought:', _msg.content);
@@ -124,9 +138,16 @@ GOAL: Extract Facts & State. No Narratives. No Meta-Commentary.
             }
 
         } catch (error) {
-            console.warn('[MemoryReflector] Background analysis failed (non-fatal):', error);
+            if (abortController.signal.aborted) {
+                console.log('[MemoryReflector] Analysis aborted (superseded by newer prompt)');
+            } else {
+                console.warn('[MemoryReflector] Background analysis failed (non-fatal):', error);
+            }
         } finally {
-            this.isAnalyzing = false;
+            if (runId === this.activeRunId) {
+                this.isAnalyzing = false;
+                this.currentAbortController = null;
+            }
         }
     }
 }

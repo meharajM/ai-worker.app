@@ -2,6 +2,56 @@
 
 This log contains the issues tracked during end-to-end testing of the AI Worker execution flow.
 
+## Status Snapshot (Apr 4, 2026)
+
+### Latest Focused Real-E2E Validation (Apr 4, 2026)
+- `S05: Manual Delegation` ✅ passed (`Timed out: false`, sub-agent detected, ~55.7s).
+- `S21G: Immediate Reply (no tools)` ✅ passed (`no tools: true`, ~10s).
+- Validation command: `npm run -s test:e2e:real:focus`.
+
+### Marked Fixed in Current Validation
+- **#11** `fs_write_file` infinite loop under staged/approval flow  
+  Evidence: `Critical 4: File Write Loop Safety` passed (`Infinite fs loop: false`).
+- **#12** Detailed visibility OFF final-output mismatch  
+  Evidence: `Critical 3: Detailed Visibility OFF Final Output` passed (`Checklist failed badge visible: false`).
+- **#13** Parallel delegation regression (single-worker behavior)  
+  Evidence: `Critical 1: delegate_sub_task Parallelism` passed (`Delegate signals: 2`, no max-iteration failure).
+
+### Still Open / Blocking
+- **#14, #26** Conditional/Sequential orchestration reliability remains broken in live runs (`S02` and `Critical 2` failed in real E2E).
+- **#15** Live rate-limit instability (429/backoff) still observed in real runs.
+- **#20** Speech recognizer readiness log flood still observed (`Recognizer ... not ready, ignoring`).
+- **#25, #27** Test quality gap: suites report green while key assertions/signals are missing (`Plan Response missing`, `Handoff test failed`, `Action cards/progress/checkpoints` signal gaps).
+
+### Full Issue Status Matrix
+- **#1** Likely fixed / no recent repro (memory create parse crash not seen in latest runs).
+- **#2** Open (site/protocol navigation instability still possible on retail targets).
+- **#3** Open (fallback quality still weaker than stable direct navigation).
+- **#4** Mitigated/Needs re-test (manual delegation timeout no longer reproduced in focused real run; broader decomposition timeout risk still possible).
+- **#5** Mitigated (MarkItDown auto-connect loop/noise reduced when runtime tool missing).
+- **#6** Likely fixed / no recent repro (startup memory parse failure not observed in latest suite runs).
+- **#7** Open (navigation/wait timeouts still appear under live scenarios).
+- **#8** Needs re-test (no strong fresh evidence of launch thrash in current run).
+- **#9** Open (navigate timeouts still appear in live real E2E traces).
+- **#10** Needs re-test (no fresh `execution context destroyed` repro in latest run).
+- **#11** Fixed (validated).
+- **#12** Fixed (validated).
+- **#13** Fixed (validated).
+- **#14** Open (validated failing in real E2E).
+- **#15** Open (validated by repeated 429/backoff in live runs).
+- **#16** Open (partially mitigated: reflector cancellation hook added, but residual background activity can still appear around prompt boundaries).
+- **#17** Fixed (cache API guard added; no startup crash signal in recent runs).
+- **#18** Likely fixed (CSP duplication signal not seen in latest startup logs).
+- **#19** Open (recovery visibility warnings still present in mocked E2E).
+- **#20** Open (recognizer readiness log flood persists).
+- **#21** Fixed (bundle-integrity + `test:build` now pass).
+- **#22** Mitigated (mac scripts moved to ZIP-first policy; DMG no longer default path).
+- **#23** Open/By design (Windows native rebuild cross-compile unsupported on current host).
+- **#24** Fixed as originally filed (wine hard-gate replaced by host-aware checks + actionable preflight).
+- **#25** Open (mocked suite still green despite scenario-level failures).
+- **#26** Open (real E2E currently failing S02 + Critical 2).
+- **#27** Open (core signal-gap issue remains, though `S21G` now has a deterministic no-tool pass in focused real validation).
+
 ## 1. MCP Tool Parsing Errors (`memory_create_entity`)
 **Log Error:**
 `[MCP Renderer ERROR] Tool call failed {operation: executeToolCall, toolName: memory_create_entity, serverId: <id>, error: Failed to parse create_entities response: Unexpected letter after JSON at position 216...}`
@@ -196,3 +246,30 @@ Windows packaging on current host fails during `@electron/rebuild` of `better-sq
 
 **Issue:**
 `build:win*` and `rebuild:win*` npm scripts are hard-gated by `check:wine`, causing immediate failures in environments without `wine`, before any packaging fallback/path-specific handling can occur.
+
+## 25. Mocked E2E Contains Hidden Assertion Failures While Suite Exits Green
+**Log Evidence (from `npm run -s test:mock`):**
+- `⚠️ Handoff test failed`
+- `❌ Plan Response missing`
+- Final line still reports success: `🎉 ALL SCENARIOS PASSED (with handled warnings)`
+
+**Issue:**
+Mocked E2E currently downgrades some scenario failures to warnings and still returns exit code 0. This can mask orchestration regressions in CI unless these specific checks are promoted back to hard assertions or split into explicit non-blocking diagnostics.
+
+## 26. Real E2E Still Fails Sequential and Conditional-Orchestration Criticals (2026-04-04 run)
+**Log Evidence (from `node tests/real_e2e_test.cjs` on Apr 4, 2026):**
+- `❌ S02: Sequential Orchestration — Plan created: false ... Timed out after 180.5s`
+- `❌ Critical 2: Conditional Multi-Site Decomposition — Completed: false ... Timed out after 195.2s`
+- Final summary: `Total: 20 | Passed: 18 | Failed: 2`
+
+**Issue:**
+Core orchestration behavior is still unstable in live flow: sequential planning can fail to materialize and conditional multi-site decomposition still misses expected branching/delegation. This remains a release blocker for production-like real runs.
+
+## 27. Multiple "Pass" Scenarios Are Reporting Degraded Signals (False-Positive Risk)
+**Log Evidence (same Apr 4, 2026 real suite):**
+- `✅ S21A ... Action cards: 0 (expected 1)`
+- `✅ S21C ... Progress signals: false`
+- `✅ S15 ... Checkpoints fired: 0`
+
+**Issue:**
+Several scenarios are marked passed while key acceptance signals are missing. This weakens regression detection and can allow UX-level breakages (progress/action-card/checkpoint visibility) to ship unnoticed unless pass criteria are tightened.

@@ -205,6 +205,10 @@ export function useAgent(): UseAgentReturn {
 
                 // ── Step 3: Dynamically import AgentRuntime ────────────────────────
                 const { AgentRuntime } = await import("../lib/agent-runtime");
+                const { MemoryReflector } = await import("../lib/memory-reflector");
+                // Stop any previous background reflector run so prompt-local logs/results
+                // don't bleed into the new user request lifecycle.
+                MemoryReflector.getInstance().cancel('prompt-restart');
 
                 if (targetJid) {
                     console.log(`[useAgent] WhatsApp flow detected/enabled. JID: ${targetJid}`);
@@ -313,22 +317,7 @@ export function useAgent(): UseAgentReturn {
                     reconstructedHistory
                 );
 
-                // ── Step 5: Fire-and-forget background memory reflection ───────────
-                // WHY started BEFORE awaiting runtime.chat(): Captures the user's intent
-                // even if the agent gets stuck or fails early.
-                // WHY read originSessionId's messages: The user may have switched to
-                // another session by the time the dynamic import resolves.
-                import("../lib/memory-reflector").then(({ MemoryReflector }) => {
-                    const sessionMessages =
-                        useChatStore.getState().sessions.find(s => s.id === originSessionId)?.messages ?? [];
-                    const historyForReflector: LLMMessage[] = sessionMessages.map((m) => ({
-                        role: m.role as "user" | "assistant" | "system",
-                        content: m.content,
-                    }));
-                    MemoryReflector.getInstance().analyze(historyForReflector, settingsForLLM);
-                });
-
-                // ── Step 6: Run the agent ──────────────────────────────────────────
+                // ── Step 5: Run the agent ──────────────────────────────────────────
                 // When the incoming message has multimodal content (WhatsApp image/audio),
                 // we pass the resolved LLMMessage content instead of the raw text string.
                 // This ensures the LLM receives the actual media parts, not "[Media Message]".
@@ -340,7 +329,7 @@ export function useAgent(): UseAgentReturn {
                 const agentAttachments = userLLMMessage?.attachments ?? attachmentData;
                 const llmResponse = await runtime.chat(agentContent, agentAttachments);
 
-                // ── Step 7: Handle Outbound WhatsApp Messages ──────────────────────
+                // ── Step 6: Handle Outbound WhatsApp Messages ──────────────────────
                 // If WhatsApp mode is enabled, we need to send the final assistant response
                 // back to the remote user via IPC.
                 if (targetJid) {
@@ -349,6 +338,16 @@ export function useAgent(): UseAgentReturn {
                 } else {
                     console.log(`[useAgent] No targetJid resolved for this prompt. Skipping WhatsApp delivery.`);
                 }
+
+                // ── Step 7: Fire-and-forget memory reflection (post-response) ──────
+                // Run after completion to reduce cross-prompt overlap in logs and UI.
+                const sessionMessages =
+                    useChatStore.getState().sessions.find(s => s.id === originSessionId)?.messages ?? [];
+                const historyForReflector: LLMMessage[] = sessionMessages.map((m) => ({
+                    role: m.role as "user" | "assistant" | "system",
+                    content: m.content,
+                }));
+                MemoryReflector.getInstance().analyze(historyForReflector, settingsForLLM);
 
             } catch (error) {
                 console.error("[useAgent] Handler error:", error);

@@ -639,7 +639,8 @@ export // Call OpenAI-compatible API
   // WHY always (not just useJsonFallback): some models (and test mocks) return an empty
   // tool_calls array but embed the tool call as a JSON blob in the content field.
   // Attempting JSON recovery here is safe — it only fires when toolCalls is empty.
-  if (!toolCalls || toolCalls.length === 0) {
+  const toolRecoveryAllowed = Boolean(tools && tools.length > 0);
+  if ((!toolCalls || toolCalls.length === 0) && toolRecoveryAllowed) {
     if (content) {
       const mayContainStructuredToolPayload =
         /```json/i.test(content) ||

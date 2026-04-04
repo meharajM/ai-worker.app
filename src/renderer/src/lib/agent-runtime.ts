@@ -51,7 +51,6 @@ import {
   type SubAgentFactory,
 } from "./agent/OrchestrationService";
 import { analyzeTaskForDecomposition } from "./task-decomposer";
-import { MemoryReflector } from "./memory-reflector";
 
 
 // Re-export types for backward compatibility.
@@ -99,6 +98,31 @@ function isWriteAwaitingApproval(callName: string, resultStr: string): boolean {
     /workspace\s+required/i.test(resultStr) ||
     /select a workspace folder/i.test(resultStr)
   );
+}
+
+function shouldPreferDirectAnswer(prompt: string): boolean {
+  const p = prompt.trim().toLowerCase();
+  if (!p) return false;
+  if (p.length > 220) return false;
+  if (/(https?:\/\/|www\.)/.test(p)) return false;
+
+  const actionOrEnvironmentIntent =
+    /\b(open|go to|navigate|search|find on|click|fill|press|upload|download|scrape|extract|compare .* on|delegate|sub-?agent|tool|run|execute|build|publish|deploy|install|test|debug|fix|edit|write|create|delete|file|folder|directory|repo|repository|codebase|workspace|terminal|command|log)\b/.test(
+      p
+    );
+  if (actionOrEnvironmentIntent) return false;
+
+  // Current/live data should remain tool-grounded.
+  const realtimeIntent =
+    /\b(today|latest|current|now|weather|temperature|stock|price|news|score|live|exchange rate|market)\b/.test(
+      p
+    );
+  if (realtimeIntent) return false;
+
+  const knowledgeQuestion =
+    /^(what|why|how|when|where|who|which|explain|difference between|define)\b/.test(p) ||
+    p.endsWith("?");
+  return knowledgeQuestion;
 }
 
 export class AgentRuntime implements IAgentClient {
@@ -302,7 +326,6 @@ export class AgentRuntime implements IAgentClient {
           }
         );
         this._emitProgress(100);
-        MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
         return result;
       }
 
@@ -330,7 +353,6 @@ export class AgentRuntime implements IAgentClient {
           }
         );
         this._emitProgress(100);
-        MemoryReflector.getInstance().analyze(this.messages, this.options.settings);
         return seqResult;
       }
     }
@@ -366,6 +388,7 @@ export class AgentRuntime implements IAgentClient {
     let activeAssistantMessageId: string | undefined;
     // Master list of all tool calls across every iteration — merged into the one bubble.
     const accumulatedToolCalls: AccumulatedToolCall[] = [];
+    const directAnswerFirstTurn = !this.options.isSubAgent && shouldPreferDirectAnswer(finalPrompt);
 
     while (iterationCount < this.maxIterations) {
       this.totalIterations++;
@@ -374,10 +397,16 @@ export class AgentRuntime implements IAgentClient {
       await this._handleContextLimits();
       this.messages = pruneContext(this.messages);
 
-      const allTools = this._getAvailableTools();
+      const disableToolsThisIteration = directAnswerFirstTurn && iterationCount === 0;
+      const allTools = disableToolsThisIteration ? [] : this._getAvailableTools();
       const serverInfo = this._getServerInfo();
       const dynamicRules = await this._getDynamicRules();
 
+      if (disableToolsThisIteration) {
+        console.info(
+          `[AgentRuntime][Issue #27] direct_answer_mode agent=${this.agentInstanceId} session=${this.options.activeSessionId}`
+        );
+      }
       console.log(`[AgentRuntime] Iteration ${iterationCount + 1}: Calling LLM...`);
       let response: LLMResponse;
 
@@ -392,7 +421,8 @@ export class AgentRuntime implements IAgentClient {
           this.options.signal,
           dynamicRules,
           this.options.isSubAgent,
-          this.options.workspacePath
+          this.options.workspacePath,
+          !disableToolsThisIteration
         );
 
 
@@ -511,9 +541,16 @@ export class AgentRuntime implements IAgentClient {
           this.lastCheckpoint = checkpoint;
           resultStr = result;
         } else if (call.name === "delegate_sub_task") {
-          const { result, planUpdate } = await this.specialHandlers.handleDelegateSubTask(call.arguments, this.executionPlan);
-          if (planUpdate) this.executionPlan = planUpdate;
-          resultStr = result;
+          if (this.options.isSubAgent) {
+            console.warn(
+              `[AgentRuntime][Issue #16] nested_delegate_blocked agent=${this.agentInstanceId} session=${this.options.activeSessionId}`
+            );
+            resultStr = "Nested delegation is disabled inside sub-agents. Complete the current sub-task directly.";
+          } else {
+            const { result, planUpdate } = await this.specialHandlers.handleDelegateSubTask(call.arguments, this.executionPlan);
+            if (planUpdate) this.executionPlan = planUpdate;
+            resultStr = result;
+          }
         } else {
           try {
             const rawResult = await executeWithSelfHealing(
@@ -737,9 +774,12 @@ export class AgentRuntime implements IAgentClient {
   private _getAvailableTools(): LLMTool[] {
     const mcpTools = getAllTools();
     const toolMap = new Map<string, LLMTool>();
+    const clientTools = this.options.isSubAgent
+      ? CLIENT_TOOLS.filter((tool) => tool.name !== "delegate_sub_task")
+      : CLIENT_TOOLS;
     const all = [
       ...mcpTools.map((t) => ({ name: t.name, description: t.description, parameters: t.inputSchema })),
-      ...CLIENT_TOOLS.map((t) => ({ name: t.name, description: t.description, parameters: t.inputSchema })),
+      ...clientTools.map((t) => ({ name: t.name, description: t.description, parameters: t.inputSchema })),
     ];
     for (const tool of all) {
       if (!toolMap.has(tool.name)) toolMap.set(tool.name, tool);

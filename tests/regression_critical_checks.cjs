@@ -70,12 +70,88 @@ function testAgentStateServiceNoGlobalSuppressor() {
   assertIncludes(src, 'clearMemoryCreateFailure(createContext);', 'agent-state');
 }
 
+function testPhaseARuntimeWritePauseAndSessionIsolation() {
+  const runtimeSrc = read('src/renderer/src/lib/agent-runtime.ts');
+  assertIncludes(runtimeSrc, 'function isWriteAwaitingApproval(callName: string, resultStr: string): boolean {', 'agent-runtime');
+  assertIncludes(runtimeSrc, 'File Write Paused', 'agent-runtime');
+  assertIncludes(runtimeSrc, 'pending approval', 'agent-runtime');
+
+  const chatStoreSrc = read('src/renderer/src/stores/chatStore.ts');
+  assertIncludes(chatStoreSrc, 'const existing = next.get(sessionId);', 'chat-store');
+  assertIncludes(chatStoreSrc, 'existing.abortController.abort();', 'chat-store');
+}
+
+function testPhaseAMemoryParsingFallbacks() {
+  const src = read('src/main/services/memory/adapters/ServerMemoryAdapter.ts');
+  assertIncludes(src, 'function parseEntityLikePayload(text: string): Record<string, unknown> | null {', 'server-memory-adapter');
+  assertNotIncludes(src, "throw new Error('No content returned from create_entities')", 'server-memory-adapter');
+  assertNotIncludes(src, "throw new Error('No text content in create_entities response')", 'server-memory-adapter');
+}
+
+function testPhaseACompactChecklistSemantics() {
+  const src = read('src/renderer/src/components/chat/SubTaskChecklist.tsx');
+  assertIncludes(src, 'const completedWithIssues = isTerminal && hasFailure', 'subtask-checklist');
+  assertIncludes(src, 'Completed with issues', 'subtask-checklist');
+  assertNotIncludes(src, 'const completedWithIssues = isTerminal && hasFailure && completedCount > 0', 'subtask-checklist');
+}
+
+function testImmediateReplyNoToolMode() {
+  const runtimeSrc = read('src/renderer/src/lib/agent-runtime.ts');
+  assertIncludes(
+    runtimeSrc,
+    'const directAnswerFirstTurn = !this.options.isSubAgent && shouldPreferDirectAnswer(finalPrompt);',
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    'const disableToolsThisIteration = directAnswerFirstTurn && iterationCount === 0;',
+    'agent-runtime'
+  );
+
+  const llmSrc = read('src/renderer/src/lib/llm.ts');
+  assertIncludes(
+    llmSrc,
+    'includePlanTool = true',
+    'llm'
+  );
+  assertIncludes(
+    llmSrc,
+    'if (includePlanTool) {',
+    'llm'
+  );
+
+  const openaiSrc = read('src/renderer/src/lib/llm/openai.ts');
+  assertIncludes(
+    openaiSrc,
+    'const toolRecoveryAllowed = Boolean(tools && tools.length > 0);',
+    'openai'
+  );
+}
+
+function testMemoryReflectorCancellationHook() {
+  const reflectorSrc = read('src/renderer/src/lib/memory-reflector.ts');
+  assertIncludes(reflectorSrc, "cancel(reason = 'new prompt')", 'memory-reflector');
+  assertIncludes(reflectorSrc, 'this.currentAbortController?.abort();', 'memory-reflector');
+
+  const useAgentSrc = read('src/renderer/src/hooks/useAgent.ts');
+  assertIncludes(
+    useAgentSrc,
+    "MemoryReflector.getInstance().cancel('prompt-restart');",
+    'useAgent'
+  );
+}
+
 function run() {
   console.log('Running critical regression checks...');
   testAgentRuntimeDelegateParallelism();
   testTaskDecomposerConditionalHeuristic();
   testOpenRouterBackoffIsolationAndAbortability();
   testAgentStateServiceNoGlobalSuppressor();
+  testPhaseARuntimeWritePauseAndSessionIsolation();
+  testPhaseAMemoryParsingFallbacks();
+  testPhaseACompactChecklistSemantics();
+  testImmediateReplyNoToolMode();
+  testMemoryReflectorCancellationHook();
   console.log('All critical regression checks passed.');
 }
 
@@ -86,4 +162,3 @@ try {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 }
-
