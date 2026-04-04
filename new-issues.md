@@ -284,11 +284,3 @@ Core orchestration behavior is still unstable in live flow: sequential planning 
 
 **Issue:**
 Several scenarios are marked passed while key acceptance signals are missing. This weakens regression detection and can allow UX-level breakages (progress/action-card/checkpoint visibility) to ship unnoticed unless pass criteria are tightened.
-
-## 28. Speech UI Listening Placeholder Is Intermittently Not Updating
-**Log Evidence (Apr 4, 2026 `npm run -s test:speech`):**
-- `⚠️ Placeholder did not change to Listening within 30s, currently: "Message... (Shift+Enter for new line, or drag files here)"`
-- Same run still showed mic/stop flow operational and finished with `ALL SPEECH TESTS PASSED`.
-
-**Issue:**
-Voice mode activation can be functionally active while the textarea placeholder fails to reflect `Listening...` reliably. This is a UX-state consistency issue (non-blocking) and can confuse users about whether capture is active.

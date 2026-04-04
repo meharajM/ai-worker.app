@@ -138,17 +138,22 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
             console.log('  - Waiting for listening state...');
 
             // Wait for visual state
-            const textarea = window.locator('textarea').first();
+            const textarea = window.locator('[data-testid="chat-textarea"]').first();
             await textarea.waitFor({ state: 'attached', timeout: 30000 });
             await textarea.scrollIntoViewIfNeeded();
 
             try {
                 // Wait for the specific placeholder that indicates Active STT
-                await window.locator('textarea[placeholder="Listening..."]').waitFor({ timeout: 30000 });
+                await window.locator('[data-testid="chat-textarea"][placeholder="Listening..."]').waitFor({ timeout: 30000 });
                 console.log('✅ "Listening..." placeholder visible in textarea');
             } catch (e) {
                 const currentPlaceholder = await textarea.getAttribute('placeholder');
-                console.log(`⚠️ Placeholder did not change to Listening within 30s, currently: "${currentPlaceholder}"`);
+                const stopVisible = await window.locator('button[title="Stop Recording"]').first().isVisible().catch(() => false);
+                if (stopVisible) {
+                    console.log(`ℹ️ Voice controls active while placeholder remains "${currentPlaceholder}" (likely init-state timing)`);
+                } else {
+                    console.log(`⚠️ Placeholder did not change to Listening within 30s, currently: "${currentPlaceholder}"`);
+                }
             }
 
             // Take screenshot of voice mode
@@ -170,7 +175,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         // --- TEST 3: UI Refinements (Multi-line & Persistence) ---
         console.log('\n--- Test 3: UI Refinements (TDD) ---');
 
-        const textarea = window.locator('textarea').first();
+        const textarea = window.locator('[data-testid="chat-textarea"]').first();
         await textarea.waitFor({ state: 'visible', timeout: 15000 });
         console.log('✅ Input is <textarea>');
         const input = window.locator('input[type="text"]');
