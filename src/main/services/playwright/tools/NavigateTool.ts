@@ -20,9 +20,25 @@ export class NavigateTool extends PlaywrightTool {
     async execute(page: Page, args: any): Promise<ToolResult> {
         const navError = this.requireParam(args, 'url');
         if (navError) return { result: null, error: navError };
+        const timeout = typeof args.timeout === 'number' ? args.timeout : 30000;
+        const startedAt = Date.now();
+        console.info(`[NavigateTool][Issue #2/#3/#7/#9] start url=${args.url} timeout=${timeout}`);
 
         try {
-            await page.goto(args.url, { waitUntil: 'domcontentloaded' });
+            try {
+                await page.goto(args.url, { waitUntil: 'domcontentloaded', timeout });
+            } catch (firstError) {
+                const msg = String(firstError);
+                // Retry once with a softer readiness check for heavy anti-bot pages
+                // that often miss domcontentloaded/network idle timing windows.
+                if (msg.includes('Timeout') || msg.includes('ERR_HTTP2_PROTOCOL_ERROR')) {
+                    console.warn(`[NavigateTool][Issue #2/#7/#9] primary goto failed (${msg}). Retrying with waitUntil=commit timeout=${Math.round(timeout * 1.5)}`);
+                    await page.goto(args.url, { waitUntil: 'commit', timeout: Math.round(timeout * 1.5) });
+                } else {
+                    throw firstError;
+                }
+            }
+            console.info(`[NavigateTool][Issue #2/#7/#9] success url=${page.url()} elapsedMs=${Date.now() - startedAt}`);
 
             const navTitle = await page.title();
             const navPageText = await page.evaluate(() => {
@@ -56,16 +72,23 @@ export class NavigateTool extends PlaywrightTool {
             };
         } catch (e) {
             const errorStr = String(e);
-            if (errorStr.includes('ERR_NAME_NOT_RESOLVED') || errorStr.includes('ERR_CONNECTION_REFUSED')) {
+            if (
+                errorStr.includes('ERR_NAME_NOT_RESOLVED') ||
+                errorStr.includes('ERR_CONNECTION_REFUSED') ||
+                errorStr.includes('ERR_HTTP2_PROTOCOL_ERROR')
+            ) {
                 const fallbackUrl = `https://google.com/search?q=${encodeURIComponent(args.url)}`;
-                console.log(`[PlaywrightService] Navigation failed (${errorStr}). Falling back to Google Search: ${fallbackUrl}`);
+                console.warn(`[NavigateTool][Issue #2/#3] Navigation failed (${errorStr}). Falling back to Google Search: ${fallbackUrl}`);
                 try {
-                    await page.goto(fallbackUrl, { waitUntil: 'domcontentloaded' });
+                    await page.goto(fallbackUrl, { waitUntil: 'domcontentloaded', timeout: Math.round(timeout * 1.5) });
+                    console.info(`[NavigateTool][Issue #3] fallback success finalUrl=${page.url()} elapsedMs=${Date.now() - startedAt}`);
                     return { result: `Navigation failed for '${args.url}', so I searched Google instead. Now at: ${page.url()}` };
                 } catch (fallbackError) {
+                    console.error(`[NavigateTool][Issue #2/#3] fallback failed error=${String(fallbackError)}`);
                     return { result: null, error: `Navigation failed: ${errorStr}` };
                 }
             }
+            console.error(`[NavigateTool][Issue #2/#7/#9] fatal navigation error=${errorStr}`);
             throw e;
         }
     }
@@ -76,7 +99,10 @@ export class NavigateTool extends PlaywrightTool {
             description: 'NAVIGATION: Go to a URL. Use this FIRST to open any website. Example: navigate to "https://google.com" before searching.',
             inputSchema: {
                 type: 'object',
-                properties: { url: { type: 'string', description: 'Full URL including https://' } },
+                properties: {
+                    url: { type: 'string', description: 'Full URL including https://' },
+                    timeout: { type: 'number', description: 'Max wait time in ms (default: 30000)' }
+                },
                 required: ['url']
             }
         };

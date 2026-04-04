@@ -157,6 +157,7 @@ async function analyzeTaskWithLLM(
   // Check cache first to avoid redundant LLM calls
   const cached = getCachedAnalysis(userRequest, conversationSummary);
   if (cached) {
+    console.info(`[TaskDecomposer][Issue #4/#14/#26] Cache hit. parallel=${cached.shouldParallelize} contexts=${cached.contexts.join(',')}`);
     return cached;
   }
 
@@ -225,9 +226,11 @@ Return ONLY valid JSON, do not include any markdown formatting or conversational
 }`;
 
   try {
-    // Add timeout to prevent hanging (max 5 seconds for analysis)
+    const startedAt = Date.now();
+    // Add timeout to prevent hanging while still allowing heavier models
+    // enough time to respond for multi-site decomposition decisions.
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('LLM analysis timeout')), 5000)
+      setTimeout(() => reject(new Error('LLM analysis timeout')), 12000)
     );
 
     const llmPromise = chat(
@@ -273,13 +276,17 @@ Return ONLY valid JSON, do not include any markdown formatting or conversational
       reasoning: result.reasoning || 'LLM analysis completed'
     };
 
+    console.info(
+      `[TaskDecomposer][Issue #4/#14/#26] LLM analysis completed in ${Date.now() - startedAt}ms. parallel=${analysisResult.shouldParallelize} contexts=${analysisResult.contexts.join(',')} reason="${analysisResult.reasoning}"`
+    );
+
     // Cache the result for future use
     setCachedAnalysis(userRequest, analysisResult, conversationSummary);
 
     return analysisResult;
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : 'Unknown error';
-    console.error('[TaskDecomposer] LLM analysis failed:', errorMsg);
+    console.error('[TaskDecomposer][Issue #4/#14/#26] LLM analysis failed:', errorMsg);
 
     // Default to sequential if parsing fails (safer option)
     // This handles: network errors, timeouts, malformed JSON, invalid responses
@@ -301,6 +308,7 @@ export async function analyzeTaskForDecomposition(
   currentUrl?: string,
   conversationHistory?: Array<{ role: string; content: string }>
 ): Promise<TaskDecomposition> {
+  const startedAt = Date.now();
   const estimatedActions = countActions(userRequest);
   const requestLower = userRequest.toLowerCase();
   const explicitContexts = extractExplicitWebsiteContexts(userRequest);
@@ -309,6 +317,7 @@ export async function analyzeTaskForDecomposition(
 
   // Fast path: avoid an extra decomposer LLM call for simple non-automation prompts.
   if (!hasWebsiteReference && !hasActionKeyword && userRequest.trim().length <= 220) {
+    console.info(`[TaskDecomposer][Issue #4/#14/#26] direct-short-circuit: no website/action keywords (elapsed=${Date.now() - startedAt}ms)`);
     return {
       type: 'single_context',
       contexts: ['current_page'],
@@ -325,6 +334,7 @@ export async function analyzeTaskForDecomposition(
     !SEQUENTIAL_INTENT_PATTERN.test(userRequest) &&
     estimatedActions <= 4
   ) {
+    console.info(`[TaskDecomposer][Issue #4/#14/#26] direct-single-site short-circuit: ${explicitContexts[0]} (elapsed=${Date.now() - startedAt}ms)`);
     return {
       type: 'single_context',
       contexts: explicitContexts,
@@ -346,7 +356,7 @@ export async function analyzeTaskForDecomposition(
     const containsExplicitUrls = /https?:\/\/|\b\w+\.(com|org|net|io)\b/i.test(userRequest);
 
     if (hasAssistantResults && isShortPrompt && !containsExplicitUrls) {
-      console.log('[TaskDecomposer] Short follow-up with existing context — skipping decomposition, direct execution.');
+      console.log('[TaskDecomposer][Issue #14/#26] short follow-up detected, keeping single-context execution.');
       return {
         type: 'single_context',
         contexts: ['current_page'],
@@ -367,6 +377,9 @@ export async function analyzeTaskForDecomposition(
       (CONDITIONAL_SEQUENTIAL_INTENT_PATTERN.test(userRequest) && !hasOptionalConditional) ||
       hasDependencyChain;
     if (hasParallelIntent && !hasSequentialIntent) {
+      console.info(
+        `[TaskDecomposer][Issue #14/#26] heuristic parallel decision contexts=${explicitContexts.join(',')} optionalConditional=${hasOptionalConditional} dependencyChain=${hasDependencyChain}`
+      );
       return {
         type: 'multi_context',
         contexts: explicitContexts,
@@ -378,6 +391,9 @@ export async function analyzeTaskForDecomposition(
     }
 
     if (hasSequentialIntent) {
+      console.info(
+        `[TaskDecomposer][Issue #14/#26] heuristic sequential decision contexts=${explicitContexts.join(',')} optionalConditional=${hasOptionalConditional} dependencyChain=${hasDependencyChain}`
+      );
       return {
         type: 'single_context',
         contexts: ['current_page'],
@@ -406,7 +422,7 @@ export async function analyzeTaskForDecomposition(
 
   // If LLM recommends parallel execution
   if (analysis.shouldParallelize && analysis.contexts.length > 1) {
-    console.log(`[TaskDecomposer] LLM detected ${analysis.contexts.length} independent contexts: ${analysis.contexts.join(', ')}`);
+    console.log(`[TaskDecomposer][Issue #14/#26] LLM detected ${analysis.contexts.length} independent contexts: ${analysis.contexts.join(', ')} (elapsed=${Date.now() - startedAt}ms)`);
     return {
       type: 'multi_context',
       contexts: analysis.contexts,
@@ -417,7 +433,7 @@ export async function analyzeTaskForDecomposition(
     };
   }
 
-  console.log(`[TaskDecomposer] Sequential execution: ${analysis.reasoning}`);
+  console.log(`[TaskDecomposer][Issue #14/#26] Sequential execution: ${analysis.reasoning} (elapsed=${Date.now() - startedAt}ms)`);
 
   // For backward compatibility, still check if this is a complex single-context task
   // that might benefit from a sequential sub-agent

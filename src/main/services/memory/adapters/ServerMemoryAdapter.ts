@@ -113,6 +113,33 @@ function extractJsonFromText(text: string): string {
   return stripped
 }
 
+function parseEntityLikePayload(text: string): Record<string, unknown> | null {
+  const pureJson = extractJsonFromText(text)
+  const parsed = JSON.parse(pureJson)
+
+  if (Array.isArray(parsed)) {
+    return (parsed[0] && typeof parsed[0] === 'object') ? parsed[0] as Record<string, unknown> : null
+  }
+
+  if (parsed && typeof parsed === 'object') {
+    const asObj = parsed as Record<string, unknown>
+    const entities = asObj.entities
+    if (Array.isArray(entities)) {
+      const first = entities[0]
+      return first && typeof first === 'object' ? first as Record<string, unknown> : null
+    }
+    return asObj
+  }
+
+  return null
+}
+
+function previewText(value: string, limit = 160): string {
+  const compact = value.replace(/\s+/g, ' ').trim()
+  if (compact.length <= limit) return compact
+  return `${compact.slice(0, limit)}...`
+}
+
 export class ServerMemoryAdapter implements UnifiedMemoryBackend {
   private client: Client | null = null
   private storagePath: string
@@ -217,44 +244,34 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
       throw new Error(`Failed to create entity: ${result.error}`)
     }
 
-    // Parse MCP content
-    // result.result is CallToolResult.content (Array<TextContent | ImageContent>)
+    // Parse MCP content best-effort. If response shape drifts or comes back empty,
+    // do not fail the write path — we still return a stable entity shape so the
+    // agent can continue operating without entering retry loops.
     const content = result.result
-    if (!content || !Array.isArray(content) || content.length === 0) {
-         // It might be that server-memory returns empty list if secret redaction happened internally? 
-         // But here we are just parsing the output.
-         throw new Error('No content returned from create_entities')
-    }
-
-    const textContent = content
-      .map((c: Record<string, unknown>) => (typeof c?.text === 'string' ? c.text : ''))
-      .filter(Boolean)
-      .join('\n')
-      .trim()
-    if (!textContent) {
-        throw new Error('No text content in create_entities response')
-    }
-
     let entityData: Record<string, unknown> | null = null
-    try {
-      const pureJson = extractJsonFromText(textContent)
-      const parsed = JSON.parse(pureJson)
-      if (Array.isArray(parsed)) {
-        entityData = parsed[0] ?? null
-      } else if (parsed && typeof parsed === 'object') {
-        if (Array.isArray((parsed as { entities?: unknown[] }).entities)) {
-          entityData = ((parsed as { entities?: Record<string, unknown>[] }).entities?.[0]) ?? null
-        } else {
-          entityData = parsed as Record<string, unknown>
+    if (content && Array.isArray(content) && content.length > 0) {
+      const textContent = content
+        .map((c: Record<string, unknown>) => (typeof c?.text === 'string' ? c.text : ''))
+        .filter(Boolean)
+        .join('\n')
+        .trim()
+
+      if (textContent) {
+        console.info(
+          `[ServerMemoryAdapter][Issue #1/#6] create_entities payload received (chars=${textContent.length}) preview="${previewText(textContent)}"`
+        )
+        try {
+          entityData = parseEntityLikePayload(textContent)
+        } catch (error) {
+          console.warn(
+            `[ServerMemoryAdapter][Issue #1/#6] Failed to parse create_entities response, using fallback entity: ${error instanceof Error ? error.message : String(error)}`
+          )
         }
+      } else {
+        console.warn('[ServerMemoryAdapter][Issue #1/#6] create_entities returned no text content, using fallback entity')
       }
-    } catch (error) {
-      // Do not fail entity creation just because the MCP response format drifted.
-      // The tool call itself already succeeded (no result.error); we can safely
-      // return the requested entity shape and keep memory writes available.
-      console.warn(
-        `[ServerMemoryAdapter] Failed to parse create_entities response, using fallback entity: ${error instanceof Error ? error.message : String(error)}`
-      )
+    } else {
+      console.warn('[ServerMemoryAdapter][Issue #1/#6] create_entities returned empty content envelope, using fallback entity')
     }
 
     const entity: Entity = {
@@ -349,6 +366,9 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
    */
   async search(query: string, options?: SearchOptions): Promise<Entity[]> {
     this.ensureInitialized()
+    console.info(
+      `[ServerMemoryAdapter][Issue #1/#6] search_nodes start query="${query}" limit=${options?.limit ?? 'default'}`
+    )
 
     const result = await this.callTool('search_nodes', {
       query,
@@ -372,6 +392,7 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
       .join('\n')
       .trim()
     if (!textContent) {
+        console.warn('[ServerMemoryAdapter][Issue #1/#6] search_nodes returned empty text payload')
         return []
     }
 
@@ -388,14 +409,45 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
             } else if (Array.isArray(parsed.entities)) {
                 nodes = parsed.entities;
             } else {
-                console.warn(`[ServerMemoryAdapter] Unexpected search response structure:`, parsed)
+                console.warn(`[ServerMemoryAdapter][Issue #1/#6] Unexpected search response structure:`, parsed)
             }
         }
-    } catch {
-        // If content isn't JSON, it might be an issue or just empty
-        console.warn(`[ServerMemoryAdapter] Failed to parse search response: ${textContent}`)
-        return []
+    } catch (error) {
+        // Fall back to line-wise extraction because some memory servers append
+        // trailing prose/log lines after the JSON payload.
+        for (const segment of textContent.split('\n')) {
+          const trimmed = segment.trim()
+          if (!trimmed) continue
+          try {
+            const parsed = JSON.parse(extractJsonFromText(trimmed))
+            if (Array.isArray(parsed)) {
+              nodes = parsed as Record<string, unknown>[]
+              break
+            }
+            if (parsed && typeof parsed === 'object') {
+              const asObj = parsed as Record<string, unknown>
+              if (Array.isArray(asObj.nodes)) {
+                nodes = asObj.nodes as Record<string, unknown>[]
+                break
+              }
+              if (Array.isArray(asObj.entities)) {
+                nodes = asObj.entities as Record<string, unknown>[]
+                break
+              }
+            }
+          } catch {
+            // keep scanning
+          }
+        }
+        if (nodes.length === 0) {
+          console.warn(
+            `[ServerMemoryAdapter][Issue #1/#6] Failed to parse search response, returning empty result set: ${error instanceof Error ? error.message : String(error)}; preview="${previewText(textContent)}"`
+          )
+          return []
+        }
     }
+
+    console.info(`[ServerMemoryAdapter][Issue #1/#6] search_nodes parsed nodes=${nodes.length}`)
 
     let entities = nodes.map((node: Record<string, unknown>) =>
       this.mapNodeToEntity(node)

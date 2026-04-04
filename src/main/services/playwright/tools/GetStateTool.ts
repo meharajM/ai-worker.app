@@ -35,14 +35,35 @@ export class GetStateTool extends PlaywrightTool {
     }
 
     async execute(page: Page, args: any): Promise<ToolResult> {
+        const withNavigationRecovery = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
+            for (let attempt = 1; attempt <= 2; attempt++) {
+                try {
+                    return await fn()
+                } catch (error) {
+                    const msg = String(error)
+                    const navigationRace = msg.includes('Execution context was destroyed') || msg.includes('Cannot find context with specified id')
+                    if (!navigationRace || attempt === 2) {
+                        if (navigationRace) {
+                            console.warn(`[GetStateTool][Issue #10] navigation race unresolved after attempt ${attempt}, returning fallback.`);
+                        }
+                        return fallback
+                    }
+                    console.warn(`[GetStateTool][Issue #10] navigation race detected. retrying attempt=${attempt + 1}`);
+                    await page.waitForLoadState('domcontentloaded', { timeout: 2000 }).catch(() => {});
+                }
+            }
+            return fallback
+        }
+
         const mode = args.mode || 'fast';
+        console.info(`[GetStateTool][Issue #10/#7] start mode=${mode} includeScreenshot=${Boolean(args.screenshot)} includeTree=${Boolean(args.tree)} url=${page.url()}`);
         const includeScreenshot = args.screenshot ?? (mode === 'vision');
         const includeTree = args.tree ?? (mode === 'full');
         const useHighlighting = args.highlight ?? includeScreenshot;
 
         const state: any = {
             url: page.url(),
-            title: await page.title(),
+            title: await withNavigationRecovery(() => page.title(), '(loading...)'),
             mode: mode,
         };
 
@@ -171,7 +192,7 @@ export class GetStateTool extends PlaywrightTool {
         }
 
         if (mode === 'fast' && !state.interactableElements) {
-            const quickElements = await page.evaluate(() => {
+            const quickElements = await withNavigationRecovery(() => page.evaluate(() => {
                 const selectors = 'a[href],button,input,textarea,select,[role="button"],[role="link"]';
                 const els = document.querySelectorAll(selectors);
                 const list: string[] = [];
@@ -185,7 +206,7 @@ export class GetStateTool extends PlaywrightTool {
                     }
                 });
                 return list;
-            });
+            }), [] as string[]);
             state.elements = quickElements;
         }
 

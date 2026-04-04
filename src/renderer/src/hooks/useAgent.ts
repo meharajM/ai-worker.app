@@ -244,6 +244,12 @@ export function useAgent(): UseAgentReturn {
                                 isFinalResult: Boolean((msg as LLMMessage & { isFinalResult?: boolean }).isFinalResult),
                             };
 
+                            if (storeMsg.role === "assistant") {
+                                console.info(
+                                    `[useAgent][Issue #12/#27] onMessage session=${originSessionId} isFinalResult=${storeMsg.isFinalResult} toolCalls=${msg.tool_calls?.length ?? 0}`
+                                );
+                            }
+
                             if (msg.tool_calls) {
                                 storeMsg.toolCalls = msg.tool_calls.map((tc) => ({
                                     id: tc.id,
@@ -282,6 +288,12 @@ export function useAgent(): UseAgentReturn {
                             // The store doesn't have a "tool" role — skip role updates
                             if ((storeUpdates as { role?: string }).role === "tool") {
                                 delete (storeUpdates as { role?: string }).role;
+                            }
+
+                            if (Object.prototype.hasOwnProperty.call(storeUpdates, "isFinalResult")) {
+                                console.info(
+                                    `[useAgent][Issue #12/#27] onMessageUpdate session=${originSessionId} message=${id} isFinalResult=${String((storeUpdates as { isFinalResult?: boolean }).isFinalResult)}`
+                                );
                             }
 
                             updateSessionMessage(originSessionId, id, storeUpdates);
@@ -380,14 +392,13 @@ export function useAgent(): UseAgentReturn {
                 const existingPlan = store.sessions.find(s => s.id === originSessionId)?.plan;
                 store.updateSessionProgress(originSessionId, undefined, undefined, existingPlan);
 
-                // Close the Playwright browser to free system resources.
-                // Only close if this was the last active session.
-                // WHY: Concurrent sessions share the same browser instance.
+                // Do NOT force-close the browser on every prompt completion.
+                // BrowserManager already has an idle timeout and this eager close
+                // causes repeated relaunch/SingletonSocket cleanup thrash.
+                // Keep warm when no active sessions remain; close happens via idle timer.
                 const currentProcessingCount = store._processingSessions.size;
                 if (currentProcessingCount === 0) {
-                    import('../lib/electron').then(({ default: electronLib }) => {
-                        electronLib.playwright.closeBrowser().catch(() => {});
-                    });
+                    console.log('[useAgent] No active sessions. Leaving browser warm; idle timer will close it.');
                 } else {
                     console.log(`[useAgent] 🕒 Deferring browser shutdown. ${currentProcessingCount} sessions still active.`);
                 }

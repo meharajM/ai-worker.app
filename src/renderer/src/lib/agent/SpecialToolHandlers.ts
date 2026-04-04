@@ -175,7 +175,7 @@ export class SpecialToolHandlers {
             context = context.substring(0, 5000) + "\n...[truncated for efficiency]...";
         }
 
-        console.log(`[SpecialToolHandlers] Delegating to sub-agent: ${instruction}`);
+        console.log(`[SpecialToolHandlers][Issue #13/#14/#16/#26] Delegating to sub-agent: ${instruction}`);
 
         const subAgentId = globalThis.crypto.randomUUID();
 
@@ -224,6 +224,9 @@ export class SpecialToolHandlers {
         });
 
         try {
+            console.info(
+                `[SpecialToolHandlers][Issue #16] delegate_start parentAgent=${this.agentInstanceId} subAgent=${subAgentId} session=${this.options.activeSessionId} tab=${subAgentTabId ?? 'headless'}`
+            );
             const prompt = `${instruction}${context ? `\n\nContext: ${context}` : ""}\n\nReturn key findings only. End with "✓ Done".`;
             const finalRes = await subAgent.chat(prompt);
             const finalContent = typeof finalRes.content === "string" ? finalRes.content : JSON.stringify(finalRes.content);
@@ -282,9 +285,15 @@ export class SpecialToolHandlers {
                 if (matchingStep) {
                     matchingStep.status = isBailout ? "failed" : "completed";
                     matchingStep.result = salvagedResult.substring(0, 500);
+                    console.info(
+                        `[SpecialToolHandlers][Issue #12/#26] plan_step_update subAgent=${subAgentId} status=${matchingStep.status} step=${matchingStep.id}`
+                    );
                 }
             }
 
+            console.info(
+                `[SpecialToolHandlers][Issue #13/#14/#26] delegate_done parentAgent=${this.agentInstanceId} subAgent=${subAgentId} bailout=${isBailout}`
+            );
             return { result: salvagedResult.trim(), planUpdate: updatedPlan };
         } catch (err: any) {
             // Best-effort tab cleanup on hard failure to prevent leaks
@@ -299,6 +308,9 @@ export class SpecialToolHandlers {
                     console.warn(`[SpecialToolHandlers] Failed to close sub-agent tab ${subAgentTabId} after error`, e);
                 }
             }
+            console.error(
+                `[SpecialToolHandlers][Issue #13/#14/#26] delegate_failed parentAgent=${this.agentInstanceId} subAgent=${subAgentId}: ${err?.message || String(err)}`
+            );
             return { result: `Sub-agent failed: ${err.message}` };
         }
     }

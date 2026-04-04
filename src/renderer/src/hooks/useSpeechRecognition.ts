@@ -53,6 +53,8 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     const visAudioContextRef = useRef<AudioContext | null>(null)
     const visAnimationFrameRef = useRef<number | null>(null)
     const visProcessorRef = useRef<ScriptProcessorNode | null>(null)
+    const lastRecognizerNotReadyLogAtRef = useRef(0)
+    const recognizerNotReadyCountRef = useRef(0)
 
     // Initialize: Select Model based on settings
     useEffect(() => {
@@ -221,8 +223,19 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
                 voskService.resetRecognizer()
                 const recognizer = voskService.getRecognizer()
                 if (!recognizer) {
-                    console.error('Recognizer not ready')
+                    const now = Date.now()
+                    recognizerNotReadyCountRef.current += 1
+                    if (now - lastRecognizerNotReadyLogAtRef.current > 30000) {
+                        console.warn(
+                            `[Speech][Issue #20] Recognizer not ready; skipping capture cycle. misses=${recognizerNotReadyCountRef.current}`
+                        )
+                        lastRecognizerNotReadyLogAtRef.current = now
+                    }
                     return
+                }
+                if (recognizerNotReadyCountRef.current > 0) {
+                    console.info(`[Speech][Issue #20] Recognizer recovered after misses=${recognizerNotReadyCountRef.current}`)
+                    recognizerNotReadyCountRef.current = 0
                 }
 
                 recognizer.on('result', (message: any) => {
@@ -323,6 +336,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
             component: 'useSpeechRecognition',
             details: { metadata: { state: 'initializing', useNativeSpeech, model: currentModel?.name } }
         })
+        console.info(`[Speech][Issue #20] startListening requested. native=${useNativeSpeech} model=${currentModel?.id || 'unknown'}`)
 
         if (useNativeSpeech) {
             setIsInitializing(true)
@@ -436,6 +450,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     const stopListening = useCallback(async () => {
         const sessionId = useChatStore.getState().activeSessionId || 'unknown'
         addLog({ eventType: 'STATE_CHANGE', sessionId, component: 'useSpeechRecognition', details: { metadata: { state: 'listening_stopped' } } })
+        console.info('[Speech][Issue #20] stopListening requested')
 
         shouldListenRef.current = false
         if (useNativeSpeech) {

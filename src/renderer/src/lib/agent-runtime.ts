@@ -91,6 +91,16 @@ interface AccumulatedToolCall {
  */
 import { SpecialToolHandlers } from "./agent/SpecialToolHandlers";
 
+function isWriteAwaitingApproval(callName: string, resultStr: string): boolean {
+  if (!callName.startsWith("fs_write")) return false;
+  return (
+    /"status"\s*:\s*"staged"/i.test(resultStr) ||
+    /approval\s+required/i.test(resultStr) ||
+    /workspace\s+required/i.test(resultStr) ||
+    /select a workspace folder/i.test(resultStr)
+  );
+}
+
 export class AgentRuntime implements IAgentClient {
   private messages: LLMMessage[] = [];
   private options: AgentRuntimeOptions;
@@ -146,6 +156,9 @@ export class AgentRuntime implements IAgentClient {
     userContent: string,
     attachments?: { name: string; path: string; type: string }[]
   ): Promise<LLMMessage> {
+    console.info(
+      `[AgentRuntime][Issue #11/#12/#16/#27] run_start agent=${this.agentInstanceId} session=${this.options.activeSessionId} isSubAgent=${Boolean(this.options.isSubAgent)} promptChars=${userContent.length}`
+    );
     let finalPrompt = userContent;
 
 
@@ -563,6 +576,24 @@ export class AgentRuntime implements IAgentClient {
           });
         }
 
+        // Terminal guard for staged filesystem writes. Once a write is staged or
+        // blocked by workspace selection, stop issuing new write attempts and
+        // explicitly hand control back to the user.
+        if (isWriteAwaitingApproval(call.name, truncated)) {
+          console.warn(
+            `[AgentRuntime][Issue #11] staged_write_pause agent=${this.agentInstanceId} session=${this.options.activeSessionId} tool=${call.name} callId=${call.id}`
+          );
+          const pauseMsg: LLMMessage = {
+            role: "assistant",
+            content:
+              "## File Write Paused\n\n" +
+              "The write operation is staged/pending approval.\n" +
+              "Please approve the staged change or select a workspace folder, then ask me to continue.",
+          };
+          this.addMessage(pauseMsg);
+          return pauseMsg;
+        }
+
         // ── Progress calculation (Gap 2 fix) ──────────────────────────────
         // Runs unconditionally — not just when there's presentable data.
         // This ensures the progress bar advances for every tool call,
@@ -622,6 +653,9 @@ export class AgentRuntime implements IAgentClient {
         response.toolCalls.every((call) => call.name === "delegate_sub_task");
 
       if (parallelDelegateBatch) {
+        console.info(
+          `[AgentRuntime][Issue #13/#14/#26] parallel_delegate_batch size=${response.toolCalls.length} agent=${this.agentInstanceId}`
+        );
         // Keep same-turn delegate_sub_task calls parallel for multi-site workflows.
         // This restores expected behavior while preserving sequential execution for
         // all other tool categories.
@@ -629,6 +663,11 @@ export class AgentRuntime implements IAgentClient {
         const bailout = results.find((r) => r && r.role === "assistant");
         if (bailout) return bailout as LLMMessage;
       } else {
+        if (response.toolCalls.some((call) => call.name === "delegate_sub_task")) {
+          console.info(
+            `[AgentRuntime][Issue #13/#14/#26] non_parallel_delegate_path size=${response.toolCalls.length} names=${response.toolCalls.map((c) => c.name).join(',')}`
+          );
+        }
         // Execute non-delegation calls sequentially in emission order.
         for (const call of response.toolCalls) {
           const maybeBailout = await executeToolCall(call);
@@ -775,6 +814,9 @@ export class AgentRuntime implements IAgentClient {
 
   private _handleMaxIterations(finalPrompt: string): LLMMessage {
     if (this.options.isSubAgent) throw new Error("Max iterations reached");
+    console.warn(
+      `[AgentRuntime][Issue #27] max_iterations_reached agent=${this.agentInstanceId} session=${this.options.activeSessionId} max=${this.maxIterations} promptPreview="${finalPrompt.slice(0, 120)}"`
+    );
     const handoffMsg: LLMMessage = {
       role: "assistant",
       content: `I've reached the maximum number of steps (${this.maxIterations}) for this context. To ensure accuracy and prevent context issues, I've saved a checkpoint of my progress. Should I continue with a fresh context or stop here?`,
@@ -800,6 +842,11 @@ export class AgentRuntime implements IAgentClient {
     // Incrementally track context size (avoid full JSON.stringify)
     const contentLen = typeof msg.content === 'string' ? msg.content.length : JSON.stringify(msg.content ?? '').length;
     this._estimatedContextBytes += contentLen + 50; // +50 for role, metadata overhead
+    if (msg.role === "assistant" && (msg as LLMMessage & { isFinalResult?: boolean }).isFinalResult) {
+      console.info(
+        `[AgentRuntime][Issue #12/#27] final_result_emitted agent=${this.agentInstanceId} session=${this.options.activeSessionId} contentChars=${contentLen}`
+      );
+    }
     return this.options.onMessage?.(msg);
   }
 

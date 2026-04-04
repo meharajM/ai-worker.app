@@ -79,6 +79,10 @@ export async function executeParallelSubAgents(
     onPlanUpdate?: (plan: ExecutionPlan) => void
 ): Promise<LLMMessage> {
     const { contexts } = decomposition;
+    const orchestrationRunId = globalThis.crypto.randomUUID();
+    console.info(
+        `[OrchestrationService][Issue #13/#14/#16/#26] parallel_start run=${orchestrationRunId} parentAgent=${parentAgentId} session=${parentOptions.activeSessionId} contexts=${contexts.join(',')}`
+    );
 
     // ── Convert parallel contexts to ExecutionPlan for the UI ──────────────
     // WHY: Parallel tasks don't have a JSON plan yet, so we treat each context
@@ -232,6 +236,7 @@ export async function executeParallelSubAgents(
         });
 
         try {
+            console.info(`[OrchestrationService][Issue #16] sub_agent_start run=${orchestrationRunId} context=${context} subAgent=${subAgentId} tab=${subAgentTabId ?? 'headless'}`);
             const result = await subAgent.chat(instruction);
             const resultContent =
                 typeof result?.content === "string"
@@ -255,6 +260,9 @@ export async function executeParallelSubAgents(
                 }
                 console.warn(`[OrchestrationService] Parallel sub-agent ${context} bailed out. Salvaged ${partials.length} partial findings.`);
             }
+            console.info(
+                `[OrchestrationService][Issue #13/#14/#26] sub_agent_complete run=${orchestrationRunId} context=${context} success=${isSuccess} bailout=${isBailout}`
+            );
 
             agentStatuses[index].isRunning = false;
             agentStatuses[index].result = finalResultStr;
@@ -301,6 +309,9 @@ export async function executeParallelSubAgents(
 
             return { context, success: isSuccess, result: finalResultStr };
         } catch (error: unknown) {
+            console.error(
+                `[OrchestrationService][Issue #13/#14/#26] sub_agent_crash run=${orchestrationRunId} context=${context}: ${error instanceof Error ? error.message : String(error)}`
+            );
             agentStatuses[index].isRunning = false;
             agentStatuses[index].status = "Failed";
 
@@ -370,6 +381,9 @@ export async function executeParallelSubAgents(
     // Aggregate results into a final summary
     const successfulResults = results.filter((r) => r.success);
     const failedResults = results.filter((r) => !r.success);
+    console.info(
+        `[OrchestrationService][Issue #13/#14/#26] parallel_done run=${orchestrationRunId} success=${successfulResults.length} failed=${failedResults.length}`
+    );
 
     let summary = `## Results from ${contexts.length} sources\n\n`;
     for (const result of successfulResults) {
@@ -424,8 +438,12 @@ export async function executeSequentialSubAgents(
     spawnSubAgent: SubAgentFactory,
     onPlanUpdate?: (plan: ExecutionPlan) => void
 ): Promise<LLMMessage> {
+    const orchestrationRunId = globalThis.crypto.randomUUID();
     const { contexts, estimatedActions } = decomposition;
     const targetContext = contexts[0] || "task";
+    console.info(
+        `[OrchestrationService][Issue #14/#26] sequential_start run=${orchestrationRunId} parentAgent=${parentAgentId} session=${parentOptions.activeSessionId} estimatedActions=${estimatedActions} target=${targetContext}`
+    );
 
     // Notify user about auto-orchestration
     // NOTE: Only call addMessage OR onMessage — not both.
@@ -495,6 +513,7 @@ Format as JSON:
 
         const steps = planData.steps;
         console.log(`[OrchestrationService] Plan created with ${steps.length} steps`);
+        console.info(`[OrchestrationService][Issue #14/#26] plan_created run=${orchestrationRunId} steps=${steps.length}`);
 
         // ── Convert to ExecutionPlan for the SubTaskChecklist UI ──────────────
         // WHY: The SubTaskChecklist reads session.plan (ExecutionPlan type).
@@ -567,6 +586,7 @@ Format as JSON:
             for (const step of steps) {
                 if (parentOptions.signal?.aborted) {
                     console.log("[OrchestrationService] Sequential orchestration aborted by user");
+                    console.warn(`[OrchestrationService][Issue #16] sequential_aborted run=${orchestrationRunId} step=${step.id}`);
                     throw new Error("Aborted by user");
                 }
 
@@ -629,6 +649,7 @@ End with "✓ Done" and a brief result.`;
                 });
 
                 try {
+                    console.info(`[OrchestrationService][Issue #14/#26] sequential_step_start run=${orchestrationRunId} step=${step.id} subAgent=${subAgentId}`);
                     const stepResult = await subAgent.chat(subAgentInstruction);
                     const stepContent =
                         typeof stepResult.content === "string"
@@ -650,6 +671,7 @@ End with "✓ Done" and a brief result.`;
                     } else {
                         results.push({ step: step.id, description: step.description, result: stepContent.trim() });
                     }
+                    console.info(`[OrchestrationService][Issue #14/#26] sequential_step_done run=${orchestrationRunId} step=${step.id} bailout=${isBailout}`);
 
                     // Mark step as completed in the ExecutionPlan
                     const completedStep = executionPlan.steps.find(s => s.id === step.id);
@@ -667,6 +689,9 @@ End with "✓ Done" and a brief result.`;
                     });
                 } catch (error: unknown) {
                     console.error(`[OrchestrationService] Step ${step.id} failed:`, error);
+                    console.error(
+                        `[OrchestrationService][Issue #14/#26] sequential_step_failed run=${orchestrationRunId} step=${step.id}: ${error instanceof Error ? error.message : String(error)}`
+                    );
 
                     // Try to salvage partial data even on a hard crash
                     let partialsMsg = "";
@@ -715,6 +740,7 @@ End with "✓ Done" and a brief result.`;
         // Only addMessage — it calls onMessage internally
         // isFinalResult: true ensures this is always shown in clean/prod view
         const finalMessage: LLMMessage = { role: "assistant", content: finalSummary, isFinalResult: true };
+        console.info(`[OrchestrationService][Issue #14/#26] sequential_done run=${orchestrationRunId} steps=${results.length}`);
         addMessage(finalMessage);
 
         return finalMessage;

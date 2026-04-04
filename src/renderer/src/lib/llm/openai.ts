@@ -5,6 +5,7 @@ import { ensureRecord, parseToolCallsFromJson, getEnvFallback } from "./utils";
 import { buildSystemPrompt } from "./prompts";
 
 const openRouterBackoffUntilByKey = new Map<string, number>();
+const MAX_FREE_TIER_BACKOFF_WAIT_MS = 20_000;
 
 function parseRateLimitReset(raw?: string): number | undefined {
   if (!raw) return undefined;
@@ -20,6 +21,15 @@ function getOpenRouterBackoffKey(baseUrl: string, model: string): string {
 
 function getOpenRouterBackoffUntil(key: string): number {
   return openRouterBackoffUntilByKey.get(key) ?? 0;
+}
+
+function redactHeadersForLogs(headers: Record<string, string>): Record<string, string> {
+  const copy = { ...headers };
+  if (copy.Authorization?.startsWith("Bearer ")) {
+    const token = copy.Authorization.slice("Bearer ".length);
+    copy.Authorization = `Bearer ${token.slice(0, 6)}...${token.slice(-4)}`;
+  }
+  return copy;
 }
 
 async function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
@@ -58,8 +68,15 @@ async function waitForOpenRouterBackoff(
   if (!model.toLowerCase().includes(":free")) return;
   const waitMs = getOpenRouterBackoffUntil(backoffKey) - Date.now();
   if (waitMs > 0) {
-    console.warn(`[LLM Chat] Waiting ${waitMs}ms for OpenRouter free-tier reset window.`);
-    await sleepWithAbort(waitMs, signal);
+    const boundedWaitMs = Math.min(waitMs, MAX_FREE_TIER_BACKOFF_WAIT_MS);
+    if (waitMs > MAX_FREE_TIER_BACKOFF_WAIT_MS) {
+      console.warn(
+        `[LLM Chat] Backoff window ${waitMs}ms exceeds cap. Waiting ${boundedWaitMs}ms to keep task runtime bounded.`
+      );
+    } else {
+      console.warn(`[LLM Chat] Waiting ${boundedWaitMs}ms for OpenRouter free-tier reset window.`);
+    }
+    await sleepWithAbort(boundedWaitMs, signal);
   }
 }
 
@@ -477,7 +494,7 @@ export // Call OpenAI-compatible API
   });
 
   console.log(`[LLM Chat] URL: ${baseUrl}/chat/completions`);
-  console.log(`[LLM Chat] Headers:`, JSON.stringify(headers, null, 2));
+  console.log(`[LLM Chat] Headers:`, JSON.stringify(redactHeadersForLogs(headers), null, 2));
   if (import.meta.env.DEV) {
     console.log(`[LLM Chat] Request Body for ${model}:`, body);
   } else {
@@ -627,7 +644,7 @@ export // Call OpenAI-compatible API
       const mayContainStructuredToolPayload =
         /```json/i.test(content) ||
         /"tool_calls"\s*:|"tool"\s*:|"commands"\s*:|"goal"\s*:/i.test(content) ||
-        /^[\s]*[\[{]/.test(content);
+        /^[\s]*[[{]/.test(content);
       if (mayContainStructuredToolPayload) {
         console.log('[LLM] No native tool calls found. Attempting to parse JSON from content...');
         const recovered = parseToolCallsFromJson(content);

@@ -133,7 +133,6 @@ export const useMcpStore = create<McpState>()((set, get) => ({
 
                     // Migration: Enable MarkItDown auto-connect and upgrade to [all] extras
                     if (updated.name === 'markitdown') {
-                        updated.autoConnect = true;
                         // Upgrade old arg 'markitdown-mcp' → 'markitdown-mcp[all]' for full file support
                         if (updated.args?.includes('markitdown-mcp') && !updated.args.includes('markitdown-mcp[all]')) {
                             updated.args = ['markitdown-mcp[all]'];
@@ -190,6 +189,9 @@ export const useMcpStore = create<McpState>()((set, get) => ({
             // Lazy connect: Only auto-connect on startup if we don't have cached tool schemas.
             // This prevents spawning expensive Node/Python child processes for unused servers.
             const autoConnectServers = initialServers.filter(s => s.autoConnect && s.tools.length === 0)
+            if (autoConnectServers.length > 0) {
+                console.info(`[mcpStore][Issue #5] auto_connect_start servers=${autoConnectServers.map(s => s.name).join(',')}`)
+            }
             for (const server of autoConnectServers) {
                 // Connect sequentially to avoid overwhelming
                 get().connectServer(server.id).catch(console.error)
@@ -306,6 +308,7 @@ export const useMcpStore = create<McpState>()((set, get) => ({
             })
 
             if (result.success) {
+                console.info(`[mcpStore] connectServer success: ${server.name}`)
                 const toolsResult = await electron.mcp.listTools(id) as { tools: { name: string; description: string; inputSchema?: Record<string, unknown> }[], error?: string }
 
                 set(state => ({
@@ -325,19 +328,33 @@ export const useMcpStore = create<McpState>()((set, get) => ({
             }
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
+            const isMissingRuntimeTool = errorMessage.includes('Environment Setup Needed') || errorMessage.includes('ENOENT');
 
             set(state => ({
                 servers: state.servers.map(s =>
                     s.id === id ? {
                         ...s,
                         connected: false,
+                        // Disable noisy auto-connect loops for optional servers (like markitdown)
+                        // when the required runtime binary is not installed.
+                        autoConnect: (s.name === 'markitdown' && isMissingRuntimeTool) ? false : s.autoConnect,
                         error: errorMessage
                     } : s
                 )
             }))
 
+            if (server.name === 'markitdown' && isMissingRuntimeTool) {
+                console.warn('[mcpStore][Issue #5] markitdown runtime missing. autoConnect disabled to stop startup loop noise.')
+                const uid = get().activeUserId
+                const storageKey = getPersistenceKey(uid)
+                const updatedServers = get().servers.map(s =>
+                    s.id === id ? { ...s, autoConnect: false, connected: false, error: errorMessage } : s
+                )
+                await electron.store.set(storageKey, updatedServers)
+            }
+
             // If the process failed to spawn due to missing system tools (e.g. uv, python, node), surface the setup screen
-            if (errorMessage.includes('Environment Setup Needed') || errorMessage.includes('ENOENT')) {
+            if (isMissingRuntimeTool) {
                 window.dispatchEvent(new Event('app:check-dependencies'))
             }
 

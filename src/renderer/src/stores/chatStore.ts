@@ -162,13 +162,23 @@ export const useChatStore = create<ChatState>()(
                 // A new Map is created to guarantee Zustand detects the change.
                 set(state => {
                     const next = new Map(state._processingSessions);
+                    const existing = next.get(sessionId);
+                    if (existing) {
+                        // Same-session isolation: replacing an in-flight run in the
+                        // same session must abort the previous controller to prevent
+                        // residual sub-agent/tool activity bleed into the new run.
+                        console.warn(`[chatStore][Issue #16] Aborting existing run before starting a new one in session=${sessionId}`);
+                        existing.abortController.abort();
+                    }
                     next.set(sessionId, { abortController: controller });
                     return { _processingSessions: next };
                 });
+                console.info(`[chatStore][Issue #16] startProcessing session=${sessionId}`);
                 return controller.signal;
             },
 
             stopProcessing: (sessionId: string): void => {
+                console.info(`[chatStore][Issue #16] stopProcessing session=${sessionId}`);
                 set(state => {
                     const next = new Map(state._processingSessions);
                     next.delete(sessionId);
