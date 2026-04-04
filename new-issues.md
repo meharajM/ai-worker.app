@@ -4,6 +4,20 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 
 ## Status Snapshot (Apr 4, 2026)
 
+### Latest Validation Update (Apr 4, 2026, late-night rerun)
+- Full real suite rerun:
+  - `node tests/real_e2e_test.cjs` ❌ (`18/20 passed`)
+  - Failed scenarios:
+    - `S02: Sequential Orchestration` (timed out, `Plan created: false`)
+    - `Critical 2: Conditional Multi-Site Decomposition` (timed out, `Completed: false`)
+- Full e2e bundle rerun:
+  - `npm run -s test:e2e` ✅ (exit 0)
+  - But mocked phase still emitted regression signals:
+    - `⚠️ Handoff test failed`
+    - `❌ Plan Response missing`
+    - while final line remained `ALL SCENARIOS PASSED (with handled warnings)`.
+  - Speech phase passed but still printed repeated `Recognizer ... not ready, ignoring`.
+
 ### Latest Validation Update (Apr 4, 2026, evening)
 - Local gates after Phase A/B/C runtime updates:
   - `npm run -s typecheck` ✅
@@ -62,9 +76,10 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
   Evidence: `Critical 1: delegate_sub_task Parallelism` passed (`Delegate signals: 2`, no max-iteration failure).
 
 ### Still Open / Blocking
-- **#14, #26** No longer failing in latest critical-only validation, but still require full-suite revalidation (`S02` path not included in critical-only run).
+- **#14, #26** Open in latest full real rerun (`S02` and `Critical 2` failed with timeouts).
 - **#15** Live rate-limit instability (429/backoff) still observed in real runs.
 - **#27** Broader signal-quality gate still needs full-suite re-validation (action cards/progress/checkpoints).
+- **#25** Reopened in latest `test:e2e` run (`Handoff test failed`, `Plan Response missing` under warning-only behavior).
 
 ### Full Issue Status Matrix
 - **#1** Likely fixed / no recent repro (memory create parse crash not seen in latest runs).
@@ -80,19 +95,19 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 - **#11** Fixed (validated).
 - **#12** Fixed (validated).
 - **#13** Fixed (validated).
-- **#14** Mitigated / needs full-suite re-test (passes in latest critical-only run).
+- **#14** Open (failed in latest full real rerun; conditional decomposition still timing out).
 - **#15** Open (validated by repeated 429/backoff in live runs; still observed transiently in focused run startup).
 - **#16** Mitigated (real E2E blocks scenario handoff until active run is idle, and low-signal direct prompts now skip memory reflection).
 - **#17** Fixed (cache API guard added; no startup crash signal in recent runs).
 - **#18** Likely fixed (CSP duplication signal not seen in latest startup logs).
-- **#19** Fixed (recovery visibility now asserted via explicit runtime markers; mocked suite passes without prior JSON/XML non-blocking warnings).
-- **#20** Mitigated (log flood suppressed in latest `test:speech` rerun; no repeated `Recognizer ... not ready, ignoring` spam observed).
+- **#19** Regressed / needs re-test (latest `test:e2e` still reports recovery visibility warnings in mocked path).
+- **#20** Open (speech passes functionally, but repeated `Recognizer ... not ready, ignoring` logs are still present).
 - **#21** Fixed (bundle-integrity + `test:build` now pass).
 - **#22** Mitigated (mac scripts moved to ZIP-first policy; DMG no longer default path).
 - **#23** Open/By design (Windows native rebuild cross-compile unsupported on current host).
 - **#24** Fixed as originally filed (wine hard-gate replaced by host-aware checks + actionable preflight).
-- **#25** Fixed (mocked suite now hard-fails on plan/handoff regressions and currently passes cleanly).
-- **#26** Mitigated / needs full-suite re-test (`Critical 2` now passes in latest critical-only run; `S02` still pending).
+- **#25** Regressed / open (latest `test:e2e` shows handoff+plan assertion failures while suite still exits green).
+- **#26** Open (failed again in latest full real rerun).
 - **#27** Open (partially mitigated; `Critical 3` now passes in targeted run, full-suite action-card/progress/checkpoint quality still pending complete re-validation).
 
 ## 1. MCP Tool Parsing Errors (`memory_create_entity`)
