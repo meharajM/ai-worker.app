@@ -652,6 +652,7 @@ export // Call OpenAI-compatible API
         if (recovered && recovered.length > 0) {
           toolCalls = recovered;
           console.log(`[LLM] Successfully recovered ${toolCalls.length} tool calls from content body.`);
+          console.log(`[LLM][Issue #19] recovery_json_success count=${toolCalls.length}`);
         }
       }
     }
@@ -659,6 +660,7 @@ export // Call OpenAI-compatible API
     // Check for XML Plan (Legacy/Model Hallucination Fallback) — only if JSON didn't match
     if ((!toolCalls || toolCalls.length === 0) && content && content.includes('<agent_plan>')) {
       console.log('[LLM] Detected XML plan in content, converting to tool call');
+      console.log('[LLM][Issue #19] recovery_xml_success tool=create_execution_plan');
       toolCalls = [{
         id: `auto_plan_${Date.now()}`,
         name: 'create_execution_plan',

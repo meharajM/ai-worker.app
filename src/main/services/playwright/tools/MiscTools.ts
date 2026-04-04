@@ -60,12 +60,18 @@ export class WaitForNavigationTool extends PlaywrightTool {
     }
 
     async execute(page: Page | Frame, args: any): Promise<ToolResult> {
-        const timeout = typeof args.timeout === 'number' ? args.timeout : 30000;
+        const safeArgs = args ?? {};
+        const timeout = typeof safeArgs.timeout === 'number' ? safeArgs.timeout : 30000;
         const loadStates: Array<'domcontentloaded' | 'load' | 'networkidle'> = ['domcontentloaded', 'load', 'networkidle'];
+        const perStateTimeout = Math.max(2000, Math.floor(timeout / loadStates.length));
+        let progressedState: 'domcontentloaded' | 'load' | null = null;
 
         for (const state of loadStates) {
             try {
-                await page.waitForLoadState(state, { timeout });
+                await page.waitForLoadState(state, { timeout: perStateTimeout });
+                if (state === 'domcontentloaded' || state === 'load') {
+                    progressedState = state;
+                }
                 return { result: `Navigation/Load complete (${state})` };
             } catch (error) {
                 const msg = String(error);
@@ -75,6 +81,24 @@ export class WaitForNavigationTool extends PlaywrightTool {
                     throw error;
                 }
             }
+        }
+
+        // Graceful fallback for dynamic pages that keep network connections open.
+        const heuristics = await page.evaluate(() => {
+            const selectors = 'a[href],button,input,textarea,select,[role="button"],[role="link"]';
+            return {
+                readyState: document.readyState,
+                interactive: document.querySelectorAll(selectors).length
+            };
+        }).catch(() => ({ readyState: 'unknown', interactive: 0 }));
+        if (progressedState || heuristics.readyState === 'interactive' || heuristics.readyState === 'complete' || heuristics.interactive > 0) {
+            return {
+                result:
+                    `Navigation likely complete (heuristic).\n` +
+                    `readyState=${heuristics.readyState}\n` +
+                    `interactiveElements=${heuristics.interactive}\n` +
+                    `lastState=${progressedState ?? 'none'}`
+            };
         }
 
         return {

@@ -13,7 +13,8 @@ export class ClickTextTool extends PlaywrightTool {
                 properties: {
                     text: { type: 'string', description: 'Visible text on the element (e.g., "Sign In", "Add to Cart")' },
                     exact: { type: 'boolean', description: 'true=exact match, false=partial match (default)' },
-                    tag: { type: 'string', description: 'Limit to tag type: button, a, div, span, etc.' }
+                    tag: { type: 'string', description: 'Limit to tag type: button, a, div, span, etc.' },
+                    timeout: { type: 'number', description: 'Max wait in ms (default: 8000, capped to 15000)' }
                 },
                 required: ['text']
             }
@@ -21,18 +22,56 @@ export class ClickTextTool extends PlaywrightTool {
     }
 
     async execute(page: Page, args: any): Promise<ToolResult> {
-        const textFindError = this.requireParam(args, 'text');
+        const safeArgs = args ?? {};
+        const textFindError = this.requireParam(safeArgs, 'text');
         if (textFindError) return { result: null, error: textFindError };
 
-        const textToFind = args.text;
-        const exactMatch = args.exact || false;
-        const tagFilter = args.tag ? args.tag.toLowerCase() : null;
+        const textToFind = String(safeArgs.text);
+        const exactMatch = Boolean(safeArgs.exact);
+        const tagFilter = safeArgs.tag ? String(safeArgs.tag).toLowerCase() : null;
+        const rawTimeout = typeof safeArgs.timeout === 'number' ? safeArgs.timeout : 8000;
+        const timeout = Math.max(1500, Math.min(15000, rawTimeout));
+        const normalized = textToFind.replace(/\s+/g, ' ').trim();
 
-        const clickTextSelector = tagFilter
-            ? `${tagFilter}:has-text("${textToFind}")`
-            : `text=${exactMatch ? `"${textToFind}"` : textToFind}`;
+        const clickUsingText = async (text: string, exact: boolean): Promise<boolean> => {
+            try {
+                const locator = tagFilter
+                    ? page.locator(tagFilter).getByText(text, { exact }).first()
+                    : page.getByText(text, { exact }).first();
+                await locator.click({ timeout });
+                return true;
+            } catch {
+                return false;
+            }
+        };
 
-        await page.click(clickTextSelector);
-        return { result: `Clicked element with text "${textToFind}"` };
+        if (await clickUsingText(normalized, exactMatch)) {
+            return { result: `Clicked element with text "${textToFind}"` };
+        }
+
+        // Recovery path: exact phrases on dynamic news/ecommerce cards often include
+        // hidden punctuation/line breaks; try compact partial matching before failing.
+        const compactFallback = normalized.length > 52 ? normalized.slice(0, 52) : normalized;
+        if (exactMatch && compactFallback.length >= 8 && await clickUsingText(compactFallback, false)) {
+            console.warn(`[ClickTextTool][Issue #27/#7] recovered exact click_text via compact partial match: "${compactFallback}"`);
+            return { result: `Clicked element with partial text fallback "${compactFallback}" (from exact request)` };
+        }
+
+        const keywordFallback = normalized
+            .split(/\s+/)
+            .filter((part: string) => part.length >= 4)
+            .slice(0, 4)
+            .join(' ');
+        if (keywordFallback.length >= 8 && await clickUsingText(keywordFallback, false)) {
+            console.warn(`[ClickTextTool][Issue #27/#7] recovered click_text via keyword fallback: "${keywordFallback}"`);
+            return { result: `Clicked element with keyword fallback "${keywordFallback}"` };
+        }
+
+        return {
+            result: null,
+            error:
+                `Timeout: The element '${textToFind}' was not found within ${timeout}ms.\n\n` +
+                `💡 RECOVERY HINT: Try a shorter visible label, use exact=false, or call get_interactive_elements().`
+        };
     }
 }

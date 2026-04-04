@@ -83,7 +83,7 @@ export class CloseTabTool extends PlaywrightTool {
     getSchema() {
         return {
             name: 'close_tab',
-            description: 'TABS: Close the current tab. Automatically switches to another open tab. Cannot close the last remaining tab.',
+            description: 'TABS: Close the current tab. Automatically switches to another open tab. If this is the last remaining tab, this tool is a safe no-op.',
             inputSchema: { type: 'object', properties: {} }
         };
     }
@@ -96,7 +96,7 @@ export class CloseTabTool extends PlaywrightTool {
 
         const openPages = context.context.pages().filter(p => !p.isClosed());
         if (openPages.length <= 1) {
-            return { result: null, error: 'Cannot close the last tab' };
+            return { result: 'Skipped close_tab: last tab remains open' };
         }
 
         await pageToClose.close();

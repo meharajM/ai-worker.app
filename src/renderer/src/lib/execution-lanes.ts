@@ -7,6 +7,7 @@ export const LANE_TIMEOUTS = {
     DEFAULT: 60_000,              // 60s - general fallback
     BROWSER_NAVIGATION: 120_000,  // 120s - navigate, goto (network-dependent)
     BROWSER_ACTION: 30_000,       // 30s  - click, type, select, hover, etc.
+    BROWSER_PERCEPTION: 60_000,   // 60s  - get_state/get_page_content/evaluate-style reads
     BROWSER_SNAPSHOT: 15_000,     // 15s  - screenshot, snapshot (fast)
     FILE_SYSTEM: 30_000,          // 30s  - file read/write
 } as const;
@@ -244,6 +245,21 @@ export class LaneManager {
         const NAVIGATION_TOOLS = ['navigate', 'browser_navigate', 'playwright_navigate', 'goto'];
         if (NAVIGATION_TOOLS.some(n => toolName.includes(n))) {
             return LANE_TIMEOUTS.BROWSER_NAVIGATION;
+        }
+
+        // Perception/extraction tools can legitimately take longer on dynamic pages.
+        const PERCEPTION_TOOLS = [
+            'get_state',
+            'browser_snapshot',
+            'get_page_content',
+            'get_interactive_elements',
+            'evaluate',
+            'browser_run_code',
+            'browser_evaluate',
+            'wait_for_navigation',
+        ];
+        if (PERCEPTION_TOOLS.some(n => toolName.includes(n))) {
+            return LANE_TIMEOUTS.BROWSER_PERCEPTION;
         }
 
         // Snapshot / screenshot – should be fast

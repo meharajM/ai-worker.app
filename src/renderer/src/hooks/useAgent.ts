@@ -308,6 +308,15 @@ export function useAgent(): UseAgentReturn {
                          * Always targets `originSessionId`.
                          */
                         onProgressUpdate: (progress?: number, eta?: number, plan?: unknown) => {
+                            const planSteps =
+                                plan &&
+                                typeof plan === 'object' &&
+                                Array.isArray((plan as { steps?: unknown[] }).steps)
+                                    ? (plan as { steps: unknown[] }).steps.length
+                                    : 0;
+                            console.info(
+                                `[useAgent][Issue #27] progress_update session=${originSessionId} progress=${progress === undefined ? 'cleared' : progress} eta=${eta ?? 'n/a'} planSteps=${planSteps}`
+                            );
                             useChatStore.getState().updateSessionProgress(
                                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                                 originSessionId, progress, eta, plan as any

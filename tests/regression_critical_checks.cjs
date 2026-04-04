@@ -180,19 +180,103 @@ function testMemoryReflectorCancellationHook() {
 
 function testE2EAssertionsAreStrict() {
   const realSrc = read('tests/real_e2e_test.cjs');
-  assertIncludes(realSrc, '!result.timedOut && actionCards === 1', 'real-e2e');
+  assertIncludes(realSrc, '!result.timedOut && finalResultSignals >= 1 && assistantDelta >= 1 && terminalSummarySeen', 'real-e2e');
+  assertIncludes(realSrc, '!result.timedOut && (orchestratedPath || directSingleSite)', 'real-e2e');
   assertIncludes(realSrc, '!result.timedOut && hasProgress && hasParallel', 'real-e2e');
+  assertIncludes(realSrc, 'logsContain(/progress_update session=/i) || logsContain(/parallel_start run=/i) || logsContain(/parallel_done run=/i)', 'real-e2e');
   assertIncludes(realSrc, '!result.timedOut && checkpointLogs.length > 0', 'real-e2e');
 
   const mockedSrc = read('tests/e2e_ui_mocked.cjs');
   assertIncludes(mockedSrc, "console.error('⚠️ Handoff test failed');", 'mocked-e2e');
   assertIncludes(mockedSrc, "console.error('❌ Plan Response missing');", 'mocked-e2e');
+  assertIncludes(mockedSrc, '\\[LLM\\]\\[Issue #19\\] recovery_json_success', 'mocked-e2e');
+  assertIncludes(mockedSrc, '\\[LLM\\]\\[Issue #19\\] recovery_xml_success', 'mocked-e2e');
+  assertNotIncludes(mockedSrc, 'JSON recovery signal not visible in UI; continuing (non-blocking)', 'mocked-e2e');
+  assertNotIncludes(mockedSrc, 'XML recovery signal not visible in UI; continuing (non-blocking)', 'mocked-e2e');
   assertIncludes(mockedSrc, "console.log('\\n🎉 ALL SCENARIOS PASSED');", 'mocked-e2e');
   assertNotIncludes(mockedSrc, 'ALL SCENARIOS PASSED (with handled warnings)', 'mocked-e2e');
 }
 
+function testEvaluateToolTopLevelReturnRecovery() {
+  const advancedSrc = read('src/main/services/playwright/tools/AdvancedTools.ts');
+  assertIncludes(advancedSrc, "aliases = ['browser_run_code', 'browser_evaluate'];", 'advanced-tools');
+  assertIncludes(advancedSrc, "typeof args?.code === 'string' ? args.code : ''", 'advanced-tools');
+  assertIncludes(advancedSrc, 'Missing required parameter: script', 'advanced-tools');
+  assertIncludes(advancedSrc, "return statements are only valid inside functions", 'advanced-tools');
+  assertIncludes(advancedSrc, 'const hasSyntaxLikeFailure =', 'advanced-tools');
+  assertIncludes(advancedSrc, 'const genericEvaluateFailureWithReturn =', 'advanced-tools');
+  assertIncludes(advancedSrc, 'const alreadyIifeWrapped =', 'advanced-tools');
+  assertIncludes(advancedSrc, 'recovered script by wrapping top-level return in IIFE', 'advanced-tools');
+}
+
+function testLaneTimeoutsForPerceptionTools() {
+  const lanesSrc = read('src/renderer/src/lib/execution-lanes.ts');
+  assertIncludes(lanesSrc, 'BROWSER_PERCEPTION: 60_000', 'execution-lanes');
+  assertIncludes(lanesSrc, "const PERCEPTION_TOOLS = [", 'execution-lanes');
+  assertIncludes(lanesSrc, "'get_state'", 'execution-lanes');
+  assertIncludes(lanesSrc, "'get_page_content'", 'execution-lanes');
+  assertIncludes(lanesSrc, "'wait_for_navigation'", 'execution-lanes');
+}
+
+function testCloseTabLastTabNoop() {
+  const tabToolsSrc = read('src/main/services/playwright/tools/TabTools.ts');
+  assertIncludes(tabToolsSrc, "Skipped close_tab: last tab remains open", 'tab-tools');
+  assertNotIncludes(tabToolsSrc, "return { result: null, error: 'Cannot close the last tab' };", 'tab-tools');
+}
+
+function testNavigationTimeoutRecovery() {
+  const navigateSrc = read('src/main/services/playwright/tools/NavigateTool.ts');
+  assertIncludes(navigateSrc, 'timeout but page looks interactive; continuing', 'navigate-tool');
+  assertIncludes(navigateSrc, 'Navigation timed out but page appears interactive.', 'navigate-tool');
+  assertIncludes(navigateSrc, 'const heuristics = await page.evaluate(() => {', 'navigate-tool');
+  assertIncludes(navigateSrc, "safeArgs = args ?? {}", 'navigate-tool');
+}
+
+function testWaitForNavigationHeuristicFallback() {
+  const miscSrc = read('src/main/services/playwright/tools/MiscTools.ts');
+  assertIncludes(miscSrc, 'const perStateTimeout = Math.max(2000, Math.floor(timeout / loadStates.length));', 'misc-tools');
+  assertIncludes(miscSrc, 'Navigation likely complete (heuristic).', 'misc-tools');
+  assertIncludes(miscSrc, 'interactiveElements=', 'misc-tools');
+}
+
+function testGetStateNavigationRaceResilience() {
+  const getStateSrc = read('src/main/services/playwright/tools/GetStateTool.ts');
+  assertIncludes(getStateSrc, 'const safeArgs = args ?? {};', 'get-state');
+  assertIncludes(getStateSrc, 'for (let attempt = 1; attempt <= 3; attempt++) {', 'get-state');
+  assertIncludes(getStateSrc, "await page.waitForLoadState('domcontentloaded', { timeout: 1500 }).catch(() => {});", 'get-state');
+  assertIncludes(getStateSrc, "Target page, context or browser has been closed", 'get-state');
+  assertIncludes(getStateSrc, "await withNavigationRecovery(() => page.evaluate(() => {", 'get-state');
+}
+
+function testSubAgentExtractionFirstRule() {
+  const promptSrc = read('src/renderer/src/lib/llm/prompts.ts');
+  assertIncludes(
+    promptSrc,
+    '**Extraction first**: For info-gathering tasks, prefer get_state/get_page_content/evaluate before clicking deep links.',
+    'prompts'
+  );
+}
+
+function testClickTextBoundedTimeoutAndFallbacks() {
+  const clickTextSrc = read('src/main/services/playwright/tools/ClickTextTool.ts');
+  assertIncludes(clickTextSrc, "timeout: { type: 'number', description: 'Max wait in ms (default: 8000, capped to 15000)' }", 'click-text');
+  assertIncludes(clickTextSrc, 'const rawTimeout = typeof safeArgs.timeout === \'number\' ? safeArgs.timeout : 8000;', 'click-text');
+  assertIncludes(clickTextSrc, 'const timeout = Math.max(1500, Math.min(15000, rawTimeout));', 'click-text');
+  assertIncludes(clickTextSrc, 'recovered exact click_text via compact partial match', 'click-text');
+  assertIncludes(clickTextSrc, 'recovered click_text via keyword fallback', 'click-text');
+}
+
+function testRecoverySignalLogging() {
+  const openaiSrc = read('src/renderer/src/lib/llm/openai.ts');
+  assertIncludes(openaiSrc, '[LLM][Issue #19] recovery_json_success', 'openai');
+  assertIncludes(openaiSrc, '[LLM][Issue #19] recovery_xml_success', 'openai');
+}
+
 function testRealE2EIdleGating() {
   const realSrc = read('tests/real_e2e_test.cjs');
+  assertIncludes(realSrc, "const CRITICAL_SELECT_ARG = process.argv.find((arg) => arg.startsWith('--only-critical=') || arg.startsWith('--critical='));", 'real-e2e');
+  assertIncludes(realSrc, 'function shouldRunCritical(id) {', 'real-e2e');
+  assertIncludes(realSrc, 'if (shouldRunCritical(3)) {', 'real-e2e');
   assertIncludes(realSrc, 'async function waitForRunIdle(', 'real-e2e');
   assertIncludes(realSrc, 'button[title="Stop Generation"]', 'real-e2e');
   assertIncludes(realSrc, 'Keyword matched but run still active; continuing to wait.', 'real-e2e');
@@ -212,6 +296,15 @@ function run() {
   testImmediateReplyNoToolMode();
   testMemoryReflectorCancellationHook();
   testE2EAssertionsAreStrict();
+  testEvaluateToolTopLevelReturnRecovery();
+  testLaneTimeoutsForPerceptionTools();
+  testCloseTabLastTabNoop();
+  testNavigationTimeoutRecovery();
+  testWaitForNavigationHeuristicFallback();
+  testGetStateNavigationRaceResilience();
+  testSubAgentExtractionFirstRule();
+  testClickTextBoundedTimeoutAndFallbacks();
+  testRecoverySignalLogging();
   testRealE2EIdleGating();
   console.log('All critical regression checks passed.');
 }

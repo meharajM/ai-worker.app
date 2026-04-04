@@ -95,7 +95,8 @@ Use <think>...</think> for reasoning (hidden). Put actions and final response ou
 4. **Complete the current step**: Focus on what's asked, don't do extra steps
 5. **Error handling**: If tool fails, try alternative once, then report
 6. **Panic Mode**: If you are stuck for 3 turns, run get_state (or snapshot) and report findings.
-7. **End marker**: Finish with "✓ Done"
+7. **Extraction first**: For info-gathering tasks, prefer get_state/get_page_content/evaluate before clicking deep links. Open links only when required by the task.
+8. **End marker**: Finish with "✓ Done"
 ${dynamicRules ? `\n# TASK-SPECIFIC\n${dynamicRules}` : ''}`;
 }
 

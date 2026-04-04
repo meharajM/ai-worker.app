@@ -35,14 +35,18 @@ export class GetStateTool extends PlaywrightTool {
     }
 
     async execute(page: Page, args: any): Promise<ToolResult> {
+        const safeArgs = args ?? {};
         const withNavigationRecovery = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
-            for (let attempt = 1; attempt <= 2; attempt++) {
+            for (let attempt = 1; attempt <= 3; attempt++) {
                 try {
                     return await fn()
                 } catch (error) {
                     const msg = String(error)
                     const navigationRace = msg.includes('Execution context was destroyed') || msg.includes('Cannot find context with specified id')
-                    if (!navigationRace || attempt === 2) {
+                    if (!navigationRace || attempt === 3) {
+                        if (!navigationRace && msg.includes('Target page, context or browser has been closed')) {
+                            return fallback
+                        }
                         if (navigationRace) {
                             console.warn(`[GetStateTool][Issue #10] navigation race unresolved after attempt ${attempt}, returning fallback.`);
                         }
@@ -55,11 +59,12 @@ export class GetStateTool extends PlaywrightTool {
             return fallback
         }
 
-        const mode = args.mode || 'fast';
-        console.info(`[GetStateTool][Issue #10/#7] start mode=${mode} includeScreenshot=${Boolean(args.screenshot)} includeTree=${Boolean(args.tree)} url=${page.url()}`);
-        const includeScreenshot = args.screenshot ?? (mode === 'vision');
-        const includeTree = args.tree ?? (mode === 'full');
-        const useHighlighting = args.highlight ?? includeScreenshot;
+        const mode = safeArgs.mode || 'fast';
+        console.info(`[GetStateTool][Issue #10/#7] start mode=${mode} includeScreenshot=${Boolean(safeArgs.screenshot)} includeTree=${Boolean(safeArgs.tree)} url=${page.url()}`);
+        const includeScreenshot = safeArgs.screenshot ?? (mode === 'vision');
+        const includeTree = safeArgs.tree ?? (mode === 'full');
+        const useHighlighting = safeArgs.highlight ?? includeScreenshot;
+        await page.waitForLoadState('domcontentloaded', { timeout: 1500 }).catch(() => {});
 
         const state: any = {
             url: page.url(),
@@ -71,7 +76,7 @@ export class GetStateTool extends PlaywrightTool {
 
         if (useHighlighting && includeScreenshot) {
             try {
-                elementMap = await page.evaluate(() => {
+                elementMap = await withNavigationRecovery(() => page.evaluate(() => {
                     const interactiveSelectors = [
                         'a[href]', 'button', 'input', 'textarea', 'select', '[role="button"]', '[role="link"]', '[onclick]'
                     ].join(',');
@@ -129,7 +134,7 @@ export class GetStateTool extends PlaywrightTool {
 
                     document.body.appendChild(overlayContainer);
                     return map;
-                });
+                }), {} as Record<number, string>);
 
                 state.interactableElements = elementMap;
             } catch (e) {
@@ -139,7 +144,7 @@ export class GetStateTool extends PlaywrightTool {
 
         if (includeTree) {
             try {
-                const domTree = await page.evaluate(() => {
+                const domTree = await withNavigationRecovery(() => page.evaluate(() => {
                     function extractNode(el: Element, depth: number = 0): any {
                         if (depth > 5) return null;
                         const tagName = el.tagName.toLowerCase();
@@ -165,7 +170,7 @@ export class GetStateTool extends PlaywrightTool {
                         };
                     }
                     return extractNode(document.body);
-                });
+                }), null as any);
                 state.domTree = domTree;
             } catch (e) {
                 state.domTreeError = String(e);
@@ -186,9 +191,9 @@ export class GetStateTool extends PlaywrightTool {
         }
 
         if (useHighlighting && includeScreenshot) {
-            await page.evaluate(() => {
+            await withNavigationRecovery(() => page.evaluate(() => {
                 document.getElementById('ai-worker-highlight-overlay')?.remove();
-            });
+            }), null);
         }
 
         if (mode === 'fast' && !state.interactableElements) {

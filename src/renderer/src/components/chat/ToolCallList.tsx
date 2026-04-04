@@ -226,6 +226,8 @@ export function ToolCallList({ toolCalls }: ToolCallListProps) {
           return (
             <div
               key={agentLabel}
+              data-testid="toolcall-agent-chip"
+              data-agent-label={agentLabel}
               className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--color-tool-chip-bg)] border border-[var(--color-tool-border)] w-fit"
             >
               <CheckCircle2 size={12} className="text-[var(--color-success)]" />
@@ -250,6 +252,8 @@ export function ToolCallList({ toolCalls }: ToolCallListProps) {
         return (
           <div
             key={agentLabel}
+            data-testid="toolcall-agent-group"
+            data-agent-label={agentLabel}
             className="flex flex-col bg-[var(--color-tool-bg)] border border-[var(--color-tool-border)] rounded-2xl overflow-hidden relative"
           >
             {/* Left status strip — pulses when in-progress */}

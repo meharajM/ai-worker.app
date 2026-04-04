@@ -156,13 +156,13 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         try {
             const skipBtn = window.locator('text=Skip for now').first();
             if (await skipBtn.isVisible({ timeout: 5000 })) await skipBtn.click();
-        } catch (e) {}
+        } catch (e) { }
 
         // Configure Settings
         await window.click('button[title="Settings"]');
         await window.click('text=OpenRouter');
         await window.locator('input[type="password"]').fill(process.env.VITE_OPENROUTER_API_KEY || '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');
-        await window.selectOption('select', 'nvidia/nemotron-3-super-120b-a12b:free');
+        await window.selectOption('select', 'qwen/qwen3.6-plus:free');
         await window.click('button[title="Chat"]');
 
         const chatInput = window.locator('[data-testid="chat-textarea"]');

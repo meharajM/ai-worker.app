@@ -3,7 +3,7 @@ import { PlaywrightTool, ToolResult } from '../PlaywrightTool';
 
 export class EvaluateTool extends PlaywrightTool {
     name = 'evaluate';
-    aliases = ['browser_run_code'];
+    aliases = ['browser_run_code', 'browser_evaluate'];
 
     getSchema() {
         return {
@@ -20,11 +20,42 @@ export class EvaluateTool extends PlaywrightTool {
     }
 
     async execute(page: Page, args: any): Promise<ToolResult> {
+        const script = typeof args?.script === 'string'
+            ? args.script
+            : (typeof args?.code === 'string' ? args.code : '');
+        if (!script.trim()) {
+            return { result: null, error: 'Missing required parameter: script' };
+        }
+
         try {
-            const result = await page.evaluate(args.script);
+            const result = await page.evaluate(script);
             return { result };
         } catch (error) {
-            return { result: null, error: `Script execution failed: ${String(error)}` };
+            const primaryError = String(error);
+            const hasSyntaxLikeFailure =
+                /SyntaxError|Unexpected token|Unexpected identifier|Unexpected string|Unexpected end of input|missing \)|missing \(|Invalid or unexpected token/i.test(primaryError);
+            const hasReturnLikeFailure =
+                /return statements are only valid inside functions|Illegal return statement|Unexpected token 'return'/i.test(primaryError);
+            const genericEvaluateFailureWithReturn =
+                primaryError.includes('page.evaluate') && /\breturn\b/.test(script);
+            const alreadyIifeWrapped = /^\s*\(\s*(?:\(\)\s*=>|function\b)/.test(script);
+            const canRecoverWithIifeWrap = !alreadyIifeWrapped && (hasReturnLikeFailure || hasSyntaxLikeFailure || genericEvaluateFailureWithReturn);
+
+            if (canRecoverWithIifeWrap) {
+                const wrappedScript = `(() => {\n${script}\n})()`;
+                try {
+                    const recoveredResult = await page.evaluate(wrappedScript);
+                    console.info('[EvaluateTool][Issue #26] recovered script by wrapping top-level return in IIFE');
+                    return { result: recoveredResult };
+                } catch (wrappedError) {
+                    return {
+                        result: null,
+                        error: `Script execution failed: ${primaryError}. Recovery with wrapped IIFE also failed: ${String(wrappedError)}`,
+                    };
+                }
+            }
+
+            return { result: null, error: `Script execution failed: ${primaryError}` };
         }
     }
 }

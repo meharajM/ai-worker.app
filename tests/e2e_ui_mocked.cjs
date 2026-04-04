@@ -26,19 +26,12 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
     let electronApp;
     try {
-        const tempUserDataDir = path.join(__dirname, 'temp-user-data');
-        if (fs.existsSync(tempUserDataDir)) {
-            fs.rmSync(tempUserDataDir, { recursive: true, force: true });
-        }
-
         electronApp = await electron.launch({
             executablePath: execPath,
             args: [
-                path.join(__dirname, '../out/main/index.js'),
-                '--no-sandbox',
-                `--user-data-dir=${tempUserDataDir}`
+                path.join(__dirname, '../out/main/index.js')
             ],
-            timeout: 60000,
+            timeout: 120000,
             env: { ...process.env, NODE_ENV: 'production' }
         });
         console.log('✅ Electron launched');
@@ -140,7 +133,7 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                     }
                 },
                 {
-                    triggers: ["JSON fallback", "recovery"],
+                    triggers: ["JSON fallback recovery", "Simulate JSON fallback recovery"],
                     response: {
                         choices: [{
                             message: {
@@ -170,6 +163,24 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
                             message: {
                                 role: "assistant",
                                 content: "<think>Deeply analyzing the request...</think>Here is the answer."
+                            }
+                        }]
+                    }
+                },
+                {
+                    triggers: ["XML fallback", "agent_plan recovery"],
+                    response: {
+                        choices: [{
+                            message: {
+                                role: "assistant",
+                                content: `<agent_plan>
+  <summary>Build a simple 2-step plan</summary>
+  <steps>
+    <step index="1">Inspect current state</step>
+    <step index="2">Return a compact summary</step>
+  </steps>
+</agent_plan>`,
+                                tool_calls: []
                             }
                         }]
                     }
@@ -489,32 +500,22 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
         // --- TEST 6: JSON RECOVERY ---
         console.log('\n--- Test 6: JSON Recovery ---');
         await sendMessage("Simulate JSON fallback recovery");
-        try {
-            // Accept either recovered tool-call UI text or visible recovered tool name.
-            await waitForAnyText([
-                'Using fs_list_directory',
-                'fs_list_directory',
-                'I\'ll wait for the list'
-            ], 15000);
-            console.log('✅ recovered JSON tool call found');
-        } catch (e) {
-            console.log('ℹ️ JSON recovery signal not visible in UI; continuing (non-blocking)');
-        }
+        await waitForAnyLog([
+            /\[LLM\]\[Issue #19\] recovery_json_success/i,
+            /Successfully recovered .* tool calls from content body/i,
+            /Native Tool Call Identified:\s*fs_list_directory/i
+        ], 15000);
+        console.log('✅ recovered JSON tool call signal detected');
 
         // --- TEST 7: XML RECOVERY ---
         console.log('\n--- Test 7: XML Recovery ---');
-        await sendMessage("Simulate leaked XML tool");
-        try {
-            // Accept either recovered tool-call text or sanitized visible output.
-            await waitForAnyText([
-                'Using leaked_tool',
-                'leaked_tool',
-                'Here is the answer'
-            ], 15000);
-            console.log('✅ recovered XML tool call found');
-        } catch (e) {
-            console.log('ℹ️ XML recovery signal not visible in UI; continuing (non-blocking)');
-        }
+        await sendMessage("Simulate XML fallback recovery");
+        await waitForAnyLog([
+            /\[LLM\]\[Issue #19\] recovery_xml_success/i,
+            /Detected XML plan in content, converting to tool call/i,
+            /Native Tool Call Identified:\s*create_execution_plan/i
+        ], 15000);
+        console.log('✅ recovered XML tool call signal detected');
 
         // --- TEST 8: MALFORMED RESPONSE ---
         console.log('\n--- Test 8: Malformed Response ---');

@@ -34,8 +34,8 @@ This file tracks technical root cause, current status, and latest verification s
 
 ## #7 `wait_for_navigation` strict timeout
 - Root cause: fixed short waits on slow/dynamic pages.
-- Status: Open.
-- Finding: still appears in live scenarios.
+- Status: Mitigated / needs clean re-test.
+- Finding: tool now uses per-state timeout budget and heuristic completion (readyState/interactive-elements) instead of hard-failing all timeout paths. Full live confirmation still pending under lower 429 pressure.
 
 ## #8 Browser launch thrash / stale profile socket churn
 - Root cause: browser lifecycle reuse/concurrency guard gaps.
@@ -44,13 +44,13 @@ This file tracks technical root cause, current status, and latest verification s
 
 ## #9 `navigate` hard timeout on heavy pages
 - Root cause: static timeout + heavy script/anti-bot pages without adaptive fallback.
-- Status: Open.
-- Finding: still occurs in live retail navigation.
+- Status: Mitigated / needs clean re-test.
+- Finding: `navigate` now returns soft-success when timeout occurs but DOM is interactive (`readyState`/interactive count), reducing false hard failures on heavy pages.
 
 ## #10 `get_state` race during navigation
 - Root cause: state extraction called before page lifecycle stabilizes.
-- Status: Needs re-test.
-- Finding: no fresh deterministic repro in latest focused run.
+- Status: Mitigated / needs clean re-test.
+- Finding: `get_state` now applies broader navigation-race recovery across evaluate paths (including highlight cleanup) and retries up to 3 attempts; latest runtime stability signal reported `Execution-context-destroyed: 0`.
 
 ## #11 `fs_write_file` loop under staged approval
 - Root cause: agent loop lacked terminal pause state for staged/approval-required writes.
@@ -94,8 +94,8 @@ This file tracks technical root cause, current status, and latest verification s
 
 ## #19 Recovery visibility in mocked E2E
 - Root cause: JSON/XML recovery can happen internally while UI-facing assertions miss/underreport markers.
-- Status: Open.
-- Finding: mocked runs still warn on recovery visibility checks.
+- Status: Fixed.
+- Finding: explicit recovery markers now emitted (`[LLM][Issue #19] recovery_json_success`, `[LLM][Issue #19] recovery_xml_success`) and mocked E2E asserts these signals directly; suite passes.
 
 ## #20 Speech recognizer readiness log flood
 - Root cause: recognizer lifecycle transitions emit repeated non-actionable “not ready” logs.
@@ -135,11 +135,12 @@ This file tracks technical root cause, current status, and latest verification s
 ## #27 Pass criteria too lax for degraded UX signals
 - Root cause: scenario assertions focus on timeout/completion but underweight action-card/progress/checkpoint quality signals.
 - Status: Open (partially mitigated).
-- Finding: immediate-reply and mocked-plan/handoff gates are tightened and passing; real-E2E now also blocks early keyword completion while run is active, and direct-answer prompts skip decomposition preflight. Full-suite action-card/progress/checkpoint signal quality still needs complete re-validation.
+- Finding: immediate-reply and mocked-plan/handoff gates are tightened and passing; real-E2E blocks early keyword completion while run is active. New mitigation landed in `click_text` (bounded timeout + compact/keyword fallback) and targeted validation (`--only-critical=3`) now passes Critical 3 in 51.3s. Full-suite action-card/progress/checkpoint signal quality still needs complete re-validation.
 
 ## Recent Validation Notes
 - Added focused live runner: `tests/real_e2e_focus.cjs` (`npm run -s test:e2e:real:focus`).
 - Focused live result (latest): `S05` pass (~84.8s), `S21G` pass (~11.6s, no tools) with deterministic chat-state reset for true first-turn behavior and direct-answer decomposition bypass active.
 - Added regression guard for immediate no-tool direct-answer mode in `tests/regression_critical_checks.cjs`.
 - Latest critical-only live run: `node tests/real_e2e_test.cjs --critical-only` passed all 5 critical checks after stabilizing Critical 4 completion criteria.
+- Latest targeted critical validation: `node tests/real_e2e_test.cjs --critical-only --only-critical=3` passed (`Assistant bubbles: 6`, no execution-failed badge, runtime stability clean).
 - Latest speech rerun: `npm run -s test:speech` passed with recognizer flood suppressed; placeholder check now classifies active voice controls as info-level timing instead of warning.
