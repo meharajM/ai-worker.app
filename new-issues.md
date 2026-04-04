@@ -25,7 +25,6 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 ### Still Open / Blocking
 - **#14, #26** No longer failing in latest critical-only validation, but still require full-suite revalidation (`S02` path not included in critical-only run).
 - **#15** Live rate-limit instability (429/backoff) still observed in real runs.
-- **#20** Speech recognizer readiness log flood still observed (`Recognizer ... not ready, ignoring`).
 - **#27** Broader signal-quality gate still needs full-suite re-validation (action cards/progress/checkpoints).
 
 ### Full Issue Status Matrix
@@ -48,7 +47,7 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 - **#17** Fixed (cache API guard added; no startup crash signal in recent runs).
 - **#18** Likely fixed (CSP duplication signal not seen in latest startup logs).
 - **#19** Open (recovery visibility warnings still present in mocked E2E).
-- **#20** Open (recognizer readiness log flood persists).
+- **#20** Mitigated (log flood suppressed in latest `test:speech` rerun; no repeated `Recognizer ... not ready, ignoring` spam observed).
 - **#21** Fixed (bundle-integrity + `test:build` now pass).
 - **#22** Mitigated (mac scripts moved to ZIP-first policy; DMG no longer default path).
 - **#23** Open/By design (Windows native rebuild cross-compile unsupported on current host).
@@ -215,6 +214,10 @@ Repeated renderer errors during speech model switching and restart cycles:
 **Issue:**
 Speech flow now passes end-to-end, but recognizer readiness churn generates high-volume error logs that can hide real failures and suggests missing debounce/state gating around recognizer lifecycle transitions.
 
+**Status Update (Apr 4, 2026):**
+- Mitigated in current branch: repeated recognizer-not-ready errors are now rate-limited in the audio processing loop.
+- Validation: `npm run -s test:speech` completed without the prior log flood pattern.
+
 ## 21. Build Gate Fails: `electron-store` Not Bundled in Main Bundle
 **Log Evidence:**
 `npm run test:build` fails in `check:bundle` with:
@@ -281,3 +284,11 @@ Core orchestration behavior is still unstable in live flow: sequential planning 
 
 **Issue:**
 Several scenarios are marked passed while key acceptance signals are missing. This weakens regression detection and can allow UX-level breakages (progress/action-card/checkpoint visibility) to ship unnoticed unless pass criteria are tightened.
+
+## 28. Speech UI Listening Placeholder Is Intermittently Not Updating
+**Log Evidence (Apr 4, 2026 `npm run -s test:speech`):**
+- `⚠️ Placeholder did not change to Listening within 30s, currently: "Message... (Shift+Enter for new line, or drag files here)"`
+- Same run still showed mic/stop flow operational and finished with `ALL SPEECH TESTS PASSED`.
+
+**Issue:**
+Voice mode activation can be functionally active while the textarea placeholder fails to reflect `Listening...` reliably. This is a UX-state consistency issue (non-blocking) and can confuse users about whether capture is active.

@@ -55,6 +55,8 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     const visProcessorRef = useRef<ScriptProcessorNode | null>(null)
     const lastRecognizerNotReadyLogAtRef = useRef(0)
     const recognizerNotReadyCountRef = useRef(0)
+    const lastWaveformNotReadyLogAtRef = useRef(0)
+    const waveformNotReadyCountRef = useRef(0)
 
     // Initialize: Select Model based on settings
     useEffect(() => {
@@ -261,8 +263,24 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
                         const buffer = event.inputBuffer
                         if (buffer.numberOfChannels > 0) {
                             recognizer.acceptWaveform(event.inputBuffer)
+                            if (waveformNotReadyCountRef.current > 0) {
+                                console.info(`[Speech][Issue #20] Waveform processing recovered after drops=${waveformNotReadyCountRef.current}`)
+                                waveformNotReadyCountRef.current = 0
+                            }
                         }
                     } catch (e) {
+                        const msg = e instanceof Error ? e.message : String(e)
+                        if (/recognizer.*not ready|not ready, ignoring/i.test(msg)) {
+                            const now = Date.now()
+                            waveformNotReadyCountRef.current += 1
+                            if (now - lastWaveformNotReadyLogAtRef.current > 30000) {
+                                console.warn(
+                                    `[Speech][Issue #20] Recognizer not ready in audio loop; suppressing repeats. drops=${waveformNotReadyCountRef.current}`
+                                )
+                                lastWaveformNotReadyLogAtRef.current = now
+                            }
+                            return
+                        }
                         console.error('WASM processing error:', e)
                     }
                 }
@@ -300,6 +318,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     }
 
     const stopVisualization = () => {
+        waveformNotReadyCountRef.current = 0
         if (visProcessorRef.current) {
             visProcessorRef.current.disconnect()
             visProcessorRef.current = null

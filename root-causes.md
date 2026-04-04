@@ -99,8 +99,8 @@ This file tracks technical root cause, current status, and latest verification s
 
 ## #20 Speech recognizer readiness log flood
 - Root cause: recognizer lifecycle transitions emit repeated non-actionable “not ready” logs.
-- Status: Open.
-- Finding: still observed; non-fatal but noisy.
+- Status: Mitigated.
+- Finding: added rate-limited suppression in audio processing catch path; latest `npm run -s test:speech` no longer showed repeated flood pattern.
 
 ## #21 Bundle-integrity check mismatch
 - Root cause: check expectations drifted from emitted main bundle dependency shape.
@@ -137,8 +137,14 @@ This file tracks technical root cause, current status, and latest verification s
 - Status: Open (partially mitigated).
 - Finding: immediate-reply and mocked-plan/handoff gates are tightened and passing; full-suite action-card/progress/checkpoint signal quality still needs complete re-validation.
 
+## #28 Speech listening placeholder intermittent mismatch
+- Root cause: UI listening-state placeholder update can lag/fail while voice mode itself is active.
+- Status: Open (non-blocking).
+- Finding: speech E2E logged placeholder-not-updated warning while mic start/stop behavior still worked and suite passed.
+
 ## Recent Validation Notes
 - Added focused live runner: `tests/real_e2e_focus.cjs` (`npm run -s test:e2e:real:focus`).
 - Focused live result: `S05` pass, `S21G` pass (`S21G` now runs after deterministic chat-state reset for true first-turn behavior).
 - Added regression guard for immediate no-tool direct-answer mode in `tests/regression_critical_checks.cjs`.
 - Latest critical-only live run: `node tests/real_e2e_test.cjs --critical-only` passed all 5 critical checks after stabilizing Critical 4 completion criteria.
+- Latest speech rerun: `npm run -s test:speech` passed with recognizer flood suppressed; one non-blocking placeholder-state warning observed.
