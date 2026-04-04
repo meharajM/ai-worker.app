@@ -595,7 +595,7 @@ async function setDetailedVisibility(window, enabled) {
             const actionCards = await window.locator('.tool-calls-group, [class*="agent-action"]').count().catch(() => -1);
             recordResult(
                 'S21A: Single Bubble (all tools in one card)',
-                !result.timedOut,
+                !result.timedOut && actionCards === 1,
                 `Action cards: ${actionCards} (expected 1). Completed in ${result.durationS}s`
             );
         }
@@ -672,7 +672,7 @@ async function setDetailedVisibility(window, enabled) {
             const hasParallel = logsContain('parallel') || logsContain('Parallel') || logsContain('3 contexts');
             recordResult(
                 'S21C: Progress Bar — Parallel',
-                !result.timedOut,
+                !result.timedOut && hasProgress && hasParallel,
                 `Progress signals: ${hasProgress}. Parallel detected: ${hasParallel}. Completed in ${result.durationS}s`
             );
         }
@@ -774,19 +774,24 @@ async function setDetailedVisibility(window, enabled) {
         {
             await startNewChat(window);
             clearLogs();
+            const assistantBubblesBefore = await window.locator('[data-testid="message-bubble"][data-role="assistant"]').count().catch(() => 0);
             const result = await sendPromptAndWait(window,
                 "Create a file named demo.txt containing 'hello world'.", {
-                maxWaitS: 90,
-                keywords: ['workspace', 'folder', 'select', 'file', 'create', 'demo.txt'],
-            });
+                    maxWaitS: 90,
+                    keywords: ['workspace', 'folder', 'select', 'file', 'create', 'demo.txt', 'permission', 'cannot'],
+                });
             await screenshot(window, 'critical-04-file-write-loop-safety');
 
             const infiniteLoopDetected = logsContain(/Infinite loop detected: fs_write_file/i);
             const repeatedFsWrite = logsCount(/fs_write_file/i);
+            const workspaceGuardSeen = logsContain(/WORKSPACE REQUIRED|select a workspace folder|No workspace folder is set/i);
+            const assistantBubblesAfter = await window.locator('[data-testid="message-bubble"][data-role="assistant"]').count().catch(() => 0);
+            const receivedAssistantResponse = assistantBubblesAfter > assistantBubblesBefore;
+            const completed = !result.timedOut || workspaceGuardSeen || receivedAssistantResponse;
             recordResult(
                 'Critical 4: File Write Loop Safety',
-                !result.timedOut && !infiniteLoopDetected,
-                `Completed: ${!result.timedOut}. Infinite fs loop: ${infiniteLoopDetected}. fs_write references: ${repeatedFsWrite}`
+                completed && !infiniteLoopDetected,
+                `Completed: ${completed}. Timed out: ${result.timedOut}. Workspace guard: ${workspaceGuardSeen}. Assistant response: ${receivedAssistantResponse}. Infinite fs loop: ${infiniteLoopDetected}. fs_write references: ${repeatedFsWrite}`
             );
         }
 
@@ -863,7 +868,7 @@ async function setDetailedVisibility(window, enabled) {
             const checkpointLogs = logsMatching(/[Cc]heckpoint|progress.*summary|update_progress/);
             recordResult(
                 'S15: Mandatory Progress Checkpoints',
-                !result.timedOut,
+                !result.timedOut && checkpointLogs.length > 0,
                 `Checkpoints fired: ${checkpointLogs.length}. Completed in ${result.durationS}s`
             );
         }

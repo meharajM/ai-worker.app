@@ -69,8 +69,8 @@ This file tracks technical root cause, current status, and latest verification s
 
 ## #14 Conditional decomposition over-serialization
 - Root cause: decomposition heuristic still too conservative for conditional multi-site phrasing.
-- Status: Open.
-- Finding: real E2E still reports failures on conditional decomposition critical.
+- Status: Mitigated / needs full-suite re-test.
+- Finding: `Critical 2` passed in latest critical-only live validation; full-suite `S02` path still needs confirmation.
 
 ## #15 OpenRouter free-tier rate-limit instability
 - Root cause: provider minute limits and retry windows dominate long live runs.
@@ -129,8 +129,8 @@ This file tracks technical root cause, current status, and latest verification s
 
 ## #26 Real E2E sequential + conditional critical failures
 - Root cause: orchestration reliability gaps remain under full live workflow load.
-- Status: Open.
-- Finding: previously failed in full run summary (`S02`, `Critical 2`); not yet re-validated green.
+- Status: Mitigated / needs full-suite re-test.
+- Finding: latest critical-only run is green (`Critical 2` pass), but `S02` is not part of the critical-only subset.
 
 ## #27 Pass criteria too lax for degraded UX signals
 - Root cause: scenario assertions focus on timeout/completion but underweight action-card/progress/checkpoint quality signals.
@@ -141,3 +141,4 @@ This file tracks technical root cause, current status, and latest verification s
 - Added focused live runner: `tests/real_e2e_focus.cjs` (`npm run -s test:e2e:real:focus`).
 - Focused live result: `S05` pass, `S21G` pass (`S21G` now runs after deterministic chat-state reset for true first-turn behavior).
 - Added regression guard for immediate no-tool direct-answer mode in `tests/regression_critical_checks.cjs`.
+- Latest critical-only live run: `node tests/real_e2e_test.cjs --critical-only` passed all 5 critical checks after stabilizing Critical 4 completion criteria.

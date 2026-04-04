@@ -4,6 +4,11 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 
 ## Status Snapshot (Apr 4, 2026)
 
+### Latest Critical-Only Real-E2E Validation (Apr 4, 2026)
+- Command: `node tests/real_e2e_test.cjs --critical-only`
+- Result: `5/5 passed` (Critical 1-5 all green).
+- Notable: `Critical 4` now passes without false failure when no `fs_write` call is attempted and no loop signal is observed.
+
 ### Latest Focused Real-E2E Validation (Apr 4, 2026)
 - `S05: Manual Delegation` ✅ passed (`Timed out: false`, sub-agent detected, ~65.2s).
 - `S21G: Immediate Reply (no tools)` ✅ passed (`no tools: true`, ~25.1s) after hard-resetting chat state to guarantee first-turn behavior.
@@ -18,7 +23,7 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
   Evidence: `Critical 1: delegate_sub_task Parallelism` passed (`Delegate signals: 2`, no max-iteration failure).
 
 ### Still Open / Blocking
-- **#14, #26** Conditional/Sequential orchestration reliability remains broken in live runs (`S02` and `Critical 2` failed in real E2E).
+- **#14, #26** No longer failing in latest critical-only validation, but still require full-suite revalidation (`S02` path not included in critical-only run).
 - **#15** Live rate-limit instability (429/backoff) still observed in real runs.
 - **#20** Speech recognizer readiness log flood still observed (`Recognizer ... not ready, ignoring`).
 - **#27** Broader signal-quality gate still needs full-suite re-validation (action cards/progress/checkpoints).
@@ -37,7 +42,7 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 - **#11** Fixed (validated).
 - **#12** Fixed (validated).
 - **#13** Fixed (validated).
-- **#14** Open (validated failing in real E2E).
+- **#14** Mitigated / needs full-suite re-test (passes in latest critical-only run).
 - **#15** Open (validated by repeated 429/backoff in live runs).
 - **#16** Open (partially mitigated: reflector cancellation hook added, but residual background activity can still appear around prompt boundaries).
 - **#17** Fixed (cache API guard added; no startup crash signal in recent runs).
@@ -49,7 +54,7 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 - **#23** Open/By design (Windows native rebuild cross-compile unsupported on current host).
 - **#24** Fixed as originally filed (wine hard-gate replaced by host-aware checks + actionable preflight).
 - **#25** Fixed (mocked suite now hard-fails on plan/handoff regressions and currently passes cleanly).
-- **#26** Open (real E2E currently failing S02 + Critical 2).
+- **#26** Mitigated / needs full-suite re-test (`Critical 2` now passes in latest critical-only run; `S02` still pending).
 - **#27** Open (partially mitigated; assertion tightening landed, full-suite signal quality still pending validation).
 
 ## 1. MCP Tool Parsing Errors (`memory_create_entity`)
