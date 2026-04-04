@@ -1,13 +1,16 @@
 /**
  * MiscTools.ts — Utility navigation helpers.
- * 
+ *
  * Logic:
  *   1. go_back/go_forward: History stack manipulation.
- *   2. wait_for_navigation: Synchronization tool to wait for idle network after clicks.
+ *   2. wait_for_navigation: Synchronization tool using shared readiness probe.
+ *
+ * Issue coverage: #7 #10
  */
 
 import { Page, Frame } from 'playwright-core';
 import { PlaywrightTool, ToolResult } from '../PlaywrightTool';
+import { probeReadiness, type ReadinessResult } from './readiness-probe';
 
 export class GoBackTool extends PlaywrightTool {
     name = 'go_back';
@@ -83,28 +86,32 @@ export class WaitForNavigationTool extends PlaywrightTool {
             }
         }
 
-        // Graceful fallback for dynamic pages that keep network connections open.
-        const heuristics = await page.evaluate(() => {
-            const selectors = 'a[href],button,input,textarea,select,[role="button"],[role="link"]';
-            return {
-                readyState: document.readyState,
-                interactive: document.querySelectorAll(selectors).length
-            };
-        }).catch(() => ({ readyState: 'unknown', interactive: 0 }));
-        if (progressedState || heuristics.readyState === 'interactive' || heuristics.readyState === 'complete' || heuristics.interactive > 0) {
+        // ── Shared readiness probe (Issue #7 #10) ────────────────────────────────
+        // Uses the same logic as NavigateTool and GetStateTool to judge usability.
+        const probe: ReadinessResult = await probeReadiness(page);
+
+        if (progressedState || probe.isUsable) {
+            console.info(
+                `[WaitForNavigationTool][Issue #7] heuristic_success readyState=${probe.readyState} interactive=${probe.interactiveCount} lastState=${progressedState ?? 'none'} reason=${probe.reason}`
+            );
             return {
                 result:
                     `Navigation likely complete (heuristic).\n` +
-                    `readyState=${heuristics.readyState}\n` +
-                    `interactiveElements=${heuristics.interactive}\n` +
-                    `lastState=${progressedState ?? 'none'}`
+                    `readyState=${probe.readyState}\n` +
+                    `interactiveElements=${probe.interactiveCount}\n` +
+                    `lastState=${progressedState ?? 'none'}\n` +
+                    `reason=${probe.reason}`
             };
         }
 
+        console.warn(
+            `[WaitForNavigationTool][Issue #7] timeout_not_usable readyState=${probe.readyState} interactive=${probe.interactiveCount} reason=${probe.reason}`
+        );
         return {
             result: null,
             error:
-                `Timeout waiting for navigation after ${timeout}ms.\n\n` +
+                `Timeout waiting for navigation after ${timeout}ms.\n` +
+                `readyState=${probe.readyState}, interactiveElements=${probe.interactiveCount}\n\n` +
                 `💡 RECOVERY HINT: The page may be interactive even without network idle. ` +
                 `Try get_state(), wait_for_element(), or interact with visible elements.`
         };

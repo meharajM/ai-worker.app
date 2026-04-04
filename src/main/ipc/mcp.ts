@@ -235,19 +235,25 @@ export function registerMcpHandlers(): void {
             const res = await PlaywrightService.getInstance().callTool(toolName, args)
             if (res.error) return { result: null, error: res.error }
             const textValue = typeof res.result === 'object' ? JSON.stringify(res.result) : String(res.result)
-            return { result: { content: [{ type: 'text', text: textValue }] } }
+            const wrapped: Record<string, unknown> = { content: [{ type: 'text', text: textValue }] }
+            if (res.meta && typeof res.meta === 'object') wrapped.meta = res.meta
+            return { result: wrapped }
         }
         if (inProcessMemoryConnections.has(id)) {
             const res = await MemoryService.getInstance().callTool(toolName, args)
             if (res.error) return { result: null, error: res.error }
             const textValue = typeof res.result === 'object' ? JSON.stringify(res.result) : String(res.result)
-            return { result: { content: [{ type: 'text', text: textValue }] } }
+            const wrapped: Record<string, unknown> = { content: [{ type: 'text', text: textValue }] }
+            if (res.meta && typeof res.meta === 'object') wrapped.meta = res.meta
+            return { result: wrapped }
         }
         if (inProcessFilesystemConnections.has(id)) {
             const res = await FileSystemService.getInstance().callTool(toolName, args)
             if (res.error) return { result: null, error: res.error }
             const textValue = typeof res.result === 'object' ? JSON.stringify(res.result) : String(res.result)
-            return { result: { content: [{ type: 'text', text: textValue }] } }
+            const wrapped: Record<string, unknown> = { content: [{ type: 'text', text: textValue }] }
+            if (res.meta && typeof res.meta === 'object') wrapped.meta = res.meta
+            return { result: wrapped }
         }
 
         const client = activeConnections.get(id)

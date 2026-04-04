@@ -66,6 +66,15 @@ export class BrowserManager {
     private idleTimer: NodeJS.Timeout | null = null;
     private readonly IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
+    /**
+     * Launch cooldown rate-limiter (Issue #8 / Phase C).
+     * Records the timestamp of the last browser close. A re-launch within
+     * LAUNCH_COOLDOWN_MS is delayed to prevent close→relaunch→close thrash,
+     * which can happen when parallel sub-agents encounter errors simultaneously.
+     */
+    private _lastCloseTimestamp = 0;
+    private readonly LAUNCH_COOLDOWN_MS = 3_000;
+
     constructor() {
         this.store = new Store<Record<string, unknown>>();
     }
@@ -163,6 +172,14 @@ export class BrowserManager {
 
         this.initializationPromise = (async () => {
             try {
+                // ── Launch cooldown guard (Issue #8 / Phase C) ─────────────────
+                const msSinceClose = Date.now() - this._lastCloseTimestamp;
+                if (this._lastCloseTimestamp > 0 && msSinceClose < this.LAUNCH_COOLDOWN_MS) {
+                    const waitMs = this.LAUNCH_COOLDOWN_MS - msSinceClose;
+                    console.info(`[BrowserManager][Issue #8] launch cooldown: waiting ${waitMs}ms to avoid thrash.`);
+                    await new Promise(resolve => setTimeout(resolve, waitMs));
+                }
+
                 console.log('[BrowserManager] Launching browser...');
                 const launchStartedAt = Date.now();
                 const dataDirName = (this as any)._useHeadlessDirForHeaded ? 'playwright_data_headless' : 'playwright_data';
@@ -283,7 +300,8 @@ export class BrowserManager {
                             this.context = null;
                             this.page = null;
                             this.initializationPromise = null;
-                            console.warn('[BrowserManager][Issue #8] context closed; future tool calls will trigger re-launch.');
+                            this._lastCloseTimestamp = Date.now();
+                            console.warn('[BrowserManager][Issue #8] context closed; future tool calls will trigger re-launch (cooldown active).');
                         });
                         return; 
                     } catch (err) {

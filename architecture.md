@@ -1753,24 +1753,27 @@ graph TB
     ElectronBuilder --> MacBuild
     ElectronBuilder --> WinBuild
     ElectronBuilder --> LinuxBuild
-    
+```
+
 ### Cross-Platform Build Support
 
-AI-Worker supports building for Windows from a Linux environment using Wine. This is integrated into the build process to ensure seamless CI/CD and local development compatibility.
+AI-Worker now applies a host-aware Windows packaging preflight.
 
-**Windows Build Flow on Linux:**
+**Current Windows Build Policy:**
 
-1. **Dependency Check:** `npm run check:wine` verifies if Wine is installed.
-2. **Environment Setup:** 
-   - `install_build_deps.sh`: Helper to install Wine if missing.
-   - `fix_wine_env.sh`: Troubleshooting tool to reset corrupted Wine prefixes.
-3. **Build Execution:** `electron-builder` uses Wine to sign and package the Windows executable (`.exe`).
+1. `check:win:preflight` runs before all Windows build/publish scripts.
+2. On non-Windows hosts, the default path fails fast with actionable guidance.
+3. `better-sqlite3` rebuild is treated as target-native for reliability.
+4. Override exists only for advanced/manual experiments:
+   - `ALLOW_UNSUPPORTED_WIN_CROSS_BUILD=1`
+5. `check:wine` is still required in Windows-target build scripts where applicable.
 
 ```bash
-# Workflow
-./install_build_deps.sh  # One-time setup
-npm run build:win        # Builds .exe using Wine
-```
+# Recommended
+npm run build:win         # Run on Windows host or Windows CI runner
+
+# Escape hatch (unsupported)
+ALLOW_UNSUPPORTED_WIN_CROSS_BUILD=1 npm run build:win
 ```
 
 ### Distribution Structure
@@ -1799,6 +1802,137 @@ graph LR
     AppImage --> Distribution
     DEB --> Distribution
 ```
+
+---
+
+## Open Reliability Remediation Plan (Excluding #15)
+
+This section defines the implementation plan for currently open or partially-validated issues, excluding rate-limit instability (#15) by explicit product decision.
+
+### Scope
+
+- In scope: #2, #3, #4, #7, #8, #9, #10, #14, #23, #26, #27
+- Out of scope: #15 (tracked separately as provider-tier behavior)
+
+### Priority Order (By User Impact/Frequency)
+
+1. #2 Browser protocol errors on retail domains
+2. #9 Navigate timeouts on heavy pages
+3. #7 wait_for_navigation timeout behavior
+4. #10 get_state navigation-race errors
+5. #3 Fallback quality regression after navigation failure
+6. #4 Decomposition/orchestration timeout risk
+7. #14 Conditional multi-site over-serialization
+8. #26 Sequential/conditional orchestration instability in long flows
+9. #8 Browser relaunch thrash
+10. #27 Pass-quality gaps (action/progress/checkpoint signal quality)
+11. #23 Windows cross-compile limitations (release workflow policy)
+
+### Architecture Changes Planned
+
+1. Navigation Outcome Contract (`NavigateTool`, `ToolExecutionService`, `result-reporter`)
+- Introduce normalized outcome classes: `success`, `interactive_timeout`, `protocol_blocked`, `hard_failure`.
+- Require outcome metadata in tool results so orchestration and summary logic can branch deterministically.
+- Replace blind Google fallback on protocol errors with deterministic recovery chain:
+  `retry_with_commit` -> `alt_wait_strategy` -> `interactive_snapshot` -> `scoped_web_search`.
+
+2. Stabilized Readiness Gate (`wait_for_navigation`, `get_state`)
+- Add reusable readiness probe used by both tools to prevent split heuristics.
+- Promote a shared `isPageInteractiveEnough()` check before failing.
+- Enforce bounded retries with reason-tagged telemetry (`context_destroyed_retry`, `navigation_race_recovered`).
+
+3. Decomposition Decision Contract (`task-decomposer`, `agent-runtime`, `OrchestrationService`)
+- Add explicit decision fields: `confidence`, `decisionSource` (`heuristic` vs `llm`), and `fallbackReason`.
+- Add deterministic guard: when explicit multi-site contexts are detected, conditional language cannot collapse to single-context unless a dependency phrase is present.
+- Add deadline-aware decomposition mode to avoid long planning stalls.
+
+4. Orchestration Result Integrity (`OrchestrationService`, `useAgent`, `MessageBubble`)
+- Enforce exactly one terminal summary event per orchestration run.
+- Persist run-scoped status (`runId`, `stepId`, `terminalState`) and surface in UI state.
+- Tighten compact-mode criteria to only show failed badge on true terminal failure, not intermediate step noise.
+
+5. Browser Lifecycle Governance (`BrowserManager`, `useAgent`)
+- Add launch cooldown and relaunch suppression window to prevent repeated context churn.
+- Add explicit context-closed reason tracking (`idle_close`, `crash`, `manual_close`) for diagnostics.
+- Add counters for `SingletonSocket` cleanup frequency and alert threshold in E2E assertions.
+
+6. Build Host Policy Hardening (#23) (`scripts/check-win-build-prereqs.sh`, build docs/tests)
+- Keep Windows packaging default as Windows-host-only.
+- Keep non-Windows path as explicit, non-default override.
+- Add preflight output assertions to ensure messaging remains actionable and consistent.
+
+### Phase Plan
+
+#### Phase A: Browser Runtime Correctness (#2, #7, #9, #10, #3)
+
+- Refactor navigation and readiness probes into shared helpers.
+- Normalize navigation outcomes and propagate typed metadata.
+- Improve fallback quality with scoped extraction before generic search fallback.
+- Add targeted tests:
+  - `tests/playwright_tools_test.cjs`: protocol-error simulation and outcome contract checks
+  - `tests/regression_critical_checks.cjs`: string guards for new outcome metadata
+  - real E2E focused checks for retail navigation resilience
+
+Exit criteria:
+- No `Execution context was destroyed` spikes in focused real runs.
+- `navigate` failures produce typed recovery outcomes, not opaque hard errors.
+
+#### Phase B: Decomposition + Orchestration Reliability (#4, #14, #26)
+
+- Add confidence/deadline-aware decomposition output.
+- Strengthen conditional multi-site handling to preserve parallel/structured execution where appropriate.
+- Add run-level orchestration invariants (single terminal summary, deterministic step transitions).
+- Add/extend tests:
+  - `tests/real_e2e_test.cjs` criticals 1/2/3 and `S02`
+  - mocked decomposition fixtures for conditional phrasing
+
+Exit criteria:
+- `Critical 2` and `S02` pass consistently across clean reruns.
+- No max-iteration regressions in conditional multi-site tasks.
+
+#### Phase C: Lifecycle + UX Signal Quality (#8, #27)
+
+- Add browser relaunch suppression metrics and guard rails.
+- Tighten progress/action/checkpoint acceptance criteria in real E2E harness.
+- Require explicit terminal-state signal before scenario success.
+- Add telemetry assertions for:
+  - duplicate terminal updates
+  - stale active-run state after completion
+  - relaunch churn thresholds
+
+Exit criteria:
+- No launch thrash pattern in normal sequential/parallel runs.
+- Real E2E quality gates fail on degraded UX signaling, not just hard timeout.
+
+#### Phase D: Release Workflow Policy (#23)
+
+- Keep current host-aware preflight policy as default architecture.
+- Add CI doc + script assertions for Windows-host requirement.
+- Ensure override path remains explicit and non-default.
+
+Exit criteria:
+- Build scripts and architecture docs remain in sync.
+- Preflight failures are actionable and deterministic.
+
+### Verification Matrix
+
+- Fast gate:
+  - `npm run -s test:regression:critical`
+  - `npm run build`
+- Mocked gate:
+  - `npm run -s test:mock`
+- Focused live gate:
+  - `npm run -s test:e2e:real:focus`
+  - `node tests/real_e2e_test.cjs --critical-only --only-critical=1,2,3`
+- Full live gate (post-stabilization):
+  - `node tests/real_e2e_test.cjs`
+
+### Ownership Map
+
+- Playwright runtime fixes: `src/main/services/playwright/tools/*`, `BrowserManager.ts`
+- Decomposition/orchestration fixes: `task-decomposer.ts`, `agent-runtime.ts`, `OrchestrationService.ts`
+- UI signal integrity: `useAgent.ts`, `MessageBubble.tsx`, checklist/rendering components
+- Release policy: `scripts/check-win-build-prereqs.sh`, `package.json` build/publish scripts
 
 ---
 
@@ -2014,7 +2148,7 @@ See [performance-analysis.md](file:///Users/meharaj/Downloads/ai-worker-whatsapp
 
 ---
 
-**Last Updated:** 2026-04-02  
+**Last Updated:** 2026-04-04  
 **Version:** 0.2.1  
 **Architecture Version:** 1.4
 

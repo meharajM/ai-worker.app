@@ -5,11 +5,14 @@
  *   Provides modes for fast text extraction, full DOM tree serialization,
  *   and "vision" mode with a labeled screenshot for multimodal LLMs.
  *
+ * Issue coverage: #7 #10
+ *
  * Consumed by: PlaywrightService (via ToolRegistry)
  */
 
 import { Page } from 'playwright-core';
 import { PlaywrightTool, ToolResult } from '../PlaywrightTool';
+import { probeReadinessWithRetry } from './readiness-probe';
 
 /**
  * Perception tool that helps the agent understand what is on the screen.
@@ -36,6 +39,11 @@ export class GetStateTool extends PlaywrightTool {
 
     async execute(page: Page, args: any): Promise<ToolResult> {
         const safeArgs = args ?? {};
+
+        // ── Shared readiness probe with retry (Issue #7 #10) ─────────────────────
+        // Uses the same readiness model as NavigateTool and WaitForNavigationTool.
+        // Waits for the page to become usable (or gives up after 3 attempts).
+        // This replaces the old inline withNavigationRecovery helper.
         const withNavigationRecovery = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
             for (let attempt = 1; attempt <= 3; attempt++) {
                 try {
@@ -64,7 +72,16 @@ export class GetStateTool extends PlaywrightTool {
         const includeScreenshot = safeArgs.screenshot ?? (mode === 'vision');
         const includeTree = safeArgs.tree ?? (mode === 'full');
         const useHighlighting = safeArgs.highlight ?? includeScreenshot;
-        await page.waitForLoadState('domcontentloaded', { timeout: 1500 }).catch(() => {});
+
+        // Use shared readiness probe to wait for page stabilization before extraction.
+        // This replaces the old bare waitForLoadState call and provides better
+        // diagnostics when the page is mid-navigation.
+        const readinessProbe = await probeReadinessWithRetry(page, 2, 1200);
+        if (!readinessProbe.isUsable) {
+            console.warn(
+                `[GetStateTool][Issue #10] page not usable before extraction: ${readinessProbe.reason}. Proceeding with best-effort extraction.`
+            );
+        }
 
         const state: any = {
             url: page.url(),

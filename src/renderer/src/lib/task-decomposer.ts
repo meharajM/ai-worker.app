@@ -17,6 +17,12 @@ export interface TaskDecomposition {
   shouldFork: boolean;          // Whether to spawn sub-agents
   forkReason?: string;          // Explanation for the decision
   forkStrategy?: 'parallel' | 'sequential'; // How to execute sub-agents
+  /** Confidence score 0–1 for the decomposition decision (Issue #4 #14) */
+  confidence?: number;
+  /** Whether the decision came from heuristics or LLM analysis (Issue #4 #14) */
+  decisionSource?: 'heuristic' | 'llm' | 'fallback';
+  /** If the decision was a fallback, why (Issue #4) */
+  fallbackReason?: string;
 }
 
 
@@ -251,10 +257,13 @@ Return ONLY valid JSON, do not include any markdown formatting or conversational
 
   try {
     const startedAt = Date.now();
-    // Add timeout to prevent hanging while still allowing heavier models
-    // enough time to respond for multi-site decomposition decisions.
+    // ── Deadline-aware decomposition (Issue #4) ──────────────────────────
+    // If the LLM call nears the timeout budget, we fall back to the
+    // deterministic heuristic path instead of a broad fallback that loses
+    // the multi-site context detection.
+    const DECOMP_TIMEOUT_MS = 12000;
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('LLM analysis timeout')), 12000)
+      setTimeout(() => reject(new Error('LLM analysis timeout')), DECOMP_TIMEOUT_MS)
     );
 
     const llmPromise = chat(
@@ -310,10 +319,28 @@ Return ONLY valid JSON, do not include any markdown formatting or conversational
     return analysisResult;
   } catch (e) {
     const errorMsg = e instanceof Error ? e.message : 'Unknown error';
-    console.error('[TaskDecomposer][Issue #4/#14/#26] LLM analysis failed:', errorMsg);
+    const isTimeout = errorMsg.includes('timeout') || errorMsg.includes('Timeout');
+    console.error(`[TaskDecomposer][Issue #4/#14/#26] LLM analysis failed: ${errorMsg} isTimeout=${isTimeout}`);
+
+    // ── Deadline-aware fallback (Issue #4) ─────────────────────────────
+    // When the timeout fires, fall back to heuristic-based multi-site
+    // detection instead of collapsing to single_context. This preserves
+    // the parallel intent when the LLM call is just too slow.
+    if (isTimeout) {
+      const heuristicContexts = extractExplicitWebsiteContexts(userRequest);
+      if (heuristicContexts.length > 1 && PARALLEL_INTENT_PATTERN.test(userRequest)) {
+        console.info(
+          `[TaskDecomposer][Issue #4] timeout_heuristic_fallback contexts=${heuristicContexts.join(',')}`
+        );
+        return {
+          shouldParallelize: true,
+          contexts: heuristicContexts,
+          reasoning: `LLM timed out — heuristic fallback detected ${heuristicContexts.length} independent contexts`
+        };
+      }
+    }
 
     // Default to sequential if parsing fails (safer option)
-    // This handles: network errors, timeouts, malformed JSON, invalid responses
     return {
       shouldParallelize: false,
       contexts: ['current_page'],
@@ -347,7 +374,9 @@ export async function analyzeTaskForDecomposition(
       contexts: ['current_page'],
       estimatedActions: 1,
       shouldFork: false,
-      forkReason: 'Simple direct request — skipping decomposition analysis'
+      forkReason: 'Simple direct request — skipping decomposition analysis',
+      confidence: 1.0,
+      decisionSource: 'heuristic',
     };
   }
 
@@ -364,7 +393,9 @@ export async function analyzeTaskForDecomposition(
       contexts: explicitContexts,
       estimatedActions,
       shouldFork: false,
-      forkReason: `Single-site task (${explicitContexts[0]}) — direct execution`
+      forkReason: `Single-site task (${explicitContexts[0]}) — direct execution`,
+      confidence: 0.95,
+      decisionSource: 'heuristic',
     };
   }
 
@@ -396,10 +427,18 @@ export async function analyzeTaskForDecomposition(
     const hasParallelIntent = PARALLEL_INTENT_PATTERN.test(userRequest);
     const hasOptionalConditional = OPTIONAL_CONDITIONAL_PATTERN.test(userRequest);
     const hasDependencyChain = DEPENDENCY_CHAIN_PATTERN.test(userRequest);
+    // ── Issue #14 fix: optional conditional wording ("if possible",
+    // "if available") should NOT serialize independent contexts. Only
+    // mandatory conditionals ("if X then Y else Z") or explicit dependency
+    // chains create sequential intent.
     const hasSequentialIntent =
       SEQUENTIAL_INTENT_PATTERN.test(userRequest) ||
       (CONDITIONAL_SEQUENTIAL_INTENT_PATTERN.test(userRequest) && !hasOptionalConditional) ||
       hasDependencyChain;
+
+    // ── Issue #14 deterministic guard: explicit multi-site + optional
+    // conditional wording should remain multi-context unless EXPLICIT
+    // dependency chain is present.
     if (hasParallelIntent && !hasSequentialIntent) {
       console.info(
         `[TaskDecomposer][Issue #14/#26] heuristic parallel decision contexts=${explicitContexts.join(',')} optionalConditional=${hasOptionalConditional} dependencyChain=${hasDependencyChain}`
@@ -410,7 +449,28 @@ export async function analyzeTaskForDecomposition(
         estimatedActions: Math.max(estimatedActions, explicitContexts.length * 2),
         shouldFork: true,
         forkStrategy: 'parallel',
-        forkReason: `Heuristic: independent multi-site comparison (${explicitContexts.join(', ')})`
+        forkReason: `Heuristic: independent multi-site comparison (${explicitContexts.join(', ')})`,
+        confidence: 0.9,
+        decisionSource: 'heuristic',
+      };
+    }
+
+    // When NO parallel intent is present but multi-site + optional conditional,
+    // default to parallel (not sequential) since the contexts are independent
+    // and the conditional is advisory, not a dependency chain.
+    if (!hasSequentialIntent && hasOptionalConditional && explicitContexts.length > 1) {
+      console.info(
+        `[TaskDecomposer][Issue #14] optional_conditional_parallel contexts=${explicitContexts.join(',')} — treating as independent`
+      );
+      return {
+        type: 'multi_context',
+        contexts: explicitContexts,
+        estimatedActions: Math.max(estimatedActions, explicitContexts.length * 2),
+        shouldFork: true,
+        forkStrategy: 'parallel',
+        forkReason: `Heuristic: optional conditional with independent contexts (${explicitContexts.join(', ')})`,
+        confidence: 0.75,
+        decisionSource: 'heuristic',
       };
     }
 
@@ -424,7 +484,9 @@ export async function analyzeTaskForDecomposition(
         estimatedActions: Math.max(estimatedActions, explicitContexts.length * 2),
         shouldFork: true,
         forkStrategy: 'sequential',
-        forkReason: `Heuristic: sequential multi-site workflow (${explicitContexts.join(', ')})`
+        forkReason: `Heuristic: sequential multi-site workflow (${explicitContexts.join(', ')})`,
+        confidence: 0.85,
+        decisionSource: 'heuristic',
       };
     }
   }
@@ -453,7 +515,9 @@ export async function analyzeTaskForDecomposition(
       estimatedActions,
       shouldFork: true,
       forkStrategy: 'parallel',
-      forkReason: `LLM-verified independent tasks: ${analysis.reasoning}`
+      forkReason: `LLM-verified independent tasks: ${analysis.reasoning}`,
+      confidence: 0.85,
+      decisionSource: 'llm',
     };
   }
 

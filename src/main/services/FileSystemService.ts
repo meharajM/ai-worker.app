@@ -39,6 +39,7 @@ interface ToolSchema {
 interface ToolCallResponse {
     result: any
     error?: string
+    meta?: Record<string, unknown>
 }
 
 /**

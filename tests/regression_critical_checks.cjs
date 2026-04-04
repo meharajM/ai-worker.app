@@ -226,9 +226,11 @@ function testCloseTabLastTabNoop() {
 
 function testNavigationTimeoutRecovery() {
   const navigateSrc = read('src/main/services/playwright/tools/NavigateTool.ts');
-  assertIncludes(navigateSrc, 'timeout but page looks interactive; continuing', 'navigate-tool');
+  assertIncludes(navigateSrc, 'interactive_timeout — page usable', 'navigate-tool');
   assertIncludes(navigateSrc, 'Navigation timed out but page appears interactive.', 'navigate-tool');
-  assertIncludes(navigateSrc, 'const heuristics = await page.evaluate(() => {', 'navigate-tool');
+  assertIncludes(navigateSrc, 'const probe = await probeReadiness(page);', 'navigate-tool');
+  assertIncludes(navigateSrc, 'const outcome = classifyNavigationError(errorStr, probe);', 'navigate-tool');
+  assertIncludes(navigateSrc, "meta: { navigationOutcome: 'interactive_timeout' as NavigationOutcome }", 'navigate-tool');
   assertIncludes(navigateSrc, "safeArgs = args ?? {}", 'navigate-tool');
 }
 
@@ -243,9 +245,18 @@ function testGetStateNavigationRaceResilience() {
   const getStateSrc = read('src/main/services/playwright/tools/GetStateTool.ts');
   assertIncludes(getStateSrc, 'const safeArgs = args ?? {};', 'get-state');
   assertIncludes(getStateSrc, 'for (let attempt = 1; attempt <= 3; attempt++) {', 'get-state');
-  assertIncludes(getStateSrc, "await page.waitForLoadState('domcontentloaded', { timeout: 1500 }).catch(() => {});", 'get-state');
+  assertIncludes(getStateSrc, 'const readinessProbe = await probeReadinessWithRetry(page, 2, 1200);', 'get-state');
+  assertIncludes(getStateSrc, '[GetStateTool][Issue #10] page not usable before extraction', 'get-state');
   assertIncludes(getStateSrc, "Target page, context or browser has been closed", 'get-state');
   assertIncludes(getStateSrc, "await withNavigationRecovery(() => page.evaluate(() => {", 'get-state');
+}
+
+function testToolResultMetadataPropagation() {
+  const toolBase = read('src/main/services/playwright/PlaywrightTool.ts');
+  assertIncludes(toolBase, 'meta?: Record<string, unknown>;', 'playwright-tool');
+
+  const mainMcp = read('src/main/ipc/mcp.ts');
+  assertIncludes(mainMcp, "if (res.meta && typeof res.meta === 'object') wrapped.meta = res.meta", 'main-mcp');
 }
 
 function testSubAgentExtractionFirstRule() {
@@ -302,6 +313,7 @@ function run() {
   testNavigationTimeoutRecovery();
   testWaitForNavigationHeuristicFallback();
   testGetStateNavigationRaceResilience();
+  testToolResultMetadataPropagation();
   testSubAgentExtractionFirstRule();
   testClickTextBoundedTimeoutAndFallbacks();
   testRecoverySignalLogging();

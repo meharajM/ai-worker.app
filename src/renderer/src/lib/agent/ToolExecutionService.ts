@@ -283,6 +283,21 @@ async function _executeWithRetry(
                 return _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, attempt + 1, startTime);
             }
 
+            // ── Protocol errors: do NOT retry at this layer (Issue #2) ────────────
+            // NavigateTool now handles these with readiness probes and typed outcomes
+            // (interactive_timeout, protocol_blocked). Retrying here would bypass
+            // that classification and lose the structured outcome metadata.
+            if (
+                errorStr.includes("ERR_HTTP2_PROTOCOL_ERROR") ||
+                errorStr.includes("ERR_HTTP2_") ||
+                errorStr.includes("ERR_SSL_") ||
+                errorStr.includes("ERR_CERT_") ||
+                errorStr.includes("ERR_BLOCKED_BY")
+            ) {
+                console.log(`[ToolExecutionService][Issue #2] Protocol error in ${name} — returning to agent for structured handling.`);
+                return { result: null, error: errorStr };
+            }
+
             if (errorStr.includes("Element is not attached") || errorStr.includes("Node is detached")) {
                 console.log(`[ToolExecutionService] Stale element in ${name}. Retrying immediately...`);
                 return _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, attempt + 1, startTime);

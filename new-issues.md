@@ -4,6 +4,20 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 
 ## Status Snapshot (Apr 4, 2026)
 
+### Latest Validation Update (Apr 4, 2026, evening)
+- Local gates after Phase A/B/C runtime updates:
+  - `npm run -s typecheck` ✅
+  - `npm run -s test:regression:critical` ✅
+  - `npm run -s test:playwright` ✅
+  - `npm run -s test:mock` ✅
+  - `npm run -s test:build` ✅
+- Live focus rerun:
+  - `npm run -s test:e2e:real:focus` => `S21G` ✅, `S05` ❌ timeout (`181.4s`) with provider throttling/429 pressure in logs.
+- Targeted live critical rerun:
+  - `node tests/real_e2e_test.cjs --critical-only --only-critical=3` ✅
+  - `Critical 3` passed with `Checklist failed badge visible: false`
+  - Runtime stability signal remained clean (`Execution-context-destroyed: 0`, `Stale-socket-cleanups: 0`).
+
 ### Latest Runtime + Harness Validation Update (Apr 4, 2026)
 - Real-E2E harness now enforces run-idle before scenario handoff (`Stop Generation` clear + idle gate), preventing early keyword-hit exits from contaminating the next scenario.
 - Partial live re-run evidence after this change:

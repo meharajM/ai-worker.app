@@ -58,6 +58,7 @@ export interface Relation {
 interface ToolCallResponse {
     result: any
     error?: string
+    meta?: Record<string, unknown>
 }
 
 // ============================================================================

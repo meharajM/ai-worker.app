@@ -22,6 +22,11 @@ import { ToolSchema } from '../../../shared/browser-tool-schemas';
 export interface ToolResult {
     result: any;
     error?: string;
+    /**
+     * Optional structured metadata for downstream orchestration/retry logic.
+     * Serialized by the IPC bridge when present.
+     */
+    meta?: Record<string, unknown>;
 }
 
 /**

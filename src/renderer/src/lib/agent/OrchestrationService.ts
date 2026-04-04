@@ -97,6 +97,27 @@ export async function executeParallelSubAgents(
     };
     onPlanUpdate?.(executionPlan);
 
+    // ── Monotonic step status transitions (Issue #26 / Phase B.3) ─────────
+    // Once a step reaches a terminal state (completed/failed), it must not
+    // be overwritten. This prevents race conditions from overlapping parallel
+    // sub-agent completions.
+    const TERMINAL_STATUSES = new Set(['completed', 'failed']);
+    const updateStepStatus = (stepId: number, newStatus: 'pending' | 'active' | 'completed' | 'failed', result?: string) => {
+        const step = executionPlan.steps.find(s => s.id === stepId);
+        if (!step) return;
+        if (TERMINAL_STATUSES.has(step.status)) {
+            console.warn(`[OrchestrationService][Issue #26] ignoring step ${stepId} transition ${step.status} → ${newStatus} (already terminal)`);
+            return;
+        }
+        step.status = newStatus;
+        if (result !== undefined) step.result = result;
+        onPlanUpdate?.(executionPlan);
+    };
+
+    // ── Terminal summary guard (Issue #26 / Phase B.3) ─────────────────────
+    // Ensures exactly one terminal summary is emitted per orchestration run.
+    let _terminalSummaryEmitted = false;
+
     // Helper to salvage data from a sub-agent
     const extractPartialFindings = async (subAgentInstance: IAgentClient): Promise<string[]> => {
         const history = subAgentInstance.getHistory?.() as LLMMessage[] | undefined;
@@ -153,12 +174,8 @@ export async function executeParallelSubAgents(
         const instruction = generateSubAgentInstruction(originalRequest, context, contexts);
         const subAgentId = globalThis.crypto.randomUUID();
 
-        // Mark step as active in the ExecutionPlan
-        const planStep = executionPlan.steps[index];
-        if (planStep) {
-            planStep.status = "active";
-            onPlanUpdate?.(executionPlan);
-        }
+        // Mark step as active (monotonic — won't overwrite terminal)
+        updateStepStatus(index + 1, 'active');
 
         // Pre-seed memory so the sub-agent can find its state entity on init
         await preSeedSubAgentMemory(
@@ -268,13 +285,8 @@ export async function executeParallelSubAgents(
             agentStatuses[index].result = finalResultStr;
             agentStatuses[index].status = finalStatus;
 
-            // Mark step as completed or failed in the ExecutionPlan
-            const finishedStep = executionPlan.steps[index];
-            if (finishedStep) {
-                finishedStep.status = isSuccess ? "completed" : "failed";
-                finishedStep.result = finalResultStr.substring(0, 200);
-            }
-            onPlanUpdate?.(executionPlan);
+            // Mark step as completed or failed (monotonic)
+            updateStepStatus(index + 1, isSuccess ? 'completed' : 'failed', finalResultStr.substring(0, 200));
 
             if (statusMessageId && parentOptions.onMessageUpdate) {
                 parentOptions.onMessageUpdate(statusMessageId, { content: renderStatus() });
@@ -400,6 +412,13 @@ export async function executeParallelSubAgents(
 
     // Update the status card one final time with the aggregated result.
     // isFinalResult: true ensures this message is always shown in clean/prod view
+    // ── Terminal summary guard (Issue #26) ─────────────────────────────────
+    if (_terminalSummaryEmitted) {
+        console.warn(`[OrchestrationService][Issue #26] duplicate terminal summary suppressed for run=${orchestrationRunId}`);
+        return { role: "assistant", content: summary, isFinalResult: true };
+    }
+    _terminalSummaryEmitted = true;
+
     if (statusMessageId && parentOptions.onMessageUpdate) {
         parentOptions.onMessageUpdate(statusMessageId, { content: summary, isFinalResult: true });
     }
@@ -528,6 +547,23 @@ Format as JSON:
         };
         onPlanUpdate?.(executionPlan);
 
+        // ── Monotonic step status transitions (Issue #26 / Phase B.3) ───────
+        const SEQ_TERMINAL_STATUSES = new Set(['completed', 'failed']);
+        const updateSeqStepStatus = (stepId: number, newStatus: 'pending' | 'active' | 'completed' | 'failed', result?: string) => {
+            const step = executionPlan.steps.find(s => s.id === stepId);
+            if (!step) return;
+            if (SEQ_TERMINAL_STATUSES.has(step.status)) {
+                console.warn(`[OrchestrationService][Issue #26] ignoring sequential step ${stepId} transition ${step.status} → ${newStatus} (already terminal)`);
+                return;
+            }
+            step.status = newStatus;
+            if (result !== undefined) step.result = result;
+            onPlanUpdate?.(executionPlan);
+        };
+
+        // ── Terminal summary guard (Issue #26 / Phase B.3) ─────────────────
+        let _seqTerminalSummaryEmitted = false;
+
         // Display plan to user (addMessage only — it calls onMessage internally)
         addMessage({
             role: "assistant",
@@ -592,10 +628,8 @@ Format as JSON:
 
                 console.log(`[OrchestrationService] Executing step ${step.id}: ${step.description}`);
 
-                // Mark step as active in the ExecutionPlan for the SubTaskChecklist
-                const planStep = executionPlan.steps.find(s => s.id === step.id);
-                if (planStep) planStep.status = 'active';
-                onPlanUpdate?.(executionPlan);
+                // Mark step as active (monotonic — won't overwrite terminal)
+                updateSeqStepStatus(step.id, 'active');
 
                 // Build context from previous steps
                 const previousStepsSummary =
@@ -673,13 +707,8 @@ End with "✓ Done" and a brief result.`;
                     }
                     console.info(`[OrchestrationService][Issue #14/#26] sequential_step_done run=${orchestrationRunId} step=${step.id} bailout=${isBailout}`);
 
-                    // Mark step as completed in the ExecutionPlan
-                    const completedStep = executionPlan.steps.find(s => s.id === step.id);
-                    if (completedStep) {
-                        completedStep.status = 'completed';
-                        completedStep.result = stepContent.substring(0, 200);
-                    }
-                    onPlanUpdate?.(executionPlan);
+                    // Mark step as completed (monotonic)
+                    updateSeqStepStatus(step.id, 'completed', stepContent.substring(0, 200));
 
                     // Only addMessage — it calls onMessage internally
                     addMessage({
@@ -703,10 +732,8 @@ End with "✓ Done" and a brief result.`;
                         }
                     } catch { /* ignored */ }
 
-                    // Mark step as failed in the ExecutionPlan
-                    const failedStep = executionPlan.steps.find(s => s.id === step.id);
-                    if (failedStep) failedStep.status = 'failed';
-                    onPlanUpdate?.(executionPlan);
+                    // Mark step as failed (monotonic)
+                    updateSeqStepStatus(step.id, 'failed');
 
                     results.push({
                         step: step.id,
@@ -739,6 +766,13 @@ End with "✓ Done" and a brief result.`;
 
         // Only addMessage — it calls onMessage internally
         // isFinalResult: true ensures this is always shown in clean/prod view
+        // ── Terminal summary guard (Issue #26) ──────────────────────────────
+        if (_seqTerminalSummaryEmitted) {
+            console.warn(`[OrchestrationService][Issue #26] duplicate sequential terminal summary suppressed for run=${orchestrationRunId}`);
+            return { role: "assistant", content: finalSummary, isFinalResult: true };
+        }
+        _seqTerminalSummaryEmitted = true;
+
         const finalMessage: LLMMessage = { role: "assistant", content: finalSummary, isFinalResult: true };
         console.info(`[OrchestrationService][Issue #14/#26] sequential_done run=${orchestrationRunId} steps=${results.length}`);
         addMessage(finalMessage);
