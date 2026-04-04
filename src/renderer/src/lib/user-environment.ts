@@ -1,12 +1,21 @@
 let cachedGeoLocation: string | null = null;
 let isFetchingGeo = false;
+let geoFetchBackoffUntil = 0;
+let lastGeoFetchErrorLogAt = 0;
+
+const GEO_FETCH_TIMEOUT_MS = 2000;
+const GEO_FETCH_BACKOFF_MS = 10 * 60 * 1000;
+const GEO_LOG_THROTTLE_MS = 60 * 1000;
 
 export async function fetchGeoLocation(): Promise<string | null> {
     if (cachedGeoLocation) return cachedGeoLocation;
+    if (Date.now() < geoFetchBackoffUntil) return null;
     if (isFetchingGeo) return null; // Avoid concurrent identical requests blocking
     isFetchingGeo = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), GEO_FETCH_TIMEOUT_MS);
     try {
-        const res = await fetch('https://get.geojs.io/v1/ip/geo.json');
+        const res = await fetch('https://get.geojs.io/v1/ip/geo.json', { signal: controller.signal });
         if (res.ok) {
             const data = await res.json();
             const parts: string[] = [];
@@ -17,11 +26,20 @@ export async function fetchGeoLocation(): Promise<string | null> {
 
             if (parts.length > 0) {
                 cachedGeoLocation = parts.join('\\n  - ');
+            } else {
+                geoFetchBackoffUntil = Date.now() + GEO_FETCH_BACKOFF_MS;
             }
+        } else {
+            geoFetchBackoffUntil = Date.now() + GEO_FETCH_BACKOFF_MS;
         }
     } catch (e) {
-        console.warn("[LLM context] Failed to fetch geolocation", e);
+        geoFetchBackoffUntil = Date.now() + GEO_FETCH_BACKOFF_MS;
+        if (Date.now() - lastGeoFetchErrorLogAt >= GEO_LOG_THROTTLE_MS) {
+            lastGeoFetchErrorLogAt = Date.now();
+            console.warn("[LLM context] Failed to fetch geolocation (backing off)", e);
+        }
     } finally {
+        clearTimeout(timeout);
         isFetchingGeo = false;
     }
     return cachedGeoLocation;

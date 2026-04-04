@@ -71,6 +71,14 @@ function testOpenRouterBackoffIsolationAndAbortability() {
   assertIncludes(src, 'await sleepWithAbort(delayMs, abortSignal);', 'openai');
 }
 
+function testUserEnvironmentGeoBackoff() {
+  const src = read('src/renderer/src/lib/user-environment.ts');
+  assertIncludes(src, 'const GEO_FETCH_TIMEOUT_MS = 2000;', 'user-environment');
+  assertIncludes(src, 'const GEO_FETCH_BACKOFF_MS = 10 * 60 * 1000;', 'user-environment');
+  assertIncludes(src, 'if (Date.now() < geoFetchBackoffUntil) return null;', 'user-environment');
+  assertIncludes(src, 'Failed to fetch geolocation (backing off)', 'user-environment');
+}
+
 function testAgentStateServiceNoGlobalSuppressor() {
   const src = read('src/renderer/src/lib/agent/AgentStateService.ts');
   assertIncludes(src, 'const memoryCreateDisabledUntilByContext = new Map<string, number>();', 'agent-state');
@@ -196,6 +204,7 @@ function run() {
   testTaskDecomposerConditionalHeuristic();
   testTaskDecomposerWebsiteAliasExtraction();
   testOpenRouterBackoffIsolationAndAbortability();
+  testUserEnvironmentGeoBackoff();
   testAgentStateServiceNoGlobalSuppressor();
   testPhaseARuntimeWritePauseAndSessionIsolation();
   testPhaseAMemoryParsingFallbacks();

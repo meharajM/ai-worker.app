@@ -20,7 +20,7 @@ This file tracks technical root cause, current status, and latest verification s
 ## #4 LLM analysis / orchestration timeouts
 - Root cause: long tool/LLM chains under decomposition paths and dynamic pages exceed scenario timeout budgets.
 - Status: Mitigated, needs re-test.
-- Finding: decomposer now maps common site aliases (e.g., `amazon`, `ebay`, `bestbuy`) to explicit contexts to avoid unnecessary LLM decomposition calls; runtime now also bypasses decomposition for direct-answer prompts (`skipping_decomposition_for_direct_answer`). Full-suite decomposition stress still needs confirmation.
+- Finding: decomposer now maps common site aliases (e.g., `amazon`, `ebay`, `bestbuy`) to explicit contexts to avoid unnecessary LLM decomposition calls; runtime now bypasses decomposition for direct-answer prompts (`skipping_decomposition_for_direct_answer`); geolocation context fetch now has timeout/backoff to avoid repeated prompt-build stalls under network failure. Full-suite decomposition stress still needs confirmation.
 
 ## #5 MarkItDown sidecar startup noise (`uvx` missing)
 - Root cause: eager sidecar init without validating runtime dependency availability.
