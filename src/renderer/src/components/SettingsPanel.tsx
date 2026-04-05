@@ -273,6 +273,42 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                                 </div>
                             </div>
 
+                            {/* Filesystem Safe Mode */}
+                            <div className="bg-[var(--color-card-elevated)] border border-[var(--color-border)] rounded-xl p-4 mb-4">
+                                <div className="flex items-center justify-between gap-4">
+                                    <div>
+                                        <label className="block text-sm text-[var(--color-text-primary)] mb-1">Filesystem Safe Mode</label>
+                                        <p className="text-xs text-[var(--color-text-muted)]">
+                                            Stage AI file edits for approval before writing to disk.
+                                        </p>
+                                    </div>
+                                    <input
+                                        type="checkbox"
+                                        className="toggle toggle-success"
+                                        checked={settings.fileSystemSafeMode}
+                                        onChange={() => settings.setFileSystemSafeMode(!settings.fileSystemSafeMode)}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Filesystem Auto-Approve */}
+                            <div className="bg-[var(--color-card-elevated)] border border-[var(--color-border)] rounded-xl p-4 mb-4">
+                                <div className="flex items-center justify-between gap-4">
+                                    <div>
+                                        <label className="block text-sm text-[var(--color-text-primary)] mb-1">Auto-Approve AI File Writes</label>
+                                        <p className="text-xs text-[var(--color-text-muted)]">
+                                            Automatically apply staged writes. Disable to review each change manually.
+                                        </p>
+                                    </div>
+                                    <input
+                                        type="checkbox"
+                                        className="toggle toggle-success"
+                                        checked={settings.fileSystemAutoApprove}
+                                        onChange={() => settings.setFileSystemAutoApprove(!settings.fileSystemAutoApprove)}
+                                    />
+                                </div>
+                            </div>
+
                             {/* Info Box */}
                             <div className="bg-[var(--color-brand-teal)]/10 border border-[var(--color-brand-teal)]/30 rounded-xl p-4">
                                 <div className="flex items-start gap-3">

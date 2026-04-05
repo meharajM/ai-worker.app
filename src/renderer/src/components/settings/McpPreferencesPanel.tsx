@@ -9,7 +9,9 @@ export const McpPreferencesPanel: React.FC = () => {
         playwrightHeadless, 
         setPlaywrightHeadless,
         fileSystemSafeMode,
-        setFileSystemSafeMode
+        setFileSystemSafeMode,
+        fileSystemAutoApprove,
+        setFileSystemAutoApprove
     } = useSettingsStore()
 
     const browsers: { value: PlaywrightBrowserType; label: string }[] = [
@@ -90,7 +92,7 @@ export const McpPreferencesPanel: React.FC = () => {
                             Safe Mode (Shadow Writes)
                         </label>
                         <p className="text-xs text-muted-foreground">
-                            When enabled, the agent cannot write to files directly. Changes are staged in a temporary area and require your approval.
+                            When enabled, user-facing file edits are staged in a temporary area and require your approval. Internal AI-Worker tracking files (like <code>.ai-worker/tasks.json</code>) are written automatically.
                         </p>
                     </div>
                     <input
@@ -98,6 +100,21 @@ export const McpPreferencesPanel: React.FC = () => {
                         className="toggle toggle-success"
                         checked={fileSystemSafeMode}
                         onChange={(e) => setFileSystemSafeMode(e.target.checked)}
+                    />
+                </div>
+
+                <div className="flex items-center justify-between space-x-2 border rounded-md p-3">
+                    <div className="space-y-0.5">
+                        <label className="text-sm font-medium text-foreground">Auto-Approve Writes</label>
+                        <p className="text-xs text-muted-foreground">
+                            Automatically commit staged writes without showing the approval queue.
+                        </p>
+                    </div>
+                    <input
+                        type="checkbox"
+                        className="toggle toggle-success"
+                        checked={fileSystemAutoApprove}
+                        onChange={(e) => setFileSystemAutoApprove(e.target.checked)}
                     />
                 </div>
             </div>

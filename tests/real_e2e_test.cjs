@@ -29,7 +29,7 @@ const SELECTED_CRITICALS = (() => {
     const ids = raw
         .split(',')
         .map((part) => Number(part.trim()))
-        .filter((n) => Number.isInteger(n) && n >= 1 && n <= 6);
+        .filter((n) => Number.isInteger(n) && n >= 1 && n <= 7);
     return ids.length ? new Set(ids) : null;
 })();
 function shouldRunCritical(id) {
@@ -367,6 +367,33 @@ async function startNewChat(window) {
  */
 async function screenshot(window, name) {
     await window.screenshot({ path: path.join(SCREENSHOT_DIR, `${name}.png`) });
+}
+
+async function setFileSystemSettings(window, safeMode, autoApprove) {
+    await window.evaluate(async ({ safeMode, autoApprove }) => {
+        const current = (await window.electron.store.get('mcpFileSystem')) || {};
+        await window.electron.store.set('mcpFileSystem', {
+            ...current,
+            safeMode,
+            autoApprove
+        });
+    }, { safeMode, autoApprove });
+    await window.waitForTimeout(300);
+}
+
+async function rejectPendingWriteForPath(window, targetPath) {
+    await window.evaluate(async ({ targetPath }) => {
+        try {
+            const pending = await window.electron.fs.getPendingChanges();
+            for (const change of pending || []) {
+                if (change && change.originalPath === targetPath) {
+                    await window.electron.fs.rejectChange(change.id);
+                }
+            }
+        } catch {
+            // best-effort cleanup
+        }
+    }, { targetPath });
 }
 
 /**
@@ -1037,6 +1064,96 @@ async function setDetailedVisibility(window, enabled) {
                     'Critical 4: File Write Loop Safety',
                     completed && !infiniteLoopDetected,
                     `Completed: ${completed}. Timed out: ${result.timedOut}. Workspace guard: ${workspaceGuardSeen}. Assistant response: ${receivedAssistantResponse}. Infinite fs loop: ${infiniteLoopDetected}. fs_write references: ${repeatedFsWrite}`
+                );
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════
+        //  CRITICAL 7: Filesystem auto-approve should bypass staging
+        //  Verifies both behaviors:
+        //    - safeMode=true + autoApprove=false => staged (no direct write)
+        //    - safeMode=true + autoApprove=true  => direct write
+        // ══════════════════════════════════════════════════════════
+        if (shouldRunCritical(7)) {
+            console.log('\n' + '─'.repeat(60));
+            console.log('📋 Critical 7: Filesystem Auto-Approve Toggle');
+            console.log('─'.repeat(60));
+            {
+                const stagedPath = `/tmp/ai-worker-e2e-staged-${Date.now()}.txt`;
+                const autoApprovedPath = `/tmp/ai-worker-e2e-auto-approved-${Date.now()}.txt`;
+                const autoApprovedContent = `AUTO_APPROVE_OK_${Date.now()}`;
+
+                // Part A: staging path (auto-approve OFF)
+                await setFileSystemSettings(window, true, false);
+                await startNewChat(window);
+                clearLogs();
+
+                const stagedResult = await sendPromptAndWait(
+                    window,
+                    `Use fs_write_file to write exactly this absolute path: ${stagedPath}. Content must be exactly: STAGED_TEST_CONTENT`,
+                    {
+                        maxWaitS: 90,
+                        keywords: ['staged', 'approval', 'file write paused', 'review'],
+                        successLogPattern: /File Write Paused|status["\\]*\s*:\s*["\\]*staged|STAGED for review/i,
+                    }
+                );
+
+                const stagedWriteCalls = logsCount(/Executing tool: fs_write_file/i);
+                const stagedSignalSeen = logsContain(/File Write Paused|status["\\]*\s*:\s*["\\]*staged|STAGED for review/i);
+                const stagedFileExists = fs.existsSync(stagedPath);
+
+                // Clean staged queue entry to keep environment stable
+                await rejectPendingWriteForPath(window, stagedPath);
+
+                await screenshot(window, 'critical-07a-auto-approve-off');
+
+                // Part B: auto-approve path (auto-approve ON)
+                await setFileSystemSettings(window, true, true);
+                await startNewChat(window);
+                clearLogs();
+
+                const autoResult = await sendPromptAndWait(
+                    window,
+                    `Use fs_write_file to write exactly this absolute path: ${autoApprovedPath}. Content must be exactly: ${autoApprovedContent}`,
+                    {
+                        maxWaitS: 90,
+                        keywords: ['written', 'saved', 'created', 'done', 'file'],
+                        successLogPattern: /written_auto_approved|File written with auto-approval|Executing tool: fs_write_file/i,
+                    }
+                );
+
+                const autoWriteCalls = logsCount(/Executing tool: fs_write_file/i);
+                const autoStagedSignal = logsContain(/status["\\]*\s*:\s*["\\]*staged|STAGED for review|File Write Paused/i);
+                const autoApproveSignal = logsContain(/written_auto_approved|File written with auto-approval/i);
+                const autoFileExists = fs.existsSync(autoApprovedPath);
+                const autoFileContent = autoFileExists ? fs.readFileSync(autoApprovedPath, 'utf8') : '';
+                const autoContentMatches = autoFileContent === autoApprovedContent;
+
+                await screenshot(window, 'critical-07b-auto-approve-on');
+
+                // Restore defaults for subsequent tests and manual usage
+                await setFileSystemSettings(window, true, false);
+
+                // Cleanup created file
+                if (autoFileExists) {
+                    try { fs.unlinkSync(autoApprovedPath); } catch { /* ignore */ }
+                }
+
+                const passed =
+                    !stagedResult.timedOut &&
+                    stagedWriteCalls >= 1 &&
+                    stagedSignalSeen &&
+                    !stagedFileExists &&
+                    !autoResult.timedOut &&
+                    autoWriteCalls >= 1 &&
+                    autoFileExists &&
+                    autoContentMatches &&
+                    !autoStagedSignal;
+
+                recordResult(
+                    'Critical 7: Filesystem Auto-Approve Toggle',
+                    passed,
+                    `Staged mode -> timedOut=${stagedResult.timedOut}, calls=${stagedWriteCalls}, stagedSignal=${stagedSignalSeen}, fileExists=${stagedFileExists}. Auto-approve mode -> timedOut=${autoResult.timedOut}, calls=${autoWriteCalls}, autoSignal=${autoApproveSignal}, stagedSignal=${autoStagedSignal}, fileExists=${autoFileExists}, contentMatch=${autoContentMatches}`
                 );
             }
         }

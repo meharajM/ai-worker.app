@@ -406,7 +406,7 @@ export class AgentRuntime implements IAgentClient {
           console.log('[AgentRuntime] Recovered execution plan from tasks.json');
 
           // Sync recovered plan to tasks.json to ensure file is up-to-date
-          import('./task-manager').then(m => m.syncPlanToFile(this.options.workspacePath, this.executionPlan!));
+          this._persistExecutionPlanToInternalFile();
         }
       } catch (e) {
         console.warn('[AgentRuntime] Failed to recover tasks.json:', e);
@@ -497,6 +497,7 @@ export class AgentRuntime implements IAgentClient {
           // onPlanUpdate: Bridge orchestration plan → session.plan → SubTaskChecklist
           (plan) => {
             this.executionPlan = plan;
+            this._persistExecutionPlanToInternalFile();
             this._emitProgress(this._lastProgressPct);
           }
         );
@@ -524,6 +525,7 @@ export class AgentRuntime implements IAgentClient {
           // plan=undefined to onProgressUpdate, and the checklist never renders.
           (plan) => {
             this.executionPlan = plan;
+            this._persistExecutionPlanToInternalFile();
             this._emitProgress(this._lastProgressPct);
           }
         );
@@ -732,6 +734,7 @@ export class AgentRuntime implements IAgentClient {
         if (call.name === "create_execution_plan") {
           const { result, plan } = this.specialHandlers.handleCreateExecutionPlan(call.arguments);
           this.executionPlan = plan;
+          this._persistExecutionPlanToInternalFile();
           resultStr = result;
         } else if (call.name === "scan_page_accessibility") {
           resultStr = await this.specialHandlers.handleScanPageAccessibility();
@@ -744,7 +747,10 @@ export class AgentRuntime implements IAgentClient {
             resultStr = "Nested delegation is disabled inside sub-agents. Complete the current sub-task directly.";
           } else {
             const { result, planUpdate } = await this.specialHandlers.handleDelegateSubTask(call.arguments, this.executionPlan);
-            if (planUpdate) this.executionPlan = planUpdate;
+            if (planUpdate) {
+              this.executionPlan = planUpdate;
+              this._persistExecutionPlanToInternalFile();
+            }
             resultStr = result;
           }
         } else {
@@ -929,6 +935,21 @@ export class AgentRuntime implements IAgentClient {
     }
     // Sending undefined for progress clears the bar (matches useAgent.ts finally-block behaviour)
     this.options.onProgressUpdate(clamped === 100 ? undefined : clamped, clamped === 100 ? undefined : eta, this.executionPlan ?? undefined);
+  }
+
+  /**
+   * Persists the current execution plan to `.ai-worker/tasks.json` via the
+   * internal IPC writer (bypasses staged fs_write approvals).
+   */
+  private _persistExecutionPlanToInternalFile(): void {
+    if (this.options.isSubAgent) return;
+    if (!this.options.workspacePath || !this.executionPlan) return;
+
+    import("./task-manager")
+      .then((m) => m.syncPlanToFile(this.options.workspacePath, this.executionPlan))
+      .catch((error) => {
+        console.warn("[AgentRuntime] Failed to persist execution plan:", error);
+      });
   }
 
   // ── Private: Helpers ───────────────────────────────────────────────────────

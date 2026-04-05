@@ -47,6 +47,7 @@ interface ToolCallResponse {
  */
 interface SafeModeSettings {
     safeMode?: boolean
+    autoApprove?: boolean
 }
 
 // ============================================================================
@@ -184,16 +185,35 @@ export class FileSystemService {
      * Check if Safe Mode is enabled
      * @private
      */
-    private async isSafeModeEnabled(): Promise<boolean> {
+    private async getSafeModeSettings(): Promise<{ safeMode: boolean; autoApprove: boolean }> {
         try {
             const Store = (await import('electron-store')).default
             const store = new Store<Record<string, any>>()
             const settings = ((store as any).get('mcpFileSystem', {}) as any) as SafeModeSettings
-            return settings.safeMode !== false  // Default to true
+            return {
+                safeMode: settings.safeMode !== false, // Default to true
+                autoApprove: settings.autoApprove === true, // Default to false
+            }
         } catch (error) {
             console.warn('[FileSystemService] Failed to check safe mode, defaulting to enabled:', error)
-            return true  // Fail-safe to protect user files
+            return {
+                safeMode: true, // Fail-safe to protect user files
+                autoApprove: false,
+            }
         }
+    }
+
+    /**
+     * Internal tracking files are written by the app itself and should not
+     * require staged user approval even when Safe Mode is enabled.
+     */
+    private isInternalTrackingFile(filePath: string): boolean {
+        const normalized = path.normalize(filePath)
+        const parentDir = path.basename(path.dirname(normalized)).toLowerCase()
+        const fileName = path.basename(normalized).toLowerCase()
+
+        if (parentDir !== '.ai-worker') return false
+        return fileName === 'tasks.json' || fileName === 'execution-plan.json'
     }
 
     // ========================================================================
@@ -313,9 +333,10 @@ export class FileSystemService {
         try {
             switch (name) {
                 case 'fs_write_file': {
-                    const isSafeMode = await this.isSafeModeEnabled()
+                    const { safeMode: isSafeMode, autoApprove } = await this.getSafeModeSettings()
+                    const isInternalTrackingWrite = this.isInternalTrackingFile(args.path)
 
-                    if (isSafeMode) {
+                    if (isSafeMode && !autoApprove && !isInternalTrackingWrite) {
                         // Safe Mode: Stage for user review
                         const change = await this.stageWrite(args.path, args.content)
                         return {
@@ -326,14 +347,26 @@ export class FileSystemService {
                             }
                         }
                     } else {
-                        // Direct write (Safe Mode disabled)
+                        // Direct write:
+                        // - Safe Mode disabled OR
+                        // - Auto-approve enabled OR
+                        // - Internal tracking file
                         await fs.mkdir(path.dirname(args.path), { recursive: true })
                         await fs.writeFile(args.path, args.content, 'utf8')
+                        const status = isInternalTrackingWrite
+                            ? 'written_internal'
+                            : autoApprove
+                                ? 'written_auto_approved'
+                                : 'written'
                         return {
                             result: {
-                                status: 'written',
+                                status,
                                 path: args.path,
-                                message: `File written to ${args.path}`
+                                message: isInternalTrackingWrite
+                                    ? `Internal tracking file updated: ${args.path}`
+                                    : autoApprove
+                                        ? `File written with auto-approval: ${args.path}`
+                                    : `File written to ${args.path}`
                             }
                         }
                     }
