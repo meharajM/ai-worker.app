@@ -41,6 +41,7 @@ import {
   checkForLoop,
   executeWithSelfHealing,
   formatToolResult,
+  isWritePendingApprovalSignal,
   truncateToolOutput,
   reportFinding,
 } from "./agent/ToolExecutionService";
@@ -91,13 +92,7 @@ interface AccumulatedToolCall {
 import { SpecialToolHandlers } from "./agent/SpecialToolHandlers";
 
 function isWriteAwaitingApproval(callName: string, resultStr: string): boolean {
-  if (!callName.startsWith("fs_write")) return false;
-  return (
-    /"status"\s*:\s*"staged"/i.test(resultStr) ||
-    /approval\s+required/i.test(resultStr) ||
-    /workspace\s+required/i.test(resultStr) ||
-    /select a workspace folder/i.test(resultStr)
-  );
+  return isWritePendingApprovalSignal(callName, resultStr);
 }
 
 const LOCAL_PREFERENCE_MEMORY_KEY = "ai_worker_local_preferences_v1";

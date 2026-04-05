@@ -57,6 +57,61 @@ function signatureToToolName(signature: string): string {
     return idx === -1 ? signature : signature.slice(0, idx);
 }
 
+function maybeParseJson(value: string): unknown | null {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const first = trimmed[0];
+    if (first !== "{" && first !== "[" && first !== "\"") return null;
+    try {
+        return JSON.parse(trimmed);
+    } catch {
+        return null;
+    }
+}
+
+function collectSignalStrings(value: unknown, sink: Set<string>, depth = 0): void {
+    if (depth > 6 || value === null || value === undefined) return;
+
+    if (typeof value === "string") {
+        sink.add(value);
+        const parsed = maybeParseJson(value);
+        if (parsed !== null) collectSignalStrings(parsed, sink, depth + 1);
+        return;
+    }
+
+    if (Array.isArray(value)) {
+        for (const item of value) collectSignalStrings(item, sink, depth + 1);
+        return;
+    }
+
+    if (typeof value === "object") {
+        const record = value as Record<string, unknown>;
+        for (const nested of Object.values(record)) {
+            collectSignalStrings(nested, sink, depth + 1);
+        }
+        return;
+    }
+
+    sink.add(String(value));
+}
+
+/**
+ * Detects whether an fs_write result indicates a staged/pending approval state.
+ *
+ * Handles plain text, JSON objects, and nested MCP envelopes with escaped JSON text.
+ */
+export function isWritePendingApprovalSignal(callName: string, rawResult: unknown): boolean {
+    if (!callName.startsWith("fs_write")) return false;
+
+    const signals = new Set<string>();
+    collectSignalStrings(rawResult, signals);
+    const haystack = Array.from(signals).join("\n");
+
+    return /"status"\s*:\s*"staged"|\\\"status\\\"\\s*:\\s*\\\"staged\\\"|approval\s+required|pending\s+approval|user\s+must\s+approve|workspace\s+required|workspace\s+folder|select a workspace folder/i.test(
+        haystack
+    );
+}
+
 // ── Loop Detection ─────────────────────────────────────────────────────────────
 
 /**
@@ -94,7 +149,7 @@ export function checkForLoop(
             .slice(-5)
             .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)));
         const awaitingApproval = recentResults.some((content) =>
-            /"status"\s*:\s*"staged"|approval\s+required|workspace\s+folder/i.test(content)
+            isWritePendingApprovalSignal(callName, content)
         );
         if (awaitingApproval) {
             console.error(

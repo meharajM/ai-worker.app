@@ -120,6 +120,11 @@ export const STATEFUL_BROWSER_TOOLS = [
 
 // Tools that modify file system state (using fileLock)
 export const STATEFUL_FILE_TOOLS = [
+  // Internal filesystem MCP tools
+  'fs_write_file',
+  'fs_read_file',
+  'fs_list_directory',
+  // Legacy/alias tool names
   'write_to_file',
   'replace_file_content',
   'create_file',
@@ -243,4 +248,3 @@ export const CLIENT_TOOLS = [
   WHATSAPP_SEND_MEDIA_TOOL,
   WHATSAPP_SEND_MESSAGE_TOOL,
 ];
-
