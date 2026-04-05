@@ -46,6 +46,14 @@ export const electron = {
         return null
     },
 
+    // Get user home path
+    getHomePath: async (): Promise<string> => {
+        if (isElectron() && window.electron?.app?.getHomePath) {
+            return await window.electron.app.getHomePath()
+        }
+        return ''
+    },
+
     // MCP operations
     mcp: {
         connect: async (serverConfig: unknown) => {
@@ -169,9 +177,9 @@ export const electron = {
 
     // FS operations
     fs: {
-        getPendingChanges: async () => {
+        getPendingChanges: async (sessionId?: string) => {
             if (isElectron() && window.electron?.fs) {
-                return await window.electron.fs.getPendingChanges()
+                return await window.electron.fs.getPendingChanges(sessionId)
             }
             return []
         },

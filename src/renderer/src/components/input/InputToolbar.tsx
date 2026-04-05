@@ -1,11 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { Eye, EyeOff, Paperclip, FolderOpen, File as FileIcon } from 'lucide-react'
-import { Button } from '../primitives/Button'
+import React, { useRef } from 'react'
+import { Eye, EyeOff, Paperclip, FolderOpen, ShieldCheck, ShieldAlert } from 'lucide-react'
 
 interface InputToolbarProps {
   workspacePath: string | null
   isHeadless: boolean
+  fileWriteAutoApprove: boolean
   onToggleHeadless: () => void
+  onToggleFileWriteAutoApprove: () => void
   onSelectFolder: () => void
   onSelectFiles: (files: File[]) => void
   hasAttachments: boolean
@@ -15,14 +16,14 @@ interface InputToolbarProps {
 export function InputToolbar({
   workspacePath,
   isHeadless,
+  fileWriteAutoApprove,
   onToggleHeadless,
+  onToggleFileWriteAutoApprove,
   onSelectFolder,
   onSelectFiles,
   hasAttachments,
   disabled = false,
 }: InputToolbarProps) {
-  const [showContextMenu, setShowContextMenu] = useState(false)
-  const contextMenuRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -31,18 +32,6 @@ export function InputToolbar({
       e.target.value = ''
     }
   }
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
-        setShowContextMenu(false)
-      }
-    }
-    if (showContextMenu) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [showContextMenu])
 
   return (
     <>
@@ -54,64 +43,55 @@ export function InputToolbar({
         style={{ display: 'none' }}
       />
 
-      {/* Unified Workspace / File Selector */}
-      <div className="relative" ref={contextMenuRef}>
-        <button
-          onClick={() => setShowContextMenu(!showContextMenu)}
-          disabled={disabled}
-          className={`p-2 mb-[1px] rounded-[var(--radius-lg)] transition-all h-[44px] w-[36px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${workspacePath
-              ? 'bg-[var(--color-brand-teal)]/20 text-[var(--color-brand-teal)] hover:bg-[var(--color-brand-teal)]/30'
-              : hasAttachments
-                ? 'bg-[var(--color-success)]/20 text-[var(--color-success)] hover:bg-[var(--color-success)]/30'
-                : 'bg-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)]'
-            } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-          title={workspacePath ? `Workspace: ${workspacePath}` : 'Select workspace or files'}
-        >
-          <Paperclip size={18} />
-        </button>
+      <button
+        id="workspace-select-button"
+        data-testid="workspace-select-button"
+        type="button"
+        onClick={onSelectFolder}
+        disabled={disabled}
+        className={`inline-flex h-[36px] items-center gap-1.5 rounded-[var(--radius-lg)] border px-2 text-[10px] font-semibold tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${workspacePath
+            ? 'border-[var(--color-brand-teal)]/40 bg-[var(--color-brand-teal)]/15 text-[var(--color-brand-teal)] hover:bg-[var(--color-brand-teal)]/25'
+            : 'border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+          } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+        title={workspacePath ? `Workspace: ${workspacePath}` : 'Select Workspace'}
+      >
+        <FolderOpen size={12} />
+        <span className="max-w-[180px] truncate">
+          {workspacePath ? `Workspace: ${workspacePath.split(/[/\\]/).pop()}` : 'Select Workspace'}
+        </span>
+      </button>
 
-        {/* Dropdown Menu */}
-        {showContextMenu && (
-          <div className="absolute bottom-full mb-2 -right-4 bg-[var(--color-card-elevated)] border border-[var(--color-border)] rounded-[var(--radius-xl)] shadow-[var(--shadow-glass)] overflow-hidden min-w-[200px] animate-in fade-in slide-in-from-bottom-2 duration-[var(--duration-fast)] z-50">
-            {/* Select Workspace */}
-            <button
-              onClick={() => {
-                onSelectFolder()
-                setShowContextMenu(false)
-              }}
-              className="w-full flex items-center gap-3 px-4 py-3 text-[var(--text-sm)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface)] hover:text-[var(--color-primary)] transition-colors"
-            >
-              <FolderOpen
-                size={16}
-                className={workspacePath ? 'text-[var(--color-brand-teal)]' : 'text-[var(--color-text-muted)]'}
-              />
-              <div className="flex flex-col items-start">
-                <span className="font-[var(--font-weight-medium)]">Select Workspace</span>
-                {workspacePath && (
-                  <span className="text-[10px] text-[var(--color-brand-teal)]/70 max-w-[160px] truncate">
-                    {workspacePath.split(/[/\\]/).pop()}
-                  </span>
-                )}
-              </div>
-            </button>
-            <div className="border-t border-[var(--color-border)]" />
-            {/* Select Files */}
-            <button
-              onClick={() => {
-                fileInputRef.current?.click()
-                setShowContextMenu(false)
-              }}
-              className="w-full flex items-center gap-3 px-4 py-3 text-[var(--text-sm)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface)] hover:text-[var(--color-primary)] transition-colors"
-            >
-              <FileIcon
-                size={16}
-                className={hasAttachments ? 'text-[var(--color-success)]' : 'text-[var(--color-text-muted)]'}
-              />
-              <span className="font-[var(--font-weight-medium)]">Select Files</span>
-            </button>
-          </div>
-        )}
-      </div>
+      <button
+        id="attachment-select-button"
+        data-testid="attachment-select-button"
+        type="button"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={disabled}
+        className={`p-2 mb-[1px] rounded-[var(--radius-lg)] transition-all h-[44px] w-[36px] flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${hasAttachments
+            ? 'bg-[var(--color-success)]/20 text-[var(--color-success)] hover:bg-[var(--color-success)]/30'
+            : 'bg-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)]'
+          } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+        title="Select Files"
+      >
+        <Paperclip size={18} />
+      </button>
+
+      <button
+        id="workspace-auto-file-write-approval-toggle"
+        data-testid="workspace-auto-file-write-approval-toggle"
+        type="button"
+        aria-pressed={fileWriteAutoApprove}
+        onClick={onToggleFileWriteAutoApprove}
+        disabled={disabled}
+        className={`inline-flex h-[36px] items-center gap-1.5 rounded-[var(--radius-lg)] border px-2 text-[10px] font-semibold tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] ${fileWriteAutoApprove
+            ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'
+            : 'border-amber-500/40 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25'
+          } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+        title={fileWriteAutoApprove ? 'Auto File Write Approval: ON' : 'Auto File Write Approval: OFF'}
+      >
+        {fileWriteAutoApprove ? <ShieldCheck size={12} /> : <ShieldAlert size={12} />}
+        <span>Auto File Write Approval: {fileWriteAutoApprove ? 'ON' : 'OFF'}</span>
+      </button>
 
       {/* Headless Toggle */}
       <button

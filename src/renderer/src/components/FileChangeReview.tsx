@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { FileText, Check, X, AlertTriangle, RefreshCw, Clock3 } from 'lucide-react'
+import { useChatStore } from '../stores/chatStore'
 import { useSettingsStore } from '../stores/settingsStore'
 
 interface FileChange {
@@ -13,30 +14,61 @@ interface FileChange {
 
 export const FileChangeReview: React.FC = () => {
     const [changes, setChanges] = useState<FileChange[]>([])
+    const [autoApproveErrorIds, setAutoApproveErrorIds] = useState<Set<string>>(new Set())
     const [isLoading, setIsLoading] = useState(false)
     const INTERNAL_TRACKING_FILE_PATTERN = /[\\/]\.ai-worker[\\/](tasks|execution-plan)\.json$/i
+    const { activeSessionId, sessions } = useChatStore()
     const fileSystemAutoApprove = useSettingsStore((s) => s.fileSystemAutoApprove)
+    const activeSession = sessions.find((s) => s.id === activeSessionId)
+    const sessionAutoApprove = activeSession?.fileWriteAutoApprove ?? fileSystemAutoApprove
 
     const fetchChanges = async () => {
         setIsLoading(true)
         try {
-            const pending = await window?.electron?.fs.getPendingChanges()
+            const pending = await window?.electron?.fs.getPendingChanges(activeSessionId || 'default')
             if (pending) {
                 // Internal task tracking writes should not surface in the review panel.
                 const filtered = pending.filter(
                     (change: FileChange) => !INTERNAL_TRACKING_FILE_PATTERN.test(change.originalPath)
                 )
+                const pendingIds = new Set(filtered.map((change: FileChange) => change.id))
+                setAutoApproveErrorIds((prev) => {
+                    const next = new Set(Array.from(prev).filter((id) => pendingIds.has(id)))
+                    if (next.size === prev.size && Array.from(next).every((id) => prev.has(id))) return prev
+                    return next
+                })
 
                 // If Auto-Approve is enabled, sweep backlog entries so this panel
                 // doesn't keep reappearing with stale pending writes.
-                if (fileSystemAutoApprove && filtered.length > 0) {
+                if (sessionAutoApprove && filtered.length > 0) {
+                    // Do not repeatedly retry entries that already failed auto-approval.
+                    // Keep them visible for manual approval/rejection instead.
+                    const autoSweepCandidates = filtered.filter(
+                        (change: FileChange) => !autoApproveErrorIds.has(change.id)
+                    )
+                    if (autoSweepCandidates.length === 0) {
+                        setChanges(filtered)
+                        return
+                    }
                     const settle = await Promise.all(
-                        filtered.map((change) =>
-                            window?.electron?.fs.approveChange(change.id).catch(() => ({ success: false }))
+                        autoSweepCandidates.map((change) =>
+                            window?.electron?.fs.approveChange(change.id)
+                                .then(() => ({ success: true }))
+                                .catch(() => ({ success: false }))
                         )
                     )
-                    const failed = filtered.filter((_change, idx) => !settle[idx]?.success)
-                    setChanges(failed)
+                    const failedIds = autoSweepCandidates
+                        .filter((_change, idx) => !settle[idx]?.success)
+                        .map((change) => change.id)
+                    if (failedIds.length > 0) {
+                        setAutoApproveErrorIds((prev) => {
+                            const next = new Set(prev)
+                            for (const id of failedIds) next.add(id)
+                            if (next.size === prev.size && failedIds.every((id) => prev.has(id))) return prev
+                            return next
+                        })
+                    }
+                    setChanges(filtered)
                     return
                 }
 
@@ -54,11 +86,16 @@ export const FileChangeReview: React.FC = () => {
         // Poll for changes every 2 seconds
         const interval = setInterval(fetchChanges, 2000)
         return () => clearInterval(interval)
-    }, [fileSystemAutoApprove])
+    }, [activeSessionId, sessionAutoApprove, autoApproveErrorIds])
 
     const handleApprove = async (id: string) => {
         try {
             await window?.electron?.fs.approveChange(id)
+            setAutoApproveErrorIds((prev) => {
+                const next = new Set(prev)
+                next.delete(id)
+                return next
+            })
             setChanges(prev => prev.filter(c => c.id !== id))
         } catch (error) {
             console.error('Failed to approve change:', error)
@@ -68,6 +105,11 @@ export const FileChangeReview: React.FC = () => {
     const handleReject = async (id: string) => {
         try {
             await window?.electron?.fs.rejectChange(id)
+            setAutoApproveErrorIds((prev) => {
+                const next = new Set(prev)
+                next.delete(id)
+                return next
+            })
             setChanges(prev => prev.filter(c => c.id !== id))
         } catch (error) {
             console.error('Failed to reject change:', error)

@@ -17,6 +17,7 @@ import { useSpeechRecognition } from '../../hooks/useSpeechRecognition'
 import { useFileDragDrop } from '../../hooks/useFileDragDrop'
 import { useLogStore } from '../../stores/logStore'
 import { useChatStore } from '../../stores/chatStore'
+import { useSettingsStore } from '../../stores/settingsStore'
 import { useWhatsAppStore } from '../../stores/whatsappStore'
 import electron from '../../lib/electron'
 
@@ -33,22 +34,50 @@ interface ChatInputProps {
   onAbort?: () => void
 }
 
+function normalizePathForCompare(value: string): string {
+  return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+}
+
+function isPathInside(rootPath: string, targetPath: string): boolean {
+  const normalizedRoot = normalizePathForCompare(rootPath)
+  const normalizedTarget = normalizePathForCompare(targetPath)
+  return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}/`)
+}
+
 export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProps) {
   const [textInput, setTextInput] = useState('')
   const [isHeadless, setIsHeadless] = useState(false)
   const [workspacePath, setWorkspacePath] = useState<string | null>(null)
+  const [sessionFileWriteAutoApprove, setSessionFileWriteAutoApproveState] = useState<boolean | undefined>(undefined)
+  const [userHomePath, setUserHomePath] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<File[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileSystemAutoApprove = useSettingsStore((s) => s.fileSystemAutoApprove)
   const { addLog } = useLogStore()
-  const { activeSessionId, getActiveSession } = useChatStore()
+  const { activeSessionId, getActiveSession, setSessionFileWriteAutoApprove } = useChatStore()
   const { whatsappEnabled, connectionState } = useWhatsAppStore()
 
   // Load workspace from active session and reset per-session state
   useEffect(() => {
     const session = getActiveSession()
     setWorkspacePath(session?.workspacePath || null)
+    setSessionFileWriteAutoApproveState(session?.fileWriteAutoApprove)
     setIsHeadless(false)
   }, [activeSessionId, getActiveSession])
+
+  const effectiveFileWriteAutoApprove = sessionFileWriteAutoApprove ?? fileSystemAutoApprove
+
+  useEffect(() => {
+    let mounted = true
+    electron.getHomePath()
+      .then((homePath) => {
+        if (mounted && homePath) setUserHomePath(homePath)
+      })
+      .catch((error) => {
+        console.warn('[ChatInput] Failed to resolve user home path:', error)
+      })
+    return () => { mounted = false }
+  }, [])
 
   // Speech recognition hook
   const {
@@ -124,6 +153,10 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
     try {
       const selectedPath = await electron.selectFolder()
       if (selectedPath) {
+        if (userHomePath && !isPathInside(userHomePath, selectedPath)) {
+          console.warn('[ChatInput] Rejected workspace outside user home folder:', selectedPath)
+          return
+        }
         setWorkspacePath(selectedPath)
         const {
           createSession,
@@ -147,7 +180,7 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
     } catch (error) {
       console.error('Failed to select folder:', error)
     }
-  }, [addLog])
+  }, [addLog, userHomePath])
 
   // Derive workspace from file path if none is set
   const maybeSetWorkspaceFromFiles = useCallback((files: File[]) => {
@@ -156,8 +189,13 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const firstPath = (window as any).electron?.utils?.getPathForFile(firstFile) || (firstFile as any).path as string | undefined
     if (!firstPath) return
-    const parentDir = firstPath.includes('/') ? firstPath.substring(0, firstPath.lastIndexOf('/')) : null
+    const lastSlash = Math.max(firstPath.lastIndexOf('/'), firstPath.lastIndexOf('\\'))
+    const parentDir = lastSlash > 0 ? firstPath.substring(0, lastSlash) : null
     if (!parentDir) return
+    if (userHomePath && !isPathInside(userHomePath, parentDir)) {
+      console.warn('[ChatInput] Skipping auto-derived workspace outside user home folder:', parentDir)
+      return
+    }
     setWorkspacePath(parentDir)
     const { createSession, activeSessionId: currentSessionId, updateSessionWorkspace } = useChatStore.getState()
     if (!currentSessionId) {
@@ -165,7 +203,7 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
     } else {
       updateSessionWorkspace(currentSessionId, parentDir)
     }
-  }, [workspacePath])
+  }, [workspacePath, userHomePath])
 
   // Handle files selected via toolbar dropdown
   const handleSelectFiles = useCallback((files: File[]) => {
@@ -325,7 +363,14 @@ export function ChatInput({ onSubmit, disabled = false, onAbort }: ChatInputProp
             <InputToolbar
               workspacePath={workspacePath}
               isHeadless={isHeadless}
+              fileWriteAutoApprove={effectiveFileWriteAutoApprove}
               onToggleHeadless={() => setIsHeadless(!isHeadless)}
+              onToggleFileWriteAutoApprove={() => {
+                if (!activeSessionId) return
+                const nextValue = !effectiveFileWriteAutoApprove
+                setSessionFileWriteAutoApproveState(nextValue)
+                setSessionFileWriteAutoApprove(activeSessionId, nextValue)
+              }}
               onSelectFolder={handleSelectFolder}
               onSelectFiles={handleSelectFiles}
               hasAttachments={attachments.length > 0}

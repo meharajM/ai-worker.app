@@ -381,10 +381,36 @@ async function setFileSystemSettings(window, safeMode, autoApprove) {
     await window.waitForTimeout(300);
 }
 
+async function isSessionAutoApproveEnabled(window) {
+    const toggle = window.locator('[data-testid="workspace-auto-file-write-approval-toggle"]');
+    await toggle.first().waitFor({ state: 'visible', timeout: 15000 });
+    const pressed = await toggle.first().getAttribute('aria-pressed');
+    return pressed === 'true';
+}
+
+async function setSessionAutoApprove(window, enabled) {
+    const toggle = window.locator('[data-testid="workspace-auto-file-write-approval-toggle"]');
+    await toggle.first().waitFor({ state: 'visible', timeout: 15000 });
+    const current = await isSessionAutoApproveEnabled(window);
+    if (current !== enabled) {
+        await toggle.first().click();
+        await window.waitForTimeout(350);
+    }
+}
+
 async function rejectPendingWriteForPath(window, targetPath) {
     await window.evaluate(async ({ targetPath }) => {
         try {
-            const pending = await window.electron.fs.getPendingChanges();
+            const raw = window.localStorage.getItem('ai-worker-chat-v3');
+            let activeSessionId = 'default';
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                activeSessionId =
+                    parsed?.state?.activeSessionId ||
+                    parsed?.activeSessionId ||
+                    'default';
+            }
+            const pending = await window.electron.fs.getPendingChanges(activeSessionId);
             for (const change of pending || []) {
                 if (change && change.originalPath === targetPath) {
                     await window.electron.fs.rejectChange(change.id);
@@ -399,7 +425,16 @@ async function rejectPendingWriteForPath(window, targetPath) {
 async function hasPendingWriteForPath(window, targetPath) {
     return await window.evaluate(async ({ targetPath }) => {
         try {
-            const pending = await window.electron.fs.getPendingChanges();
+            const raw = window.localStorage.getItem('ai-worker-chat-v3');
+            let activeSessionId = 'default';
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                activeSessionId =
+                    parsed?.state?.activeSessionId ||
+                    parsed?.activeSessionId ||
+                    'default';
+            }
+            const pending = await window.electron.fs.getPendingChanges(activeSessionId);
             return (pending || []).some((change) => change && change.originalPath === targetPath);
         } catch {
             return false;
@@ -457,7 +492,7 @@ async function setDetailedVisibility(window, enabled) {
     try {
         electronApp = await electron.launch({
             executablePath: execPath,
-            args: [APP_PATH],
+            args: [APP_PATH, '--no-sandbox'],
             env: { ...env, NODE_ENV: 'production' },
             timeout: 120000
         });
@@ -1080,23 +1115,34 @@ async function setDetailedVisibility(window, enabled) {
         }
 
         // ══════════════════════════════════════════════════════════
-        //  CRITICAL 7: Filesystem auto-approve should bypass staging
-        //  Verifies both behaviors:
-        //    - safeMode=true + autoApprove=false => staged (no direct write)
-        //    - safeMode=true + autoApprove=true  => direct write
+        //  CRITICAL 7: Session-scoped workspace row controls + auto-approve toggle
+        //  Verifies:
+        //    - Workspace selector, file selector, and auto-approve toggle are visible
+        //    - OFF => staged (no direct write)
+        //    - ON  => direct write in same session
+        //    - New chat session starts with toggle OFF (session isolation)
         // ══════════════════════════════════════════════════════════
         if (shouldRunCritical(7)) {
             console.log('\n' + '─'.repeat(60));
-            console.log('📋 Critical 7: Filesystem Auto-Approve Toggle');
+            console.log('📋 Critical 7: Session Auto-Approve + Workspace Controls');
             console.log('─'.repeat(60));
             {
+                const sessionResetPath = `/tmp/ai-worker-e2e-session-reset-${Date.now()}.txt`;
                 const stagedPath = `/tmp/ai-worker-e2e-staged-${Date.now()}.txt`;
                 const autoApprovedPath = `/tmp/ai-worker-e2e-auto-approved-${Date.now()}.txt`;
                 const autoApprovedContent = `AUTO_APPROVE_OK_${Date.now()}`;
+                const sessionResetContent = `SESSION_RESET_CONTENT_${Date.now()}`;
 
-                // Part A: staging path (auto-approve OFF)
+                // Keep global defaults deterministic: safe mode ON, global auto-approve OFF.
                 await setFileSystemSettings(window, true, false);
+
+                // Part A: Session toggle OFF -> staging path.
                 await startNewChat(window);
+                const workspaceSelectorVisible = (await window.locator('[data-testid="workspace-select-button"]').count()) > 0;
+                const fileSelectorVisible = (await window.locator('[data-testid="attachment-select-button"]').count()) > 0;
+                const sessionToggleVisible = (await window.locator('[data-testid="workspace-auto-file-write-approval-toggle"]').count()) > 0;
+                const initialSessionAutoApprove = await isSessionAutoApproveEnabled(window);
+                await setSessionAutoApprove(window, false);
                 clearLogs();
 
                 const stagedResult = await sendPromptAndWait(
@@ -1119,9 +1165,9 @@ async function setDetailedVisibility(window, enabled) {
 
                 await screenshot(window, 'critical-07a-auto-approve-off');
 
-                // Part B: auto-approve path (auto-approve ON)
-                await setFileSystemSettings(window, true, true);
-                await startNewChat(window);
+                // Part B: same session toggle ON -> direct write.
+                await setSessionAutoApprove(window, true);
+                const sessionAutoApproveOn = await isSessionAutoApproveEnabled(window);
                 clearLogs();
 
                 const autoResult = await sendPromptAndWait(
@@ -1136,15 +1182,30 @@ async function setDetailedVisibility(window, enabled) {
 
                 const autoWriteCalls = logsCount(/Executing tool: fs_write_file/i);
                 const autoStagedSignal = logsContain(/status["\\]*\s*:\s*["\\]*staged|STAGED for review|File Write Paused/i);
-                const autoApproveSignal = logsContain(/written_auto_approved|File written with auto-approval/i);
+                const autoApproveSignal = logsContain(/written_session_auto_approved|File written with session auto-approval|written_auto_approved|File written with auto-approval/i);
                 const autoFileExists = fs.existsSync(autoApprovedPath);
                 const autoFileContent = autoFileExists ? fs.readFileSync(autoApprovedPath, 'utf8') : '';
                 const autoContentMatches = autoFileContent === autoApprovedContent;
 
                 await screenshot(window, 'critical-07b-auto-approve-on');
 
-                // Restore defaults for subsequent tests and manual usage
-                await setFileSystemSettings(window, true, false);
+                // Part C: new session should reset to OFF (session-scoped).
+                await startNewChat(window);
+                const sessionAutoApproveAfterNewSession = await isSessionAutoApproveEnabled(window);
+                clearLogs();
+                const sessionResetResult = await sendPromptAndWait(
+                    window,
+                    `Use fs_write_file to write exactly this absolute path: ${sessionResetPath}. Content must be exactly: ${sessionResetContent}`,
+                    {
+                        maxWaitS: 90,
+                        keywords: ['staged', 'approval', 'file write paused', 'review'],
+                        successLogPattern: /File Write Paused|status["\\]*\s*:\s*["\\]*staged|STAGED for review/i,
+                    }
+                );
+                const sessionResetStaged = logsContain(/File Write Paused|status["\\]*\s*:\s*["\\]*staged|STAGED for review/i);
+                const sessionResetFileExists = fs.existsSync(sessionResetPath);
+                const sessionResetPending = await hasPendingWriteForPath(window, sessionResetPath);
+                await rejectPendingWriteForPath(window, sessionResetPath);
 
                 // Cleanup created file
                 if (autoFileExists) {
@@ -1152,20 +1213,29 @@ async function setDetailedVisibility(window, enabled) {
                 }
 
                 const passed =
+                    workspaceSelectorVisible &&
+                    fileSelectorVisible &&
+                    sessionToggleVisible &&
+                    initialSessionAutoApprove === false &&
                     !stagedResult.timedOut &&
                     stagedWriteCalls >= 1 &&
                     (stagedSignalSeen || stagedPendingExists) &&
                     !stagedFileExists &&
+                    sessionAutoApproveOn &&
                     !autoResult.timedOut &&
                     autoWriteCalls >= 1 &&
                     autoFileExists &&
                     autoContentMatches &&
-                    !autoStagedSignal;
+                    !autoStagedSignal &&
+                    !sessionResetResult.timedOut &&
+                    sessionAutoApproveAfterNewSession === false &&
+                    (sessionResetStaged || sessionResetPending) &&
+                    !sessionResetFileExists;
 
                 recordResult(
-                    'Critical 7: Filesystem Auto-Approve Toggle',
+                    'Critical 7: Session Auto-Approve + Workspace Controls',
                     passed,
-                    `Staged mode -> timedOut=${stagedResult.timedOut}, calls=${stagedWriteCalls}, stagedSignal=${stagedSignalSeen}, pendingExists=${stagedPendingExists}, fileExists=${stagedFileExists}. Auto-approve mode -> timedOut=${autoResult.timedOut}, calls=${autoWriteCalls}, autoSignal=${autoApproveSignal}, stagedSignal=${autoStagedSignal}, fileExists=${autoFileExists}, contentMatch=${autoContentMatches}`
+                    `workspaceVisible=${workspaceSelectorVisible}, filesVisible=${fileSelectorVisible}, toggleVisible=${sessionToggleVisible}, initialOff=${initialSessionAutoApprove === false}, toggledOn=${sessionAutoApproveOn}, newSessionOff=${sessionAutoApproveAfterNewSession === false}. Staged mode -> timedOut=${stagedResult.timedOut}, calls=${stagedWriteCalls}, stagedSignal=${stagedSignalSeen}, pendingExists=${stagedPendingExists}, fileExists=${stagedFileExists}. Auto-approve mode -> timedOut=${autoResult.timedOut}, calls=${autoWriteCalls}, autoSignal=${autoApproveSignal}, stagedSignal=${autoStagedSignal}, fileExists=${autoFileExists}, contentMatch=${autoContentMatches}. Session reset -> timedOut=${sessionResetResult.timedOut}, staged=${sessionResetStaged}, pending=${sessionResetPending}, fileExists=${sessionResetFileExists}`
                 );
             }
         }

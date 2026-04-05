@@ -408,6 +408,75 @@ function testRealE2EIdleGating() {
   assertIncludes(realSrc, 'successLogPattern: /Using deterministic local preference recall answer/i,', 'real-e2e');
 }
 
+function testWorkspaceSelectionAndInternalTaskTracking() {
+  const toolbarSrc = read('src/renderer/src/components/input/InputToolbar.tsx');
+  assertIncludes(toolbarSrc, 'data-testid="workspace-select-button"', 'input-toolbar');
+  assertIncludes(toolbarSrc, 'data-testid="attachment-select-button"', 'input-toolbar');
+  assertIncludes(toolbarSrc, 'data-testid="workspace-auto-file-write-approval-toggle"', 'input-toolbar');
+  assertIncludes(toolbarSrc, 'onClick={onSelectFolder}', 'input-toolbar');
+  assertIncludes(toolbarSrc, "onClick={() => fileInputRef.current?.click()}", 'input-toolbar');
+
+  const chatInputSrc = read('src/renderer/src/components/input/ChatInput.tsx');
+  assertIncludes(chatInputSrc, 'const maybeSetWorkspaceFromFiles = useCallback((files: File[]) => {', 'chat-input');
+  assertIncludes(chatInputSrc, 'onSelectFolder={handleSelectFolder}', 'chat-input');
+  assertIncludes(chatInputSrc, 'onSelectFiles={handleSelectFiles}', 'chat-input');
+
+  const realSrc = read('tests/real_e2e_test.cjs');
+  assertIncludes(realSrc, '[data-testid="workspace-select-button"]', 'real-e2e');
+  assertIncludes(realSrc, '[data-testid="attachment-select-button"]', 'real-e2e');
+  assertIncludes(realSrc, 'Critical 7: Session Auto-Approve + Workspace Controls', 'real-e2e');
+
+  const taskManagerSrc = read('src/renderer/src/lib/task-manager.ts');
+  assertIncludes(taskManagerSrc, "electron.fs.writeInternalFile(workspacePath, 'tasks.json'", 'task-manager');
+
+  const ipcFsSrc = read('src/main/ipc/fs.ts');
+  assertIncludes(ipcFsSrc, "'.ai-worker', 'system-workspace'", 'ipc-fs');
+  assertIncludes(ipcFsSrc, "ipcMain.handle('fs:write-internal-file'", 'ipc-fs');
+  assertIncludes(ipcFsSrc, "ipcMain.handle('fs:read-internal-file'", 'ipc-fs');
+
+  const fileSystemServiceSrc = read('src/main/services/FileSystemService.ts');
+  assertIncludes(fileSystemServiceSrc, 'private isInternalTrackingFile(filePath: string): boolean {', 'filesystem-service');
+  assertIncludes(fileSystemServiceSrc, 'if (isSafeMode && !effectiveAutoApprove && !isInternalTrackingWrite)', 'filesystem-service');
+}
+
+function testFileWriteApprovalAndSandboxHardening() {
+  const useAgentSrc = read('src/renderer/src/hooks/useAgent.ts');
+  assertIncludes(
+    useAgentSrc,
+    'fileWriteAutoApprove: activeSession?.fileWriteAutoApprove,',
+    'useAgent'
+  );
+  assertNotIncludes(
+    useAgentSrc,
+    'fileWriteAutoApprove: activeSession?.fileWriteAutoApprove === true,',
+    'useAgent'
+  );
+
+  const chatStoreSrc = read('src/renderer/src/stores/chatStore.ts');
+  assertNotIncludes(chatStoreSrc, 'fileWriteAutoApprove: false,', 'chat-store');
+
+  const fsServiceSrc = read('src/main/services/FileSystemService.ts');
+  assertNotIncludes(fsServiceSrc, 'normalized.includes(legacyWorkspaceMarker)', 'filesystem-service');
+  assertNotIncludes(fsServiceSrc, 'const isInternalPathRequested = this.isInternalTrackingFile(rawPath)', 'filesystem-service');
+  assertIncludes(fsServiceSrc, "'.ai-worker', 'system-workspace'", 'filesystem-service');
+  assertIncludes(
+    fsServiceSrc,
+    'const resolvedPath = this.resolveWorkspaceScopedTargetPath(args?.path, args?.workspacePath, name)',
+    'filesystem-service'
+  );
+
+  const mcpSrc = read('src/renderer/src/lib/mcp.ts');
+  assertIncludes(mcpSrc, 'function normalizeAbsoluteFsPath(value: string): string | null {', 'mcp');
+  assertIncludes(mcpSrc, 'function resolveFsPath(baseAbsolutePath: string, targetPath: string): string | null {', 'mcp');
+  assertIncludes(mcpSrc, 'const resolvedTargetPath = resolveFsPath(normalizedWorkspacePath, rawTargetPath);', 'mcp');
+  assertIncludes(mcpSrc, 'if (!resolvedTargetPath) {', 'mcp');
+
+  const fileReviewSrc = read('src/renderer/src/components/FileChangeReview.tsx');
+  assertIncludes(fileReviewSrc, 'const [autoApproveErrorIds, setAutoApproveErrorIds] = useState<Set<string>>(new Set())', 'file-change-review');
+  assertIncludes(fileReviewSrc, 'const autoSweepCandidates = filtered.filter(', 'file-change-review');
+  assertIncludes(fileReviewSrc, 'if (autoSweepCandidates.length === 0) {', 'file-change-review');
+}
+
 function run() {
   console.log('Running critical regression checks...');
   testAgentRuntimeDelegateParallelism();
@@ -433,6 +502,8 @@ function run() {
   testClickTextBoundedTimeoutAndFallbacks();
   testRecoverySignalLogging();
   testRealE2EIdleGating();
+  testWorkspaceSelectionAndInternalTaskTracking();
+  testFileWriteApprovalAndSandboxHardening();
   console.log('All critical regression checks passed.');
 }
 

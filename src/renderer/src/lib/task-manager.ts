@@ -3,7 +3,7 @@ import electron from "./electron";
 
 /**
  * Syncs the internal ExecutionPlan to a JSON file 
- * in the user's workspace under `.ai-worker/tasks.json`.
+ * in AI-Worker's hidden internal system workspace (`~/.ai-worker/system-workspace/.../tasks.json`).
  * 
  * Bypasses Safe Mode so the user isn't prompted for every step.
  */

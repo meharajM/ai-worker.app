@@ -1,12 +1,12 @@
 {
-  "generatedAt": "2026-04-05T06:38:33.858Z",
+  "generatedAt": "2026-04-05T12:15:18.127Z",
   "suite": "issues_repro_e2e",
   "excludedIssue": "#15",
   "results": [
     {
       "issue": "#11",
       "status": "not_reproduced",
-      "finding": "guard active (writes=1, paused=true)"
+      "finding": "guard active (writes=2, paused=true)"
     },
     {
       "issue": "#13",
@@ -15,8 +15,8 @@
     },
     {
       "issue": "#14/#26",
-      "status": "inconclusive",
-      "finding": "no stable multi-context UI signal observed"
+      "status": "not_reproduced",
+      "finding": "multi-context output remained visible"
     },
     {
       "issue": "#12/#27",
@@ -51,7 +51,7 @@
   ],
   "summary": {
     "reproduced": 0,
-    "not_reproduced": 6,
-    "inconclusive": 3
+    "not_reproduced": 7,
+    "inconclusive": 2
   }
 }

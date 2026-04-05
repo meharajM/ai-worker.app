@@ -32,6 +32,7 @@ interface ElectronAPI {
     app: {
         getVersion: () => Promise<string>
         getName: () => Promise<string>
+        getHomePath: () => Promise<string>
         selectFolder: () => Promise<string | null>
         getMissingDependencies: () => Promise<any[]>
         getAllDependencies: () => Promise<any[]>

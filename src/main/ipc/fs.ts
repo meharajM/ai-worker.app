@@ -2,13 +2,30 @@ import { ipcMain, app } from 'electron'
 import { FileSystemService } from '../services/FileSystemService'
 import * as path from 'path'
 import * as fs from 'fs/promises'
+import { createHash } from 'crypto'
+
+function getInternalTaskRoot(): string {
+    return path.join(app.getPath('home'), '.ai-worker', 'system-workspace')
+}
+
+function getInternalWorkspaceScope(workspacePath: string | undefined | null): string {
+    const normalized = workspacePath && workspacePath.trim() !== ''
+        ? path.resolve(workspacePath)
+        : 'default-workspace'
+    const digest = createHash('sha256').update(normalized).digest('hex').slice(0, 16)
+    return digest
+}
+
+function getInternalWorkspaceDir(workspacePath: string | undefined | null): string {
+    return path.join(getInternalTaskRoot(), getInternalWorkspaceScope(workspacePath))
+}
 
 export function registerFsHandlers(): void {
     // Get pending changes for review
-    ipcMain.handle('fs:get-pending-changes', async () => {
+    ipcMain.handle('fs:get-pending-changes', async (_event, sessionId?: string) => {
         try {
             const fsService = FileSystemService.getInstance()
-            return fsService.getPendingChanges()
+            return fsService.getPendingChanges(sessionId || 'default')
         } catch (error) {
             console.error('Failed to get pending changes:', error)
             return []
@@ -42,13 +59,7 @@ export function registerFsHandlers(): void {
         try {
             if (!filename.match(/^[a-zA-Z0-9_.-]+$/)) throw new Error("Invalid filename");
 
-            // Fallback: If no workspace is selected, save to the app's user data directory (e.g. ~/Library/Application Support/ai-worker)
-            let internalDir: string;
-            if (workspacePath && workspacePath.trim() !== '') {
-                internalDir = path.join(workspacePath, '.ai-worker');
-            } else {
-                internalDir = path.join(app.getPath('userData'), 'tasks-fallback');
-            }
+            const internalDir = getInternalWorkspaceDir(workspacePath)
 
             const targetPath = path.join(internalDir, filename);
 
@@ -68,19 +79,26 @@ export function registerFsHandlers(): void {
         try {
             if (!filename.match(/^[a-zA-Z0-9_.-]+$/)) throw new Error("Invalid filename");
 
-            let internalDir: string;
-            if (workspacePath && workspacePath.trim() !== '') {
-                internalDir = path.join(workspacePath, '.ai-worker');
-            } else {
-                internalDir = path.join(app.getPath('userData'), 'tasks-fallback');
-            }
-
+            const internalDir = getInternalWorkspaceDir(workspacePath)
             const targetPath = path.join(internalDir, filename);
             const content = await fs.readFile(targetPath, 'utf8');
             return { success: true, content };
         } catch (error) {
-            // Silently fail if it doesn't exist yet
-            return { success: false, error: error instanceof Error ? error.message : String(error) };
+            // Legacy fallback for pre-migration files: workspace/.ai-worker and userData/tasks-fallback
+            try {
+                let legacyDir: string;
+                if (workspacePath && workspacePath.trim() !== '') {
+                    legacyDir = path.join(workspacePath, '.ai-worker');
+                } else {
+                    legacyDir = path.join(app.getPath('userData'), 'tasks-fallback');
+                }
+                const legacyPath = path.join(legacyDir, filename);
+                const content = await fs.readFile(legacyPath, 'utf8');
+                return { success: true, content };
+            } catch {
+                // Silently fail if it doesn't exist yet
+                return { success: false, error: error instanceof Error ? error.message : String(error) };
+            }
         }
     })
 

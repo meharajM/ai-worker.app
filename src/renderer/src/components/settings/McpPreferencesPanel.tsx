@@ -92,7 +92,7 @@ export const McpPreferencesPanel: React.FC = () => {
                             Safe Mode (Shadow Writes)
                         </label>
                         <p className="text-xs text-muted-foreground">
-                            When enabled, user-facing file edits are staged in a temporary area and require your approval. Internal AI-Worker tracking files (like <code>.ai-worker/tasks.json</code>) are written automatically.
+                            When enabled, user-facing file edits are staged in a temporary area and require your approval. Internal AI-Worker tracking files (under <code>~/.ai-worker/system-workspace</code>) are written automatically.
                         </p>
                     </div>
                     <input

@@ -48,6 +48,12 @@ export interface AgentRuntimeOptions {
     workspacePath?: string;
 
     /**
+     * Per-session override for filesystem write approval.
+     * When true, fs_write_file bypasses staging for this chat session only.
+     */
+    fileWriteAutoApprove?: boolean;
+
+    /**
      * LLM provider configuration (API keys, model names, base URLs).
      * Typed as `any` to avoid coupling to the settings store shape.
      * In Phase 3, this moves to the backend — the client sends only a session token.

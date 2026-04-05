@@ -234,17 +234,64 @@ export class FileSystemService {
         }
     }
 
+    private normalizePathForCompare(value: string): string {
+        return path.resolve(value).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+    }
+
+    private isPathWithin(rootPath: string, targetPath: string): boolean {
+        const normalizedRoot = this.normalizePathForCompare(rootPath)
+        const normalizedTarget = this.normalizePathForCompare(targetPath)
+        return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}/`)
+    }
+
+    private resolveWorkspaceForUserOps(workspacePath: unknown): string {
+        if (typeof workspacePath !== 'string' || workspacePath.trim() === '') {
+            throw new Error('WORKSPACE REQUIRED: Select a workspace folder before filesystem operations.')
+        }
+
+        const resolvedWorkspace = path.resolve(workspacePath.trim())
+        const userHome = app.getPath('home')
+        if (!this.isPathWithin(userHome, resolvedWorkspace)) {
+            throw new Error(`WORKSPACE REQUIRED: Workspace must be inside your user home folder (${userHome}).`)
+        }
+
+        return resolvedWorkspace
+    }
+
+    private resolveWorkspaceScopedTargetPath(
+        targetPath: unknown,
+        workspacePath: unknown,
+        toolName: string
+    ): string {
+        if (typeof targetPath !== 'string' || targetPath.trim() === '') {
+            throw new Error(`Missing required path for ${toolName}.`)
+        }
+
+        const resolvedWorkspace = this.resolveWorkspaceForUserOps(workspacePath)
+        const rawTargetPath = targetPath.trim()
+        const resolvedTarget = path.isAbsolute(rawTargetPath)
+            ? path.resolve(rawTargetPath)
+            : path.resolve(resolvedWorkspace, rawTargetPath)
+
+        if (!this.isPathWithin(resolvedWorkspace, resolvedTarget)) {
+            throw new Error(
+                `SECURITY VIOLATION: Access denied. Path '${resolvedTarget}' is outside the active workspace '${resolvedWorkspace}'.`
+            )
+        }
+
+        return resolvedTarget
+    }
+
     /**
      * Internal tracking files are written by the app itself and should not
      * require staged user approval even when Safe Mode is enabled.
      */
     private isInternalTrackingFile(filePath: string): boolean {
-        const normalized = path.normalize(filePath)
-        const parentDir = path.basename(path.dirname(normalized)).toLowerCase()
-        const fileName = path.basename(normalized).toLowerCase()
+        const fileName = path.basename(filePath).toLowerCase()
+        if (fileName !== 'tasks.json' && fileName !== 'execution-plan.json') return false
 
-        if (parentDir !== '.ai-worker') return false
-        return fileName === 'tasks.json' || fileName === 'execution-plan.json'
+        const internalRoot = path.resolve(path.join(app.getPath('home'), '.ai-worker', 'system-workspace'))
+        return this.isPathWithin(internalRoot, path.resolve(filePath))
     }
 
     // ========================================================================
@@ -397,11 +444,21 @@ export class FileSystemService {
             switch (name) {
                 case 'fs_write_file': {
                     const { safeMode: isSafeMode, autoApprove } = await this.getSafeModeSettings()
-                    const isInternalTrackingWrite = this.isInternalTrackingFile(args.path)
+                    const resolvedPath = this.resolveWorkspaceScopedTargetPath(args?.path, args?.workspacePath, name)
+                    const isInternalTrackingWrite = this.isInternalTrackingFile(resolvedPath)
+                    const sessionId =
+                        typeof args?._sessionId === 'string' && args._sessionId.trim() !== ''
+                            ? args._sessionId.trim()
+                            : 'default'
+                    const hasSessionAutoApproveOverride = typeof args?._sessionAutoApprove === 'boolean'
+                    const sessionAutoApprove = args?._sessionAutoApprove === true
+                    const effectiveAutoApprove = hasSessionAutoApproveOverride
+                        ? sessionAutoApprove
+                        : autoApprove
 
-                    if (isSafeMode && !autoApprove && !isInternalTrackingWrite) {
+                    if (isSafeMode && !effectiveAutoApprove && !isInternalTrackingWrite) {
                         // Safe Mode: Stage for user review
-                        const change = await this.stageWrite(args.path, args.content)
+                        const change = await this.stageWrite(resolvedPath, args.content, sessionId)
                         return {
                             result: {
                                 status: 'staged',
@@ -414,34 +471,40 @@ export class FileSystemService {
                         // - Safe Mode disabled OR
                         // - Auto-approve enabled OR
                         // - Internal tracking file
-                        await fs.mkdir(path.dirname(args.path), { recursive: true })
-                        await fs.writeFile(args.path, args.content, 'utf8')
+                        await fs.mkdir(path.dirname(resolvedPath), { recursive: true })
+                        await fs.writeFile(resolvedPath, args.content, 'utf8')
                         const status = isInternalTrackingWrite
                             ? 'written_internal'
-                            : autoApprove
+                            : sessionAutoApprove
+                                ? 'written_session_auto_approved'
+                                : autoApprove
                                 ? 'written_auto_approved'
                                 : 'written'
                         return {
                             result: {
                                 status,
-                                path: args.path,
+                                path: resolvedPath,
                                 message: isInternalTrackingWrite
-                                    ? `Internal tracking file updated: ${args.path}`
+                                    ? `Internal tracking file updated: ${resolvedPath}`
+                                    : sessionAutoApprove
+                                        ? `File written with session auto-approval: ${resolvedPath}`
                                     : autoApprove
-                                        ? `File written with auto-approval: ${args.path}`
-                                    : `File written to ${args.path}`
+                                        ? `File written with auto-approval: ${resolvedPath}`
+                                    : `File written to ${resolvedPath}`
                             }
                         }
                     }
                 }
 
                 case 'fs_read_file': {
-                    const content = await fs.readFile(args.path, 'utf8')
+                    const resolvedPath = this.resolveWorkspaceScopedTargetPath(args?.path, args?.workspacePath, name)
+                    const content = await fs.readFile(resolvedPath, 'utf8')
                     return { result: content }
                 }
 
                 case 'fs_list_directory': {
-                    const files = await fs.readdir(args.path)
+                    const resolvedPath = this.resolveWorkspaceScopedTargetPath(args?.path, args?.workspacePath, name)
+                    const files = await fs.readdir(resolvedPath)
                     return { result: files }
                 }
 

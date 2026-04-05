@@ -49,6 +49,7 @@ interface ElectronAPI {
     app: {
         getVersion: () => Promise<string>
         getName: () => Promise<string>
+        getHomePath: () => Promise<string>
         selectFolder: () => Promise<string | null>
     }
 
@@ -67,7 +68,7 @@ interface ElectronAPI {
     }
 
     fs: {
-        getPendingChanges: () => Promise<Array<{
+        getPendingChanges: (sessionId?: string) => Promise<Array<{
             id: string
             originalPath: string
             shadowPath: string

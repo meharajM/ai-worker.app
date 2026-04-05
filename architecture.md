@@ -297,6 +297,14 @@ The chat store manages multiple independent sessions concurrently. The key desig
 
 The chat store uses a custom **1-second debounced storage adapter** to prevent UI thread blocking. During agent tool loops, `addMessage`/`updateMessage` fire rapidly (every tool call), and each would ordinarily trigger `JSON.stringify` + `localStorage.setItem` of ALL sessions. The adapter coalesces writes to at most once per second, dramatically reducing main-thread jank during heavy tool execution.
 
+**Session-Scoped File Write Approval:**
+
+- Each `ChatSession` now stores its own `fileWriteAutoApprove` boolean.
+- The input toolbar (next to workspace selection) exposes this as a visible per-session toggle (`Auto File Write Approval: ON/OFF`).
+- Runtime injects `_sessionId` + `_sessionAutoApprove` into `fs_*` tool calls.
+- `FileSystemService` stages or writes based on that session flag (with global setting as fallback), and pending review queries are session-filtered.
+- Internal task-plan/execution files are persisted under AI-Worker's hidden system workspace (`~/.ai-worker/system-workspace/...`) and always bypass staged approvals.
+
 > [!NOTE]
 > Storage key bumped from `ai-worker-chat-v2` → `ai-worker-chat-v3`.
 > Old persisted flat fields (`isProcessing`, `abortController`) no longer exist in the state shape.

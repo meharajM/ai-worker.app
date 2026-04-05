@@ -38,6 +38,7 @@ import { useSettingsStore } from "../stores/settingsStore";
 import { type LLMMessage } from "../lib/types";
 import { resolveWhatsAppTarget, setWhatsAppTyping, setWhatsAppPaused, getWhatsAppSystemPrompt, sendWhatsAppResponse, resolveWhatsAppMessageToLLM } from "../lib/whatsapp-integration";
 import { buildAttachmentLLMParts } from "../lib/media-utils";
+import { executeToolCall } from "../lib/mcp";
 
 const LOCAL_PREFERENCE_MEMORY_KEY = "ai_worker_local_preferences_v1";
 
@@ -211,6 +212,7 @@ export function useAgent(): UseAgentReturn {
             // condition if the user disconnects mid-run (the finally call would return null,
             // leaving the typing indicator stuck on the personal phone).
             const targetJid = resolveWhatsAppTarget(content);
+            let runtime: { getAssignedTabId?: () => number | undefined } | null = null;
 
             try {
                 // ── Step 1: Reconstruct LLM message history ────────────────────────
@@ -278,10 +280,13 @@ export function useAgent(): UseAgentReturn {
                 }
 
                 // ── Step 4: Instantiate the agent ──────────────────────────────────
-                const runtime = new AgentRuntime(
+                runtime = new AgentRuntime(
                     {
                         activeSessionId: originSessionId,
                         workspacePath: activeSession?.workspacePath,
+                        // Preserve undefined so FileSystemService can fall back to
+                        // global mcpFileSystem.autoApprove when no session override exists.
+                        fileWriteAutoApprove: activeSession?.fileWriteAutoApprove,
                         settings: settingsForLLM,
                         isHeadless,
                         // The abort signal is scoped to THIS session only.
@@ -485,15 +490,22 @@ export function useAgent(): UseAgentReturn {
                 const existingPlan = store.sessions.find(s => s.id === originSessionId)?.plan;
                 store.updateSessionProgress(originSessionId, undefined, undefined, existingPlan);
 
-                // Do NOT force-close the browser on every prompt completion.
-                // BrowserManager already has an idle timeout and this eager close
-                // causes repeated relaunch/SingletonSocket cleanup thrash.
-                // Keep warm when no active sessions remain; close happens via idle timer.
+                // Close only the dedicated tab owned by this agent run.
+                // Keep the browser/context warm for other sessions and idle-timeout strategy.
+                const ownedTabId = runtime?.getAssignedTabId?.();
+                if (ownedTabId !== undefined) {
+                    try {
+                        await executeToolCall("close_tab", { tabId: ownedTabId, force: true });
+                    } catch (e) {
+                        console.warn(`[useAgent] Failed to close owned tab ${ownedTabId}:`, e);
+                    }
+                }
+
                 const currentProcessingCount = store._processingSessions.size;
                 if (currentProcessingCount === 0) {
-                    console.log('[useAgent] No active sessions. Leaving browser warm; idle timer will close it.');
+                    console.log('[useAgent] No active sessions. Browser stays warm; idle timer will close process if unused.');
                 } else {
-                    console.log(`[useAgent] 🕒 Deferring browser shutdown. ${currentProcessingCount} sessions still active.`);
+                    console.log(`[useAgent] 🕒 Session complete. ${currentProcessingCount} sessions still active; browser remains available.`);
                 }
             }
         },

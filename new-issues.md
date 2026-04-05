@@ -42,6 +42,17 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 - Memory appears unreliable even when backend/runtime recall succeeds.
 - Creates confusion and repeat prompts, increasing latency and token usage.
 
+## 31. Real E2E Harness Can Hard-Fail on Closed Window During Screenshot Capture
+**Observed Behavior:**
+- In live `real_e2e_test` runs under heavy 429/retry pressure, the harness can detect window closure mid-wait and then still attempt `page.screenshot`, causing a hard failure:
+  - `Target page, context or browser has been closed`
+  - Failure occurs in `screenshot()` after timeout/closure path.
+
+**If Not Fixed (User Experience Impact):**
+- Live validation can fail for harness reasons even when product logic is otherwise functioning.
+- Re-run noise increases and obscures true regressions.
+- Release confidence drops when flaky harness failures look like product failures.
+
 ### Latest Validation Update (Apr 5, 2026, pre-push revalidation)
 - Completed checks:
   - `npm run -s typecheck` ✅
