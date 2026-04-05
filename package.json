@@ -19,6 +19,9 @@
         "test:e2e": "node tests/integration_test.cjs && node tests/e2e_ui_mocked.cjs && node tests/speech_e2e.cjs",
         "test:e2e:issues": "node tests/issues_repro_e2e.cjs",
         "test:e2e:real:focus": "node tests/real_e2e_focus.cjs",
+        "test:e2e:real": "node tests/real_e2e_test.cjs",
+        "test:e2e:real:full:rate-safe": "node tests/real_e2e_test.cjs --rate-safe",
+        "test:e2e:real:sequential": "node tests/real_e2e_test.cjs --critical-only --only-critical=1,2,3,4,5,6 --extended-criticals --rate-safe",
         "test:mock": "node tests/e2e_ui_mocked.cjs",
         "test:playwright": "node tests/playwright_tools_test.cjs",
         "test:speech": "node tests/speech_e2e.cjs",
@@ -140,7 +143,6 @@
         ],
         "mac": {
             "target": [
-                "dmg",
                 "zip"
             ],
             "mergeASARs": false,

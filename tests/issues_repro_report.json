@@ -1,0 +1,57 @@
+{
+  "generatedAt": "2026-04-05T06:38:33.858Z",
+  "suite": "issues_repro_e2e",
+  "excludedIssue": "#15",
+  "results": [
+    {
+      "issue": "#11",
+      "status": "not_reproduced",
+      "finding": "guard active (writes=1, paused=true)"
+    },
+    {
+      "issue": "#13",
+      "status": "not_reproduced",
+      "finding": "multiple delegate_sub_task calls observed (delegates=2)"
+    },
+    {
+      "issue": "#14/#26",
+      "status": "inconclusive",
+      "finding": "no stable multi-context UI signal observed"
+    },
+    {
+      "issue": "#12/#27",
+      "status": "not_reproduced",
+      "finding": "final result propagated and no false failed badge"
+    },
+    {
+      "issue": "#16",
+      "status": "inconclusive",
+      "finding": "could not correlate run ids from logs"
+    },
+    {
+      "issue": "#19",
+      "status": "not_reproduced",
+      "finding": "JSON/XML recovery markers observed in runtime logs"
+    },
+    {
+      "issue": "#25",
+      "status": "not_reproduced",
+      "finding": "no handoff/plan/parallel warning markers detected"
+    },
+    {
+      "issue": "#20",
+      "status": "inconclusive",
+      "finding": "no speech readiness logs observed in this environment"
+    },
+    {
+      "issue": "#5",
+      "status": "not_reproduced",
+      "finding": "no markitdown startup noise detected"
+    }
+  ],
+  "summary": {
+    "reproduced": 0,
+    "not_reproduced": 6,
+    "inconclusive": 3
+  }
+}

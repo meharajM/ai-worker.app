@@ -104,6 +104,8 @@ function testPhaseAMemoryParsingFallbacks() {
   assertIncludes(src, 'function parseEntityLikePayload(text: string): Record<string, unknown> | null {', 'server-memory-adapter');
   assertNotIncludes(src, "throw new Error('No content returned from create_entities')", 'server-memory-adapter');
   assertNotIncludes(src, "throw new Error('No text content in create_entities response')", 'server-memory-adapter');
+  assertIncludes(src, "const normalizedDescription = input.description?.trim() || ''", 'server-memory-adapter');
+  assertIncludes(src, "observations", 'server-memory-adapter');
 }
 
 function testPhaseACompactChecklistSemantics() {
@@ -115,6 +117,81 @@ function testPhaseACompactChecklistSemantics() {
 
 function testImmediateReplyNoToolMode() {
   const runtimeSrc = read('src/renderer/src/lib/agent-runtime.ts');
+  assertIncludes(
+    runtimeSrc,
+    'function hasMemoryRecallIntent(prompt: string): boolean {',
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    'if (hasMemoryRecallIntent(p)) return false;',
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    "Memory-recall cue detected; keeping tools enabled on first turn.",
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    'await this._primeMemoryContext(finalPrompt);',
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    'private async _primeMemoryContext(prompt: string): Promise<void> {',
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    'const LOCAL_PREFERENCE_MEMORY_KEY = "ai_worker_local_preferences_v1";',
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    'getLocalPreferenceMemoryLines()',
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    'function buildDeterministicPreferenceRecallAnswer(prompt: string): string | null {',
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    "Using deterministic local preference recall answer.",
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    'function isWeakFinalNarration(content: string): boolean {',
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    'function buildDelegateFallbackSummary(calls: AccumulatedToolCall[]): string | null {',
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    'buildDelegateFallbackSummary(accumulatedToolCalls);',
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    'Replaced weak terminal narration with delegate summary fallback.',
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    'isFinalResult: true,',
+    'agent-runtime'
+  );
+  assertIncludes(
+    runtimeSrc,
+    'Memory primer injected with',
+    'agent-runtime'
+  );
   assertIncludes(
     runtimeSrc,
     'const directAnswerFirstTurn = !this.options.isSubAgent && shouldPreferDirectAnswer(finalPrompt);',
@@ -179,7 +256,32 @@ function testMemoryReflectorCancellationHook() {
   );
   assertIncludes(
     useAgentSrc,
+    'const isMemoryRecallQuestion =',
+    'useAgent'
+  );
+  assertIncludes(
+    useAgentSrc,
     'isShortButStablePreference ||',
+    'useAgent'
+  );
+  assertIncludes(
+    useAgentSrc,
+    '!isMemoryRecallQuestion &&',
+    'useAgent'
+  );
+  assertIncludes(
+    useAgentSrc,
+    'hasMemoryIntent ||',
+    'useAgent'
+  );
+  assertIncludes(
+    useAgentSrc,
+    'const LOCAL_PREFERENCE_MEMORY_KEY = "ai_worker_local_preferences_v1";',
+    'useAgent'
+  );
+  assertIncludes(
+    useAgentSrc,
+    'persistLocalPreferenceHints(normalizedPrompt);',
     'useAgent'
   );
 }
@@ -292,9 +394,18 @@ function testRealE2EIdleGating() {
   assertIncludes(realSrc, "const CRITICAL_SELECT_ARG = process.argv.find((arg) => arg.startsWith('--only-critical=') || arg.startsWith('--critical='));", 'real-e2e');
   assertIncludes(realSrc, 'function shouldRunCritical(id) {', 'real-e2e');
   assertIncludes(realSrc, 'if (shouldRunCritical(3)) {', 'real-e2e');
+  assertIncludes(realSrc, "const INCLUDE_EXTENDED_CRITICALS = process.argv.includes('--extended-criticals') || process.env.E2E_EXTENDED_CRITICALS === '1';", 'real-e2e');
+  assertIncludes(realSrc, 'if (INCLUDE_EXTENDED_CRITICALS && shouldRunCritical(6)) {', 'real-e2e');
+  assertIncludes(realSrc, "Critical 6 was selected but --extended-criticals is not enabled; skipping Critical 6.", 'real-e2e');
+  assertIncludes(realSrc, "const RATE_SAFE_MODE = process.argv.includes('--rate-safe') || process.env.E2E_RATE_SAFE === '1';", 'real-e2e');
+  assertIncludes(realSrc, 'if (RATE_SAFE_MODE) {', 'real-e2e');
   assertIncludes(realSrc, 'async function waitForRunIdle(', 'real-e2e');
   assertIncludes(realSrc, 'button[title="Stop Generation"]', 'real-e2e');
   assertIncludes(realSrc, 'Keyword matched but run still active; continuing to wait.', 'real-e2e');
+  assertIncludes(realSrc, 'function logsContainPattern(pattern, startIndex = 0) {', 'real-e2e');
+  assertIncludes(realSrc, 'successLogPattern = null,', 'real-e2e');
+  assertIncludes(realSrc, 'Success signal observed in logs; accepting prompt as completed.', 'real-e2e');
+  assertIncludes(realSrc, 'successLogPattern: /Using deterministic local preference recall answer/i,', 'real-e2e');
 }
 
 function run() {

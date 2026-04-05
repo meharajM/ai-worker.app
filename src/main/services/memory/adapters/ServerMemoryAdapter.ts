@@ -229,13 +229,18 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
    */
   async createEntity(input: CreateEntityInput): Promise<Entity> {
     this.ensureInitialized()
+    const normalizedDescription = input.description?.trim() || ''
+    const observations = [
+      ...(normalizedDescription ? [normalizedDescription] : []),
+      ...(input.observations || [])
+    ].filter((obs, idx, arr) => Boolean(obs) && arr.indexOf(obs) === idx)
 
     const result = await this.callTool('create_entities', {
       entities: [
         {
           name: input.name,
           entityType: input.type,
-          observations: input.observations || []
+          observations
         }
       ]
     })
@@ -280,7 +285,7 @@ export class ServerMemoryAdapter implements UnifiedMemoryBackend {
       description: input.description,
       observations: (Array.isArray(entityData?.observations)
         ? entityData.observations.filter((o): o is string => typeof o === 'string')
-        : input.observations) || [],
+        : observations) || [],
       metadata: input.metadata || {},
       createdAt: new Date().toISOString()
     }

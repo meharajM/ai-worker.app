@@ -39,6 +39,67 @@ import { type LLMMessage } from "../lib/types";
 import { resolveWhatsAppTarget, setWhatsAppTyping, setWhatsAppPaused, getWhatsAppSystemPrompt, sendWhatsAppResponse, resolveWhatsAppMessageToLLM } from "../lib/whatsapp-integration";
 import { buildAttachmentLLMParts } from "../lib/media-utils";
 
+const LOCAL_PREFERENCE_MEMORY_KEY = "ai_worker_local_preferences_v1";
+
+type LocalPreferenceMemory = {
+    preferredName?: string;
+    packageManager?: string;
+    budget?: string;
+    updatedAt?: string;
+};
+
+function extractLocalPreferenceHints(prompt: string): Partial<LocalPreferenceMemory> {
+    const hints: Partial<LocalPreferenceMemory> = {};
+    const normalized = prompt.toLowerCase();
+
+    const callMeMatch = normalized.match(/\bcall me\s+([a-z0-9._-]{2,40})\b/i);
+    if (callMeMatch?.[1]) {
+        hints.preferredName = callMeMatch[1];
+    }
+
+    const myNameIsMatch = normalized.match(/\bmy name is\s+([a-z0-9._-]{2,40})\b/i);
+    if (myNameIsMatch?.[1]) {
+        hints.preferredName = myNameIsMatch[1];
+    }
+
+    const packageManagerMatch = normalized.match(/\buse\s+(pnpm|npm|yarn|bun)\b/i);
+    if (packageManagerMatch?.[1]) {
+        hints.packageManager = packageManagerMatch[1];
+    }
+
+    const budgetMatch = normalized.match(/\bbudget(?:\s+is|\s*[:=])\s*(\$?\s*\d+(?:\.\d{1,2})?)\b/i);
+    if (budgetMatch?.[1]) {
+        hints.budget = budgetMatch[1].replace(/\s+/g, "");
+    }
+
+    return hints;
+}
+
+function persistLocalPreferenceHints(prompt: string): string[] {
+    const hints = extractLocalPreferenceHints(prompt);
+    if (!hints.preferredName && !hints.packageManager && !hints.budget) {
+        return [];
+    }
+
+    try {
+        const existingRaw = localStorage.getItem(LOCAL_PREFERENCE_MEMORY_KEY);
+        const existing: LocalPreferenceMemory =
+            existingRaw && existingRaw.trim() ? JSON.parse(existingRaw) as LocalPreferenceMemory : {};
+
+        const updated: LocalPreferenceMemory = {
+            ...existing,
+            ...hints,
+            updatedAt: new Date().toISOString(),
+        };
+        localStorage.setItem(LOCAL_PREFERENCE_MEMORY_KEY, JSON.stringify(updated));
+
+        return Object.keys(hints).filter((key) => Boolean((hints as Record<string, string | undefined>)[key]));
+    } catch (error) {
+        console.warn("[useAgent] Failed to persist local preference hints:", error);
+        return [];
+    }
+}
+
 /**
  * State returned by `useAgent`.
  * App.tsx destructures this and passes values to child components.
@@ -342,6 +403,9 @@ export function useAgent(): UseAgentReturn {
                     /^(what|why|how|when|where|who|is|are|can|could|should|do|does|did|will|would)\b/.test(normalizedPrompt);
                 const hasShortPreferenceCue =
                     /\b(?:call me\s+\w+|my name is\s+\w+|i(?:'m| am)\s+\w+|i\s+(?:prefer|like|want|need)\b|please use\b|use\s+[a-z0-9._-]+(?:\s+for\b|$)|budget(?:\s+is|\s*[:=])\s*\$?\s*\d+)\b/.test(normalizedPrompt);
+                const isMemoryRecallQuestion =
+                    looksLikeQuestion &&
+                    /\b(?:what(?:'s| is)?\s+my\s+name|what\s+name\s+should\s+you\s+call\s+me|call\s+me|which\s+package\s+manager|package\s+manager|budget|remember|preferences?)\b/.test(normalizedPrompt);
                 const hasRecentToolCalls = sessionMessages
                     .slice(-6)
                     .some((m) => (m.toolCalls?.length ?? 0) > 0);
@@ -351,13 +415,32 @@ export function useAgent(): UseAgentReturn {
                     hasShortPreferenceCue &&
                     !looksLikeQuestion;
                 const shouldRunReflector =
-                    hasMemoryIntent ||
-                    hasRecentToolCalls ||
-                    isShortButStablePreference ||
-                    normalizedPrompt.length >= 80;
+                    !isMemoryRecallQuestion &&
+                    (
+                        hasMemoryIntent ||
+                        hasRecentToolCalls ||
+                        isShortButStablePreference ||
+                        normalizedPrompt.length >= 80
+                    );
+                const persistedPreferenceKeys = persistLocalPreferenceHints(normalizedPrompt);
+                if (persistedPreferenceKeys.length > 0) {
+                    console.log(`[useAgent] Stored local preference hints: ${persistedPreferenceKeys.join(",")}`);
+                }
 
                 if (shouldRunReflector) {
+                    const reasons = [
+                        hasMemoryIntent ? "memory-intent" : null,
+                        isMemoryRecallQuestion ? "recall-question-skipped" : null,
+                        hasRecentToolCalls ? "recent-tools" : null,
+                        isShortButStablePreference ? "short-preference" : null,
+                        normalizedPrompt.length >= 80 ? "length>=80" : null,
+                    ].filter(Boolean).join(",");
+                    console.log(`[useAgent] Running MemoryReflector (reasons: ${reasons || "none"})`);
                     MemoryReflector.getInstance().analyze(historyForReflector, settingsForLLM);
+                } else {
+                    console.log(
+                        `[useAgent] Skipping MemoryReflector (len=${normalizedPrompt.length}, question=${looksLikeQuestion}, memoryIntent=${hasMemoryIntent}, recallQuestion=${isMemoryRecallQuestion}, recentTools=${hasRecentToolCalls}, shortPreference=${isShortButStablePreference})`
+                    );
                 }
 
             } catch (error) {

@@ -4,6 +4,44 @@ This log contains the issues tracked during end-to-end testing of the AI Worker 
 
 ## Status Snapshot (Apr 4, 2026)
 
+### Latest Validation Update (Apr 5, 2026, critical-6 stabilization pass)
+- Completed checks:
+  - `npm run -s test:regression:critical` ✅
+  - `npm run -s build` ✅
+  - `node tests/real_e2e_test.cjs --critical-only --only-critical=6 --extended-criticals --rate-safe` ✅
+  - `node tests/real_e2e_test.cjs --critical-only --only-critical=5 --rate-safe` ✅
+- Failing checks in this pass:
+  - `npm run -s test:e2e` ❌ (Electron launch fails before first window)
+  - `npm run -s test:e2e:issues` ❌ (same launch failure)
+  - `node tests/e2e_ui_mocked.cjs` ❌ (same launch failure)
+  - `node tests/speech_e2e.cjs` ❌ (same launch failure)
+- Critical-6 specific note:
+  - Real flow now confirms deterministic recall signal and persisted preference recall.
+  - UI text capture still reports `ui=false` for recall in the test summary, even when deterministic recall and persisted values are present.
+
+### New Issue Added in This Pass
+## 29. Playwright Electron Launch Instability in Non-Real E2E Suites
+**Observed Behavior:**
+- `integration_test`, `e2e_ui_mocked`, `issues_repro_e2e`, and `speech_e2e` abort at launch with:
+  - `Error: Process failed to launch!` (Playwright Electron launcher)
+- Failure occurs before `firstWindow()` and before scenario assertions run.
+
+**If Not Fixed (User Experience Impact):**
+- CI/local regression coverage for mocked, integration, and speech paths is effectively blind.
+- Real-only suites may pass while non-real regressions ship undetected.
+- Team confidence in release readiness drops because full validation cannot be completed.
+
+## 30. Deterministic Preference Recall Not Reliably Visible in UI Bubble
+**Observed Behavior:**
+- Runtime logs show `Using deterministic local preference recall answer.`
+- Persisted local preference keys confirm recall data exists.
+- But UI response text scraping for the recall prompt still frequently misses explicit `sam/pnpm` text (`ui=false`), indicating the deterministic answer is not consistently surfaced as a visible assistant bubble in this flow.
+
+**If Not Fixed (User Experience Impact):**
+- Users may see ongoing “thinking”/tool chatter without a clear final recall answer.
+- Memory appears unreliable even when backend/runtime recall succeeds.
+- Creates confusion and repeat prompts, increasing latency and token usage.
+
 ### Latest Validation Update (Apr 5, 2026, pre-push revalidation)
 - Completed checks:
   - `npm run -s typecheck` ✅

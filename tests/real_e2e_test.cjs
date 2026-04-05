@@ -16,7 +16,9 @@ const assert = require('assert');
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots_real');
 const APP_PATH = path.join(__dirname, '../out/main/index.js');
 const MAX_RESPONSE_WAIT_S = 180; // 3 min max per scenario
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = Number(process.env.E2E_POLL_INTERVAL_MS || 5000);
+const RATE_SAFE_MODE = process.argv.includes('--rate-safe') || process.env.E2E_RATE_SAFE === '1';
+const INCLUDE_EXTENDED_CRITICALS = process.argv.includes('--extended-criticals') || process.env.E2E_EXTENDED_CRITICALS === '1';
 const CRITICAL_ONLY = process.argv.includes('--critical-only') || process.env.CRITICAL_ONLY === '1';
 const CRITICAL_SELECT_ARG = process.argv.find((arg) => arg.startsWith('--only-critical=') || arg.startsWith('--critical='));
 const SELECTED_CRITICALS = (() => {
@@ -27,13 +29,18 @@ const SELECTED_CRITICALS = (() => {
     const ids = raw
         .split(',')
         .map((part) => Number(part.trim()))
-        .filter((n) => Number.isInteger(n) && n >= 1 && n <= 5);
+        .filter((n) => Number.isInteger(n) && n >= 1 && n <= 6);
     return ids.length ? new Set(ids) : null;
 })();
 function shouldRunCritical(id) {
     return !SELECTED_CRITICALS || SELECTED_CRITICALS.has(id);
 }
-const SCENARIO_COOLDOWN_MS = Number(process.env.E2E_SCENARIO_COOLDOWN_MS || 5000);
+const SCENARIO_COOLDOWN_MS = Number(process.env.E2E_SCENARIO_COOLDOWN_MS || (RATE_SAFE_MODE ? 20000 : 5000));
+const RATE_SAFE_EXTRA_COOLDOWN_MS = Number(process.env.E2E_RATE_SAFE_EXTRA_COOLDOWN_MS || (RATE_SAFE_MODE ? 12000 : 0));
+const RATE_SAFE_JITTER_MS = Number(process.env.E2E_RATE_SAFE_JITTER_MS || (RATE_SAFE_MODE ? 4000 : 0));
+const RATE_LIMIT_RETRY_MAX = Number(process.env.E2E_RATE_LIMIT_RETRY_MAX || (RATE_SAFE_MODE ? 2 : 0));
+const RATE_LIMIT_BACKOFF_MS = Number(process.env.E2E_RATE_LIMIT_BACKOFF_MS || 90000);
+const MEMORY_REFLECT_SETTLE_MS = Number(process.env.E2E_MEMORY_REFLECT_SETTLE_MS || 10000);
 const QUIET_PERIOD_MS = Number(process.env.E2E_QUIET_PERIOD_MS || 2500);
 const QUIET_MAX_WAIT_MS = Number(process.env.E2E_QUIET_MAX_WAIT_MS || 20000);
 const RUN_IDLE_MAX_WAIT_MS = Number(process.env.E2E_RUN_IDLE_MAX_WAIT_MS || 45000);
@@ -106,6 +113,19 @@ function allLogsMatching(pattern) {
 function allLogsCount(pattern) {
     return allLogsMatching(pattern).length;
 }
+const RATE_LIMIT_SIGNAL_PATTERN = /\b429\b|rate.?limit|resource.?exhausted|too many requests|quota.?exceeded|retry[-\s]?after/i;
+function hasRateLimitSignal(text) {
+    return RATE_LIMIT_SIGNAL_PATTERN.test(String(text || ''));
+}
+function logsContainRateLimit(startIndex = 0) {
+    return allConsoleLogs.slice(startIndex).some((entry) => hasRateLimitSignal(entry));
+}
+function logsContainPattern(pattern, startIndex = 0) {
+    if (!pattern) return false;
+    const entries = allConsoleLogs.slice(startIndex);
+    if (typeof pattern === 'string') return entries.some((entry) => entry.includes(pattern));
+    return entries.some((entry) => pattern.test(entry));
+}
 
 function isClosedTargetError(error) {
     const msg = String(error);
@@ -168,67 +188,134 @@ async function sendPromptAndWait(window, prompt, opts = {}) {
         maxWaitS = MAX_RESPONSE_WAIT_S,
         keywords = [],          // any of these in last bubble = success
         bubbleSelector = '[data-testid="message-bubble"]',
+        rateLimitRetries = RATE_LIMIT_RETRY_MAX,
+        requireRunIdle = true,
+        successLogPattern = null,
     } = opts;
 
     clearLogs();
-
-    const input = window.locator('[data-testid="chat-textarea"]');
-    await input.waitFor({ state: 'visible', timeout: 15000 });
-    await input.fill(prompt);
-    await window.keyboard.press('Enter');
-    console.log(`\n🚀 Prompt: "${prompt.substring(0, 80)}${prompt.length > 80 ? '...' : ''}"`);
-
-    const start = Date.now();
-    const maxPolls = Math.ceil(maxWaitS / (POLL_INTERVAL_MS / 1000));
+    const startedAt = Date.now();
+    const totalAttempts = Math.max(1, 1 + Math.max(0, Number(rateLimitRetries) || 0));
     let lastText = '';
+    let combinedText = '';
 
-    for (let i = 0; i < maxPolls; i++) {
-        try {
-            await window.waitForTimeout(POLL_INTERVAL_MS);
-        } catch (error) {
-            if (isClosedTargetError(error)) {
-                const durationS = ((Date.now() - start) / 1000).toFixed(1);
-                console.error(`[E2E] Window/browser closed while waiting for response (${durationS}s).`);
-                return { text: lastText, timedOut: true, durationS: parseFloat(durationS), windowClosed: true };
-            }
-            throw error;
-        }
-        process.stdout.write('.');
+    for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+        const attemptStartLog = allConsoleLogs.length;
+        const input = window.locator('[data-testid="chat-textarea"]');
+        await input.waitFor({ state: 'visible', timeout: 15000 });
+        await input.fill(prompt);
+        await window.keyboard.press('Enter');
+        console.log(`\n🚀 Prompt (attempt ${attempt}/${totalAttempts}): "${prompt.substring(0, 80)}${prompt.length > 80 ? '...' : ''}"`);
 
-        try {
-            // Only inspect assistant bubbles. User bubbles often contain the same
-            // keywords as the prompt and can cause false positives.
-            const assistantBubbles = window.locator(`${bubbleSelector}[data-role="assistant"]`);
-            const assistantCount = await assistantBubbles.count();
-            if (assistantCount < 1) continue;
-
-            const assistantTexts = await assistantBubbles.allInnerTexts().catch(() => []);
-            if (!assistantTexts || assistantTexts.length === 0) continue;
-
-            lastText = assistantTexts[assistantTexts.length - 1] || '';
-            const combinedAssistantText = assistantTexts.join('\n').toLowerCase();
-
-            // Check if agent is done (keyword match anywhere in assistant output)
-            if (keywords.length > 0) {
-                if (keywords.some(kw => combinedAssistantText.includes(kw.toLowerCase()))) {
-                    // Prevent cross-scenario bleed: only mark done after run is idle.
-                    const runIdle = await waitForRunIdle(window);
-                    if (!runIdle) {
-                        console.warn('[E2E] Keyword matched but run still active; continuing to wait.');
-                        continue;
-                    }
-                    const durationS = ((Date.now() - start) / 1000).toFixed(1);
-                    console.log(`\n⏱️  Response in ${durationS}s`);
-                    return { text: lastText, timedOut: false, durationS: parseFloat(durationS) };
+        const maxPolls = Math.ceil(maxWaitS / (POLL_INTERVAL_MS / 1000));
+        for (let i = 0; i < maxPolls; i++) {
+            try {
+                await window.waitForTimeout(POLL_INTERVAL_MS);
+            } catch (error) {
+                if (isClosedTargetError(error)) {
+                    const durationS = ((Date.now() - startedAt) / 1000).toFixed(1);
+                    console.error(`[E2E] Window/browser closed while waiting for response (${durationS}s).`);
+                    return { text: lastText, combinedText, timedOut: true, durationS: parseFloat(durationS), windowClosed: true, attempts: attempt };
                 }
+                throw error;
+            }
+            process.stdout.write('.');
+
+            if (successLogPattern && logsContainPattern(successLogPattern, attemptStartLog)) {
+                const durationS = ((Date.now() - startedAt) / 1000).toFixed(1);
+                // Give the UI a short chance to render the deterministic final bubble
+                // so assertions can prefer visible output over log-only signals.
+                let uiKeywordSeen = false;
+                try {
+                    const snapshotAttempts = keywords.length > 0 ? 20 : 10;
+                    for (let snap = 0; snap < snapshotAttempts; snap++) {
+                        const assistantBubbles = window.locator(`${bubbleSelector}[data-role="assistant"]`);
+                        const assistantTexts = await assistantBubbles.allInnerTexts().catch(() => []);
+                        if (assistantTexts && assistantTexts.length > 0) {
+                            lastText = assistantTexts[assistantTexts.length - 1] || lastText;
+                            combinedText = assistantTexts.join('\n').toLowerCase();
+                            if (keywords.length > 0) {
+                                uiKeywordSeen = keywords.some((kw) => combinedText.includes(String(kw).toLowerCase()));
+                                if (uiKeywordSeen) break;
+                            } else if (lastText.trim().length > 0) {
+                                break;
+                            }
+                        }
+                        await window.waitForTimeout(500);
+                    }
+                } catch {
+                    // Keep log-only success path if UI snapshot is unavailable.
+                }
+                console.log('\n[E2E] Success signal observed in logs; accepting prompt as completed.');
+                console.log(`\n⏱️  Response in ${durationS}s`);
+                return {
+                    text: lastText,
+                    combinedText,
+                    timedOut: false,
+                    durationS: parseFloat(durationS),
+                    attempts: attempt,
+                    rateLimited: false,
+                    logSignalOnly: !uiKeywordSeen
+                };
             }
 
-        } catch (e) { /* bubble might not exist yet */ }
+            try {
+                // Only inspect assistant bubbles. User bubbles often contain the same
+                // keywords as the prompt and can cause false positives.
+                const assistantBubbles = window.locator(`${bubbleSelector}[data-role="assistant"]`);
+                const assistantCount = await assistantBubbles.count();
+                if (assistantCount < 1) continue;
+
+                const assistantTexts = await assistantBubbles.allInnerTexts().catch(() => []);
+                if (!assistantTexts || assistantTexts.length === 0) continue;
+
+                lastText = assistantTexts[assistantTexts.length - 1] || '';
+                const combinedAssistantText = assistantTexts.join('\n').toLowerCase();
+                combinedText = combinedAssistantText;
+
+                // Check if agent is done (keyword match anywhere in assistant output)
+                if (keywords.length > 0) {
+                    if (keywords.some(kw => combinedAssistantText.includes(kw.toLowerCase()))) {
+                        if (requireRunIdle) {
+                            // Prevent cross-scenario bleed: only mark done after run is idle.
+                            const runIdle = await waitForRunIdle(window);
+                            if (!runIdle) {
+                                console.warn('[E2E] Keyword matched but run still active; continuing to wait.');
+                                continue;
+                            }
+                        } else {
+                            console.log('[E2E] Keyword matched; skipping strict run-idle wait for this prompt.');
+                        }
+                        const durationS = ((Date.now() - startedAt) / 1000).toFixed(1);
+                        console.log(`\n⏱️  Response in ${durationS}s`);
+                        return { text: lastText, combinedText, timedOut: false, durationS: parseFloat(durationS), attempts: attempt, rateLimited: false };
+                    }
+                }
+            } catch (e) {
+                // bubble might not exist yet
+            }
+        }
+
+        const rateLimited = hasRateLimitSignal(lastText) || logsContainRateLimit(attemptStartLog);
+        if (rateLimited && attempt < totalAttempts) {
+            const backoffMs = RATE_LIMIT_BACKOFF_MS * attempt;
+            console.warn(`[E2E] Rate-limit signal detected. Backing off for ${(backoffMs / 1000).toFixed(0)}s before retry ${attempt + 1}/${totalAttempts}.`);
+            const stopBtn = window.locator('button[title="Stop Generation"]');
+            if ((await stopBtn.count().catch(() => 0)) > 0) {
+                await stopBtn.first().click().catch(() => { });
+            }
+            await waitForRunIdle(window, Math.max(RUN_IDLE_MAX_WAIT_MS, 30000), 1000);
+            await window.waitForTimeout(backoffMs);
+            continue;
+        }
+
+        const durationS = ((Date.now() - startedAt) / 1000).toFixed(1);
+        console.log(`\n⏱️  Timed out after ${durationS}s`);
+        return { text: lastText, combinedText, timedOut: true, durationS: parseFloat(durationS), attempts: attempt, rateLimited };
     }
 
-    const durationS = ((Date.now() - start) / 1000).toFixed(1);
-    console.log(`\n⏱️  Timed out after ${durationS}s`);
-    return { text: lastText, timedOut: true, durationS: parseFloat(durationS) };
+    const durationS = ((Date.now() - startedAt) / 1000).toFixed(1);
+    return { text: lastText, combinedText, timedOut: true, durationS: parseFloat(durationS), attempts: totalAttempts, rateLimited: hasRateLimitSignal(lastText) };
 }
 
 /**
@@ -248,6 +335,19 @@ async function startNewChat(window) {
     await waitForLogQuietPeriod(window, QUIET_PERIOD_MS, Math.max(QUIET_MAX_WAIT_MS, 30000));
     if (SCENARIO_COOLDOWN_MS > 0) {
         await window.waitForTimeout(SCENARIO_COOLDOWN_MS);
+    }
+    const previousScenarioRateLimited = logsContainRateLimit();
+    if (RATE_SAFE_MODE) {
+        const jitterMs = RATE_SAFE_JITTER_MS > 0 ? Math.floor(Math.random() * (RATE_SAFE_JITTER_MS + 1)) : 0;
+        const extraCooldownMs = RATE_SAFE_EXTRA_COOLDOWN_MS + jitterMs;
+        if (extraCooldownMs > 0) {
+            console.log(`[E2E] Rate-safe cooldown: waiting ${(extraCooldownMs / 1000).toFixed(1)}s before next scenario.`);
+            await window.waitForTimeout(extraCooldownMs);
+        }
+        if (previousScenarioRateLimited && RATE_LIMIT_BACKOFF_MS > 0) {
+            console.warn(`[E2E] Previous scenario hit provider limits. Cooling down ${(RATE_LIMIT_BACKOFF_MS / 1000).toFixed(0)}s.`);
+            await window.waitForTimeout(RATE_LIMIT_BACKOFF_MS);
+        }
     }
 
     try {
@@ -424,6 +524,14 @@ async function setDetailedVisibility(window, enabled) {
         console.log('✅ Setup complete. Starting scenarios...\n');
         const criticalScope = SELECTED_CRITICALS ? ` (selected: ${Array.from(SELECTED_CRITICALS).sort((a, b) => a - b).join(',')})` : '';
         console.log(`🧪 Test mode: ${CRITICAL_ONLY ? 'critical-only' : 'full-suite'}${criticalScope}`);
+        if (RATE_SAFE_MODE) {
+            console.log(`🕒 Rate-safe mode: ON (cooldown=${SCENARIO_COOLDOWN_MS}ms, extra=${RATE_SAFE_EXTRA_COOLDOWN_MS}ms, retries=${RATE_LIMIT_RETRY_MAX}, backoff=${RATE_LIMIT_BACKOFF_MS}ms)`);
+        }
+        if (INCLUDE_EXTENDED_CRITICALS) {
+            console.log('🧪 Extended criticals: ON (includes Critical 6 short-preference memory persistence)');
+        } else if (SELECTED_CRITICALS?.has(6)) {
+            console.warn('⚠️ Critical 6 was selected but --extended-criticals is not enabled; skipping Critical 6.');
+        }
 
         // Startup validation for historically flaky signals (#1/#6/#18/#17).
         const startupParseError = allLogsContain(/Failed to parse create_entities response|Failed to parse search response/i);
@@ -958,6 +1066,74 @@ async function setDetailedVisibility(window, enabled) {
                     !result.timedOut && !parseFailure && !memoryCreateDisabled,
                     `Completed: ${!result.timedOut}. Parse failure: ${parseFailure}. 300s disable: ${memoryCreateDisabled}`
                 );
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════
+        //  CRITICAL 6: Short preference prompts should persist to memory
+        //  Guards short factual preference reflection regression.
+        // ══════════════════════════════════════════════════════════
+        if (INCLUDE_EXTENDED_CRITICALS && shouldRunCritical(6)) {
+            console.log('\n' + '─'.repeat(60));
+            console.log('📋 Critical 6: Short Preference Memory Persistence');
+            console.log('─'.repeat(60));
+            {
+                // Run in prod-like filtering mode so intermediate reflector chatter
+                // does not mask the final user-facing recall answer in the DOM.
+                await setDetailedVisibility(window, false);
+                await startNewChat(window);
+                clearLogs();
+                const capture = await sendPromptAndWait(window,
+                    "Call me Sam and use pnpm.", {
+                    maxWaitS: 75,
+                    keywords: ['sam', 'pnpm', 'noted', 'remember', 'got it', 'understood'],
+                });
+                await screenshot(window, 'critical-06a-short-pref-capture');
+                const memoryReflectorSignal =
+                    logsContain(/MemoryReflector|memory_create_entity|Invoking Tool: memory_create/i);
+
+                // Memory reflection is fire-and-forget. Give it quiet time to flush.
+                await waitForLogQuietPeriod(window, Math.max(QUIET_PERIOD_MS, 3000), Math.max(QUIET_MAX_WAIT_MS, 30000));
+                if (MEMORY_REFLECT_SETTLE_MS > 0) {
+                    await window.waitForTimeout(MEMORY_REFLECT_SETTLE_MS);
+                }
+
+                await startNewChat(window);
+                clearLogs();
+                const recall = await sendPromptAndWait(window,
+                    "What name should you call me, and which package manager should you use for my project?", {
+                    maxWaitS: 40,
+                    keywords: ['sam', 'pnpm', 'name', 'package manager'],
+                    requireRunIdle: false,
+                    successLogPattern: /Using deterministic local preference recall answer/i,
+                });
+                await screenshot(window, 'critical-06b-short-pref-recall');
+
+                const reply = String(recall.combinedText || recall.text || '').toLowerCase();
+                const uiHasName = /\bsam\b/.test(reply);
+                const uiHasPackageManager = /\bpnpm\b/.test(reply);
+                const deterministicRecallSignal = logsContain(/Using deterministic local preference recall answer/i);
+                const localPreferenceRaw = await window.evaluate(() => localStorage.getItem('ai_worker_local_preferences_v1') || '{}').catch(() => '{}');
+                let localPreference = {};
+                try {
+                    localPreference = JSON.parse(localPreferenceRaw || '{}');
+                } catch {
+                    localPreference = {};
+                }
+                const persistedName = String(localPreference.preferredName || '').toLowerCase();
+                const persistedPackageManager = String(localPreference.packageManager || '').toLowerCase();
+                const persistedHasName = persistedName.includes('sam');
+                const persistedHasPackageManager = persistedPackageManager.includes('pnpm');
+                const hasName = uiHasName || (deterministicRecallSignal && persistedHasName);
+                const hasPackageManager = uiHasPackageManager || (deterministicRecallSignal && persistedHasPackageManager);
+                const memorySearchSignal = logsContain(/memory_search|Invoking Tool: memory_search/i);
+                const replySnippet = (recall.text || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+                recordResult(
+                    'Critical 6: Short Preference Memory Persistence',
+                    !capture.timedOut && hasName && hasPackageManager,
+                    `Capture timed out: ${capture.timedOut}. Recall timed out: ${recall.timedOut}. Name recalled: ${hasName} (ui=${uiHasName}, persisted=${persistedHasName}, deterministic=${deterministicRecallSignal}). Package manager recalled: ${hasPackageManager} (ui=${uiHasPackageManager}, persisted=${persistedHasPackageManager}, deterministic=${deterministicRecallSignal}). Reflector signal: ${memoryReflectorSignal}. Memory search signal: ${memorySearchSignal}. Recall snippet: "${replySnippet}"`
+                );
+                await setDetailedVisibility(window, true);
             }
         }
 

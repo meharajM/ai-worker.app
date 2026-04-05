@@ -4,6 +4,18 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+function loadEnv() {
+    const envPath = path.join(__dirname, '../.env');
+    if (!fs.existsSync(envPath)) return {};
+    const content = fs.readFileSync(envPath, 'utf8');
+    const env = {};
+    content.split('\n').forEach((line) => {
+        const match = line.match(/^([^#\s]+)=(.+)$/);
+        if (match) env[match[1].trim()] = match[2].trim();
+    });
+    return env;
+}
+
 (async () => {
     console.log('🚀 Starting Comprehensive Playwright Tools E2E Test (With Validation)...');
 
@@ -23,16 +35,13 @@ const os = require('os');
         electronApp = await electron.launch({
             executablePath: execPath,
             args: [
-                path.join(__dirname, '../out/main/index.js'),
-                '--no-sandbox',
-                '--disable-gpu',
-                '--disable-dev-shm-usage'
+                path.join(__dirname, '../out/main/index.js')
             ],
             timeout: 120000,
             env: {
                 ...process.env,
-                NODE_ENV: 'production',
-                ELECTRON_ENABLE_LOGGING: '1'
+                ...loadEnv(),
+                NODE_ENV: 'production'
             }
         });
         console.log('✅ Electron launched successfully');

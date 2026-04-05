@@ -100,11 +100,187 @@ function isWriteAwaitingApproval(callName: string, resultStr: string): boolean {
   );
 }
 
+const LOCAL_PREFERENCE_MEMORY_KEY = "ai_worker_local_preferences_v1";
+
+function hasMemoryRecallIntent(prompt: string): boolean {
+  const p = prompt.trim().toLowerCase();
+  if (!p) return false;
+  return /\b(remember|my name|call me|what should you call me|what's my name|what is my name|my preference|preferences|prefer|for my project|which package manager|use pnpm|use npm|use yarn|budget(?:\s+is|\s*[:=]))\b/.test(
+    p
+  );
+}
+
+function extractMemoryEntityLines(searchResult: unknown): string[] {
+  const payload =
+    searchResult &&
+    typeof searchResult === "object" &&
+    "result" in (searchResult as Record<string, unknown>)
+      ? (searchResult as Record<string, unknown>).result
+      : searchResult;
+
+  if (!payload) return [];
+
+  const pickEntityArray = (value: unknown): unknown[] => {
+    if (Array.isArray(value)) return value;
+    if (!value || typeof value !== "object") return [];
+    const obj = value as Record<string, unknown>;
+    if (Array.isArray(obj.entities)) return obj.entities;
+    if (Array.isArray(obj.results)) return obj.results;
+    if (Array.isArray(obj.items)) return obj.items;
+    if (obj.data && typeof obj.data === "object") {
+      const nested = obj.data as Record<string, unknown>;
+      if (Array.isArray(nested.entities)) return nested.entities;
+      if (Array.isArray(nested.results)) return nested.results;
+      if (Array.isArray(nested.items)) return nested.items;
+    }
+    return [];
+  };
+
+  const entities = pickEntityArray(payload);
+  if (!entities.length) return [];
+
+  const lines: string[] = [];
+  for (const rawEntity of entities) {
+    if (!rawEntity || typeof rawEntity !== "object") continue;
+    const entity = rawEntity as Record<string, unknown>;
+    const nameRaw =
+      (typeof entity.name === "string" && entity.name) ||
+      (typeof entity.Name === "string" && entity.Name) ||
+      (typeof entity.id === "string" && entity.id) ||
+      "";
+    const descriptionRaw =
+      (typeof entity.description === "string" && entity.description) ||
+      (typeof entity.Description === "string" && entity.Description) ||
+      (typeof entity.summary === "string" && entity.summary) ||
+      (typeof entity.observation === "string" && entity.observation) ||
+      (Array.isArray(entity.observations) && typeof entity.observations[0] === "string" ? String(entity.observations[0]) : "") ||
+      (typeof entity.content === "string" && entity.content) ||
+      "";
+    const name = nameRaw.replace(/\s+/g, " ").trim().slice(0, 80);
+    const description = descriptionRaw.replace(/\s+/g, " ").trim().slice(0, 180);
+    if (!name && !description) continue;
+    lines.push(description ? `${name || "memory"}: ${description}` : name);
+  }
+  return lines;
+}
+
+function getLocalPreferenceMemoryLines(): string[] {
+  try {
+    if (typeof localStorage === "undefined") return [];
+    const raw = localStorage.getItem(LOCAL_PREFERENCE_MEMORY_KEY);
+    if (!raw || !raw.trim()) return [];
+    const parsed = JSON.parse(raw) as {
+      preferredName?: string;
+      packageManager?: string;
+      budget?: string;
+    };
+    const lines: string[] = [];
+    if (typeof parsed.preferredName === "string" && parsed.preferredName.trim()) {
+      lines.push(`Preferred name: ${parsed.preferredName.trim()}`);
+    }
+    if (typeof parsed.packageManager === "string" && parsed.packageManager.trim()) {
+      lines.push(`Preferred package manager: ${parsed.packageManager.trim()}`);
+    }
+    if (typeof parsed.budget === "string" && parsed.budget.trim()) {
+      lines.push(`Budget constraint: ${parsed.budget.trim()}`);
+    }
+    return lines;
+  } catch {
+    return [];
+  }
+}
+
+function getLocalPreferenceMemory(): { preferredName?: string; packageManager?: string; budget?: string } {
+  try {
+    if (typeof localStorage === "undefined") return {};
+    const raw = localStorage.getItem(LOCAL_PREFERENCE_MEMORY_KEY);
+    if (!raw || !raw.trim()) return {};
+    const parsed = JSON.parse(raw) as {
+      preferredName?: string;
+      packageManager?: string;
+      budget?: string;
+    };
+    return {
+      preferredName: typeof parsed.preferredName === "string" ? parsed.preferredName.trim() : undefined,
+      packageManager: typeof parsed.packageManager === "string" ? parsed.packageManager.trim() : undefined,
+      budget: typeof parsed.budget === "string" ? parsed.budget.trim() : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+function buildDeterministicPreferenceRecallAnswer(prompt: string): string | null {
+  const normalized = prompt.trim().toLowerCase();
+  if (!normalized) return null;
+  const isQuestion = /\?\s*$/.test(normalized) || /^(what|which|who|how|can|should|do|does|did|will|would)\b/.test(normalized);
+  if (!isQuestion) return null;
+  const memory = getLocalPreferenceMemory();
+  if (!memory.preferredName && !memory.packageManager && !memory.budget) return null;
+
+  const asksName = /\b(name|call me|call you|address)\b/.test(normalized);
+  const asksPackageManager = /\b(package manager|pnpm|npm|yarn|bun)\b/.test(normalized);
+  const asksBudget = /\b(budget|price range|spend|limit)\b/.test(normalized);
+
+  const parts: string[] = [];
+  if (asksName && memory.preferredName) parts.push(`your preferred name is **${memory.preferredName}**`);
+  if (asksPackageManager && memory.packageManager) parts.push(`your preferred package manager is **${memory.packageManager}**`);
+  if (asksBudget && memory.budget) parts.push(`your budget is **${memory.budget}**`);
+
+  if (parts.length === 0) {
+    if (memory.preferredName) parts.push(`your preferred name is **${memory.preferredName}**`);
+    if (memory.packageManager) parts.push(`your preferred package manager is **${memory.packageManager}**`);
+    if (memory.budget) parts.push(`your budget is **${memory.budget}**`);
+  }
+
+  if (parts.length === 0) return null;
+  const sentence = parts.join(" and ");
+  return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
+}
+
+function isWeakFinalNarration(content: string): boolean {
+  const normalized = content.trim().toLowerCase();
+  if (!normalized) return true;
+  if (/^mock issue repro response[.!]*$/.test(normalized)) return true;
+  if (/^(ok|done|completed|task complete|all done|finished|working\.\.\.|analyzing\.\.\.)[.!]*$/.test(normalized)) {
+    return true;
+  }
+  return normalized.length < 20 && !/[0-9$₹€£]/.test(normalized);
+}
+
+function stripMarkdownForSummary(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/^#+\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildDelegateFallbackSummary(calls: AccumulatedToolCall[]): string | null {
+  const delegateCalls = calls.filter(
+    (c) => c.name === "delegate_sub_task" && typeof c.result === "string" && c.result.trim().length > 0
+  );
+  if (delegateCalls.length === 0) return null;
+
+  const lines = delegateCalls.map((call, index) => {
+    const clean = stripMarkdownForSummary(call.result || "");
+    const clipped = clean.length > 220 ? `${clean.slice(0, 220)}...` : clean;
+    return `${index + 1}. ${clipped || "Completed."}`;
+  });
+
+  return `Sub-task execution complete.\n\n${lines.join("\n")}`;
+}
+
 function shouldPreferDirectAnswer(prompt: string): boolean {
   const p = prompt.trim().toLowerCase();
   if (!p) return false;
   if (p.length > 220) return false;
   if (/(https?:\/\/|www\.)/.test(p)) return false;
+  if (hasMemoryRecallIntent(p)) return false;
 
   const actionOrEnvironmentIntent =
     /\b(open|go to|navigate|search|find on|click|fill|press|upload|download|scrape|extract|compare .* on|delegate|sub-?agent|tool|run|execute|build|publish|deploy|install|test|debug|fix|edit|write|create|delete|file|folder|directory|repo|repository|codebase|workspace|terminal|command|log)\b/.test(
@@ -370,6 +546,20 @@ export class AgentRuntime implements IAgentClient {
       this.addMessage({ role: "user", content: finalPrompt });
     }
 
+    if (!this.options.isSubAgent) {
+      const deterministicRecall = buildDeterministicPreferenceRecallAnswer(finalPrompt);
+      if (deterministicRecall) {
+        console.log('[AgentRuntime] Using deterministic local preference recall answer.');
+        const assistantMsg: LLMMessage = {
+          role: "assistant",
+          content: deterministicRecall,
+          isFinalResult: true,
+        };
+        this.addMessage(assistantMsg);
+        return assistantMsg;
+      }
+    }
+
     const loopResult = await this._runLoop(finalPrompt);
 
     return loopResult;
@@ -393,6 +583,10 @@ export class AgentRuntime implements IAgentClient {
     // Master list of all tool calls across every iteration — merged into the one bubble.
     const accumulatedToolCalls: AccumulatedToolCall[] = [];
     const directAnswerFirstTurn = !this.options.isSubAgent && shouldPreferDirectAnswer(finalPrompt);
+    if (!this.options.isSubAgent && hasMemoryRecallIntent(finalPrompt)) {
+      console.log('[AgentRuntime] Memory-recall cue detected; keeping tools enabled on first turn.');
+      await this._primeMemoryContext(finalPrompt);
+    }
 
     while (iterationCount < this.maxIterations) {
       this.totalIterations++;
@@ -435,7 +629,18 @@ export class AgentRuntime implements IAgentClient {
         const refusal = this._handleModelRefusal(response);
         if (refusal) continue;
 
-        const assistantMsg: LLMMessage = { role: "assistant", content: response.content };
+        const rawAssistantContent =
+          typeof response.content === "string" ? response.content : String(response.content ?? "");
+        const delegateFallback = buildDelegateFallbackSummary(accumulatedToolCalls);
+        const finalContent =
+          delegateFallback && isWeakFinalNarration(rawAssistantContent)
+            ? delegateFallback
+            : rawAssistantContent;
+        if (delegateFallback && finalContent === delegateFallback) {
+          console.log("[AgentRuntime] Replaced weak terminal narration with delegate summary fallback.");
+        }
+
+        const assistantMsg: LLMMessage = { role: "assistant", content: finalContent };
         this._appendCheckpointReport(assistantMsg);
 
         if (activeAssistantMessageId && this.options.onMessageUpdate) {
@@ -754,6 +959,72 @@ export class AgentRuntime implements IAgentClient {
         estimatedTokens
       );
     }
+  }
+
+  private async _primeMemoryContext(prompt: string): Promise<void> {
+    const queries = [
+      prompt,
+      "user preference name package manager budget",
+    ];
+    const deduped = new Set<string>();
+    const lines: string[] = [];
+
+    for (const query of queries) {
+      const raw = await executeWithSelfHealing(
+        "memory_search",
+        { query, limit: 8 },
+        undefined,
+        undefined,
+        this.options.signal,
+        this.options.isHeadless
+      );
+      if (raw.error) continue;
+      const found = extractMemoryEntityLines(raw);
+      if (found.length === 0) {
+        const rawShape =
+          raw && typeof raw === "object" && "result" in (raw as Record<string, unknown>)
+            ? (raw as Record<string, unknown>).result
+            : raw;
+        const rawSnippet = JSON.stringify(rawShape ?? null).slice(0, 300);
+        console.log(`[AgentRuntime] Memory primer query "${query}" returned no parseable entities. Raw: ${rawSnippet}`);
+      }
+      for (const line of found) {
+        if (deduped.has(line)) continue;
+        deduped.add(line);
+        lines.push(line);
+        if (lines.length >= 6) break;
+      }
+      if (lines.length >= 6) break;
+    }
+
+    if (lines.length < 6) {
+      const localLines = getLocalPreferenceMemoryLines();
+      for (const line of localLines) {
+        if (deduped.has(line)) continue;
+        deduped.add(line);
+        lines.push(line);
+        if (lines.length >= 6) break;
+      }
+      if (localLines.length > 0) {
+        console.log(`[AgentRuntime] Added ${localLines.length} local preference hints to memory primer.`);
+      }
+    }
+
+    if (lines.length === 0) {
+      console.log("[AgentRuntime] Memory primer found no matching entities.");
+      return;
+    }
+
+    const primer = [
+      "[Memory Primer]",
+      "Relevant stored preferences/facts for this prompt:",
+      ...lines.map((line) => `- ${line}`),
+      "Use these if they answer the user question. If user provides new contradictory info, latest user input wins.",
+    ].join("\n");
+
+    this.messages.push({ role: "system", content: primer });
+    this._estimatedContextBytes += primer.length + 50;
+    console.log(`[AgentRuntime] Memory primer injected with ${lines.length} entries.`);
   }
 
   private _getAvailableTools(): LLMTool[] {
