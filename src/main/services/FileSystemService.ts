@@ -2,6 +2,7 @@ import { promises as fs } from 'fs'
 import * as path from 'path'
 import { app } from 'electron'
 import { randomUUID } from 'crypto'
+import { Store } from '../lib/store-wrapper'
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -187,8 +188,11 @@ export class FileSystemService {
      */
     private async getSafeModeSettings(): Promise<{ safeMode: boolean; autoApprove: boolean }> {
         try {
-            const Store = (await import('electron-store')).default
-            const store = new Store<Record<string, any>>()
+            // Must use the same store namespace as ipc/store.ts and settingsStore.
+            const store = new Store<Record<string, any>>({
+                name: 'ai-worker-store',
+                defaults: {},
+            })
             const settings = ((store as any).get('mcpFileSystem', {}) as any) as SafeModeSettings
             return {
                 safeMode: settings.safeMode !== false, // Default to true

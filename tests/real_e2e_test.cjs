@@ -396,6 +396,17 @@ async function rejectPendingWriteForPath(window, targetPath) {
     }, { targetPath });
 }
 
+async function hasPendingWriteForPath(window, targetPath) {
+    return await window.evaluate(async ({ targetPath }) => {
+        try {
+            const pending = await window.electron.fs.getPendingChanges();
+            return (pending || []).some((change) => change && change.originalPath === targetPath);
+        } catch {
+            return false;
+        }
+    }, { targetPath });
+}
+
 /**
  * Toggle "Detailed Visibility" mode in dev UI.
  * - true  => Detailed Visibility ON (dev internals visible)
@@ -1101,6 +1112,7 @@ async function setDetailedVisibility(window, enabled) {
                 const stagedWriteCalls = logsCount(/Executing tool: fs_write_file/i);
                 const stagedSignalSeen = logsContain(/File Write Paused|status["\\]*\s*:\s*["\\]*staged|STAGED for review/i);
                 const stagedFileExists = fs.existsSync(stagedPath);
+                const stagedPendingExists = await hasPendingWriteForPath(window, stagedPath);
 
                 // Clean staged queue entry to keep environment stable
                 await rejectPendingWriteForPath(window, stagedPath);
@@ -1142,7 +1154,7 @@ async function setDetailedVisibility(window, enabled) {
                 const passed =
                     !stagedResult.timedOut &&
                     stagedWriteCalls >= 1 &&
-                    stagedSignalSeen &&
+                    (stagedSignalSeen || stagedPendingExists) &&
                     !stagedFileExists &&
                     !autoResult.timedOut &&
                     autoWriteCalls >= 1 &&
@@ -1153,7 +1165,7 @@ async function setDetailedVisibility(window, enabled) {
                 recordResult(
                     'Critical 7: Filesystem Auto-Approve Toggle',
                     passed,
-                    `Staged mode -> timedOut=${stagedResult.timedOut}, calls=${stagedWriteCalls}, stagedSignal=${stagedSignalSeen}, fileExists=${stagedFileExists}. Auto-approve mode -> timedOut=${autoResult.timedOut}, calls=${autoWriteCalls}, autoSignal=${autoApproveSignal}, stagedSignal=${autoStagedSignal}, fileExists=${autoFileExists}, contentMatch=${autoContentMatches}`
+                    `Staged mode -> timedOut=${stagedResult.timedOut}, calls=${stagedWriteCalls}, stagedSignal=${stagedSignalSeen}, pendingExists=${stagedPendingExists}, fileExists=${stagedFileExists}. Auto-approve mode -> timedOut=${autoResult.timedOut}, calls=${autoWriteCalls}, autoSignal=${autoApproveSignal}, stagedSignal=${autoStagedSignal}, fileExists=${autoFileExists}, contentMatch=${autoContentMatches}`
                 );
             }
         }
