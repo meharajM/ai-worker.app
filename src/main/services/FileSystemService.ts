@@ -183,6 +183,33 @@ export class FileSystemService {
     }
 
     /**
+     * Remove a change ID from all session index lists.
+     * Prevents stale session references from accumulating indefinitely.
+     */
+    private removeChangeFromSessions(changeId: string): void {
+        for (const [sessionId, ids] of this.sessionChanges.entries()) {
+            const next = ids.filter(id => id !== changeId)
+            if (next.length > 0) {
+                this.sessionChanges.set(sessionId, next)
+            } else {
+                this.sessionChanges.delete(sessionId)
+            }
+        }
+    }
+
+    /**
+     * Find an existing pending change for the same target path in a session.
+     */
+    private findPendingChangeForPath(filePath: string, sessionId: string): FileChange | undefined {
+        const ids = this.sessionChanges.get(sessionId) || []
+        for (const id of ids) {
+            const change = this.pendingChanges.get(id)
+            if (change && change.originalPath === filePath) return change
+        }
+        return undefined
+    }
+
+    /**
      * Check if Safe Mode is enabled
      * @private
      */
@@ -236,6 +263,20 @@ export class FileSystemService {
         content: string,
         sessionId: string = 'default'
     ): Promise<FileChange> {
+        // Coalesce repeated writes to the same file into one pending entry.
+        // This prevents the review panel from growing with duplicate looped writes.
+        const existing = this.findPendingChangeForPath(filePath, sessionId)
+        if (existing) {
+            await fs.mkdir(path.dirname(existing.shadowPath), { recursive: true })
+            await fs.writeFile(existing.shadowPath, content, 'utf8')
+            existing.type = await this.fileExists(filePath) ? 'modify' : 'create'
+            existing.content = content.length < 10000 ? content : undefined
+            existing.timestamp = Date.now()
+            this.pendingChanges.set(existing.id, existing)
+            console.log(`[FileSystemService] Updated staged ${existing.type} for ${filePath} (ID: ${existing.id})`)
+            return existing
+        }
+
         const changeId = randomUUID()
         const shadowPath = path.join(this.shadowDir, sessionId, changeId)
         const type = await this.fileExists(filePath) ? 'modify' : 'create'
@@ -283,6 +324,7 @@ export class FileSystemService {
             // Cleanup
             await fs.rm(change.shadowPath)
             this.pendingChanges.delete(changeId)
+            this.removeChangeFromSessions(changeId)
 
             console.log(`[FileSystemService] ✓ Committed ${change.type} to ${change.originalPath}`)
         } catch (error) {
@@ -302,6 +344,7 @@ export class FileSystemService {
         try {
             await fs.rm(change.shadowPath)
             this.pendingChanges.delete(changeId)
+            this.removeChangeFromSessions(changeId)
             console.log(`[FileSystemService] ✗ Discarded ${change.type} for ${change.originalPath}`)
         } catch (error) {
             console.error(`[FileSystemService] Failed to discard ${changeId}:`, error)
@@ -315,7 +358,23 @@ export class FileSystemService {
      */
     getPendingChanges(sessionId: string = 'default'): FileChange[] {
         const ids = this.sessionChanges.get(sessionId) || []
-        return ids.map(id => this.pendingChanges.get(id)!).filter(Boolean)
+        const resolved: FileChange[] = []
+        const aliveIds: string[] = []
+
+        for (const id of ids) {
+            const change = this.pendingChanges.get(id)
+            if (!change) continue
+            resolved.push(change)
+            aliveIds.push(id)
+        }
+
+        // Heal stale session index entries opportunistically.
+        if (aliveIds.length !== ids.length) {
+            if (aliveIds.length > 0) this.sessionChanges.set(sessionId, aliveIds)
+            else this.sessionChanges.delete(sessionId)
+        }
+
+        return resolved
     }
 
     // ========================================================================

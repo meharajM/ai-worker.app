@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { FileText, Check, X, AlertTriangle, RefreshCw, Clock3 } from 'lucide-react'
+import { useSettingsStore } from '../stores/settingsStore'
 
 interface FileChange {
     id: string
@@ -14,6 +15,7 @@ export const FileChangeReview: React.FC = () => {
     const [changes, setChanges] = useState<FileChange[]>([])
     const [isLoading, setIsLoading] = useState(false)
     const INTERNAL_TRACKING_FILE_PATTERN = /[\\/]\.ai-worker[\\/](tasks|execution-plan)\.json$/i
+    const fileSystemAutoApprove = useSettingsStore((s) => s.fileSystemAutoApprove)
 
     const fetchChanges = async () => {
         setIsLoading(true)
@@ -24,6 +26,20 @@ export const FileChangeReview: React.FC = () => {
                 const filtered = pending.filter(
                     (change: FileChange) => !INTERNAL_TRACKING_FILE_PATTERN.test(change.originalPath)
                 )
+
+                // If Auto-Approve is enabled, sweep backlog entries so this panel
+                // doesn't keep reappearing with stale pending writes.
+                if (fileSystemAutoApprove && filtered.length > 0) {
+                    const settle = await Promise.all(
+                        filtered.map((change) =>
+                            window?.electron?.fs.approveChange(change.id).catch(() => ({ success: false }))
+                        )
+                    )
+                    const failed = filtered.filter((_change, idx) => !settle[idx]?.success)
+                    setChanges(failed)
+                    return
+                }
+
                 setChanges(filtered)
             }
         } catch (error) {
@@ -38,7 +54,7 @@ export const FileChangeReview: React.FC = () => {
         // Poll for changes every 2 seconds
         const interval = setInterval(fetchChanges, 2000)
         return () => clearInterval(interval)
-    }, [])
+    }, [fileSystemAutoApprove])
 
     const handleApprove = async (id: string) => {
         try {
