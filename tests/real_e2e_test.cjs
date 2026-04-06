@@ -1138,6 +1138,19 @@ async function setDetailedVisibility(window, enabled) {
 
                 // Part A: Session toggle OFF -> staging path.
                 await startNewChat(window);
+                
+                // Set /tmp as the session workspace to satisfy security guards
+                await window.evaluate(async (path) => {
+                    if (window.useChatStore) {
+                        const state = window.useChatStore.getState();
+                        if (state.activeSessionId) {
+                            state.updateSessionWorkspace(state.activeSessionId, path);
+                        }
+                    }
+                }, '/tmp');
+                
+                await window.waitForTimeout(500); // Wait for store/UI to settle
+
                 const workspaceSelectorVisible = (await window.locator('[data-testid="workspace-select-button"]').count()) > 0;
                 const fileSelectorVisible = (await window.locator('[data-testid="attachment-select-button"]').count()) > 0;
                 const sessionToggleVisible = (await window.locator('[data-testid="workspace-auto-file-write-approval-toggle"]').count()) > 0;

@@ -39,6 +39,12 @@ import { useThemeSync } from "./hooks/useThemeSync";
 
 function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
+  
+  // Expose store for E2E tests
+  if (import.meta.env.MODE === 'test') {
+    (window as any).useChatStore = useChatStore;
+  }
+
   const [dependenciesResolved, setDependenciesResolved] = useState(() => {
     // Only skip the long background shell check during automated test runs.
     // Using process.env.NODE_ENV ensures this bypass is compile-time and

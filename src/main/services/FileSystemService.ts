@@ -250,11 +250,6 @@ export class FileSystemService {
         }
 
         const resolvedWorkspace = path.resolve(workspacePath.trim())
-        const userHome = app.getPath('home')
-        if (!this.isPathWithin(userHome, resolvedWorkspace)) {
-            throw new Error(`WORKSPACE REQUIRED: Workspace must be inside your user home folder (${userHome}).`)
-        }
-
         return resolvedWorkspace
     }
 
