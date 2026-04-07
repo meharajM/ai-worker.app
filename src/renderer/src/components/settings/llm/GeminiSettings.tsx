@@ -6,11 +6,9 @@
  */
 import React, { useState } from 'react'
 import { useSettingsStore } from '../../../stores/settingsStore'
-import { useAuthStore } from '../../../stores/authStore'
 import { testGeminiConnection } from '../../../lib/llm'
 import { ModelSelect } from '../../ModelSelect'
 import { ProviderCard } from './ProviderCard'
-import { AntigravityLinkButton } from './AntigravityLinkButton'
 
 interface GeminiSettingsProps {
     available?: boolean
@@ -21,15 +19,14 @@ interface GeminiSettingsProps {
 
 export function GeminiSettings({ available, models, checking, onRefresh }: GeminiSettingsProps) {
     const settings = useSettingsStore()
-    const { antigravitySignedIn } = useAuthStore()
     const [testing, setTesting] = useState(false)
     const [testResult, setTestResult] = useState<string | undefined>()
 
-    const canTest = !!(settings.geminiApiKey || antigravitySignedIn)
+    const canTest = !!settings.geminiApiKey
 
     async function handleTest() {
         if (!canTest) {
-            setTestResult('Error: Please enter an API key or link your Google account first')
+            setTestResult('Error: Please enter a Gemini API key first')
             return
         }
         setTesting(true)
@@ -68,8 +65,6 @@ export function GeminiSettings({ available, models, checking, onRefresh }: Gemin
             checking={checking}
             headerActions={
                 <>
-                    <div className="h-4 w-px bg-[var(--color-border)] mx-1" />
-                    <AntigravityLinkButton variant="compact" />
                     <a
                         href="https://aistudio.google.com/app/apikey"
                         target="_blank"
@@ -88,13 +83,13 @@ export function GeminiSettings({ available, models, checking, onRefresh }: Gemin
             {/* API Key */}
             <div>
                 <label className="block text-xs text-[var(--color-text-muted)] mb-1">
-                    API Key {antigravitySignedIn && '(Optional — linked via Google)'}
+                    API Key
                 </label>
                 <input
                     type="password"
                     value={settings.geminiApiKey || ''}
                     onChange={(e) => settings.setGeminiApiKey(e.target.value)}
-                    placeholder={antigravitySignedIn ? 'Linked to Google Account' : 'Enter Gemini API Key...'}
+                    placeholder='Enter Gemini API Key...'
                     className="w-full bg-[var(--color-input-bg)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm placeholder:text-[var(--color-text-dim)] text-[var(--color-text-primary)] focus:border-[var(--color-primary)] focus:outline-none"
                 />
             </div>

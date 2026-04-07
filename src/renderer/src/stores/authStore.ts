@@ -3,7 +3,6 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import { useSettingsStore } from './settingsStore'
 import { useMcpStore } from './mcpStore'
 import { FEATURE_FLAGS, RATE_LIMITS } from '../lib/constants'
-import electron from '../lib/electron'
 import {
     signInWithGoogle as firebaseSignIn,
     signOutFromFirebase,
@@ -78,7 +77,7 @@ export const useAuthStore = create<AuthState>()(
             error: null,
             usage: getDefaultUsage(),
 
-            // Antigravity OAuth defaults
+            // Antigravity OAuth defaults (integration disabled)
             antigravitySignedIn: false,
             antigravityEmail: null,
             antigravityLoading: false,
@@ -175,10 +174,6 @@ export const useAuthStore = create<AuthState>()(
 
                 try {
                     await signOutFromFirebase()
-                    // Also sign out from Antigravity if signed in
-                    try {
-                        await electron.antigravity.signOut()
-                    } catch { /* Antigravity sign-out is best-effort */ }
                     set({ user: null, loading: false, antigravitySignedIn: false, antigravityEmail: null })
                 } catch (error) {
                     console.error('Sign out failed:', error)
@@ -191,52 +186,21 @@ export const useAuthStore = create<AuthState>()(
 
             // Antigravity OAuth — sign in for Gemini access without API key
             signInWithAntigravity: async () => {
-                set({ antigravityLoading: true, error: null })
-                try {
-                    const result = await electron.antigravity.signIn()
-                    set({
-                        antigravitySignedIn: result.signedIn,
-                        antigravityEmail: result.email,
-                        antigravityLoading: false,
-                    })
-                    // When user links Google/Gemini, set it as default as requested
-                    if (result.signedIn) {
-                        useSettingsStore.getState().setPreferredProvider('gemini')
-                    }
-                    console.log('[Auth] Antigravity sign-in successful:', result.email)
-                } catch (error) {
-                    console.error('[Auth] Antigravity sign-in failed:', error)
-                    set({
-                        error: error instanceof Error ? error.message : 'Antigravity sign-in failed',
-                        antigravityLoading: false,
-                    })
-                }
+                set({
+                    antigravitySignedIn: false,
+                    antigravityEmail: null,
+                    antigravityLoading: false,
+                    error: 'Antigravity login is temporarily disabled',
+                })
             },
 
             signOutFromAntigravity: async () => {
-                try {
-                    await electron.antigravity.signOut()
-                    set({ antigravitySignedIn: false, antigravityEmail: null })
-                    console.log('[Auth] Antigravity signed out')
-                } catch (error) {
-                    console.error('[Auth] Antigravity sign-out failed:', error)
-                }
+                set({ antigravitySignedIn: false, antigravityEmail: null, antigravityLoading: false })
             },
 
             // Initialize Antigravity — restore session on app start
             initializeAntigravity: async () => {
-                try {
-                    const status = await electron.antigravity.initialize()
-                    if (status.signedIn) {
-                        set({
-                            antigravitySignedIn: true,
-                            antigravityEmail: status.email,
-                        })
-                        console.log('[Auth] Antigravity session restored:', status.email)
-                    }
-                } catch (error) {
-                    console.error('[Auth] Antigravity initialization failed:', error)
-                }
+                set({ antigravitySignedIn: false, antigravityEmail: null, antigravityLoading: false })
             },
 
             initializeAuthListener: async () => {

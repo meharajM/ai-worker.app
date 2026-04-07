@@ -2,7 +2,6 @@ import React, { useState } from 'react'
 import { LogOut, LogIn, Loader2, Mail } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { AuthModal } from '../AuthModal'
-import { AntigravityLinkButton } from './llm/AntigravityLinkButton'
 
 export function AccountSettings() {
     const auth = useAuthStore()
@@ -77,23 +76,7 @@ export function AccountSettings() {
                 </div>
             )}
 
-            {/* Antigravity (Gemini Access) Section */}
-            <div className="mt-8">
-                <hr className="border-[var(--color-border)] mb-8" />
-                <div className="flex items-center justify-between mb-4">
-                    <div>
-                        <h4 className="font-bold text-lg text-[var(--color-text-primary)]">Gemini Pro Access</h4>
-                        <p className="text-xs text-[var(--color-text-muted)]">Higher rate limits via Google IDE gateway</p>
-                    </div>
-                    <div className="px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider bg-[var(--color-brand-teal)]/10 text-[var(--color-brand-teal)] border border-[var(--color-brand-teal)]/20">
-                        Antigravity
-                    </div>
-                </div>
-
-                <div className="bg-[var(--color-card-elevated)] border border-[var(--color-border)] rounded-xl p-5">
-                    <AntigravityLinkButton variant="full" />
-                </div>
-            </div>
+            {/* Antigravity account linking temporarily disabled. */}
         </div>
     )
 }

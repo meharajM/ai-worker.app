@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { X, Mail, Lock, User, AlertCircle, Loader2, Sparkles, Check } from 'lucide-react'
+import { X, Mail, Lock, User, AlertCircle, Loader2 } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import { AnimatePresence, motion } from 'framer-motion'
 
@@ -18,7 +18,6 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
     const {
         signInWithGoogle, signInWithEmail, signUpWithEmail,
-        signInWithAntigravity, antigravitySignedIn, antigravityEmail, antigravityLoading,
         loading, error: storeError
     } = useAuthStore()
 
@@ -59,16 +58,8 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
         try {
             await signInWithGoogle()
             onClose()
-        } catch (err) {
-            console.error(err)
-        }
-    }
-
-    const handleAntigravitySignIn = async () => {
-        try {
-            await signInWithAntigravity()
-        } catch (err) {
-            console.error(err)
+        } catch (_err) {
+            // Store handles and surfaces auth errors.
         }
     }
 
@@ -216,32 +207,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                             Continue with Google
                         </button>
 
-                        {/* Antigravity sign-in for free Gemini access */}
-                        {antigravitySignedIn ? (
-                            <div className="flex items-center gap-2 p-3 bg-[#4fd1c5]/10 border border-[#4fd1c5]/20 rounded-lg">
-                                <Check size={16} className="text-[#4fd1c5] flex-shrink-0" />
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-medium text-[#4fd1c5]">Free Gemini AI enabled</p>
-                                    <p className="text-xs text-[var(--color-text-muted)] truncate">{antigravityEmail}</p>
-                                </div>
-                            </div>
-                        ) : (
-                            <button
-                                onClick={handleAntigravitySignIn}
-                                disabled={antigravityLoading || loading}
-                                className="w-full flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-[var(--color-brand-teal)]/10 to-[var(--color-accent)]/10 border border-[var(--color-brand-teal)]/30 text-[var(--color-text-primary)] rounded-lg font-medium hover:from-[var(--color-brand-teal)]/20 hover:to-[var(--color-accent)]/20 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {antigravityLoading ? (
-                                    <Loader2 size={16} className="animate-spin" />
-                                ) : (
-                                    <Sparkles size={16} className="text-[#667eea]" />
-                                )}
-                                <span>Enable Free Gemini AI</span>
-                            </button>
-                        )}
-                        <p className="text-[10px] text-[var(--color-text-dim)] text-center -mt-3">
-                            Sign in with Google to access Gemini models without an API key
-                        </p>
+                        {/* Antigravity login integration temporarily disabled. */}
 
                         <div className="text-center text-sm">
                             <span className="text-[var(--color-text-muted)]">
@@ -260,4 +226,3 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
         </AnimatePresence>
     )
 }
-

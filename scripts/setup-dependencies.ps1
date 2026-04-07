@@ -17,19 +17,16 @@ function Test-Administrator {
     return $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Check for admin privileges
-if (-not (Test-Administrator)) {
-    Write-Host "⚠️  This script requires Administrator privileges." -ForegroundColor Yellow
-    Write-Host "Please right-click PowerShell and select 'Run as Administrator', then run this script again." -ForegroundColor Yellow
-    Write-Host ""
-    Read-Host "Press Enter to exit"
-    exit 1
+# We prefer admin for system-wide installs, but can still run user-scoped installs.
+$isAdmin = Test-Administrator
+if (-not $isAdmin) {
+    Write-Host "⚠️  Running without Administrator privileges. Trying user-scoped installs first." -ForegroundColor Yellow
 }
 
 # Check for Chocolatey (package manager for Windows)
 $hasChoco = Test-CommandExists choco
 
-if (-not $hasChoco) {
+if (-not $hasChoco -and $isAdmin) {
     Write-Host "📦 Installing Chocolatey (Windows package manager)..." -ForegroundColor Yellow
     Set-ExecutionPolicy Bypass -Scope Process -Force
     [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
@@ -38,13 +35,37 @@ if (-not $hasChoco) {
     # Refresh environment
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 } else {
-    Write-Host "✅ Chocolatey already installed" -ForegroundColor Green
+    if ($hasChoco) {
+        Write-Host "✅ Chocolatey already installed" -ForegroundColor Green
+    } else {
+        Write-Host "ℹ️ Chocolatey not found (and no admin). Falling back to winget/manual installers." -ForegroundColor Gray
+    }
+}
+
+function Install-WithWingetOrManual {
+    param(
+        [string]$WingetId,
+        [string]$DisplayName,
+        [string]$ManualUrl
+    )
+    if (Test-CommandExists winget) {
+        Write-Host "📦 Installing $DisplayName via winget..." -ForegroundColor Yellow
+        winget install --id $WingetId --accept-package-agreements --accept-source-agreements --silent --disable-interactivity --scope user
+        return $true
+    }
+    Write-Host "❌ Could not install $DisplayName automatically (winget not found)." -ForegroundColor Red
+    Write-Host "   Install manually: $ManualUrl" -ForegroundColor Yellow
+    return $false
 }
 
 # Install Node.js
 if (-not (Test-CommandExists node)) {
     Write-Host "📦 Installing Node.js..." -ForegroundColor Yellow
-    choco install nodejs -y
+    if ($hasChoco) {
+        choco install nodejs -y
+    } else {
+        Install-WithWingetOrManual -WingetId "OpenJS.NodeJS.LTS" -DisplayName "Node.js LTS" -ManualUrl "https://nodejs.org"
+    }
 } else {
     $nodeVersion = node --version
     Write-Host "✅ Node.js already installed ($nodeVersion)" -ForegroundColor Green
@@ -53,7 +74,11 @@ if (-not (Test-CommandExists node)) {
 # Install Python
 if (-not (Test-CommandExists python)) {
     Write-Host "📦 Installing Python 3..." -ForegroundColor Yellow
-    choco install python -y
+    if ($hasChoco) {
+        choco install python -y
+    } else {
+        Install-WithWingetOrManual -WingetId "Python.Python.3.12" -DisplayName "Python 3" -ManualUrl "https://www.python.org/downloads/windows/"
+    }
 } else {
     $pythonVersion = python --version
     Write-Host "✅ Python already installed ($pythonVersion)" -ForegroundColor Green
@@ -71,7 +96,11 @@ if (-not (Test-CommandExists uv)) {
 # Install ffmpeg
 if (-not (Test-CommandExists ffmpeg)) {
     Write-Host "📦 Installing ffmpeg (required for audio processing)..." -ForegroundColor Yellow
-    choco install ffmpeg -y
+    if ($hasChoco) {
+        choco install ffmpeg -y
+    } else {
+        Install-WithWingetOrManual -WingetId "Gyan.FFmpeg" -DisplayName "ffmpeg" -ManualUrl "https://ffmpeg.org/download.html"
+    }
 } else {
     Write-Host "✅ ffmpeg already installed" -ForegroundColor Green
 }

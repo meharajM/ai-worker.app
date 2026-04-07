@@ -120,16 +120,16 @@ const electronAPI = {
         checkMigration: () => ipcRenderer.invoke('memory:check-migration'),
         openFileLocation: () => ipcRenderer.invoke('memory:open-file-location'),
     },
-    // Antigravity OAuth operations (Google sign-in for Gemini access)
-    antigravity: {
-        initialize: () => ipcRenderer.invoke('antigravity:initialize'),
-        signIn: () => ipcRenderer.invoke('antigravity:sign-in'),
-        getToken: () => ipcRenderer.invoke('antigravity:get-token'),
-        signOut: () => ipcRenderer.invoke('antigravity:sign-out'),
-        getStatus: () => ipcRenderer.invoke('antigravity:get-status'),
-        callGateway: (url: string, headers: Record<string, string>, body: string) =>
-            ipcRenderer.invoke('antigravity:call-gateway', url, headers, body),
-    },
+    // Antigravity OAuth operations temporarily disabled.
+    // antigravity: {
+    //     initialize: () => ipcRenderer.invoke('antigravity:initialize'),
+    //     signIn: () => ipcRenderer.invoke('antigravity:sign-in'),
+    //     getToken: () => ipcRenderer.invoke('antigravity:get-token'),
+    //     signOut: () => ipcRenderer.invoke('antigravity:sign-out'),
+    //     getStatus: () => ipcRenderer.invoke('antigravity:get-status'),
+    //     callGateway: (url: string, headers: Record<string, string>, body: string) =>
+    //         ipcRenderer.invoke('antigravity:call-gateway', url, headers, body),
+    // },
     // Clipboard operations
     clipboard: {
         readFilePaths: () => {

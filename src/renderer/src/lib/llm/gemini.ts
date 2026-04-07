@@ -1,21 +1,28 @@
 import { LLMMessage, LLMSettings, LLMTool, LLMResponse } from "../types";
-import type { AntigravityCredentials } from "../antigravity-gateway";
 import { ProviderStatus } from "./types";
 import { LLM_CONFIG } from "../constants";
 import { extractTextForLegacyProviders, ensureRecord, getEnvFallback } from "./utils";
 
+function sanitizeToolSchema(obj: unknown): unknown {
+  if (!obj || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj.map(sanitizeToolSchema);
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+    if (key === "$schema" || key === "title") continue;
+    cleaned[key] = sanitizeToolSchema(value);
+  }
+  return cleaned;
+}
+
 /**
- * Resolves Gemini credentials from settings / secure store / Antigravity OAuth.
- * Priority: settings object → electron secure store → env variables → Antigravity (no-key path).
+ * Resolves Gemini credentials from settings / secure store / env variables.
  */
 export async function getGeminiSettings(settings?: LLMSettings): Promise<{
   apiKey: string;
   baseUrl: string;
   model: string;
-  antigravity: AntigravityCredentials | null;
 }> {
   const electron = (await import("../electron")).default;
-  const { getAntigravityCredentials } = await import("../antigravity-gateway");
 
   const envKey = getEnvFallback('gemini', 'api_key');
   const envModel = getEnvFallback('gemini', 'model');
@@ -27,32 +34,19 @@ export async function getGeminiSettings(settings?: LLMSettings): Promise<{
     "";
   const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
   const model = settings?.geminiModel || envModel || LLM_CONFIG.GEMINI.DEFAULT_MODEL;
-  const antigravity = await getAntigravityCredentials();
 
-  return { apiKey, baseUrl, model, antigravity };
+  return { apiKey, baseUrl, model };
 }
 
 /**
  * Checks whether Gemini is configured and reachable.
- * Returns available=true if either an API key or Antigravity OAuth is present.
+ * Requires a valid API key.
  */
 export async function checkGemini(settings?: LLMSettings): Promise<ProviderStatus> {
-  const { apiKey, model, antigravity } = await getGeminiSettings(settings);
+  const { apiKey, model } = await getGeminiSettings(settings);
 
-  if (!apiKey && !antigravity) {
-    return { available: false, error: 'Sign in with Google or set Gemini API Key' };
-  }
-
-  // Antigravity path: gateway doesn't expose /models — use the known model list.
-  if (antigravity && !apiKey) {
-    const { SUPPORTED_GATEWAY_MODELS } = await import('../antigravity-gateway');
-    const models = Array.from(SUPPORTED_GATEWAY_MODELS);
-    return {
-      available: true,
-      model: (models as string[]).includes(model as string) ? model : models[0],
-      models,
-      modelsEndpointAvailable: false,
-    };
+  if (!apiKey) {
+    return { available: false, error: 'Set Gemini API Key to use this provider' };
   }
 
   // API-key path: fetch the available models list.
@@ -93,11 +87,11 @@ export async function checkGemini(settings?: LLMSettings): Promise<ProviderStatu
 
 /**
  * Tests the Gemini connection.
- * Falls back to Antigravity gateway when no API key is provided.
+ * Requires an API key.
  */
 export async function testGeminiConnection(
   apiKey: string,
-  model: string,
+  _model: string,
   _settings?: LLMSettings
 ): Promise<{
   success: boolean;
@@ -106,55 +100,34 @@ export async function testGeminiConnection(
   modelsEndpointAvailable?: boolean;
 }> {
   try {
-    if (apiKey) {
-      const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
-      const response = await fetch(`${baseUrl}/models?key=${apiKey}`);
-
-      if (response.ok) {
-        const data = await response.json();
-        const models = (data.models || [])
-          .filter((m: { name: string }) => m.name.includes("gemini"))
-          .map((m: { name: string }) => m.name.split("/").pop())
-          .filter(Boolean) as string[];
-        return { success: true, models, modelsEndpointAvailable: true };
-      }
-
-      const errorData = await response.json().catch(() => ({})) as Record<string, unknown>;
-      return {
-        success: false,
-        error: (errorData.error as any)?.message || `API error: ${response.statusText}`
-      };
+    if (!apiKey) {
+      return { success: false, error: 'No Gemini API key provided.' };
     }
 
-    // No API key — try Antigravity
-    const { getAntigravityCredentials, buildGatewayRequest, SUPPORTED_GATEWAY_MODELS } = await import('../antigravity-gateway');
-    const antigravity = await getAntigravityCredentials();
+    const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
+    const response = await fetch(`${baseUrl}/models?key=${apiKey}`);
 
-    if (antigravity) {
-      const payload = {
-        contents: [{ role: 'user', parts: [{ text: 'ping' }] }],
-        generationConfig: { maxOutputTokens: 1 }
-      };
-      const request = buildGatewayRequest(antigravity, model, payload);
-      const response = await fetch(request.url, { method: 'POST', headers: request.headers, body: request.body });
-
-      if (response.ok) {
-        return { success: true, models: Array.from(SUPPORTED_GATEWAY_MODELS), modelsEndpointAvailable: false };
-      }
-      const errorData = await response.json().catch(() => ({})) as Record<string, unknown>;
-      return { success: false, error: (errorData.error as any)?.message || `Gateway error: ${response.statusText}` };
+    if (response.ok) {
+      const data = await response.json();
+      const models = (data.models || [])
+        .filter((m: { name: string }) => m.name.includes("gemini"))
+        .map((m: { name: string }) => m.name.split("/").pop())
+        .filter(Boolean) as string[];
+      return { success: true, models, modelsEndpointAvailable: true };
     }
 
-    return { success: false, error: 'No API key provided and not signed in with Google.' };
+    const errorData = await response.json().catch(() => ({})) as Record<string, unknown>;
+    return {
+      success: false,
+      error: (errorData.error as any)?.message || `API error: ${response.statusText}`
+    };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : "Connection failed" };
   }
 }
 
 /**
- * Sends a chat request to Gemini via either:
- *   1. Antigravity gateway (OAuth, higher rate limits) — preferred when signed in
- *   2. Standard Gemini REST API (API key)
+ * Sends a chat request to Gemini using the standard Gemini REST API.
  */
 export async function callGemini(
   messages: LLMMessage[],
@@ -162,8 +135,7 @@ export async function callGemini(
   settings?: LLMSettings,
   abortSignal?: AbortSignal
 ): Promise<LLMResponse> {
-  const { apiKey, model, antigravity } = await getGeminiSettings(settings);
-  const { buildGatewayRequest, unwrapGatewayResponse, sanitizeToolSchema } = await import('../antigravity-gateway');
+  const { apiKey, model } = await getGeminiSettings(settings);
   const { fileUrlToBase64 } = await import('./utils');
   const baseUrl = LLM_CONFIG.GEMINI.BASE_URL;
 
@@ -299,28 +271,21 @@ export async function callGemini(
     }
   };
 
-  // Route: Antigravity gateway → standard API
-  let data: Record<string, unknown>;
-  if (antigravity) {
-    const gw = buildGatewayRequest(antigravity, model, geminiPayload);
-    const result = await (await import('../electron')).default.antigravity.callGateway(gw.url, gw.headers, gw.body as string);
-    data = unwrapGatewayResponse(result as any) as unknown as Record<string, unknown>;
-  } else if (apiKey) {
-    const response = await fetch(`${baseUrl}/models/${model}:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: abortSignal,
-      body: JSON.stringify(geminiPayload)
-    });
-
-    if (!response.ok) {
-      const errorDetails = await response.json().catch(() => ({}));
-      throw new Error(`Gemini API error: ${response.statusText}. ${JSON.stringify(errorDetails)}`);
-    }
-    data = await response.json();
-  } else {
-    throw new Error('No Gemini authentication available. Sign in with Google or set a Gemini API key.');
+  if (!apiKey) {
+    throw new Error('Gemini API key is required.');
   }
+  const response = await fetch(`${baseUrl}/models/${model}:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal: abortSignal,
+    body: JSON.stringify(geminiPayload)
+  });
+
+  if (!response.ok) {
+    const errorDetails = await response.json().catch(() => ({}));
+    throw new Error(`Gemini API error: ${response.statusText}. ${JSON.stringify(errorDetails)}`);
+  }
+  const data = await response.json();
 
   // Parse response
   const candidate = data.candidates && Array.isArray(data.candidates) ? data.candidates[0] : null;

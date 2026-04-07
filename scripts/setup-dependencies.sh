@@ -23,6 +23,19 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+install_playwright_if_project_present() {
+    if [ -f "package.json" ] && [ -d "node_modules" ]; then
+        echo "📦 Ensuring Playwright browser binaries are installed..."
+        if [ "$PLATFORM" = "Linux" ]; then
+            npx playwright install --with-deps
+        else
+            npx playwright install
+        fi
+    else
+        echo "ℹ️ Skipping Playwright install (package.json/node_modules not found in current directory)"
+    fi
+}
+
 # Function to install on macOS
 install_mac() {
     echo "🍎 Installing dependencies for macOS..."
@@ -70,9 +83,7 @@ install_mac() {
         echo "✅ ffmpeg already installed"
     fi
 
-    # Install Playwright browsers if missing
-    echo "📦 Ensuring Playwright browser binaries are installed..."
-    npx playwright install
+    install_playwright_if_project_present
 
     # Pre-cache MarkItDown with ALL extras (pdf, docx, xlsx, pptx, audio)
     echo "📦 Pre-installing markitdown with all extras (pdf/docx/audio support)..."
@@ -94,8 +105,14 @@ install_linux() {
     elif command_exists dnf; then
         PKG_MANAGER="dnf"
         INSTALL_CMD="sudo dnf install -y"
+    elif command_exists pacman; then
+        PKG_MANAGER="pacman"
+        INSTALL_CMD="sudo pacman -S --noconfirm"
+    elif command_exists zypper; then
+        PKG_MANAGER="zypper"
+        INSTALL_CMD="sudo zypper install -y"
     else
-        echo "❌ Could not detect package manager (apt, yum, or dnf)"
+        echo "❌ Could not detect package manager (apt, yum, dnf, pacman, or zypper)"
         exit 1
     fi
     
@@ -142,9 +159,7 @@ install_linux() {
         echo "✅ ffmpeg already installed"
     fi
 
-    # Install Playwright browsers if missing
-    echo "📦 Ensuring Playwright browser binaries and OS dependencies are installed..."
-    npx playwright install --with-deps
+    install_playwright_if_project_present
 
     # Pre-cache MarkItDown with ALL extras (pdf, docx, xlsx, pptx, audio)
     echo "📦 Pre-installing markitdown with all extras (pdf/docx/audio support)..."

@@ -8,26 +8,47 @@ set -euo pipefail
 check_dependencies() {
   local needs_docker=$1
   local needs_wine=$2
+  local host_os
+  host_os="$(uname -s)"
 
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo "  🚀 Bootstrapping Release Environment"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-  # 1. Homebrew
-  if command -v brew > /dev/null 2>&1; then
-    echo "✅ Homebrew is ready."
-  else
-    echo "🍺 Homebrew missing. Installing..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  if [ "$host_os" = "Darwin" ]; then
+    # 1. Homebrew (macOS only)
+    if command -v brew > /dev/null 2>&1; then
+      echo "✅ Homebrew is ready."
+    else
+      echo "🍺 Homebrew missing. Installing..."
+      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    fi
   fi
 
   # 2. AWS CLI
   if command -v aws > /dev/null 2>&1; then
     echo "✅ AWS CLI detected."
   else
-    echo "☁️  AWS CLI missing. Installing via Homebrew..."
-    brew install awscli
+    if [ "$host_os" = "Darwin" ] && command -v brew > /dev/null 2>&1; then
+      echo "☁️  AWS CLI missing. Installing via Homebrew..."
+      brew install awscli
+    elif [ "$host_os" = "Linux" ]; then
+      if command -v apt-get > /dev/null 2>&1; then
+        echo "☁️  AWS CLI missing. Installing via apt..."
+        sudo apt-get update && sudo apt-get install -y awscli
+      elif command -v dnf > /dev/null 2>&1; then
+        echo "☁️  AWS CLI missing. Installing via dnf..."
+        sudo dnf install -y awscli
+      elif command -v yum > /dev/null 2>&1; then
+        echo "☁️  AWS CLI missing. Installing via yum..."
+        sudo yum install -y awscli
+      else
+        echo "⚠️  AWS CLI missing. Install it manually before publishing."
+      fi
+    else
+      echo "⚠️  AWS CLI missing. Install it manually before publishing."
+    fi
   fi
 
   # 3. Docker (Needed for Linux builds)
@@ -35,14 +56,22 @@ check_dependencies() {
     if [ -d "/Applications/Docker.app" ] || command -v docker > /dev/null 2>&1; then
       echo "✅ Docker Desktop detected."
     else
-      echo "🐳 Docker Desktop missing. Installing via Homebrew..."
-      brew install --cask docker
+      if [ "$host_os" = "Darwin" ] && command -v brew > /dev/null 2>&1; then
+        echo "🐳 Docker Desktop missing. Installing via Homebrew..."
+        brew install --cask docker
+      else
+        echo "⚠️  Docker not detected. Install/start Docker manually for Linux packaging."
+      fi
     fi
 
     # Start Docker daemon if not running (timeout 30s to avoid hanging)
     if ! docker info > /dev/null 2>&1; then
-      echo "🐳 Docker daemon not running — launching Docker Desktop..."
-      open -a Docker 2>/dev/null || true
+      if [ "$host_os" = "Darwin" ]; then
+        echo "🐳 Docker daemon not running — launching Docker Desktop..."
+        open -a Docker 2>/dev/null || true
+      else
+        echo "🐳 Docker daemon not running."
+      fi
       echo "⏳ Waiting up to 30s for Docker daemon..."
       DOCKER_READY=false
       for i in {1..6}; do
@@ -76,8 +105,25 @@ check_dependencies() {
   if command -v ffmpeg > /dev/null 2>&1; then
     echo "✅ FFMPEG detected."
   else
-    echo "🎞️  FFMPEG missing. Installing via Homebrew..."
-    brew install ffmpeg
+    if [ "$host_os" = "Darwin" ] && command -v brew > /dev/null 2>&1; then
+      echo "🎞️  FFMPEG missing. Installing via Homebrew..."
+      brew install ffmpeg
+    elif [ "$host_os" = "Linux" ]; then
+      if command -v apt-get > /dev/null 2>&1; then
+        echo "🎞️  FFMPEG missing. Installing via apt..."
+        sudo apt-get update && sudo apt-get install -y ffmpeg
+      elif command -v dnf > /dev/null 2>&1; then
+        echo "🎞️  FFMPEG missing. Installing via dnf..."
+        sudo dnf install -y ffmpeg
+      elif command -v yum > /dev/null 2>&1; then
+        echo "🎞️  FFMPEG missing. Installing via yum..."
+        sudo yum install -y ffmpeg
+      else
+        echo "⚠️  FFMPEG missing. Install it manually if required."
+      fi
+    else
+      echo "⚠️  FFMPEG missing. Install it manually if required."
+    fi
   fi
 }
 

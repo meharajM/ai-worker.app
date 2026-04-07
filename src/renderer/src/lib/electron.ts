@@ -237,44 +237,25 @@ export const electron = {
         }
     },
 
-    // Antigravity OAuth operations (Google sign-in for Gemini access)
+    // Antigravity OAuth operations temporarily disabled.
     antigravity: {
         initialize: async (): Promise<{ signedIn: boolean; email: string | null; projectId: string | null }> => {
-            if (isElectron() && window.electron?.antigravity) {
-                return await window.electron.antigravity.initialize()
-            }
             return { signedIn: false, email: null, projectId: null }
         },
         signIn: async (): Promise<{ signedIn: boolean; email: string | null; projectId: string | null }> => {
-            if (isElectron() && window.electron?.antigravity) {
-                return await window.electron.antigravity.signIn()
-            }
-            console.warn('[Browser] Antigravity sign-in not available in browser mode')
-            throw new Error('Antigravity sign-in requires the desktop app')
+            throw new Error('Antigravity sign-in is temporarily disabled')
         },
         getToken: async (): Promise<{ token: string | null; headers: Record<string, string> | null }> => {
-            if (isElectron() && window.electron?.antigravity) {
-                return await window.electron.antigravity.getToken()
-            }
             return { token: null, headers: null }
         },
         signOut: async (): Promise<{ success: boolean }> => {
-            if (isElectron() && window.electron?.antigravity) {
-                return await window.electron.antigravity.signOut()
-            }
             return { success: true }
         },
         getStatus: async (): Promise<{ signedIn: boolean; email: string | null; projectId: string | null }> => {
-            if (isElectron() && window.electron?.antigravity) {
-                return await window.electron.antigravity.getStatus()
-            }
             return { signedIn: false, email: null, projectId: null }
         },
-        callGateway: async (url: string, headers: Record<string, string>, body: string): Promise<unknown> => {
-            if (isElectron() && window.electron?.antigravity) {
-                return await window.electron.antigravity.callGateway(url, headers, body)
-            }
-            throw new Error('Antigravity gateway calls require the desktop app')
+        callGateway: async (_url: string, _headers: Record<string, string>, _body: string): Promise<unknown> => {
+            throw new Error('Antigravity gateway calls are temporarily disabled')
         },
     },
 
