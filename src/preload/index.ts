@@ -46,6 +46,7 @@ const electronAPI = {
     app: {
         getVersion: () => ipcRenderer.invoke('app:get-version'),
         getName: () => ipcRenderer.invoke('app:get-name'),
+        getHomePath: () => ipcRenderer.invoke('app:get-home-path'),
         selectFolder: () => ipcRenderer.invoke('app:select-folder'),
         getMissingDependencies: () => ipcRenderer.invoke('app:get-missing-dependencies'),
         getAllDependencies: () => ipcRenderer.invoke('app:get-all-dependencies'),
@@ -99,7 +100,7 @@ const electronAPI = {
     },
     // Filesystem Safe Mode operations
     fs: {
-        getPendingChanges: () => ipcRenderer.invoke('fs:get-pending-changes'),
+        getPendingChanges: (sessionId?: string) => ipcRenderer.invoke('fs:get-pending-changes', sessionId),
         approveChange: (changeId: string) => ipcRenderer.invoke('fs:approve-change', changeId),
         rejectChange: (changeId: string) => ipcRenderer.invoke('fs:reject-change', changeId),
         writeInternalFile: (workspacePath: string | undefined, filename: string, content: string) =>

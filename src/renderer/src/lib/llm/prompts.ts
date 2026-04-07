@@ -79,7 +79,7 @@ ${userContext}
 
 ${workspacePath ? `ACTIVE WORKSPACE: ${workspacePath}
 All filesystem operations (fs_*) MUST be performed within this directory.` : `WORKSPACE NOT SELECTED: 
-No workspace folder is set. For operations that CREATE or WRITE files (fs_write, fs_mkdir, etc.), ask the user to select a workspace folder using the folder icon in the UI.
+No workspace folder is set. For ANY filesystem operation (fs_read, fs_write, fs_list_directory, etc.), ask the user to select a workspace folder using the folder icon in the UI.
 IMPORTANT: If the user has attached a file to this message, READ it immediately using convert_to_markdown — attached files do NOT require a workspace.`}
 
 AVAILABLE TOOLS (${toolCount}):
@@ -232,7 +232,7 @@ ${workspacePath ? `ACTIVE WORKSPACE: ${workspacePath}
 All filesystem operations (fs_*) MUST be performed within this directory.
 You can use relative paths (e.g. "src/file.ts") which will be automatically resolved.
 Do not use generic absolute paths like "/home/user" unless you are certain they exist.` : `WORKSPACE NOT SELECTED: 
-No workspace folder is set. For operations that CREATE or WRITE files (fs_write, fs_mkdir, etc.), ask the user to select a workspace folder via the folder icon in the UI.
+No workspace folder is set. For ANY filesystem operation (fs_read, fs_write, fs_list_directory, etc.), ask the user to select a workspace folder via the folder icon in the UI.
 IMPORTANT: If the user has attached a file, READ it immediately using convert_to_markdown(uri="/absolute/path/...") — attached files do NOT require a workspace to be read.`}
 
 # RESPONSE FORMAT (CRITICAL)

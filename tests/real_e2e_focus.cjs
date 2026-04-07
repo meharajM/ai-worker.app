@@ -107,7 +107,7 @@ async function screenshot(window, name) {
 
   const electronApp = await electron.launch({
     executablePath: execPath,
-    args: [APP_PATH],
+    args: [APP_PATH, '--no-sandbox'],
     env: { ...env, NODE_ENV: 'production' },
     timeout: 120000,
   });

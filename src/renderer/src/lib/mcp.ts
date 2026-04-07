@@ -105,6 +105,91 @@ function ensureRecord(args: Record<string, unknown> | null | undefined): Record<
   return args || {};
 }
 
+function isAbsolutePath(value: string): boolean {
+  return value.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(value);
+}
+
+function normalizeAbsoluteFsPath(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  let normalized = trimmed.replace(/\\/g, '/');
+  let root = '';
+
+  if (/^[a-zA-Z]:\//.test(normalized)) {
+    root = normalized.slice(0, 2).toLowerCase();
+    normalized = normalized.slice(2);
+  } else if (normalized.startsWith('/')) {
+    root = '/';
+  } else {
+    return null;
+  }
+
+  const stack: string[] = [];
+  for (const part of normalized.split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      if (stack.length > 0) stack.pop();
+      continue;
+    }
+    stack.push(part);
+  }
+
+  if (root === '/') return `/${stack.join('/')}`;
+  return stack.length > 0 ? `${root}/${stack.join('/')}` : `${root}/`;
+}
+
+function resolveFsPath(baseAbsolutePath: string, targetPath: string): string | null {
+  const normalizedBase = normalizeAbsoluteFsPath(baseAbsolutePath);
+  if (!normalizedBase) return null;
+
+  const rawTarget = targetPath.trim();
+  if (!rawTarget) return normalizedBase;
+
+  if (isAbsolutePath(rawTarget)) {
+    return normalizeAbsoluteFsPath(rawTarget);
+  }
+
+  const normalizedRelative = rawTarget.replace(/\\/g, '/');
+  let root = '';
+  let tail = '';
+
+  if (/^[a-zA-Z]:\//.test(normalizedBase)) {
+    root = normalizedBase.slice(0, 2).toLowerCase();
+    tail = normalizedBase.slice(2);
+  } else if (normalizedBase.startsWith('/')) {
+    root = '/';
+    tail = normalizedBase.slice(1);
+  } else {
+    return null;
+  }
+
+  const stack = tail.split('/').filter(Boolean);
+  for (const part of normalizedRelative.split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      if (stack.length > 0) stack.pop();
+      continue;
+    }
+    stack.push(part);
+  }
+
+  if (root === '/') return `/${stack.join('/')}`;
+  return stack.length > 0 ? `${root}/${stack.join('/')}` : `${root}/`;
+}
+
+function isPathWithin(rootPath: string, targetPath: string): boolean {
+  const normalizedRoot = normalizeAbsoluteFsPath(rootPath);
+  const normalizedTarget = normalizeAbsoluteFsPath(targetPath);
+  if (!normalizedRoot || !normalizedTarget) return false;
+  const rootComparable = (normalizedRoot.replace(/\/+$/, '') || '/').toLowerCase();
+  const targetComparable = (normalizedTarget.replace(/\/+$/, '') || '/').toLowerCase();
+  return (
+    targetComparable === rootComparable ||
+    targetComparable.startsWith(`${rootComparable}/`)
+  );
+}
+
 // Execute a tool call with retry logic for connection errors
 
 // ── MCP Idle Disconnect Timers ──────────────────────────────────────────────────
@@ -194,39 +279,48 @@ export async function executeToolCall(
 
 
   if (toolName.startsWith('fs_')) {
-    // Block filesystem access when BOTH conditions are true:
-    //   (a) no workspace path has been set for this session, AND
-    //   (b) the target path itself is not already absolute.
-    // This allows: auto-set workspaces (from file attachment), absolute paths.
-    // This blocks:  relative paths with no workspace context.
     const wsPath = args?.workspacePath as string | undefined;
-    const targetPath = args?.path as string | undefined;
-    const targetIsAbsolute =
-      !!targetPath &&
-      (targetPath.startsWith('/') || !!targetPath.match(/^[a-zA-Z]:[\\/]/));
-
-    if (!wsPath && !targetIsAbsolute) {
+    if (!wsPath) {
       return {
         result: null,
-        error: 'WORKSPACE REQUIRED: Please select a workspace folder using the folder icon in the UI before performing filesystem operations.'
+        error: 'WORKSPACE REQUIRED: Select a workspace folder before using filesystem tools.'
+      };
+    }
+    const normalizedWorkspacePath = normalizeAbsoluteFsPath(wsPath);
+    if (!normalizedWorkspacePath) {
+      return {
+        result: null,
+        error: `WORKSPACE REQUIRED: Invalid workspace path '${wsPath}'.`
       };
     }
 
-    // Path traversal guard — only runs when a workspace boundary is defined.
-    if (wsPath && targetPath) {
-      const normalizedWs = wsPath.replace(/\\/g, '/').replace(/\/$/, '');
-      const normalizedTarget = targetPath.replace(/\\/g, '/');
-      if (!normalizedTarget.startsWith(normalizedWs)) {
+    const userHomePath = await electron.getHomePath();
+    if (!userHomePath || !isPathWithin(userHomePath, normalizedWorkspacePath)) {
+      return {
+        result: null,
+        error: `WORKSPACE REQUIRED: Workspace must be inside your user home folder (${userHomePath || 'unavailable'}).`
+      };
+    }
+    (args as Record<string, unknown>).workspacePath = normalizedWorkspacePath;
+
+    const rawTargetPath = args?.path as string | undefined;
+    if (rawTargetPath && rawTargetPath.trim() !== '') {
+      const resolvedTargetPath = resolveFsPath(normalizedWorkspacePath, rawTargetPath);
+      if (!resolvedTargetPath) {
         return {
           result: null,
-          error: `SECURITY VIOLATION: Access denied. Path '${targetPath}' is outside the active workspace '${wsPath}'.`
+          error: `SECURITY VIOLATION: Invalid path '${rawTargetPath}'.`
         };
       }
-    }
 
-    // Remove workspacePath from args before forwarding — tools don't expect it.
-    if (args && 'workspacePath' in args) {
-      delete (args as Record<string, unknown>).workspacePath;
+      if (!isPathWithin(normalizedWorkspacePath, resolvedTargetPath)) {
+        return {
+          result: null,
+          error: `SECURITY VIOLATION: Access denied. Path '${resolvedTargetPath}' is outside the active workspace '${normalizedWorkspacePath}'.`
+        };
+      }
+
+      (args as Record<string, unknown>).path = resolvedTargetPath;
     }
   }
 

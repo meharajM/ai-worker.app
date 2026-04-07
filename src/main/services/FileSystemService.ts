@@ -2,6 +2,7 @@ import { promises as fs } from 'fs'
 import * as path from 'path'
 import { app } from 'electron'
 import { randomUUID } from 'crypto'
+import { Store } from '../lib/store-wrapper'
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -47,6 +48,7 @@ interface ToolCallResponse {
  */
 interface SafeModeSettings {
     safeMode?: boolean
+    autoApprove?: boolean
 }
 
 // ============================================================================
@@ -181,19 +183,110 @@ export class FileSystemService {
     }
 
     /**
+     * Remove a change ID from all session index lists.
+     * Prevents stale session references from accumulating indefinitely.
+     */
+    private removeChangeFromSessions(changeId: string): void {
+        for (const [sessionId, ids] of this.sessionChanges.entries()) {
+            const next = ids.filter(id => id !== changeId)
+            if (next.length > 0) {
+                this.sessionChanges.set(sessionId, next)
+            } else {
+                this.sessionChanges.delete(sessionId)
+            }
+        }
+    }
+
+    /**
+     * Find an existing pending change for the same target path in a session.
+     */
+    private findPendingChangeForPath(filePath: string, sessionId: string): FileChange | undefined {
+        const ids = this.sessionChanges.get(sessionId) || []
+        for (const id of ids) {
+            const change = this.pendingChanges.get(id)
+            if (change && change.originalPath === filePath) return change
+        }
+        return undefined
+    }
+
+    /**
      * Check if Safe Mode is enabled
      * @private
      */
-    private async isSafeModeEnabled(): Promise<boolean> {
+    private async getSafeModeSettings(): Promise<{ safeMode: boolean; autoApprove: boolean }> {
         try {
-            const Store = (await import('electron-store')).default
-            const store = new Store<Record<string, any>>()
+            // Must use the same store namespace as ipc/store.ts and settingsStore.
+            const store = new Store<Record<string, any>>({
+                name: 'ai-worker-store',
+                defaults: {},
+            })
             const settings = ((store as any).get('mcpFileSystem', {}) as any) as SafeModeSettings
-            return settings.safeMode !== false  // Default to true
+            return {
+                safeMode: settings.safeMode !== false, // Default to true
+                autoApprove: settings.autoApprove === true, // Default to false
+            }
         } catch (error) {
             console.warn('[FileSystemService] Failed to check safe mode, defaulting to enabled:', error)
-            return true  // Fail-safe to protect user files
+            return {
+                safeMode: true, // Fail-safe to protect user files
+                autoApprove: false,
+            }
         }
+    }
+
+    private normalizePathForCompare(value: string): string {
+        return path.resolve(value).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+    }
+
+    private isPathWithin(rootPath: string, targetPath: string): boolean {
+        const normalizedRoot = this.normalizePathForCompare(rootPath)
+        const normalizedTarget = this.normalizePathForCompare(targetPath)
+        return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}/`)
+    }
+
+    private resolveWorkspaceForUserOps(workspacePath: unknown): string {
+        if (typeof workspacePath !== 'string' || workspacePath.trim() === '') {
+            throw new Error('WORKSPACE REQUIRED: Select a workspace folder before filesystem operations.')
+        }
+
+        const resolvedWorkspace = path.resolve(workspacePath.trim())
+        return resolvedWorkspace
+    }
+
+    private resolveWorkspaceScopedTargetPath(
+        targetPath: unknown,
+        workspacePath: unknown,
+        toolName: string
+    ): string {
+        if (typeof targetPath !== 'string' || targetPath.trim() === '') {
+            throw new Error(`Missing required path for ${toolName}.`)
+        }
+
+        const resolvedWorkspace = this.resolveWorkspaceForUserOps(workspacePath)
+        const rawTargetPath = targetPath.trim()
+        const resolvedTarget = path.isAbsolute(rawTargetPath)
+            ? path.resolve(rawTargetPath)
+            : path.resolve(resolvedWorkspace, rawTargetPath)
+
+        if (!this.isPathWithin(resolvedWorkspace, resolvedTarget)) {
+            throw new Error(
+                `SECURITY VIOLATION: Access denied. Path '${resolvedTarget}' is outside the active workspace '${resolvedWorkspace}'.`
+            )
+        }
+
+        return resolvedTarget
+    }
+
+    /**
+     * Internal tracking files are written by the app itself and should not
+     * require staged user approval even when Safe Mode is enabled.
+     */
+    private isInternalTrackingFile(filePath: string): boolean {
+        const fileName = path.basename(filePath).toLowerCase()
+        if (fileName !== 'tasks.json' && fileName !== 'execution-plan.json') return false
+
+        const internalRoot = path.resolve(path.join(app.getPath('home'), '.ai-worker', 'system-workspace'))
+        return this.isPathWithin(internalRoot, path.resolve(filePath))
     }
 
     // ========================================================================
@@ -212,6 +305,20 @@ export class FileSystemService {
         content: string,
         sessionId: string = 'default'
     ): Promise<FileChange> {
+        // Coalesce repeated writes to the same file into one pending entry.
+        // This prevents the review panel from growing with duplicate looped writes.
+        const existing = this.findPendingChangeForPath(filePath, sessionId)
+        if (existing) {
+            await fs.mkdir(path.dirname(existing.shadowPath), { recursive: true })
+            await fs.writeFile(existing.shadowPath, content, 'utf8')
+            existing.type = await this.fileExists(filePath) ? 'modify' : 'create'
+            existing.content = content.length < 10000 ? content : undefined
+            existing.timestamp = Date.now()
+            this.pendingChanges.set(existing.id, existing)
+            console.log(`[FileSystemService] Updated staged ${existing.type} for ${filePath} (ID: ${existing.id})`)
+            return existing
+        }
+
         const changeId = randomUUID()
         const shadowPath = path.join(this.shadowDir, sessionId, changeId)
         const type = await this.fileExists(filePath) ? 'modify' : 'create'
@@ -259,6 +366,7 @@ export class FileSystemService {
             // Cleanup
             await fs.rm(change.shadowPath)
             this.pendingChanges.delete(changeId)
+            this.removeChangeFromSessions(changeId)
 
             console.log(`[FileSystemService] ✓ Committed ${change.type} to ${change.originalPath}`)
         } catch (error) {
@@ -278,6 +386,7 @@ export class FileSystemService {
         try {
             await fs.rm(change.shadowPath)
             this.pendingChanges.delete(changeId)
+            this.removeChangeFromSessions(changeId)
             console.log(`[FileSystemService] ✗ Discarded ${change.type} for ${change.originalPath}`)
         } catch (error) {
             console.error(`[FileSystemService] Failed to discard ${changeId}:`, error)
@@ -291,7 +400,23 @@ export class FileSystemService {
      */
     getPendingChanges(sessionId: string = 'default'): FileChange[] {
         const ids = this.sessionChanges.get(sessionId) || []
-        return ids.map(id => this.pendingChanges.get(id)!).filter(Boolean)
+        const resolved: FileChange[] = []
+        const aliveIds: string[] = []
+
+        for (const id of ids) {
+            const change = this.pendingChanges.get(id)
+            if (!change) continue
+            resolved.push(change)
+            aliveIds.push(id)
+        }
+
+        // Heal stale session index entries opportunistically.
+        if (aliveIds.length !== ids.length) {
+            if (aliveIds.length > 0) this.sessionChanges.set(sessionId, aliveIds)
+            else this.sessionChanges.delete(sessionId)
+        }
+
+        return resolved
     }
 
     // ========================================================================
@@ -313,11 +438,22 @@ export class FileSystemService {
         try {
             switch (name) {
                 case 'fs_write_file': {
-                    const isSafeMode = await this.isSafeModeEnabled()
+                    const { safeMode: isSafeMode, autoApprove } = await this.getSafeModeSettings()
+                    const resolvedPath = this.resolveWorkspaceScopedTargetPath(args?.path, args?.workspacePath, name)
+                    const isInternalTrackingWrite = this.isInternalTrackingFile(resolvedPath)
+                    const sessionId =
+                        typeof args?._sessionId === 'string' && args._sessionId.trim() !== ''
+                            ? args._sessionId.trim()
+                            : 'default'
+                    const hasSessionAutoApproveOverride = typeof args?._sessionAutoApprove === 'boolean'
+                    const sessionAutoApprove = args?._sessionAutoApprove === true
+                    const effectiveAutoApprove = hasSessionAutoApproveOverride
+                        ? sessionAutoApprove
+                        : autoApprove
 
-                    if (isSafeMode) {
+                    if (isSafeMode && !effectiveAutoApprove && !isInternalTrackingWrite) {
                         // Safe Mode: Stage for user review
-                        const change = await this.stageWrite(args.path, args.content)
+                        const change = await this.stageWrite(resolvedPath, args.content, sessionId)
                         return {
                             result: {
                                 status: 'staged',
@@ -326,26 +462,44 @@ export class FileSystemService {
                             }
                         }
                     } else {
-                        // Direct write (Safe Mode disabled)
-                        await fs.mkdir(path.dirname(args.path), { recursive: true })
-                        await fs.writeFile(args.path, args.content, 'utf8')
+                        // Direct write:
+                        // - Safe Mode disabled OR
+                        // - Auto-approve enabled OR
+                        // - Internal tracking file
+                        await fs.mkdir(path.dirname(resolvedPath), { recursive: true })
+                        await fs.writeFile(resolvedPath, args.content, 'utf8')
+                        const status = isInternalTrackingWrite
+                            ? 'written_internal'
+                            : sessionAutoApprove
+                                ? 'written_session_auto_approved'
+                                : autoApprove
+                                ? 'written_auto_approved'
+                                : 'written'
                         return {
                             result: {
-                                status: 'written',
-                                path: args.path,
-                                message: `File written to ${args.path}`
+                                status,
+                                path: resolvedPath,
+                                message: isInternalTrackingWrite
+                                    ? `Internal tracking file updated: ${resolvedPath}`
+                                    : sessionAutoApprove
+                                        ? `File written with session auto-approval: ${resolvedPath}`
+                                    : autoApprove
+                                        ? `File written with auto-approval: ${resolvedPath}`
+                                    : `File written to ${resolvedPath}`
                             }
                         }
                     }
                 }
 
                 case 'fs_read_file': {
-                    const content = await fs.readFile(args.path, 'utf8')
+                    const resolvedPath = this.resolveWorkspaceScopedTargetPath(args?.path, args?.workspacePath, name)
+                    const content = await fs.readFile(resolvedPath, 'utf8')
                     return { result: content }
                 }
 
                 case 'fs_list_directory': {
-                    const files = await fs.readdir(args.path)
+                    const resolvedPath = this.resolveWorkspaceScopedTargetPath(args?.path, args?.workspacePath, name)
+                    const files = await fs.readdir(resolvedPath)
                     return { result: files }
                 }
 

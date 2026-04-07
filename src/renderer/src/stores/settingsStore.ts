@@ -46,6 +46,7 @@ interface SettingsState {
 
     // MCP FileSystem settings
     fileSystemSafeMode: boolean
+    fileSystemAutoApprove: boolean
 
     // Sync State
     activeUserId: string | null
@@ -77,6 +78,7 @@ interface SettingsState {
     setPlaywrightBrowser: (browser: PlaywrightBrowserType) => void
     setPlaywrightHeadless: (headless: boolean) => void
     setFileSystemSafeMode: (enabled: boolean) => void
+    setFileSystemAutoApprove: (enabled: boolean) => void
 
     // Memory Settings
     memoryBackend: 'server-memory' | 'memento-mcp'
@@ -120,6 +122,7 @@ const defaultSettings = {
     playwrightBrowser: 'auto' as PlaywrightBrowserType, // Auto-detect based on OS
     playwrightHeadless: false, // Default to headed for user visibility
     fileSystemSafeMode: true, // Default to safe mode (shadow writes)
+    fileSystemAutoApprove: false, // Default: manual approval required
     memoryBackend: 'server-memory' as 'server-memory' | 'memento-mcp', // Default backend
     activeUserId: null,
     isSyncing: false,
@@ -193,6 +196,11 @@ export const useSettingsStore = create<SettingsState>()(
                 // Save to main process store for FileSystemService to read
                 const current = await electron.store.get<Record<string, unknown>>('mcpFileSystem') || {}
                 await electron.store.set('mcpFileSystem', { ...current, safeMode: enabled })
+            },
+            setFileSystemAutoApprove: async (enabled) => {
+                set({ fileSystemAutoApprove: enabled })
+                const current = await electron.store.get<Record<string, unknown>>('mcpFileSystem') || {}
+                await electron.store.set('mcpFileSystem', { ...current, autoApprove: enabled })
             },
             setMemoryBackend: async (backend) => {
                 set({ memoryBackend: backend })

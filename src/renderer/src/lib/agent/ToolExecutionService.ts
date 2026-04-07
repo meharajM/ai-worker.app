@@ -235,6 +235,8 @@ ${recentResults.length > 0
  * @param args - The tool arguments.
  * @param tabId - If set, inject as `args.tabId` for browser tools (tab isolation).
  * @param workspacePath - If set, inject as `args.workspacePath` for fs tools.
+ * @param activeSessionId - If set, inject as internal `_sessionId` for fs tools.
+ * @param fileWriteAutoApprove - Per-session override injected into `fs_write_file`.
  * @param signal - AbortSignal to cancel execution.
  * @returns `{ result, error }` — never throws (errors are returned as strings).
  */
@@ -243,10 +245,23 @@ export async function executeWithSelfHealing(
     args: Record<string, unknown>,
     tabId: number | undefined,
     workspacePath: string | undefined,
+    activeSessionId: string | undefined,
+    fileWriteAutoApprove: boolean | undefined,
     signal: AbortSignal | undefined,
     isHeadless?: boolean
 ): Promise<{ result: unknown; error?: string }> {
-    return _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, 1, Date.now());
+    return _executeWithRetry(
+        name,
+        args,
+        tabId,
+        workspacePath,
+        activeSessionId,
+        fileWriteAutoApprove,
+        signal,
+        isHeadless,
+        1,
+        Date.now()
+    );
 }
 
 async function _executeWithRetry(
@@ -254,6 +269,8 @@ async function _executeWithRetry(
     args: Record<string, unknown>,
     tabId: number | undefined,
     workspacePath: string | undefined,
+    activeSessionId: string | undefined,
+    fileWriteAutoApprove: boolean | undefined,
     signal: AbortSignal | undefined,
     isHeadless: boolean | undefined,
     attempt: number,
@@ -285,8 +302,14 @@ async function _executeWithRetry(
         }
 
         // ── Workspace security: inject workspacePath for filesystem tools ─────────
-        if (name.startsWith("fs_") && workspacePath) {
-            args = { ...args, workspacePath };
+        if (name.startsWith("fs_")) {
+            const internalFsArgs: Record<string, unknown> = {};
+            if (workspacePath) internalFsArgs.workspacePath = workspacePath;
+            if (activeSessionId) internalFsArgs._sessionId = activeSessionId;
+            if (name === "fs_write_file" && typeof fileWriteAutoApprove === "boolean") {
+                internalFsArgs._sessionAutoApprove = fileWriteAutoApprove;
+            }
+            args = { ...args, ...internalFsArgs };
         }
 
         // ── Execute via Lane Manager ──────────────────────────────────────────────
@@ -335,7 +358,18 @@ async function _executeWithRetry(
                 console.log(`[ToolExecutionService] Context destroyed in ${name}. Retrying in 1s...`);
                 await delay(1000);
                 if (signal?.aborted) return { result: null, error: "Aborted by user" };
-                return _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, attempt + 1, startTime);
+                return _executeWithRetry(
+                    name,
+                    args,
+                    tabId,
+                    workspacePath,
+                    activeSessionId,
+                    fileWriteAutoApprove,
+                    signal,
+                    isHeadless,
+                    attempt + 1,
+                    startTime
+                );
             }
 
             // ── Protocol errors: do NOT retry at this layer (Issue #2) ────────────
@@ -354,14 +388,36 @@ async function _executeWithRetry(
 
             if (errorStr.includes("Element is not attached") || errorStr.includes("Node is detached")) {
                 console.log(`[ToolExecutionService] Stale element in ${name}. Retrying immediately...`);
-                return _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, attempt + 1, startTime);
+                return _executeWithRetry(
+                    name,
+                    args,
+                    tabId,
+                    workspacePath,
+                    activeSessionId,
+                    fileWriteAutoApprove,
+                    signal,
+                    isHeadless,
+                    attempt + 1,
+                    startTime
+                );
             }
 
             if (errorStr.includes("Lane timeout")) {
                 console.log(`[ToolExecutionService] Lane timeout for ${name} (attempt ${attempt}). Retrying in 2s...`);
                 await delay(2000);
                 if (signal?.aborted) return { result: null, error: "Aborted by user" };
-                return _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, attempt + 1, startTime);
+                return _executeWithRetry(
+                    name,
+                    args,
+                    tabId,
+                    workspacePath,
+                    activeSessionId,
+                    fileWriteAutoApprove,
+                    signal,
+                    isHeadless,
+                    attempt + 1,
+                    startTime
+                );
             }
 
             if (errorStr.includes("Timeout") && args.timeout && typeof args.timeout === "number") {
@@ -371,6 +427,8 @@ async function _executeWithRetry(
                     { ...args, timeout: args.timeout * 2 },
                     tabId,
                     workspacePath,
+                    activeSessionId,
+                    fileWriteAutoApprove,
                     signal,
                     isHeadless,
                     attempt + 1,
@@ -386,7 +444,18 @@ async function _executeWithRetry(
                 console.log(`[ToolExecutionService] Network error in ${name}. Retrying in 2s...`);
                 await delay(2000);
                 if (signal?.aborted) return { result: null, error: "Aborted by user" };
-                return _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, attempt + 1, startTime);
+                return _executeWithRetry(
+                    name,
+                    args,
+                    tabId,
+                    workspacePath,
+                    activeSessionId,
+                    fileWriteAutoApprove,
+                    signal,
+                    isHeadless,
+                    attempt + 1,
+                    startTime
+                );
             }
 
             if (
@@ -397,7 +466,18 @@ async function _executeWithRetry(
                 console.log(`[ToolExecutionService] Browser context lost in ${name}. Retrying in 1s...`);
                 await delay(1000);
                 if (signal?.aborted) return { result: null, error: "Aborted by user" };
-                return _executeWithRetry(name, args, tabId, workspacePath, signal, isHeadless, attempt + 1, startTime);
+                return _executeWithRetry(
+                    name,
+                    args,
+                    tabId,
+                    workspacePath,
+                    activeSessionId,
+                    fileWriteAutoApprove,
+                    signal,
+                    isHeadless,
+                    attempt + 1,
+                    startTime
+                );
             }
 
             if (
@@ -411,6 +491,8 @@ async function _executeWithRetry(
                     { ...args, timeout: ((args.timeout as number) || 5000) * 1.5 },
                     tabId,
                     workspacePath,
+                    activeSessionId,
+                    fileWriteAutoApprove,
                     signal,
                     isHeadless,
                     attempt + 1,
@@ -425,6 +507,8 @@ async function _executeWithRetry(
                     { ...args, timeout: ((args.timeout as number) || 30000) * 1.5 },
                     tabId,
                     workspacePath,
+                    activeSessionId,
+                    fileWriteAutoApprove,
                     signal,
                     isHeadless,
                     attempt + 1,

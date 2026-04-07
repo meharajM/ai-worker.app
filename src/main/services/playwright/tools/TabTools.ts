@@ -88,14 +88,26 @@ export class CloseTabTool extends PlaywrightTool {
         };
     }
 
-    async execute(page: Page, _args: any, context?: PlaywrightContext): Promise<ToolResult> {
+    async execute(page: Page, args: any, context?: PlaywrightContext): Promise<ToolResult> {
         if (!context?.context) throw new Error('No browser context');
-        // If args.tabId or args.index is provided, use that, otherwise use current page
-        // (PlaywrightService.getPage handles this logic usually, but here we can be explicit)
-        const pageToClose = page; // Currently we just close the page passed in
+        // If a tab id/index was requested, resolve it explicitly from pagesMap.
+        // This prevents accidental closure of the current page when a stale tabId
+        // is passed and BrowserManager falls back to the active page.
+        let pageToClose = page;
+        const requestedTabId = typeof args?.tabId === 'number'
+            ? args.tabId
+            : (typeof args?.index === 'number' ? args.index : undefined);
+        if (requestedTabId !== undefined) {
+            const requestedPage = context.pagesMap.get(requestedTabId);
+            if (!requestedPage || requestedPage.isClosed()) {
+                return { result: null, error: `Tab ID ${requestedTabId} not found` };
+            }
+            pageToClose = requestedPage;
+        }
+        const forceCloseLastTab = args?.force === true;
 
         const openPages = context.context.pages().filter(p => !p.isClosed());
-        if (openPages.length <= 1) {
+        if (openPages.length <= 1 && !forceCloseLastTab) {
             return { result: 'Skipped close_tab: last tab remains open' };
         }
 

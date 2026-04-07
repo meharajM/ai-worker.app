@@ -43,6 +43,7 @@ export interface ChatSession {
     createdAt: number
     updatedAt: number
     workspacePath?: string   // Optional workspace folder for this chat session
+    fileWriteAutoApprove?: boolean // Per-session override; undefined => inherit global setting
     progress?: number
     eta?: number
     plan?: ExecutionPlan
@@ -101,6 +102,7 @@ interface ChatState {
     setActiveSession: (id: string) => void
     updateSessionTitle: (id: string, title: string) => void
     updateSessionWorkspace: (id: string, workspacePath: string) => void
+    setSessionFileWriteAutoApprove: (id: string, enabled: boolean | undefined) => void
     updateSessionProgress: (id: string, progress?: number, eta?: number, plan?: ExecutionPlan) => void
     setOfflineSpeech: (enabled: boolean) => void
 
@@ -279,6 +281,14 @@ export const useChatStore = create<ChatState>()(
                 set((state) => ({
                     sessions: state.sessions.map((s) =>
                         s.id === id ? { ...s, workspacePath, updatedAt: Date.now() } : s
+                    ),
+                }))
+            },
+
+            setSessionFileWriteAutoApprove: (id: string, enabled: boolean | undefined) => {
+                set((state) => ({
+                    sessions: state.sessions.map((s) =>
+                        s.id === id ? { ...s, fileWriteAutoApprove: enabled, updatedAt: Date.now() } : s
                     ),
                 }))
             },

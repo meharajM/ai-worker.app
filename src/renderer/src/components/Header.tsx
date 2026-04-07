@@ -57,9 +57,9 @@ export function Header({ status }: HeaderProps) {
                 )}
             </div>
 
-            <div className="text-[10px] uppercase tracking-widest text-[var(--color-text-dim)] hidden sm:flex items-center gap-2">
+            <div className="text-[10px] uppercase tracking-widest text-[var(--color-text-dim)] flex items-center gap-2">
                 <StatusDot variant="success" size="sm" animated />
-                local-session: active
+                <span className="hidden sm:inline">local-session: active</span>
 
                 {/* WhatsApp status indicator */}
                 {isWhatsAppConnected && (

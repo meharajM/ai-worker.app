@@ -27,8 +27,8 @@
 import { chat } from "./llm";
 import { LLMMessage, LLMTool, ServerInfo, type LLMResponse } from "./types";
 import { pruneContext } from "./dcp";
-import { getAllTools, getServers } from "./mcp";
-import { CLIENT_TOOLS } from "./client-tools";
+import { executeToolCall, getAllTools, getServers, parseTabIdFromResult } from "./mcp";
+import { CLIENT_TOOLS, STATEFUL_BROWSER_TOOLS } from "./client-tools";
 import type { IAgentClient } from "./agent/IAgentClient";
 import {
   initializeSessionState,
@@ -302,6 +302,16 @@ function shouldPreferDirectAnswer(prompt: string): boolean {
   return knowledgeQuestion;
 }
 
+function isBrowserToolName(toolName: string): boolean {
+  return (
+    STATEFUL_BROWSER_TOOLS.includes(toolName) ||
+    toolName.startsWith("playwright_") ||
+    toolName.startsWith("browser_")
+  );
+}
+
+const TAB_MANAGEMENT_TOOLS = new Set(["new_tab", "switch_tab", "close_tab", "get_tabs"]);
+
 export class AgentRuntime implements IAgentClient {
   private messages: LLMMessage[] = [];
   private options: AgentRuntimeOptions;
@@ -322,6 +332,8 @@ export class AgentRuntime implements IAgentClient {
   private _estimatedContextBytes = 0;
   /** Counter to trigger periodic full context resync */
   private _contextResyncCounter = 0;
+  /** Dedicated tab assigned to this runtime for browser-tool isolation */
+  private activeTabId: number | undefined;
 
   constructor(options: AgentRuntimeOptions, initialHistory: LLMMessage[] = []) {
     this.options = options;
@@ -336,6 +348,7 @@ export class AgentRuntime implements IAgentClient {
     }
 
     this.maxIterations = options.isSubAgent ? 15 : 50;
+    this.activeTabId = options.tabId;
     if (options.taskCategory) this.taskCategory = options.taskCategory;
 
     if (options.taskCategory) {
@@ -351,6 +364,30 @@ export class AgentRuntime implements IAgentClient {
       (msg) => this.addMessage(msg),
       () => this._makeSubAgentFactory()
     );
+  }
+
+  public getAssignedTabId(): number | undefined {
+    return this.activeTabId;
+  }
+
+  private async ensureDedicatedTabForBrowserTool(toolName: string): Promise<void> {
+    if (this.options.isHeadless) return;
+    if (!isBrowserToolName(toolName)) return;
+    if (TAB_MANAGEMENT_TOOLS.has(toolName)) return;
+    if (this.activeTabId !== undefined) return;
+
+    try {
+      const tabResult = await executeToolCall("new_tab", { url: "about:blank" });
+      const tabId = parseTabIdFromResult(tabResult);
+      if (tabId !== undefined) {
+        this.activeTabId = tabId;
+        console.log(`[AgentRuntime] Assigned dedicated tab ${tabId} to agent run`);
+      } else {
+        console.warn("[AgentRuntime] Could not parse tabId from new_tab result");
+      }
+    } catch (e) {
+      console.warn("[AgentRuntime] Failed to provision dedicated tab for browser tool", e);
+    }
   }
 
   async chat(
@@ -396,7 +433,7 @@ export class AgentRuntime implements IAgentClient {
       if (parentContextMsg) this.messages.push(parentContextMsg);
     }
 
-    // ── Check tasks.json for crash recovery ────────────────────────────────
+    // ── Check internal tasks.json for crash recovery ───────────────────────
     if (!this.executionPlan && !this.options.isSubAgent && this.options.workspacePath) {
       try {
         const electron = (await import('./electron')).default;
@@ -406,7 +443,7 @@ export class AgentRuntime implements IAgentClient {
           console.log('[AgentRuntime] Recovered execution plan from tasks.json');
 
           // Sync recovered plan to tasks.json to ensure file is up-to-date
-          import('./task-manager').then(m => m.syncPlanToFile(this.options.workspacePath, this.executionPlan!));
+          this._persistExecutionPlanToInternalFile();
         }
       } catch (e) {
         console.warn('[AgentRuntime] Failed to recover tasks.json:', e);
@@ -497,6 +534,7 @@ export class AgentRuntime implements IAgentClient {
           // onPlanUpdate: Bridge orchestration plan → session.plan → SubTaskChecklist
           (plan) => {
             this.executionPlan = plan;
+            this._persistExecutionPlanToInternalFile();
             this._emitProgress(this._lastProgressPct);
           }
         );
@@ -524,6 +562,7 @@ export class AgentRuntime implements IAgentClient {
           // plan=undefined to onProgressUpdate, and the checklist never renders.
           (plan) => {
             this.executionPlan = plan;
+            this._persistExecutionPlanToInternalFile();
             this._emitProgress(this._lastProgressPct);
           }
         );
@@ -732,6 +771,7 @@ export class AgentRuntime implements IAgentClient {
         if (call.name === "create_execution_plan") {
           const { result, plan } = this.specialHandlers.handleCreateExecutionPlan(call.arguments);
           this.executionPlan = plan;
+          this._persistExecutionPlanToInternalFile();
           resultStr = result;
         } else if (call.name === "scan_page_accessibility") {
           resultStr = await this.specialHandlers.handleScanPageAccessibility();
@@ -744,19 +784,31 @@ export class AgentRuntime implements IAgentClient {
             resultStr = "Nested delegation is disabled inside sub-agents. Complete the current sub-task directly.";
           } else {
             const { result, planUpdate } = await this.specialHandlers.handleDelegateSubTask(call.arguments, this.executionPlan);
-            if (planUpdate) this.executionPlan = planUpdate;
+            if (planUpdate) {
+              this.executionPlan = planUpdate;
+              this._persistExecutionPlanToInternalFile();
+            }
             resultStr = result;
           }
         } else {
           try {
+            await this.ensureDedicatedTabForBrowserTool(call.name);
             const rawResult = await executeWithSelfHealing(
               call.name,
               call.arguments as Record<string, unknown>,
-              this.options.tabId,
+              this.activeTabId,
               this.options.workspacePath,
+              this.options.activeSessionId,
+              this.options.fileWriteAutoApprove,
               this.options.signal,
               this.options.isHeadless
             );
+            if (call.name === "new_tab") {
+              const newTabId = parseTabIdFromResult(rawResult as { result: unknown });
+              if (newTabId !== undefined) {
+                this.activeTabId = newTabId;
+              }
+            }
             const { resultStr: formatted, isError } = formatToolResult(call.name, rawResult);
             resultStr = formatted;
             consecutiveErrors = isError ? consecutiveErrors + 1 : 0;
@@ -931,6 +983,22 @@ export class AgentRuntime implements IAgentClient {
     this.options.onProgressUpdate(clamped === 100 ? undefined : clamped, clamped === 100 ? undefined : eta, this.executionPlan ?? undefined);
   }
 
+  /**
+   * Persists the current execution plan to AI-Worker's hidden internal
+   * workspace (`~/.ai-worker/system-workspace/.../tasks.json`) via the
+   * internal IPC writer (bypasses staged fs_write approvals).
+   */
+  private _persistExecutionPlanToInternalFile(): void {
+    if (this.options.isSubAgent) return;
+    if (!this.options.workspacePath || !this.executionPlan) return;
+
+    import("./task-manager")
+      .then((m) => m.syncPlanToFile(this.options.workspacePath, this.executionPlan))
+      .catch((error) => {
+        console.warn("[AgentRuntime] Failed to persist execution plan:", error);
+      });
+  }
+
   // ── Private: Helpers ───────────────────────────────────────────────────────
 
   private async _handleContextLimits() {
@@ -968,6 +1036,8 @@ export class AgentRuntime implements IAgentClient {
       const raw = await executeWithSelfHealing(
         "memory_search",
         { query, limit: 8 },
+        undefined,
+        undefined,
         undefined,
         undefined,
         this.options.signal,
