@@ -279,18 +279,9 @@ export async function executeParallelSubAgents(
             ledger?.recordError(`[Parallel:${context}] ${errorText}`);
 
             return { context, success: false, result: errorText };
-        } finally {
-            if (subAgentTabId !== undefined) {
-                try {
-                    const { browserLock } = await import("../resource-lock");
-                    await browserLock.runExclusive(async () =>
-                        executeToolCall("close_tab", { tabId: subAgentTabId })
-                    );
-                    laneManager.cleanupTabLane(subAgentTabId);
-                } catch (e) {
-                    console.warn(`[OrchestrationService] Failed cleanup for tab ${subAgentTabId}`, e);
-                }
-            }
+        // NOTE: Tab cleanup for parallel sub-agents is handled exclusively by
+        // AgentRuntime's _runLoop finally block via the `ownsTab` flag.
+        // Having cleanup here AND in AgentRuntime caused double close_tab calls.
         }
     });
 
