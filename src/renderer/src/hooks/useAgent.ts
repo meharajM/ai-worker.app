@@ -38,7 +38,7 @@ import { useSettingsStore } from "../stores/settingsStore";
 import { type LLMMessage } from "../lib/types";
 import { resolveWhatsAppTarget, setWhatsAppTyping, setWhatsAppPaused, getWhatsAppSystemPrompt, sendWhatsAppResponse, resolveWhatsAppMessageToLLM } from "../lib/whatsapp-integration";
 import { buildAttachmentLLMParts } from "../lib/media-utils";
-import { executeToolCall } from "../lib/mcp";
+import { executeToolCall, parseTabsFromResult } from "../lib/mcp";
 
 const LOCAL_PREFERENCE_MEMORY_KEY = "ai_worker_local_preferences_v1";
 
@@ -503,6 +503,18 @@ export function useAgent(): UseAgentReturn {
 
                 const currentProcessingCount = store._processingSessions.size;
                 if (currentProcessingCount === 0) {
+                    // Best-effort cleanup for residual bootstrap blank tab when no tasks remain.
+                    // This covers delegated/orchestrated runs where the parent runtime itself
+                    // never owned a tab, but Playwright still has one idle about:blank page.
+                    try {
+                        const tabsResult = await executeToolCall("get_tabs", {});
+                        const tabs = parseTabsFromResult(tabsResult);
+                        if (tabs.length === 1 && tabs[0].url === "about:blank") {
+                            await executeToolCall("close_tab", { tabId: tabs[0].index, force: true });
+                        }
+                    } catch (e) {
+                        console.warn("[useAgent] Residual blank-tab cleanup failed:", e);
+                    }
                     console.log('[useAgent] No active sessions. Browser stays warm; idle timer will close process if unused.');
                 } else {
                     console.log(`[useAgent] 🕒 Session complete. ${currentProcessingCount} sessions still active; browser remains available.`);

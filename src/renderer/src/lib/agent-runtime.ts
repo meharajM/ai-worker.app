@@ -27,7 +27,7 @@
 import { chat } from "./llm";
 import { LLMMessage, LLMTool, ServerInfo, type LLMResponse } from "./types";
 import { pruneContext } from "./dcp";
-import { executeToolCall, getAllTools, getServers, parseTabIdFromResult } from "./mcp";
+import { executeToolCall, getAllTools, getServers, parseTabIdFromResult, parseTabsFromResult } from "./mcp";
 import { CLIENT_TOOLS, STATEFUL_BROWSER_TOOLS } from "./client-tools";
 import type { IAgentClient } from "./agent/IAgentClient";
 import {
@@ -377,6 +377,16 @@ export class AgentRuntime implements IAgentClient {
     if (this.activeTabId !== undefined) return;
 
     try {
+      // Reuse the bootstrap blank tab when it's the only tab.
+      // This avoids creating an extra "orphan" blank tab per task run.
+      const tabsResult = await executeToolCall("get_tabs", {});
+      const tabs = parseTabsFromResult(tabsResult);
+      if (tabs.length === 1 && tabs[0].url === "about:blank") {
+        this.activeTabId = tabs[0].index;
+        console.log(`[AgentRuntime] Claimed existing bootstrap tab ${tabs[0].index} for agent run`);
+        return;
+      }
+
       const tabResult = await executeToolCall("new_tab", { url: "about:blank" });
       const tabId = parseTabIdFromResult(tabResult);
       if (tabId !== undefined) {
