@@ -525,6 +525,55 @@ export function parseTabIdFromResult(toolResult: { result: unknown }): number | 
   return undefined;
 }
 
+type ParsedTab = {
+  index: number;
+  title?: string;
+  url?: string;
+  active?: boolean;
+};
+
+/**
+ * Parses tab lists from a `get_tabs` tool result.
+ * Supports both MCP content envelope and raw object result.
+ */
+export function parseTabsFromResult(toolResult: { result: unknown }): ParsedTab[] {
+  const resAny = toolResult.result as Record<string, unknown> | null | undefined;
+
+  const normalize = (value: unknown): ParsedTab[] => {
+    if (!value || typeof value !== "object") return [];
+    const tabs = (value as { tabs?: unknown[] }).tabs;
+    if (!Array.isArray(tabs)) return [];
+    return tabs
+      .map((tab) => {
+        if (!tab || typeof tab !== "object") return null;
+        const t = tab as Record<string, unknown>;
+        const index = typeof t.index === "number" ? t.index : undefined;
+        if (index === undefined) return null;
+        return {
+          index,
+          title: typeof t.title === "string" ? t.title : undefined,
+          url: typeof t.url === "string" ? t.url : undefined,
+          active: typeof t.active === "boolean" ? t.active : undefined,
+        };
+      })
+      .filter((tab): tab is ParsedTab => tab !== null);
+  };
+
+  // Primary path: MCP content envelope
+  if (resAny?.content && Array.isArray(resAny.content) && (resAny.content[0] as Record<string, unknown>)?.text) {
+    try {
+      const parsed = JSON.parse((resAny.content[0] as Record<string, unknown>).text as string);
+      const tabs = normalize(parsed);
+      if (tabs.length > 0) return tabs;
+    } catch {
+      // ignore and fall through
+    }
+  }
+
+  // Fallback: raw object
+  return normalize(resAny);
+}
+
 export async function setAutoConnect(serverId: string, enabled: boolean): Promise<void> {
   return useMcpStore.getState().setAutoConnect(serverId, enabled);
 }
