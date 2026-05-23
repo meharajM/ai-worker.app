@@ -5,31 +5,76 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.12.0-green.svg)](https://nodejs.org/)
 [![Platform Support](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-> **Voice-first desktop workspace with Model Context Protocol (MCP) integration**
+AI-Worker is a **voice-first desktop agent workspace** built on the **Model Context Protocol (MCP)**. It serves as an advanced sandboxed environment for developers and power users to engineer workflows using on-device models or cloud APIs. By implementing modular structures across **Prompt Engineering**, **Context Engineering**, and **Harness/Tool Engineering**, AI-Worker bridges local desktop systems with powerful AI models securely and efficiently.
 
-AI-Worker is an intelligent desktop application that combines voice interaction with seamless MCP server integration. It enables you to interact with AI agents using natural voice commands while leveraging powerful AI tools and services through the Model Context Protocol.
+## Screenshots
+
+### Hub Chat
+![AI-Worker hub chat](docs/screenshots/ai-worker-hub-chat.png)
+
+### MCP Connections
+![AI-Worker MCP connections](docs/screenshots/ai-worker-mcp-connections.png)
+
+### Hub Settings
+![AI-Worker hub settings](docs/screenshots/ai-worker-hub-settings.png)
+
+### Command Palette
+![AI-Worker command palette](docs/screenshots/ai-worker-command-palette.png)
+
+---
+
+## 🛠️ The Core Engineering Paradigms
+
+AI-Worker is designed around three fundamental engineering principles for modern agentic workflows:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                           AI-Worker                             │
+├───────────────────┬──────────────────────┬──────────────────────┤
+│Prompt Engineering │ Context Engineering  │ Harness Engineering  │
+│ ∙ System Alignment│ ∙ Semantic Memory    │ ∙ Browser Sandboxing │
+│ ∙ On-Device LLMs  │ ∙ Context Pruning    │ ∙ Secure IPC Gateways│
+│ ∙ Prompt Templates│ ∙ MCP Server Bindings│ ∙ Baileys/WA Bridge  │
+└───────────────────┴──────────────────────┴──────────────────────┘
+```
+
+### 1. Prompt Engineering
+- **System Instruction Alignment**: Enforces structured system prompt structures that align model behaviors to execution guidelines, ensuring tools are used only under strict validation constraints.
+- **On-Device Inference**: Integrates `@mlc-ai/web-llm` to execute and tune prompt templates locally, utilizing WebGPU acceleration for zero-latency local agent execution.
+- **Dynamic Variable Injection**: Compiles templates on-the-fly containing user directives, system states, and tool instructions.
+
+### 2. Context Engineering
+- **Semantic Memory Core**: Native integration with `@modelcontextprotocol/server-memory` to maintain a persistent semantic database, linking entities, preferences, and workspace structures.
+- **Dynamic Context Window Pruning**: Implements algorithmic context reduction strategies to filter token bloat, ensuring key workspace metadata is preserved without overflowing the context limits of local models.
+- **Multi-Source Context Binding**: Fuses data streams from local SQLite files, live browser environments, and active terminal sessions into a unified context payload.
+
+### 3. Harness & Tool Engineering
+- **Playwright Web Harness**: Bundles browser execution harnesses using `@playwright/mcp`, allowing models to run click-paths, query elements, take screenshots, and execute forms securely.
+- **Secure Process Isolation**: Built with strict Electron security boundaries (sandbox, isolated context bridges, zero remote execution packages).
+- **Communication Harnesses**: Integrated `baileys` socket hooks to create secure messaging loops directly linked to the user's phone, allowing the desktop agent to act as a chat companion.
+
+---
 
 ## ✨ Features
 
-- 🎤 **Voice-First Interface** - Control everything with voice commands
-- 🔌 **MCP Integration** - Connect to Model Context Protocol servers for extended capabilities
-- 🤖 **AI-Powered Workspace** - Built-in LLM support with Web-LLM for on-device inference
-- 💬 **Multi-Platform Chat** - WhatsApp integration for seamless messaging
-- 📱 **Cross-Platform** - Runs on macOS, Linux, and Windows
-- 🚀 **High Performance** - Electron-based desktop app with TypeScript
-- 🔐 **Privacy-Focused** - Local-first architecture with on-device processing
-- 🎨 **Modern UI** - Built with React, TailwindCSS, and Radix UI
-- 📊 **Advanced Browser Automation** - Playwright integration for web interactions
-- 💾 **Persistent Storage** - SQLite database for local data persistence
+- 🎤 **Voice-First Command Center** - Input instructions via localized speech recognition (Vosk-browser) for absolute privacy.
+- 🔌 **Model Context Protocol (MCP) Integration** - Out of the box stdio/SSE client connections to custom or community MCP servers.
+- 🌐 **Web-LLM Integration** - On-device AI execution bypassing cloud latency, cost, and data leakage risks.
+- 💬 **WhatsApp Agent Gateway** - Interface with WhatsApp via headless messaging layers.
+- 📂 **Workspace Synchronization** - Real-time file system watchers that index local project structures.
+- 🔒 **Enterprise-Grade Security** - Context isolation, node integration disabling, and validated IPC boundaries. See [SECURITY.md](SECURITY.md).
+
+---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- **Node.js** ≥ 22.12.0 - [Install](https://nodejs.org/)
-- **npm** or **yarn** - Comes with Node.js
-- **Python 3** (Optional, for MCP servers) - [Install](https://www.python.org/)
+- **Node.js** ≥ 22.12.0 - [NodeJS Official Site](https://nodejs.org/)
+- **npm** (comes with Node) or **yarn** / **pnpm**
+- **Python 3** (Optional, for Python-based MCP servers)
 
 ### Installation
 
@@ -39,26 +84,28 @@ AI-Worker is an intelligent desktop application that combines voice interaction 
    cd ai-worker.app
    ```
 
-2. **Install dependencies**
+2. **Install project dependencies**
    ```bash
    npm install
    ```
 
-3. **Setup dependencies (MCP servers, Python, etc.)**
-   ```bash
-   # macOS / Linux
-   ./scripts/setup-dependencies.sh
-   
-   # Windows (run PowerShell as Administrator)
-   .\scripts\setup-dependencies.ps1
-   ```
+3. **Bootstrap MCP and Local Dependencies**
+   - For macOS and Linux:
+     ```bash
+     chmod +x ./scripts/setup-dependencies.sh
+     ./scripts/setup-dependencies.sh
+     ```
+   - For Windows (run PowerShell as Administrator):
+     ```powershell
+     .\scripts\setup-dependencies.ps1
+     ```
 
-4. **Start development server**
+4. **Launch Developer Workspace**
    ```bash
    npm run dev
    ```
 
-5. **Build for your platform**
+5. **Build Native Binary Installers**
    ```bash
    # macOS
    npm run build:mac
@@ -70,160 +117,74 @@ AI-Worker is an intelligent desktop application that combines voice interaction 
    npm run build:win
    ```
 
-## 📖 Documentation
+---
+
+## 📖 Documentation & Guides
+
+To assist with onboarding and architectural review, explore our detailed documentation:
 
 ### User Documentation
-- [Installation Guide](docs/INSTALLATION.md) - Detailed setup instructions
-- [User Guide](docs/USER_GUIDE.md) - How to use AI-Worker
-- [MCP Integration](docs/MCP_GUIDE.md) - Setting up MCP servers
+- [Setup & Installation](docs/INSTALLATION.md) — Detailed environment bootstrapping.
+- [User Guide & Operations](docs/USER_GUIDE.md) — Voice controls, model configurations, and messenger setups.
+- [MCP Integration Guide](docs/MCP_GUIDE.md) — How to configure and connect custom MCP servers.
 
 ### Developer Documentation
-- [Development Setup](docs/DEVELOPMENT.md) - Getting started with development
-- [Architecture](docs/ARCHITECTURE.md) - System design and components
-- [API Reference](docs/API.md) - Internal API documentation
-- [Testing Guide](TESTING.md) - Running tests and E2E testing
+- [System Architecture](docs/architecture/phase-3-migration-plan.md) — Structural diagrams, security reviews, and component definitions.
+- [Developer & Testing Guide](docs/DEVELOPMENT.md) — Linting protocols, security guidelines, and test suite execution command index.
+- [Security Policy & Rules](SECURITY.md) — Secure IPC specifications, Chromium sandboxing boundaries, and vulnerability report routing.
 
-## 🏗️ Development
+---
 
-### Basic Commands
+## 🏗️ Commands Directory
 
 ```bash
-# Start dev server with hot reload
+# Start development workspace (HMR)
 npm run dev
 
-# Run linter
+# Clear dev server cache and reboot app clean
+npm run dev:clean
+
+# Validate formatting rules
 npm run lint
 
-# Fix linting issues
+# Auto-fix linting issues
 npm run lint:fix
 
-# Type checking
+# Run typescript compilation verification
 npm run typecheck
 
-# Build bundle
-npm run build
+# Execute E2E automated test pipeline
+npm run test:e2e
 
-# Run tests
-npm run test:e2e          # Mock E2E tests
-npm run test:mock         # UI mock tests
-npm run test:speech       # Speech integration tests
-npm run test:e2e:real     # Real E2E tests (requires API keys)
-
-# Clean build artifacts
-npm run clean
+# Execute speech model tests
+npm run test:speech
 ```
 
-### Building & Publishing
+---
 
-```bash
-# Build for Mac
-npm run publish:mac
-npm run publish:mac:universal
-
-# Build for Linux
-npm run publish:linux
-
-# Build for Windows
-npm run publish:win
-
-# Build for all platforms
-npm run publish:all
-```
-
-See [Publishing Guide](docs/PUBLISHING.md) for detailed release instructions.
-
-## 🔌 MCP Server Integration
-
-AI-Worker supports multiple MCP servers out of the box:
-
-- **Memory Server** - Persistent memory management
-- **Playwright Server** - Browser automation and web interactions
-- **Custom Servers** - Easy integration of custom MCP servers
-
-For setup instructions, see [MCP Integration Guide](docs/MCP_GUIDE.md).
-
-## 📦 Project Structure
+## 📦 Project Directory Layout
 
 ```
 ai-worker.app/
 ├── src/
-│   ├── main/          # Electron main process
-│   ├── preload/       # Electron preload scripts
-│   ├── renderer/      # React UI components
-│   └── agents/        # AI agent implementations
-├── tests/             # Test suites
-├── scripts/           # Build and setup scripts
-├── build/             # App icons and assets
-└── docs/              # Documentation
+│   ├── main/          # Electron backend, native system drivers, SQLite, process runners
+│   ├── preload/       # Security context bridges (exposes secure IPC hooks only)
+│   ├── renderer/      # React frontend application UI and local Web-LLM controllers
+│   └── renderer/src/lib/agent/ # Intent analysis, orchestration, and tool execution services
+├── docs/              # Guides, proposals, setup manuals, screenshots
+├── tests/             # Playwright test scripts, E2E validation flows, mock engines
+├── scripts/           # Platform dependent configuration bootstrapping
+└── build/             # Package installer assets (icons, splash screens)
 ```
-
-## 🛠️ Tech Stack
-
-- **Frontend**: React 18, TailwindCSS, Radix UI, Framer Motion
-- **Desktop**: Electron 40, Electron Vite
-- **Language**: TypeScript 5.3
-- **Testing**: Playwright, E2E test suites
-- **Build**: Electron Builder
-- **AI/ML**: Web-LLM, Model Context Protocol
-- **Database**: SQLite with better-sqlite3
-- **Styling**: Lucide React icons, custom CSS
-
-## 🤝 Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute to this project.
-
-### Quick Contribution Steps
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run tests and linting (`npm run lint:fix && npm run typecheck`)
-5. Commit your changes (`git commit -m 'Add amazing feature'`)
-6. Push to the branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
-
-Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before contributing.
-
-## 📋 Project Status
-
-- **Current Version**: 0.1.2 (Beta)
-- **Status**: Active Development
-- **Next Milestones**: 
-  - Enhanced voice recognition
-  - Additional MCP server integrations
-  - Mobile companion app
-
-## 🐛 Known Issues & Roadmap
-
-See [Issues](https://github.com/meharajM/ai-worker.app/issues) for known issues and [Projects](https://github.com/meharajM/ai-worker.app/projects) for our roadmap.
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Built with [Electron](https://www.electronjs.org/)
-- UI components from [Radix UI](https://www.radix-ui.com/)
-- Icons from [Lucide React](https://lucide.dev/)
-- AI capabilities from [Web-LLM](https://webllm.mlc.ai/)
-- Model Context Protocol by [Anthropic](https://modelcontextprotocol.io/)
-
-## 💬 Community
-
-- **GitHub Issues** - Report bugs or request features
-- **GitHub Discussions** - Ask questions and share ideas
-- **Email** - team@aiworker.app
-
-## 🔗 Links
-
-- **Website**: https://ai-worker.tech
-- **Documentation**: https://ai-worker.tech/docs
-- **GitHub**: https://github.com/meharajM/ai-worker.app
-- **Issues**: https://github.com/meharajM/ai-worker.app/issues
 
 ---
 
-<div align="center">
-  Made with ❤️ by the AI-Worker Team
-</div>
+## 🤝 Contributing
+
+We love contributions! Please read our [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) files to learn about our community standards, development processes, and how to submit pull requests.
+
+---
+
+## 📄 License
+
+AI-Worker is open-source software licensed under the [MIT License](LICENSE).

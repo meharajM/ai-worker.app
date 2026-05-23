@@ -1,5 +1,6 @@
 const { _electron: electron } = require('playwright');
-delete process.env.ELECTRON_RUN_AS_NODE; const path = require('path');
+delete process.env.ELECTRON_RUN_AS_NODE;
+const path = require('path');
 const fs = require('fs');
 
 const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
@@ -21,16 +22,26 @@ const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
     const linuxPath = path.join(__dirname, '../node_modules/electron/dist/electron');
     const electronExecutable = fs.existsSync(macPath) ? macPath : linuxPath;
     const execPath = fs.existsSync(electronExecutable) ? electronExecutable : 'electron';
+    const appEntry = path.join(__dirname, '../out/main/index.js');
+    const launchArgs = [appEntry];
+
+    if (process.platform === 'linux') {
+        launchArgs.push(
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-gpu',
+            '--disable-dev-shm-usage'
+        );
+    }
 
     console.log('Using electron execPath:', execPath);
+    console.log('Using electron launch args:', launchArgs.join(' '));
 
     let electronApp;
     try {
         electronApp = await electron.launch({
             executablePath: execPath,
-            args: [
-                path.join(__dirname, '../out/main/index.js')
-            ],
+            args: launchArgs,
             timeout: 120000,
             env: { ...process.env, NODE_ENV: 'production' }
         });
