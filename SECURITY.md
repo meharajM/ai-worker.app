@@ -13,7 +13,7 @@ Every `BrowserWindow` created or modified should be reviewed against these `webP
 - **`sandbox: true` where compatible**: Runs renderer processes in a restricted operating system sandbox. If a local model, worker, or file-access workflow requires an exception, document the reason and keep `contextIsolation` enabled.
 
 ### 2. The Preload Script Gate
-The preload script acts as the **sole** secure bridge between the Renderer process and the Main process. 
+The preload script acts as the **sole** secure bridge between the Renderer process and the Main process.
 - Capabilities are only exposed to the renderer using `contextBridge.exposeInMainWorld()`.
 - Exposed APIs are kept minimal, with no complex logic or conditional statements inside the preload scripts.
 - APIs map to strict, defined IPC channels via `ipcRenderer.invoke()` or `ipcRenderer.on()`.
