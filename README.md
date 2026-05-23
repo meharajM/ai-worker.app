@@ -9,7 +9,19 @@
 
 AI-Worker is a **voice-first desktop agent workspace** built on the **Model Context Protocol (MCP)**. It serves as an advanced sandbox environments for developers and power users to engineer workflows using on-device models or cloud APIs. By implementing modular structures across **Prompt Engineering**, **Context Engineering**, and **Harness/Tool Engineering**, AI-Worker bridges local desktop systems with powerful AI models securely and efficiently.
 
-![AI-Worker hub workspace](docs/screenshots/ai-worker-hub-guide.png)
+## Screenshots
+
+### Hub Chat
+![AI-Worker hub chat](docs/screenshots/ai-worker-hub-chat.png)
+
+### MCP Connections
+![AI-Worker MCP connections](docs/screenshots/ai-worker-mcp-connections.png)
+
+### Hub Settings
+![AI-Worker hub settings](docs/screenshots/ai-worker-hub-settings.png)
+
+### Command Palette
+![AI-Worker command palette](docs/screenshots/ai-worker-command-palette.png)
 
 ---
 

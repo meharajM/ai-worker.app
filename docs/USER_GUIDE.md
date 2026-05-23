@@ -2,13 +2,31 @@
 
 AI-Worker is a voice-first, local-first intelligent assistant workspace that runs directly on your desktop. It integrates seamlessly with external tools using the Model Context Protocol (MCP) and automates tasks directly on your computer.
 
-![AI-Worker hub workspace](screenshots/ai-worker-hub-guide.png)
-
 ---
 
 ## 🧭 Workspace Overview
 
 The Hub Chat view is the default workspace. Use the left sidebar to move between chat, MCP connections, and settings. The center prompt cards are ready-made workflows for common agent tasks, while the bottom composer accepts text, files, workspace folders, voice input, and visible browser-run controls.
+
+![AI-Worker hub chat](screenshots/ai-worker-hub-chat.png)
+
+### MCP Connections
+
+Use the MCP Connections view to inspect configured tool servers, check connection status, and add new integrations.
+
+![AI-Worker MCP connections](screenshots/ai-worker-mcp-connections.png)
+
+### Hub Settings
+
+Use Hub Settings to configure model providers, speech recognition, memory, browser automation, appearance, auditing, and feature flags.
+
+![AI-Worker hub settings](screenshots/ai-worker-hub-settings.png)
+
+### Command Palette
+
+Press `Cmd+K` or `Ctrl+K` to open the command palette for navigation and quick actions.
+
+![AI-Worker command palette](screenshots/ai-worker-command-palette.png)
 
 ---
 
