@@ -2,6 +2,14 @@
 
 AI-Worker is a voice-first, local-first intelligent assistant workspace that runs directly on your desktop. It integrates seamlessly with external tools using the Model Context Protocol (MCP) and automates tasks directly on your computer.
 
+![AI-Worker hub workspace](screenshots/ai-worker-hub-guide.png)
+
+---
+
+## 🧭 Workspace Overview
+
+The Hub Chat view is the default workspace. Use the left sidebar to move between chat, MCP connections, and settings. The center prompt cards are ready-made workflows for common agent tasks, while the bottom composer accepts text, files, workspace folders, voice input, and visible browser-run controls.
+
 ---
 
 ## 🎤 Voice-First Interface
