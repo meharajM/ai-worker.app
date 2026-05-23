@@ -66,7 +66,7 @@ Before installing, ensure your environment meets these version requirements:
      ```bash
      npm run build:mac:intel
      ```
-3. The packaged app will be available under the `dist/` directory as a DMG and ZIP.
+3. The packaged ZIP will be available under the `dist/` directory.
 
 ### Linux Installation
 

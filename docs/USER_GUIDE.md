@@ -70,7 +70,7 @@ If you prefer larger LLMs or lack GPU hardware:
 AI-Worker includes a built-in messenger bridge powered by Baileys.
 
 ### Setting up WhatsApp
-1. Click the **WhatsApp** tab in the sidebar.
+1. Open **MCP Connections** or click **Connect WhatsApp** from the Hub Chat view.
 2. Scan the generated QR code using your WhatsApp mobile app (Linked Devices).
 3. Once authenticated, the agent can interact with your chat list, read incoming notifications, and execute text generation drafts.
 

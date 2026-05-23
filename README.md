@@ -7,7 +7,7 @@
 [![Platform Support](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-AI-Worker is a **voice-first desktop agent workspace** built on the **Model Context Protocol (MCP)**. It serves as an advanced sandbox environments for developers and power users to engineer workflows using on-device models or cloud APIs. By implementing modular structures across **Prompt Engineering**, **Context Engineering**, and **Harness/Tool Engineering**, AI-Worker bridges local desktop systems with powerful AI models securely and efficiently.
+AI-Worker is a **voice-first desktop agent workspace** built on the **Model Context Protocol (MCP)**. It serves as an advanced sandboxed environment for developers and power users to engineer workflows using on-device models or cloud APIs. By implementing modular structures across **Prompt Engineering**, **Context Engineering**, and **Harness/Tool Engineering**, AI-Worker bridges local desktop systems with powerful AI models securely and efficiently.
 
 ## Screenshots
 
@@ -170,7 +170,7 @@ ai-worker.app/
 │   ├── main/          # Electron backend, native system drivers, SQLite, process runners
 │   ├── preload/       # Security context bridges (exposes secure IPC hooks only)
 │   ├── renderer/      # React frontend application UI and local Web-LLM controllers
-│   └── agents/        # Intent analysis, prompt compilers, context pruners, loop managers
+│   └── renderer/src/lib/agent/ # Intent analysis, orchestration, and tool execution services
 ├── docs/              # Guides, proposals, setup manuals, screenshots
 ├── tests/             # Playwright test scripts, E2E validation flows, mock engines
 ├── scripts/           # Platform dependent configuration bootstrapping

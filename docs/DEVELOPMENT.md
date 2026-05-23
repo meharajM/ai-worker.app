@@ -8,7 +8,7 @@ AI-Worker is built using **Electron**, **React**, **TypeScript**, and **Vite**.
 - **`src/main/`**: Node.js backend. Manages the Electron browser window lifecycles, configuration stores, native processes (such as MCP client runtimes), speech model servers, and local SQLite data.
 - **`src/preload/`**: The security gateway. Exposes APIs to the renderer using Electron's `contextBridge`.
 - **`src/renderer/`**: The frontend UI. Built using React, TailwindCSS, Lucide icons, and Radix UI elements.
-- **`src/agents/`**: Core AI agent implementations, handling prompt assembly, tools integration, and conversational loop states.
+- **`src/renderer/src/lib/agent/`**: Core agent orchestration, tool execution, and conversational loop state services.
 
 ---
 

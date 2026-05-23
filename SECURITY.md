@@ -4,13 +4,13 @@ AI-Worker takes security and privacy seriously. As a desktop application built o
 
 ## Secure-by-Default Architecture
 
-To protect against cross-site scripting (XSS), remote code execution (RCE), and host-level vulnerabilities, AI-Worker adheres to the following secure architecture rules:
+To protect against cross-site scripting (XSS), remote code execution (RCE), and host-level vulnerabilities, AI-Worker follows these secure architecture rules. Any exception must be documented in code and scoped to the feature that requires it.
 
 ### 1. BrowserWindow Context Boundaries
-Every `BrowserWindow` created or modified must use these `webPreferences` configuration options:
+Every `BrowserWindow` created or modified should be reviewed against these `webPreferences` defaults:
 - **`contextIsolation: true`**: Isolates renderer JS execution contexts. This prevents renderer scripts from accessing the preload or Node.js scopes directly.
 - **`nodeIntegration: false`**: Ensures renderer-side scripts (including third-party dependencies) do not have direct access to Node.js APIs like `fs`, `child_process`, or `path`.
-- **`sandbox: true`**: Runs renderer processes in a restricted operating system sandbox.
+- **`sandbox: true` where compatible**: Runs renderer processes in a restricted operating system sandbox. If a local model, worker, or file-access workflow requires an exception, document the reason and keep `contextIsolation` enabled.
 
 ### 2. The Preload Script Gate
 The preload script acts as the **sole** secure bridge between the Renderer process and the Main process. 
