@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/meharajM/ai-worker.app/security/advisories/new
+    about: Please report vulnerabilities privately. If private reporting is unavailable, see SECURITY.md.
+  - name: Setup guide
+    url: https://github.com/meharajM/ai-worker.app/blob/main/docs/setup.md
+    about: Read local setup and troubleshooting guidance before opening an install issue.

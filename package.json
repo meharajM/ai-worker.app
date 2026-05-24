@@ -1,11 +1,35 @@
 {
     "name": "ai-worker",
     "version": "0.1.2",
-    "description": "Voice-first desktop workspace with MCP integration",
+    "description": "Open-source voice-first desktop AI workspace for MCP tools, local files, browser automation, and provider-agnostic LLM workflows.",
     "main": "./out/main/index.js",
     "author": "AI-Worker Team",
     "homepage": "https://ai-worker.tech",
     "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/meharajM/ai-worker.app.git"
+    },
+    "bugs": {
+        "url": "https://github.com/meharajM/ai-worker.app/issues"
+    },
+    "keywords": [
+        "ai-worker",
+        "ai-assistant",
+        "desktop-ai",
+        "electron",
+        "mcp",
+        "model-context-protocol",
+        "llm",
+        "agent-workspace",
+        "voice-interface",
+        "browser-automation",
+        "local-first",
+        "ollama",
+        "openai",
+        "gemini",
+        "playwright"
+    ],
     "engines": {
         "node": ">=22.12.0"
     },

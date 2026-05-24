@@ -1,39 +1,50 @@
-# Description
+## Summary
 
-Please include a summary of the changes and the related issue. Please also include relevant motivation and context.
+Describe what changed and why.
 
-## Automatic Tagging
+Fixes #
 
-If this PR should trigger a new version tag automatically upon merging to `main`, please ensure the PR title starts with one of the following keywords:
+## Type Of Change
 
-- `major: {changes info}`: Triggers a **Major** version bump (e.g., v1.x.x -> v2.0.0)
-- `minor: {changes info}`: Triggers a **Minor** version bump (e.g., v1.2.x -> v1.3.x)
-- `patch: {changes info}`: Triggers a **Patch** version bump (e.g., v1.2.3 -> v1.2.4)
+- [ ] Bug fix
+- [ ] Feature
+- [ ] Documentation
+- [ ] Refactor
+- [ ] Build, packaging, or release
+- [ ] Security-sensitive change
 
-> [!NOTE]
-> The keyword must be at the very beginning of the title, followed by a colon.
+## Validation
 
-## Type of Change
+List the checks you ran and the result.
 
-- [ ] Bug fix (non-breaking change which fixes an issue)
-- [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] This change requires a documentation update
+- [ ] `npm run lint`
+- [ ] `npm run typecheck`
+- [ ] `npm run build`
+- [ ] `npm run test:mock`
+- [ ] Manual test
 
-# How Has This Been Tested?
+## Screenshots
 
-Please describe the tests that you ran to verify your changes.
+Attach screenshots or recordings for UI changes.
 
-- [ ] Mock Test
-- [ ] Manual Test
+## Release Notes
 
-# Checklist:
+Should this be mentioned in `CHANGELOG.md`?
 
-- [ ] My code follows the style guidelines of this project
-- [ ] I have performed a self-review of my code
-- [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation
-- [ ] My changes generate no new warnings
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally with my changes
-- [ ] Any dependent changes have been merged and published in downstream modules
+- [ ] Yes
+- [ ] No
+
+## Version Tagging
+
+The auto-tag workflow currently runs when a PR is merged into `prod`. If this PR should create a version tag, start the PR title with one of:
+
+- `major:`
+- `minor:`
+- `patch:`
+
+## Checklist
+
+- [ ] I kept the change focused.
+- [ ] I updated docs for user-facing behavior or setup changes.
+- [ ] I removed secrets, tokens, and private data from logs/screenshots.
+- [ ] I noted known gaps or follow-up work.

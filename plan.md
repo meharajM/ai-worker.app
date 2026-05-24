@@ -1,581 +1,211 @@
-# AI-Worker: Detailed Development & Handoff Plan
-
-AI-Worker is a voice-first desktop workspace that uses the Model Context Protocol (MCP) to bridge LLMs with local tools and files.
-
-## 🎯 Architecture & Tech Stack
-
-- **Framework:** Electron (Main process for system/MCP integration, Renderer for UI)
-- **Build Tool:** electron-vite
-- **Frontend:** React + TypeScript + Tailwind CSS
-- **Icons:** Lucide-React
-- **MCP Client:** @modelcontextprotocol/sdk
-- **Voice:** Web Speech API (STT), SpeechSynthesis API (TTS)
-- **Storage:** electron-store (cross-platform)
-- **Auth:** Firebase Auth with Google Sign-in (feature-flagged)
-- **Environment:** fix-path (for GUI-launched PATH resolution)
-- **Zero Trust:** Privacy-focused, no central data collection
-
----
-
-## 🚩 Feature Flags (constants.ts)
-
-```typescript
-export const FEATURE_FLAGS = {
-  AUTH_ENABLED: false, // Flip to true when Firebase is configured
-  RATE_LIMITING_ENABLED: false, // Flip to true when auth is ready
-  TTS_ENABLED: true, // Text-to-speech readout
-  BROWSER_LLM_ENABLED: true, // Try Gemini Nano / Phi first
-  OLLAMA_ENABLED: true, // Local Ollama models
-  CLOUD_LLM_ENABLED: true, // OpenAI-compatible APIs
-};
-
-export const RATE_LIMITS = {
-  ANONYMOUS: {
-    CHATS_PER_DAY: 10,
-    MCP_OPERATIONS_PER_HOUR: 20,
-  },
-  AUTHENTICATED: {
-    CHATS_PER_DAY: Infinity,
-    MCP_OPERATIONS_PER_HOUR: Infinity,
-  },
-};
-```
-
----
-
-## 📁 Project Structure
-
-```text
-ai-worker-app/
-├── src/
-│   ├── main/
-│   │   ├── index.ts
-│   │   ├── ipc/
-│   │   │   ├── index.ts
-│   │   │   ├── app.ts
-│   │   │   ├── mcp.ts
-│   │   │   ├── llm.ts
-│   │   │   └── store.ts
-│   │   └── utils/
-│   │       └── env.ts
-│   ├── preload/
-│   │   └── index.ts
-│   └── renderer/
-│       └── src/
-│           ├── App.tsx
-│           ├── components/
-│           │   ├── ChatView.tsx
-│           │   ├── VoiceInput.tsx
-│           │   ├── ConnectionsPanel.tsx
-│           │   ├── SettingsPanel.tsx
-│           │   ├── Header.tsx
-│           │   ├── Sidebar.tsx
-│           │   └── mcp/
-│           │       ├── McpServerCard.tsx
-│           │       └── McpServerForm.tsx
-│           ├── hooks/
-│           │   ├── useSpeechRecognition.ts
-│           │   └── useSpeechSynthesis.ts
-│           ├── lib/
-│           │   ├── constants.ts
-│           │   ├── electron.ts
-│           │   ├── firebase.ts
-│           │   ├── llm.ts
-│           │   └── mcp.ts
-│           └── stores/
-│               ├── chatStore.ts
-│               ├── authStore.ts
-│               └── settingsStore.ts
-```
-
----
-
-## 🗺️ Implementation Phases (with Validation)
-
-### ✅ Phase 1: Project Setup [COMPLETED]
-
-- [x] Electron + React + TypeScript + Tailwind scaffold
-- [x] Base UI with sidebar navigation
-- [x] electron-vite build system
-- **Validation:** `npm run dev` shows UI ✅
-
----
+# AI-Worker Open Source Visibility Plan
 
-### ✅ Phase 2: Voice & Text Input [COMPLETED]
+## Objective
 
-**Goal:** User can speak or type messages, app displays them
+Make AI-Worker credible, discoverable, and easy to adopt as an open source project. The repository should quickly answer what the product does, how to run it, how to contribute, how to report issues safely, and why the project is worth trying.
 
-**Implementation:**
+## Current Status
 
-- [x] Create `src/renderer/src/lib/constants.ts` (feature flags, rate limits)
-- [x] Create `src/renderer/src/hooks/useSpeechRecognition.ts`
-- [x] Create `src/renderer/src/hooks/useSpeechSynthesis.ts`
-- [x] Create `src/renderer/src/components/VoiceInput.tsx` (mic + text input)
-- [x] Update `App.tsx` to use VoiceInput component
-- [x] Add mute toggle for TTS
+Completed in the open-source readiness pass:
 
-**Validation:** ✅
+- Rewrote `README.md` into a product-first entrypoint with screenshots, quick start, docs links, contribution links, release notes, CI notes, and license.
+- Added `LICENSE` matching the MIT declaration in `package.json`.
+- Added `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, and `CHANGELOG.md`.
+- Added GitHub issue templates for bug reports and feature requests.
+- Updated `.github/pull_request_template.md` to focus on summary, validation, screenshots, release notes, and version tagging.
+- Expanded `package.json` metadata with repository, issue tracker, and search keywords.
+- Added `docs/setup.md` and `docs/usage.md`.
+- Added `docs/README.md` as a documentation index.
+- Added `docs/launch-checklist.md` for GitHub settings, launch copy, topics, and post-launch follow-up.
+- Added real screenshots under `docs/screenshots/`.
+- Added `.env.r2.example` so documented release setup commands resolve.
 
-- [x] Click mic → speak → see transcript appear
-- [x] Type in text field → press Enter → see message
-- [x] Mute toggle disables voice readout
+Still open before a wider public launch:
 
----
+- Review dependency audit findings and decide the upgrade path.
+- Confirm `team@aiworker.app` is the correct public security and conduct contact.
+- Fix or formally document the Electron development startup issue.
+- Set GitHub repository description, website, topics, labels, private vulnerability reporting, and social preview image in GitHub settings.
+- Align branch and release docs around `main` versus `prod`.
+- Clean up or relocate crowded root-level internal markdown files.
 
-### ✅ Phase 3: Chat Messages & State [COMPLETED]
+## Success Criteria
 
-**Goal:** Display chat history, persist messages
+- A new visitor can understand AI-Worker within 30 seconds from the README.
+- A user can install or run the project from documented steps.
+- A contributor can find contribution rules, issue paths, PR expectations, and security reporting instructions.
+- GitHub and npm metadata expose the project clearly for search and indexing.
+- Root docs and linked docs have no broken local references.
+- The repository looks maintained, safe to evaluate, and ready to share publicly.
 
-**Implementation:**
+## Workstreams
 
-- [x] Create `src/renderer/src/stores/chatStore.ts` (zustand)
-- [x] Create `src/renderer/src/components/ChatView.tsx`
-- [x] Create `src/renderer/src/components/MessageBubble.tsx`
-- [x] Integrate chat store with VoiceInput
-- [x] Persist chat history to localStorage (zustand persist)
+### 1. Legal And Project Identity
 
-**Validation:** ✅
+Status: mostly complete.
 
-- [x] Send message → appears in chat
-- [x] Restart app → chat history preserved
-- [x] Clear chat button works
+Completed:
 
----
+- Added root `LICENSE`.
+- Kept `package.json` license as `MIT`.
+- Standardized the public project name as `AI-Worker`.
 
-### ✅ Phase 4: LLM Integration [COMPLETED]
+Remaining:
 
-**Goal:** Get AI responses from available LLM providers
+- Confirm copyright holder wording.
+- Confirm `https://ai-worker.tech` is the canonical homepage.
 
-**Implementation:**
+### 2. README And Product Proof
 
-- [x] Create `src/renderer/src/lib/llm.ts` (LLM orchestrator)
-- [x] Implement Ollama client (qwen2.5:3b default)
-- [x] Implement OpenAI-compatible client
-- [x] Create provider auto-selection logic
-- [x] LLM status indicator in header
-- [x] Settings panel with API key input
+Status: mostly complete.
 
-**Validation:** ✅
+Completed:
 
-- [x] Provider status shows in UI header
-- [x] Settings shows LLM configuration options
-- [x] API key can be saved for OpenAI
+- Moved the README from release-first to product-first.
+- Embedded screenshots near the top and throughout the README.
+- Added quick start, usage, docs, contribution, project status, release, CI, and license sections.
+- Removed the stale `TESTING.md` reference.
 
----
+Remaining:
 
-### ✅ Phase 5: MCP Client [COMPLETED]
+- Review README rendering on GitHub after push.
+- Add a short demo GIF or video if one is created.
+- Add public download links once release artifacts are confirmed.
 
-**Goal:** Connect to MCP servers, execute tools
+### 3. Setup, Usage, And Docs
 
-**Implementation:**
+Status: mostly complete.
 
-- [x] Create `src/renderer/src/lib/mcp.ts` (MCP client manager)
-- [x] Create `src/renderer/src/components/ConnectionsPanel.tsx`
-- [x] Pre-configured templates (File System, GitHub, Drive, etc.)
-- [x] Custom server connection UI
-- [x] Server connect/disconnect functionality
-- [x] Server list with status indicators
+Completed:
 
-**Validation:** ✅
+- Added `docs/setup.md`.
+- Added `docs/usage.md`.
+- Added `docs/README.md`.
+- Added screenshot assets under `docs/screenshots/`.
+- Added `docs/launch-checklist.md`.
 
-- [x] Add Server dropdown shows templates
-- [x] Add File System → appears in list
-- [x] Connection status indicators work
+Remaining:
 
----
+- Validate all setup commands after the Electron startup issue is resolved.
+- Decide whether older internal docs should move under a clearer `docs/internal/` or `docs/archive/` structure.
 
-### ✅ Phase 6: Settings Panel [COMPLETED]
+### 4. Community And Governance
 
-**Goal:** User can configure app settings
+Status: mostly complete.
 
-**Implementation:**
+Completed:
 
-- [x] Create `src/renderer/src/stores/settingsStore.ts`
-- [x] Create `src/renderer/src/components/SettingsPanel.tsx`
-- [x] LLM provider selection UI
-- [x] Voice settings (TTS toggle, voice selection)
-- [x] Theme switching (dark/light)
-- [x] Persist settings to electron-store
+- Added `CONTRIBUTING.md`.
+- Added `CODE_OF_CONDUCT.md`.
+- Added `SECURITY.md`.
+- Added `CHANGELOG.md`.
+- Added issue templates.
+- Refined PR template.
 
-**Validation:** ✅
+Remaining:
 
-- [x] Change LLM provider → new provider used
-- [x] Toggle TTS → voice enabled/disabled
-- [x] Switch theme → UI updates
-- [x] Restart app → settings preserved
+- Confirm the public contact email.
+- Add repository labels in GitHub settings.
+- Pin good first issues after the first public issue pass.
 
----
+### 5. Metadata And Indexing
 
-### ✅ Phase 7: Auth & Rate Limiting (Feature-Flagged) [COMPLETED]
+Status: mostly complete for repo files.
 
-**Goal:** Optional sign-in, rate limiting for anonymous users
+Completed:
 
-**Implementation:**
+- Updated `package.json` description.
+- Added `repository`.
+- Added `bugs`.
+- Added discoverability keywords.
 
-- [x] Create `src/renderer/src/lib/firebase.ts` (placeholder config)
-- [x] Create `src/renderer/src/stores/authStore.ts`
-- [x] Create `src/renderer/src/components/AuthModal.tsx`
-- [x] Implement rate limiting logic (checks feature flag)
-- [x] Usage tracking (local storage)
-- [x] Auth status in Settings panel
+Remaining:
 
-**Validation:** ✅
+- Add `funding` if there is a funding URL.
+- Add `CITATION.cff` only if the project targets academic or research citation.
+- Set GitHub topics manually.
 
-- [x] AUTH_ENABLED=false → no sign-in UI shown
-- [x] AUTH_ENABLED=true → sign-in button appears
-- [x] RATE_LIMITING_ENABLED=true → limits enforced
-- [x] Authenticated user → no limits
+Recommended GitHub topics:
 
----
+- `ai`
+- `ai-assistant`
+- `desktop-ai`
+- `electron`
+- `mcp`
+- `model-context-protocol`
+- `llm`
+- `agent`
+- `voice-interface`
+- `browser-automation`
+- `ollama`
+- `openai`
+- `gemini`
+- `playwright`
+- `local-first`
 
-### ✅ Phase 8: Polish & Cross-Platform [COMPLETED]
+### 6. Security And Dependency Readiness
 
-**Goal:** Production-ready app
+Status: needs follow-up.
 
-**Implementation:**
+Known issues:
 
-- [x] Error handling & loading states
-- [x] Keyboard shortcuts
-- [x] Cross-platform testing (Mac, Windows, Linux)
-- [x] Build & packaging setup
-- [x] Auto-update setup
-- [x] Fix Content Security Policy (CSP) for Electron
-- [x] Implement IPC handlers for system operations
+- `npm install --package-lock-only --ignore-scripts` reported `37 vulnerabilities`: `1 low`, `10 moderate`, `25 high`, and `1 critical`.
+- `npm audit --omit=dev --audit-level=critical` reported `21 production dependency vulnerabilities`: `8 moderate`, `12 high`, and `1 critical`.
+- The critical production finding is in `protobufjs`, reached through the WhatsApp/libsignal dependency chain.
+- High production findings include Electron, `@modelcontextprotocol/sdk`, Axios, Hono, lodash, minimatch, and related transitive packages.
 
-**Validation:** ✅
+Tasks:
 
-- [x] All features work on Mac (DMG built)
-- [x] All features work on Windows (EXE built)
-- [x] All features work on Linux (AppImage/Deb built)
-- [x] Cross-compilation: Windows builds on Linux supported via Wine
-  - `install_build_deps.sh`: Installs Wine dependencies
-  - `fix_wine_env.sh`: Troubleshoots/Resets Wine environment
-  - `check:wine`: Pre-build check in package.json
+- Run `npm audit` and classify findings by production impact.
+- Avoid blind `npm audit fix --force` unless the breaking changes are reviewed.
+- Prioritize production dependencies and Electron-related exposure.
+- Document any accepted risk before public launch.
 
----
+### 7. GitHub Surface Polish
 
-### ✅ Phase 9: Real MCP Client [COMPLETED]
+Status: requires repository settings access.
 
-**Goal:** Replace mock MCP with real SDK + Generic "Add Connection"
+Manual tasks:
 
-**Implementation:**
+- Set repository description.
+- Set website URL.
+- Add topics.
+- Upload social preview image.
+- Enable private vulnerability reporting if available.
+- Create labels such as `good first issue`, `help wanted`, `bug`, `docs`, `security`, `mcp`, and `needs-triage`.
 
-- [x] Install `@modelcontextprotocol/sdk`
-- [x] Implement IPC handlers for MCP in `src/main/index.ts`
-- [x] Verify `src/preload/index.ts` bridge
-- [x] Update `src/renderer/src/lib/mcp.ts` to use IPC
-- [x] Remove mock templates
-- [x] Create generic "Add Connection" form (Stdio & SSE supported)
+### 8. Branch And Release Alignment
 
-**Validation:** ✅
+Status: needs decision.
 
-- [x] UI allows adding `stdio` server (command + args)
-- [x] UI allows adding `sse` server (URL)
-- [x] Connection state managed via Electron IPC
+Current mismatch:
 
----
+- CI runs on `main` and `prod`.
+- Auto-tagging runs on PR merges into `prod`.
+- Older docs and templates referenced `main` for tagging.
 
-### ✅ Phase 10: Robustness & DX [COMPLETED]
+Tasks:
 
-**Goal:** Fix runtime environment issues and enhance server management
+- Decide whether `main` or `prod` is the public release branch.
+- Update README, PR template, and workflows to use the same language.
+- Keep local R2 publishing docs if releases remain local-first.
 
-**Implementation:**
+## Next Execution Order
 
-- [x] Fix ESM compatibility in main process (`__dirname` shim)
-- [x] Integrate `fix-path` for GUI environmental variables
-- [x] Implement actionable MCP error messages (installation instructions)
-- [x] Add "Edit Configuration" capability for existing servers
-- [x] Enhance Stdio transport with inherited stderr for easier debugging
+1. Audit and triage dependency vulnerabilities.
+2. Fix or document the Electron startup issue.
+3. Confirm public maintainer/security contact.
+4. Push the open-source readiness files and inspect GitHub rendering.
+5. Set GitHub description, topics, labels, vulnerability reporting, and social preview.
+6. Resolve `main` versus `prod` release language.
+7. Clean up root-level internal markdown docs.
 
-**Validation:** ✅
+## Definition Of Done
 
-- [x] App launches correctly in ESM mode
-- [x] `npx` and `python3` found in PATH even when launched from GUI
-- [x] Non-technical users see install commands for missing dependencies
-- [x] Servers can be updated without re-creating them
-
----
-
-### ✅ Phase 11: Code Refactoring & Architecture Improvement [COMPLETED]
-
-**Goal:** Improve code maintainability, modularity, and developer experience
-
-**Implementation:**
-
-- [x] Modularize IPC handlers into separate files (`src/main/ipc/`)
-  - [x] `app.ts` - App info and shell operations
-  - [x] `mcp.ts` - MCP connection and tool management
-  - [x] `llm.ts` - LLM operations (placeholder for future main-process LLM)
-  - [x] `store.ts` - Storage operations
-  - [x] `index.ts` - Central IPC handler registration
-- [x] Extract UI components for better reusability
-  - [x] `Header.tsx` - App header with LLM status indicator
-  - [x] `Sidebar.tsx` - Navigation sidebar with view switching
-  - [x] `McpServerCard.tsx` - Individual MCP server card with expand/collapse
-  - [x] `McpServerForm.tsx` - Reusable form for adding/editing MCP servers
-- [x] Centralize environment utilities
-  - [x] `src/main/utils/env.ts` - ESM shims and PATH fixing initialization
-- [x] Simplify `ConnectionsPanel.tsx` (reduced from 355+ lines to manageable size)
-- [x] Refactor `App.tsx` to use new modular components
-- [x] Add `fix-path` dependency for cross-platform PATH handling
-
-**Validation:** ✅
-
-- [x] All IPC handlers work correctly after modularization
-- [x] UI components render and function properly
-- [x] MCP server management UI is more intuitive and maintainable
-- [x] Code is easier to navigate and extend
-- [x] No functionality regressions
-
----
-
-### ✅ Phase 12: Feature Flag Enhancements [COMPLETED]
-
-**Goal:** Enhance feature flag system with dynamic controls and validation
-
-**Implementation:**
-- [x] Create `src/renderer/src/components/FeatureFlagsPanel.tsx` for dev-mode flag toggling
-- [x] Implement dynamic flag system in `src/renderer/src/lib/flagSystem.ts`
-- [x] Validate and fix TTS_ENABLED reactivity in `useSpeechSynthesis.ts`
-- [x] Implement BROWSER_LLM_ENABLED in `llm.ts`
-- [x] Ensure voice panel availability in prod mode
-- [x] Link TTS controls (toggle, rate, pitch) to settingsStore
-
-**Validation:** ✅
-- [x] All 6 flags validated and functional
-- [x] TTS controls work in prod mode
-- [x] Typecheck and dev run pass with no errors
-- [x] MCP testing confirms TTS functionality
-
----
-
-### ✅ Phase 13: Advanced LLMs & Technical Inspector [COMPLETED]
-
-**Goal:** Support for high-tier models (Gemini, Claude via OpenRouter) and technical auditing.
-
-**Implementation:**
-- [x] Integrate **Google Gemini** (Native API support with multi-turn tool calling)
-- [x] Integrate **OpenRouter** (Unified access to Claude, Llama 3, etc.)
-- [x] Implement "Easy Config" UI with helper links for API keys
-- [x] Refactor logging to **Filesystem-based JSONL** storage
-- [x] Create **Activity Timeline** for technical payload inspection (Inspector with Copy/JSON)
-
-**Validation:** ✅
-- [x] Gemini/OpenRouter models fetch and call successfully
-- [x] Logs persist across restarts in `userData/logs/`
-- [x] Raw JSON payloads visible in technical inspector
-
----
-
-### ✅ Phase 14: Security Hardening & User Scoping [COMPLETED]
-
-**Goal:** Implement robust data isolation for multi-user safety.
-
-**Implementation:**
-- [x] Implement `safeStorage` encryption for API keys (`src/main/ipc/secure.ts`)
-- [x] Block sensitive keys from general store access (`src/main/ipc/store.ts`)
-- [x] Update `settingsStore` to use secure storage for all API keys
-- [x] Add `.env` to `.gitignore` to prevent accidental secret commits
-- [x] User-scoped secrets with proper login/logout handling
-
-**Validation:** ✅
-- [x] API keys encrypted at rest using OS keychain
-- [x] General store blocks access to sensitive keys
-- [x] TypeScript compilation passes
-
----
-
-### ✅ Phase 15: Agent Refactor & DCP [COMPLETED]
-
-**Goal:** Transition to native tool-calling planning and implement context optimization.
-
-**Implementation:**
-- [x] Implement `AgentRuntime` for robust iteration loop
-- [x] Integrate `create_execution_plan` as the primary orchestrator
-- [x] Implement **Dynamic Context Pruning (DCP)** to save tokens
-- [x] Redesign Tool UI as "Action Steps" (Agent-centric view)
-- [x] Add `safeParseJSON` for robust tool argument parsing
-
-**Validation:** ✅
-- [x] Complex tasks (Browser + File) execute autonomously
-- [x] UI displays granular steps instead of raw bubbles
-- [x] Context window bloat prevented by DCP
-
----
-
-### ✅ Phase 17: RPI Workflow + Sub-Agent Integration [COMPLETED]
-
-**Goal:** Implement intelligent task decomposition and automatic sub-agent spawning.
-
-**Implementation:**
-- [x] Create `task-decomposer.ts` module for task analysis
-- [x] Implement URL/website detection logic
-- [x] Implement action keyword counting
-- [x] Add auto-fork logic to `AgentRuntime.chat()`
-- [x] Implement `executeParallelSubAgents()` for multi-website tasks
-- [x] Update system prompt with sub-agent decomposition rules
-- [x] Create browser comparison document (`proposal/browser.md`)
-
-**Key Features:**
-- **Multi-website detection** → Parallel sub-agents (1 per site)
-- **Single-site, 3+ actions** → Sub-agent to protect context
-- **Simple tasks** → Direct execution (no fork overhead)
-
-**Files Changed:**
-- `src/renderer/src/lib/task-decomposer.ts` (NEW)
-- `src/renderer/src/lib/agent-runtime.ts` (+90 lines)
-- `src/renderer/src/lib/llm.ts` (+12 lines)
-
-**Validation:** ✅
-- [x] TypeScript compilation passes for new files
-- [x] Build verified in user terminal
-- [x] Documentation updated
-### ✅ Phase 15: Internal Automation (Playwright) [COMPLETED]
-
-**Goal:** Implement internal zero-latency browser automation via Playwright with advanced detection evasion.
-
-**Implementation:**
-- [x] Implement **Internal Playwright Service** (`src/main/services/PlaywrightService.ts`) for zero-latency automation
-- [x] Add E2E tests for all Playwright tools (`tests/playwright_tools_test.cjs`)
-- [x] Expose 30+ automation tools (navigate, click, fill, screenshot, etc.) directly via main process
-- [x] Implement **Advanced Headless Evasion** in `BrowserManager` (Stealth flags, Web-Security bypass, timezone mocking)
-- [x] Implement **Human-like Inputs** using `ghost-cursor` and variable typing delays in `ClickTool` and `TypeTool`
-
-**Validation:** ✅
-- [x] Playwright tools execute successfully in E2E tests
-- [x] Zero-latency automation and Stealth capability verified
-
----
-
-### ✅ Phase 18: Prompt Engineering & Usability [COMPLETED]
-
-**Goal:** Enhance AI communication style and task safety.
-
-**Implementation:**
-- [x] Update System Prompt for simple, friendly, global-first language
-- [x] Add critical rule for taking screenshots on visual states
-- [x] Enhance `confirmation-message.ts` with checks for missing preferences and high-risk tasks
-- [x] Add "Suggestions" support for task clarification
-
-**Validation:** ✅
-- [x] AI uses natural language without jargon
-- [x] Shopping/Booking tasks trigger confirmation if details missing
-- [x] High-risk tasks (payment/OTP) flagged for confirmation
-
-
----
-
-### ✅ Phase 19: General Purpose Transformation [COMPLETED]
-
-**Goal:** Transform the agent into a "Universal WorkFlow Buddy" capable of handling any task type safely.
-
-**Implementation:**
-- [x] Implement **Dynamic Prompt Injection** in `llm.ts`
-- [x] Create **Prompt Library** (`prompt-library.ts`) for task-specific instructions
-- [x] Implement **Task Categorization** (Shopping, Research, Admin, General)
-- [x] Update Sub-Agents to inherit parent safety contexts
-- [x] Add **Automatic CAPTCHA Solving** with fallback
-- [x] Implement strict **Spending Money Protocol** and **Human-Like Behavior** rules
-
-**Validation:** ✅
-- [x] Architecture verification passed (No side effects)
-- [x] General purpose tasks execute without bias
-- [x] Safety protocols trigger correctly on sensitive tasks
-
-### 🚀 Phase 16: App Launch Preparation [IN PROGRESS]
-
-**Goal:** Finalize distribution, assets, and production stability.
-
-**Implementation:**
-- [ ] **Visual Identity**: Design app icon (ICNS/ICO) and splash screen
-- [ ] **Build Optimization**: Minimizing bundle size and verifying production CSP
-- [ ] **Universal Linux Support**: Testing .deb, .rpm, and AppImage builds
-- [ ] **Documentation**: Create "Quick Start" guide for new users
-- [ ] **Landing Page**: Basic static site with download links
-
-**Validation:**
-- [ ] Clean build on all 3 major platforms
-- [ ] Installer correctly sets up shortcuts and icons
-
----
-
-### 🚀 Phase 17: MCP Enhancements (Bundling & Preferences) [PLANNED]
-
-**Goal:** Ship key MCP servers out-of-the-box and provide dedicated preference management.
-
-**Implementation:**
-- [ ] **Bundled Servers**: Ensure Playwright, File System, and Memory MCP servers are bundled in the installer (via `mcp-bundled` launcher).
-- [ ] **MCP Preferences Tab**: Add a dedicated tab in Settings for server-specific configurations.
-- [ ] **Playwright Integration**: Add browser selector, extension token input, and extension download link.
-- [ ] **Containerized File Access**: Implement "Shadow Writes" for read-only directories (writes to staging, sync on user confirmation).
-- [ ] **Memory Manager**: Create a management UI for viewing, editing, and deleting knowledge graph entities.
-
-**Reference:** [mcp-implementation-plan.md](file:///home/mhrj/Desktop/ai-worker/mcp-implementation-plan.md)
-
----
-
-### 🏁 Phase 18: Distribution & V1 Launch
-
-**Goal:** Public release, auto-updates, and update mechanism.
-
-**Implementation:**
-- [ ] Set up GitHub Actions for automated multi-platform releases
-- [ ] Configure Code Signing (Apple Developer / Windows Certs)
-- [ ] Direct download server / S3 bucket setup
-- [ ] **Auto-Updater Implementation**
-  - [ ] Install `electron-updater` (already bundled with `electron-builder`)
-  - [ ] Configure `autoUpdater.checkForUpdatesAndNotify()` in main process
-  - [ ] Configure `publish` settings in `electron-builder` config (GitHub Releases provider)
-  - [ ] Add update notification UI (toast/dialog for "Update available, restart to apply")
-  - [ ] Test update flow: publish v0.1.1 → verify v0.1.0 auto-downloads and applies
-- [ ] Initial social launch (Product Hunt / Twitter)
-
----
-
-## 🎙️ Voice UX Specification
-
-- **Primary Input:** Push-to-talk (click to start/stop)
-- **Secondary Input:** Text field (always visible)
-- **Output:** Text display + TTS readout (with mute toggle)
-
----
-
-## 🧠 LLM Provider Priority
-
-1. **Browser LLMs** (Gemini Nano, Phi) - detect & use if available
-2. **Standard APIs** (OpenAI, Gemini, OpenRouter) - cloud-scale intelligence
-3. **Local LLMs** (Ollama: qwen2.5:3b) - privacy-focused fallback
-
----
-
-## 🔗 MCP Client
-
-- Connects to external MCP servers
-- **Default Servers**: Playwright and Sequential Thinking configured automatically on first run
-- Generic "Add Connection" supports any Stdio or SSE server
-- Form pre-fills with Sequential Thinking configuration for quick setup
-- Integrated configuration editor for quick updates
-- Built-in runtime dependency helper for Node/Python/UV
-- Automatic default server restoration (adds missing defaults on load)
-
----
-
-## 👤 Authentication (Feature-Flagged)
-
-- Firebase Auth + Google Sign-in
-- Works without login (anonymous mode)
-- Rate limiting for anonymous users (configurable)
-- Sign-in unlocks unlimited usage
-
----
-
-## 📍 Storage Locations
-
-- **macOS:** `~/Library/Application Support/ai-worker/`
-- **Windows:** `%APPDATA%/ai-worker/`
-- **Linux:** `~/.config/ai-worker/`
-
----
-
-**Current Status:** Phases 1-18 complete. RPI Workflow + Sub-Agent Auto-Fork system implemented. App Launch Preparation (Phase 16) is now the primary focus.
-
+- GitHub community profile shows README, license, contributing guide, code of conduct, security policy, and issue templates.
+- README renders with screenshots and clear setup/contribution paths.
+- Package metadata is complete enough for npm/GitHub discovery.
+- Security reporting is private and documented.
+- Dependency audit findings are triaged.
+- GitHub settings are updated for discovery and sharing.
+- Remaining known issues are documented honestly before public launch.

@@ -5,6 +5,7 @@
 .env
 .env.*
 !.env.example
+!.env.r2.example
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -56,6 +57,7 @@ resources/speech/speech_macos
 .env
 .env.*
 !.env.example
+!.env.r2.example
 
 # Logs
 *.log
