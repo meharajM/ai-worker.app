@@ -1,7 +1,7 @@
 {
     "name": "ai-worker",
     "version": "0.1.2",
-    "description": "Voice-first desktop workspace with Model Context Protocol (MCP) integration, optimized for prompt, context, and harness engineering.",
+    "description": "Open-source voice-first desktop AI workspace for MCP tools, local files, browser automation, and provider-agnostic LLM workflows.",
     "main": "./out/main/index.js",
     "author": "AI-Worker Team <team@aiworker.app>",
     "homepage": "https://ai-worker.tech",
@@ -14,8 +14,15 @@
         "url": "https://github.com/meharajM/ai-worker.app/issues"
     },
     "keywords": [
+        "ai-worker",
+        "ai-assistant",
+        "desktop-ai",
+        "electron",
         "model-context-protocol",
         "mcp",
+        "llm",
+        "agent-workspace",
+        "voice-interface",
         "prompt-engineering",
         "context-engineering",
         "harness-engineering",
