@@ -64,6 +64,16 @@ Start in `Hub Chat`, configure a model provider in `Hub Settings`, then use `MCP
 
 For a walkthrough of chat, speech, providers, MCP, WhatsApp, browser automation, and common workflows, see [docs/usage.md](./docs/usage.md).
 
+## Support The Project
+
+If AI-Worker is useful to you, please help more people find it:
+
+- Star the repository so builders looking for desktop AI, MCP, and local automation tools can discover it.
+- Share the project with people working on AI agents, browser automation, voice interfaces, or local-first LLM workflows.
+- Open issues for bugs, missing setup details, integration ideas, or documentation gaps.
+- Join Discussions to share workflows, questions, and examples.
+- Contribute docs, tests, examples, provider integrations, or MCP server improvements.
+
 ## Documentation
 
 - [Setup Guide](./docs/setup.md)
