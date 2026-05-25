@@ -414,7 +414,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                                 <h4 className="text-[var(--text-2xl)] font-[var(--font-weight-bold)] text-[var(--color-text-primary)]">{APP_INFO.NAME}</h4>
                                 <p className="text-[var(--text-sm)] text-[var(--color-text-muted)] mt-[var(--space-1)]">Version {APP_INFO.VERSION}</p>
                                 <p className="text-[var(--text-sm)] text-[var(--color-text-secondary)] mt-[var(--space-4)] max-w-sm mx-auto">
-                                    Voice-first desktop workspace with MCP integration. Built for AI-assisted productivity.
+                                    Desktop AI workspace with MCP integration. Built for AI-assisted productivity.
                                 </p>
                                 <div className="mt-[var(--space-6)] pt-[var(--space-4)] border-t border-[var(--color-border)]">
                                     <p className="text-[var(--text-xs)] text-[var(--color-text-dim)]">

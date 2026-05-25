@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 [![Community](https://img.shields.io/badge/community-guidelines-00b894.svg)](./CONTRIBUTING.md)
 
-AI-Worker is an open-source, voice-first desktop AI workspace for people who want one local hub for chat, files, browser automation, MCP tools, and provider-agnostic LLM workflows.
+AI-Worker is an open-source desktop AI workspace for people who want one local hub for chat, files, browser automation, MCP tools, and provider-agnostic LLM workflows.
 
 ![AI-Worker home screen](./docs/screenshots/chat-home.png)
 
@@ -16,7 +16,7 @@ Use it to coordinate research, document extraction, local file work, browser tas
 
 ## Features
 
-- Voice-first chat workspace with text input, file drag-and-drop, and workflow starter tiles.
+- Desktop chat workspace with text input, speech input, file drag-and-drop, and workflow starter tiles.
 - MCP connections for memory, filesystem access, MarkItDown document conversion, and browser automation.
 - Provider choices for Ollama, OpenAI-compatible APIs, Gemini, OpenRouter, auto mode, and on-device paths where available.
 - Offline/local Vosk speech recognition configuration.

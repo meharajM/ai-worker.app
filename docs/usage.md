@@ -87,7 +87,7 @@ Speech recognition details:
 Use this when:
 
 - you want hands-free prompting
-- you are testing voice-first workflows
+- you are testing speech-enabled workflows
 - you prefer local speech recognition over remote services
 
 ## Manage MCP Connections
