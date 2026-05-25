@@ -13,6 +13,7 @@ Start here if you are evaluating, installing, contributing to, or launching AI-W
 
 ## Screenshots
 
+- [Social preview](./social-preview.png)
 - [Home screen](./screenshots/chat-home.png)
 - [MCP connections](./screenshots/mcp-connections.png)
 - [LLM provider settings](./screenshots/settings-llm.png)
