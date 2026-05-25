@@ -9,7 +9,7 @@
 
 # AI-Worker: Problem Statement & Requirements
 
-AI-Worker is a voice-first desktop workspace designed to revolutionize productivity by integrating Large Language Models (LLMs) with everyday applications and files using the Model Context Protocol (MCP). We are currently in the active MVP development stage, providing high-performance orchestration via secure cloud-based LLM connectivity.
+AI-Worker is a desktop AI workspace designed to improve productivity by integrating Large Language Models (LLMs) with everyday applications and files using the Model Context Protocol (MCP). We are currently in the active MVP development stage, providing high-performance orchestration via secure cloud-based LLM connectivity.
 
 ---
 
@@ -35,7 +35,7 @@ A universal bridge using MCP to connect state-of-the-art LLMs (Cloud) to local a
 
 ## Functional Requirements
 
-### 1. Voice-First Interface
+### 1. Speech-Enabled Interface
 
 #### 1.1 Speech Recognition (STT)
 - ✅ **Push-to-talk voice input** - Click microphone button to start/stop recording

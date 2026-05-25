@@ -1,6 +1,6 @@
 # AI-Worker: Detailed Development & Handoff Plan
 
-AI-Worker is a voice-first desktop workspace that uses the Model Context Protocol (MCP) to bridge LLMs with local tools and files.
+AI-Worker is a desktop AI workspace that uses the Model Context Protocol (MCP) to bridge LLMs with local tools and files.
 
 ## 🎯 Architecture & Tech Stack
 
@@ -578,4 +578,3 @@ ai-worker-app/
 ---
 
 **Current Status:** Phases 1-18 complete. RPI Workflow + Sub-Agent Auto-Fork system implemented. App Launch Preparation (Phase 16) is now the primary focus.
-
