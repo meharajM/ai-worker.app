@@ -1,7 +1,7 @@
 {
     "name": "ai-worker",
     "version": "0.1.2",
-    "description": "Open-source voice-first desktop AI workspace for MCP tools, local files, browser automation, and provider-agnostic LLM workflows.",
+    "description": "Open-source desktop AI workspace for MCP tools, local files, browser automation, and provider-agnostic LLM workflows.",
     "main": "./out/main/index.js",
     "author": "AI-Worker Team <team@aiworker.app>",
     "homepage": "https://ai-worker.tech",
@@ -31,7 +31,7 @@
         "desktop-agent",
         "local-llm",
         "on-device-ai",
-        "voice-first",
+        "local-first",
         "browser-automation",
         "playwright",
         "whatsapp-integration"

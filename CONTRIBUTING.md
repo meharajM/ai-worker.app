@@ -4,7 +4,7 @@ First off, thank you for considering contributing to AI-Worker! It's people like
 
 ## Code of Conduct
 
-This project and everyone participating in it is governed by our [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to team@aiworker.app.
+This project and everyone participating in it is governed by our [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to contact@ai-worker.tech.
 
 ## How Can I Contribute?
 

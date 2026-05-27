@@ -1,6 +1,6 @@
 # User Guide 📖
 
-AI-Worker is a voice-first, local-first intelligent assistant workspace that runs directly on your desktop. It integrates seamlessly with external tools using the Model Context Protocol (MCP) and automates tasks directly on your computer.
+AI-Worker is a local-first intelligent assistant workspace that runs directly on your desktop. It integrates seamlessly with external tools using the Model Context Protocol (MCP) and automates tasks directly on your computer.
 
 ---
 
@@ -30,7 +30,7 @@ Press `Cmd+K` or `Ctrl+K` to open the command palette for navigation and quick a
 
 ---
 
-## 🎤 Voice-First Interface
+## 🎤 Speech Input
 
 AI-Worker allows you to command your workspace using natural speech.
 
