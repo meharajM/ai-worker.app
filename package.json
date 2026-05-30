@@ -34,7 +34,9 @@
         "local-first",
         "browser-automation",
         "playwright",
-        "whatsapp-integration"
+        "whatsapp-integration",
+        "openai",
+        "ollama"
     ],
     "engines": {
         "node": ">=22.12.0"
