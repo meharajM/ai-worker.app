@@ -516,18 +516,27 @@ ai-worker-app/
 
 ### 🏁 Phase 18: Distribution & V1 Launch
 
-**Goal:** Public release, auto-updates, and update mechanism.
+**Goal:** Public release with phased rollouts, rollback capabilities, and manual update mechanism initially.
 
 **Implementation:**
 - [ ] Set up GitHub Actions for automated multi-platform releases
-- [ ] Configure Code Signing (Apple Developer / Windows Certs)
+  - [ ] Configure release action to trigger on pushes to the `prod` branch
+- [ ] [DEFERRED] Configure Code Signing (Apple Developer / Windows Certs) - Wait until monetization or sponsorship
 - [ ] Direct download server / S3 bucket setup
-- [ ] **Auto-Updater Implementation**
+- [ ] **Controlled Rollout & Rollback Infrastructure**
+  - [ ] Configure feature flags / remote config for phased rollouts (e.g., target a percentage of users for new versions)
+  - [ ] Implement rollback mechanism (ability to quickly revert to a previous stable release or disable a broken update entirely)
+- [ ] **Update Notification Implementation (Manual Downloads)**
+  - [ ] Check GitHub Releases or custom API on app startup for newer version tags
+  - [ ] Add update notification UI (toast/dialog for "Version X.Y is available! [Download Link]")
+  - [ ] Direct users to browser download link for the latest `.dmg` / `.exe` / AppImage
+- [ ] **[DEFERRED] Auto-Updater Implementation**
   - [ ] Install `electron-updater` (already bundled with `electron-builder`)
-  - [ ] Configure `autoUpdater.checkForUpdatesAndNotify()` in main process
+  - [ ] Configure `autoUpdater.checkForUpdatesAndNotify()` with staged rollouts support in main process
   - [ ] Configure `publish` settings in `electron-builder` config (GitHub Releases provider)
   - [ ] Add update notification UI (toast/dialog for "Update available, restart to apply")
   - [ ] Test update flow: publish v0.1.1 → verify v0.1.0 auto-downloads and applies
+  - [ ] Test rollback flow: ensure broken version can be reverted to stable
 - [ ] Initial social launch (Product Hunt / Twitter)
 
 ---

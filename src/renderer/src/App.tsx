@@ -36,6 +36,7 @@ import { useWhatsAppBridge } from "./hooks/useWhatsAppBridge";
 import { MissingDependenciesScreen } from "./components/MissingDependenciesScreen";
 import { ExperimentProvider } from "./lib/experiments/experimentProvider";
 import { useThemeSync } from "./hooks/useThemeSync";
+import { UpdateNotification } from "./components/UpdateNotification";
 
 function App() {
   const [currentView, setCurrentView] = useState<View>("chat");
@@ -133,6 +134,7 @@ function App() {
 
       <FileChangeReview />
       <WhatsAppConnectionDialog />
+      <UpdateNotification />
     </div>
     </ExperimentProvider>
   );
